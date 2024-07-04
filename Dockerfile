@@ -10,15 +10,19 @@ COPY ./platform/ ./platform
 COPY ./services/ ./services
 COPY ./models/ ./models
 
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH="${PATH}:/root/.bun/bin/"
+
+RUN bun install
+
 RUN python -m pip install --user pipx
 RUN python -m pipx install poetry
 ENV PATH="${PATH}:/root/.local/bin/"
 RUN poetry install --only main --no-root
 
-RUN curl -fsSL https://bun.sh/install | bash
-ENV PATH="${PATH}:/root/.bun/bin/"
-
-RUN bun install
+COPY init_milvus.py .
+RUN --mount=type=secret,id=_env,dst=/.env cat /.env \
+    && poetry run python init_milvus.py
 
 EXPOSE 3000
 

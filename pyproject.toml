@@ -15,6 +15,7 @@ openai = "^1.23.3"
 transformers = "^4.40.1"
 black = "^24.4.2"
 python-dotenv = "^1.0.1"
+pymilvus = "^2.4.4"
 
 # These dependencies should only be needed for fine tuning
 # use poetry install --with ft
