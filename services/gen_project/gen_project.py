@@ -146,4 +146,4 @@ def main(data):
     else:
         workflow_output = yaml.dump(workflow, sort_keys=False)
 
-    return {"files": {"project.yaml" if output_format == 'yaml' else "project.json": workflow_output}}
+    return {"files": {"project.yaml" if output_format == 'yaml' else "workflow.json": workflow_output}}
