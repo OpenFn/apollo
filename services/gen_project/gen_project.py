@@ -3,16 +3,22 @@ import spacy
 import json
 import yaml
 import os
+import subprocess
 
 # Get the absolute path to the current script
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
-# Load the trained NER model
-model_path = os.path.join(current_dir, "openfn_adaptor_ner")
+# Path to the model wheel file
+model_wheel_path = os.path.join(current_dir, "models/en_core_web_sm-3.7.1-py3-none-any.whl")
+
+# Install the model from the wheel file if not already installed
 try:
-    nlp = spacy.load(model_path)
-except Exception as e:
-    raise RuntimeError(f"Failed to load the NER model from {model_path}. Ensure the model path is correct.") from e
+    spacy.load("en_core_web_sm")
+except OSError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", model_wheel_path])
+    nlp = spacy.load("en_core_web_sm")
+else:
+    nlp = spacy.load("en_core_web_sm")
 
 
 # Adaptors dictionary
