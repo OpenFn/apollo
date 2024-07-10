@@ -3,6 +3,7 @@ import spacy
 import json
 import yaml
 import os
+import sys
 import subprocess
 
 # Get the absolute path to the current script
