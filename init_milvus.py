@@ -1,26 +1,18 @@
 import os
 import time
-import requests
 from dotenv import load_dotenv
-from pymilvus import FieldSchema, CollectionSchema, DataType, utility, Collection, connections
+from pymilvus import FieldSchema, CollectionSchema, DataType, utility, Collection, connections, model
 
 load_dotenv()
 
-def embedding_query(texts):
-    #Request parameters
-    model_id = "sentence-transformers/all-MiniLM-L6-v2"
-    api_url = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{model_id}"
-
-    hf_token = os.getenv("HF_EMBEDDING_TOKEN")
-    headers = {"Authorization": f"Bearer {hf_token}"}
-
-    print(f"Sending request to {hf_token}")
-
-    response = requests.post(api_url, headers=headers, json={"inputs": texts, "options":{"wait_for_model":True}})  
-    return response.json()
-
-
 if __name__ == "__main__":
+    openai_key = os.getenv("OPENAI_API_KEY")
+    openai_ef = model.dense.OpenAIEmbeddingFunction(
+        model_name='text-embedding-ada-002', # Specify the model name
+        api_key=openai_key, # Provide your OpenAI API key
+        dimensions=384 # Set the embedding dimensionality
+    )
+
     # Hardcoded corpus
     corpus =  [
     "In 2008 I was working for a public health NGO in South Africa and focusing on youth curriculum development, monitoring, and evaluation.",
@@ -41,6 +33,7 @@ if __name__ == "__main__":
     "Some of the most high-impact organizations in the world choose OpenFn, not because they have to, but because they want to.",
     "And that feels good."
     ]
+
     # Connect to milvus
     milvus_uri = os.getenv('MILVUS_URI')
     token = os.getenv('MILVUS_TOKEN')
@@ -64,11 +57,10 @@ if __name__ == "__main__":
     # Create collection
     print(f"Creating example collection: {collection_name}")
     collection = Collection(name=collection_name, schema=schema)
-    print(f"Schema: {schema}")
     print("Collection created!")
 
     # Embed the corpus
-    embeddings = embedding_query(corpus)
+    embeddings = openai_ef.encode_documents(corpus)
  
     # Insert data
     collection.insert([
@@ -91,13 +83,13 @@ if __name__ == "__main__":
     status = collection.create_index(field_name = "embedding", index_params = default_index)
     t1 = time.time()
     if not status.code:
-        print("Successfully create index in collection:{} with param:{} in {} seconds".format(collection_name, default_index, {round(t1-t0, 4)}))
+        print("Successfully create index in collection: {} in {} seconds".format(collection_name, {round(t1-t0, 4)}))
 
     # Load collection
     t0 = time.time()
     print("Loading collection...")
     collection.load()
     t1 = time.time()
-    print(f"Succeed in {round(t1-t0, 4)} seconds!")
+    print(f"Loaded collection in {round(t1-t0, 4)} seconds!")
 
     print("Milvus database configured sucessfuly!")

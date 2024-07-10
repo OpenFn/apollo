@@ -1,35 +1,23 @@
 import os
-import requests
 import json
 from util import DictObj, createLogger
-from pymilvus import MilvusClient
+from pymilvus import MilvusClient, model
 
 logger = createLogger("search")
 
-def embedding_query(texts):
-    try:
-        #Request parameters
-        model_id = "sentence-transformers/all-MiniLM-L6-v2"
-        api_url = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{model_id}"
-
-        hf_token = os.getenv("HF_EMBEDDING_TOKEN")
-        headers = {"Authorization": f"Bearer {hf_token}"}
-
-        print(f"Sending request to {hf_token}")
-
-        response = requests.post(api_url, headers=headers, json={"inputs": texts, "options":{"wait_for_model":True}})  
-        return response.json()
-
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Request to Hugging Face API failed, try again!")
-        raise
-
 class Payload(DictObj):
-    search_string: str
+    query: str
+    api_key: str
 
 def main(dataDict) -> str:
     try:
         data = Payload(dataDict)
+
+        openai_ef = model.dense.OpenAIEmbeddingFunction(
+        model_name='text-embedding-3-large', # Specify the model name
+        api_key=data.api_key, # Provide your OpenAI API key
+        dimensions=384 # Set the embedding dimensionality
+        )
 
         milvus_uri= os.getenv('MILVUS_URI')
         milvus_token = os.getenv('MILVUS_TOKEN')
@@ -44,7 +32,7 @@ def main(dataDict) -> str:
 
         #Get embeddings for search
         logger.info("Encoding search string...")
-        search_embeddings = embedding_query([data.search_string])
+        search_embeddings = openai_ef.encode_documents([data.query])
 
         logger.info("Searching database for revelent info...")
 
@@ -56,12 +44,15 @@ def main(dataDict) -> str:
         output_fields=["text"]
         )
 
+        logger.info("Extracting documents...")
+
         documents = []
         for hits in res:
             if isinstance(hits, str):
                 hits = json.loads(hits)  # Parse string to list of dictionaries
             for hit in hits:
-                documents.append(hit['entity']['text'])
+                documents.append(hit['entity']['text'])        
+        print(documents)
 
         return documents    
     except Exception as e:
