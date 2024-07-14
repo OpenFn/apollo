@@ -13,10 +13,10 @@ def main(dataDict) -> str:
     try:
         data = Payload(dataDict)
 
+        #Embedding model
         openai_ef = model.dense.OpenAIEmbeddingFunction(
-        model_name='text-embedding-3-large', # Specify the model name
-        api_key=data.api_key, # Provide your OpenAI API key
-        dimensions=384 # Set the embedding dimensionality
+        model_name='text-embedding-ada-002',
+        api_key=data.api_key,
         )
 
         milvus_uri= os.getenv('MILVUS_URI')
@@ -39,7 +39,7 @@ def main(dataDict) -> str:
         search_params = {"metric_type": "L2", "params": {"nprobe": 16}}
         res = client.search(collection_name="apollo_sample",
         data=search_embeddings,
-        limit=10, 
+        limit=20, 
         search_params=search_params,
         output_fields=["text"]
         )
@@ -52,14 +52,8 @@ def main(dataDict) -> str:
                 hits = json.loads(hits)  # Parse string to list of dictionaries
             for hit in hits:
                 documents.append(hit['entity']['text'])        
-        print(documents)
 
         return documents    
     except Exception as e:
         logger.error(f"An error occurred during execution: {e}")
         raise
-    
-
-
-
-    
