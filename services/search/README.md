@@ -1,6 +1,6 @@
 ## Search (RAG)
 
-The Job Chat search service allows for the retrieval of data relevant to user queries. Clients are 
+The Search service allows for the retrieval of data relevant to user queries. Clients are 
 encouraged to provide as much context as possible in their queries to receive the most pertinent information 
 from the documents. 
 
