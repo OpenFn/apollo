@@ -27,9 +27,9 @@ bun py search tmp/payload.json
 
 ## Implementation
 
-Currently, the service returns relevant data from a predefined corpus stored in a vector database. In the future, 
-we plan to embed OpenFn documentation into the vector database. 
-This will enable the retrieval of relevant context from the documents, thereby improving the results for other Apollo services.
+Currently, the service returns relevant data from a predefined corpus stored in a vector database.
+The corpus is generated using the OpenAI Embedding Function and it embeds the OpenFn Documentaion into the database. 
+This enables the retrieval of relevant context from the documents, thereby improving the results for other Apollo services.
 
 ## Payoad Reference
 

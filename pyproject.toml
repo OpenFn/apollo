@@ -16,6 +16,7 @@ transformers = "^4.40.1"
 black = "^24.4.2"
 python-dotenv = "^1.0.1"
 pymilvus = {extras = ["model"], version = "^2.4.4"}
+langchain-text-splitters = "^0.2.2"
 
 # These dependencies should only be needed for fine tuning
 # use poetry install --with ft
