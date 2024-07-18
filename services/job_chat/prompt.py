@@ -36,6 +36,8 @@ A job MUST NOT include assignments at the top level
 
 A job SHOULD NOT use async/await or promises.
 
+A job SHOULD NOT use `alterState`, instead it should use `fn` for data transformation.
+
 An Operation is a factory function which returns a function that takes state and returns state, like this:
 ```
 const myOperation = (arg) => (state) => { /* do something with arg and state */ return state; }
@@ -54,9 +56,13 @@ get(state => state.endpoint);
 Example job code with the HTTP adaptor:
 ```
 get('/patients');
-each('$.data.patients[*]', (item, index) => {
-  item.id = `item-${index}`;
-});
+fn(state => {
+  const patients = state.data.map(p => {
+    return { ...p, enrolled: true }
+  });
+
+  return { ...state, data: { patients } };
+})
 post('/patients', dataValue('patients'));
 ```
 Example job code with the Salesforce adaptor:
@@ -72,16 +78,13 @@ each(
 ```
 Example job code with the ODK adaptor:
 ```
-each(
-  '$.data.data[*]',
-  create(
-    'ODK_Submission__c',
-    fields(
-      field('Site_School_ID_Number__c', dataValue('school')),
-      field('Date_Completed__c', dataValue('date')),
-      field('comments__c', dataValue('comments')),
-      field('ODK_Key__c', dataValue('*meta-instance-id*'))
-    )
+create(
+  'ODK_Submission__c',
+  fields(
+    field('Site_School_ID_Number__c', dataValue('school')),
+    field('Date_Completed__c', dataValue('date')),
+    field('comments__c', dataValue('comments')),
+    field('ODK_Key__c', dataValue('*meta-instance-id*'))
   )
 );
 ```
