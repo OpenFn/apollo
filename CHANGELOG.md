@@ -1,5 +1,11 @@
 # apollo
 
+## 0.3.2
+
+### Patch Changes
+
+- chat: de-emphasise each in the prompt
+
 ## 0.3.1
 
 ### Patch Changes
