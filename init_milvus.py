@@ -50,6 +50,9 @@ if __name__ == "__main__":
             sections = split_md_by_sections(content)
             corpus.extend(section.page_content for section in sections)
 
+    # Embed the corpus
+    embeddings = openai_ef.encode_documents(corpus)
+
     # Connect to Milvus
     milvus_uri = os.getenv('MILVUS_URI')
     token = os.getenv('MILVUS_TOKEN')
@@ -74,9 +77,6 @@ if __name__ == "__main__":
     print(f"Creating example collection: {collection_name}")
     collection = Collection(name=collection_name, schema=schema)
     print("Collection created!")
-
-    # Embed the corpus
-    embeddings = openai_ef.encode_documents(corpus)
 
     # Insert data
     collection.insert([
