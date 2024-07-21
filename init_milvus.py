@@ -2,7 +2,7 @@ import os
 import time
 import glob
 from dotenv import load_dotenv
-from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pymilvus import FieldSchema, CollectionSchema, DataType, utility, Collection, connections, model
 
 load_dotenv()
@@ -17,19 +17,18 @@ def read_md_files(directory):
     return docs
 
 def split_md_by_sections(content):
-    headers_to_split_on = [
-        ("##", "Header 2"),
-        ("###", "Header 3"),
-    ]
+    # I don't know if this is efficient or not, it leads to uneven chunking of sections and hence affects the search results\
+    # After some testing the search results seem to be better for recursive splitting
+    # headers_to_split_on = [
+    #     ("##", "Header 2"),
+    #     ("###", "Header 3"),
+    # ]
 
-    markdown_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on, strip_headers=False)
-    md_header_splits = markdown_splitter.split_text(content)
-
-    chunk_size = 800
-    chunk_overlap = 50
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    # markdown_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on, strip_headers=False)
+    # md_header_splits = markdown_splitter.split_text(content)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1024, chunk_overlap=128, length_function=len, is_separator_regex=False,)
     
-    splits = text_splitter.split_documents(md_header_splits)
+    splits = text_splitter.split_text(content)
     return splits
 
 if __name__ == "__main__":
@@ -48,7 +47,7 @@ if __name__ == "__main__":
         md_files_content = read_md_files(full_path)
         for content in md_files_content:
             sections = split_md_by_sections(content)
-            corpus.extend(section.page_content for section in sections)
+            corpus.extend(sections)
 
     # Embed the corpus
     embeddings = openai_ef.encode_documents(corpus)
@@ -68,7 +67,7 @@ if __name__ == "__main__":
     # Define field schemas
     id_field = FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True, description="primary id")
     embedding_field = FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=1536, description="vector")
-    text_field = FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=900, description="text data")
+    text_field = FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=1100, description="text data")
 
     # Define collection schema
     schema = CollectionSchema(fields=[id_field, embedding_field, text_field], description="Corpus collection schema")
