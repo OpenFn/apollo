@@ -94,7 +94,7 @@ if __name__ == "__main__":
     if utility.has_collection(collection_name):
         collection = Collection(name=collection_name)
     t0 = time.time()
-    default_index = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 16384}}
+    default_index = {"index_type": "SCANN", "metric_type": "COSINE", "params": {"nlist": 16384}}
     status = collection.create_index(field_name="embedding", index_params=default_index)
     t1 = time.time()
     if not status.code:
