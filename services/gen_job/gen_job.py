@@ -4,7 +4,6 @@ from inference import inference
 
 logger = createLogger("job_expression_generator")
 
-
 class Payload(DictObj):
     api_key: str = ""
     adaptor: str = ""
@@ -24,8 +23,8 @@ def main(dataDict) -> str:
 
 def generate(model, key, adaptor, instruction, state, existing_expression) -> str:
     # Generate prompt with optional existing expression
-    prompt = generate_job_prompt(adaptor, instruction, state, existing_expression, key)
-    
+    prompt = generate_job_prompt(adaptor, instruction, key, state, existing_expression)
+
     # Generate job expression using AI model
     result = inference.generate(model, prompt, {"key": key})
     return result

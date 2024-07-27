@@ -36,10 +36,10 @@ def main(dataDict) -> str:
 
         logger.info("Searching database for revelent info...")
 
-        search_params = {"metric_type": "COSINE", "params": {"nprobe": 32}}
+        search_params = {"metric_type": "COSINE", "params": {"nprobe": 16}}
         res = client.search(collection_name="apollo_sample",
         data=search_embeddings,
-        limit=20,
+        limit=10,
         search_params=search_params,
         output_fields=["text"]
         )
