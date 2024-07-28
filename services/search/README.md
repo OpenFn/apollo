@@ -16,13 +16,13 @@ curl -X POST https://apollo-staging.openfn.org/services/search --json @tmp/paylo
 With the CLI, returning to stdout:
 
 ```
-openfn apollo search tmp/payload.json -O
+openfn apollo search tmp/payload.json
 ```
 
 To run direct from this repo (note that the server must be started):
 
 ```
-bun py search tmp/payload.json
+bun py search tmp/payload.json -O
 ```
 
 ## Implementation

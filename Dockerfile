@@ -9,7 +9,6 @@ WORKDIR /app/repo
 RUN git remote add origin https://github.com/OpenFn/docs.git
 RUN git config core.sparseCheckout true
 RUN echo "docs/*" >> .git/info/sparse-checkout
-RUN echo "adaptors/*" >> .git/info/sparse-checkout
 RUN git pull origin main
 
 WORKDIR /app
