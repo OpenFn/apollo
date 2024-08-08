@@ -2,6 +2,11 @@ FROM python:3.11-bullseye
 
 WORKDIR /app
 
+RUN apt-get update && apt-get install -y git
+RUN git clone --depth 1 https://github.com/OpenFn/docs.git /app/repo
+
+WORKDIR /app
+
 COPY ./pyproject.toml ./poetry.lock poetry.toml ./
 COPY ./package.json bun.lockb ./
 COPY ./tsconfig.json ./
@@ -19,6 +24,9 @@ RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="${PATH}:/root/.bun/bin/"
 
 RUN bun install
+
+RUN --mount=type=secret,id=_env,dst=/.env cat /.env \
+    && poetry run python services/search/generate_docs_emebddings.py repo/docs/jobs
 
 EXPOSE 3000
 
