@@ -3,20 +3,13 @@ FROM python:3.11-bullseye
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y git
-
-RUN git init /app/repo
-WORKDIR /app/repo
-RUN git remote add origin https://github.com/OpenFn/docs.git
-RUN git config core.sparseCheckout true
-RUN echo "docs/*" >> .git/info/sparse-checkout
-RUN git pull origin main
+RUN git clone --depth 1 https://github.com/OpenFn/docs.git /app/repo
 
 WORKDIR /app
 
 COPY ./pyproject.toml ./poetry.lock poetry.toml ./
 COPY ./package.json bun.lockb ./
 COPY ./tsconfig.json ./
-COPY ./init_milvus.py ./
 
 COPY ./platform/ ./platform
 COPY ./services/ ./services
@@ -33,7 +26,7 @@ ENV PATH="${PATH}:/root/.bun/bin/"
 RUN bun install
 
 RUN --mount=type=secret,id=_env,dst=/.env cat /.env \
-    && poetry run python init_milvus.py
+    && poetry run python services/search/generate_docs_emebddings.py repo/docs/jobs
 
 EXPOSE 3000
 

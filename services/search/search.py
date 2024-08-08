@@ -19,15 +19,15 @@ def main(dataDict) -> str:
         api_key=data.api_key,
         )
 
-        milvus_uri= os.getenv('MILVUS_URI')
-        milvus_token = os.getenv('MILVUS_TOKEN')
-        print(f"Connecting to DB: {milvus_uri}")
+        zilliz_uri= os.getenv('ZILLIZ_URI')
+        zilliz_token = os.getenv('ZILLIZ_TOKEN')
+        print(f"Connecting to DB: {zilliz_uri}")
 
         #Connect to milvus
         client = MilvusClient(
-        uri=milvus_uri,
-        token=milvus_token,
-        db_name="apollo_db"
+        uri=zilliz_uri,
+        token=zilliz_token,
+        db_name="openfn_docs"
         )
 
         #Get embeddings for search
@@ -37,7 +37,7 @@ def main(dataDict) -> str:
         logger.info("Searching database for revelent info...")
 
         search_params = {"metric_type": "COSINE", "params": {"nprobe": 16}}
-        res = client.search(collection_name="apollo_sample",
+        res = client.search(collection_name="openfn_docs_jobs",
         data=search_embeddings,
         limit=15,
         search_params=search_params,
