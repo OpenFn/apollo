@@ -39,15 +39,12 @@ if __name__ == "__main__":
     )
 
     # Read markdown files from the repo
-    repo_path = "/app/repo"
-    docs_folders = ["docs", "adaptors"]
+    docs_path = "/app/repo/docs"
     corpus = []
-    for folder in docs_folders:
-        full_path = os.path.join(repo_path, folder)
-        md_files_content = read_md_files(full_path)
-        for content in md_files_content:
-            sections = split_md_by_sections(content)
-            corpus.extend(sections)
+    md_files_content = read_md_files(docs_path)
+    for content in md_files_content:
+        sections = split_md_by_sections(content)
+        corpus.extend(sections)
 
     # Embed the corpus
     embeddings = openai_ef.encode_documents(corpus)

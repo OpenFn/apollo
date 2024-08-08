@@ -20,7 +20,6 @@ def main(dataDict) -> str:
     logger.info("Job expression generation complete!")
     return result
 
-
 def generate(model, key, adaptor, instruction, state, existing_expression) -> str:
     # Generate prompt with optional existing expression
     prompt = generate_job_prompt(adaptor, instruction, key, state, existing_expression)

@@ -39,7 +39,7 @@ def main(dataDict) -> str:
         search_params = {"metric_type": "COSINE", "params": {"nprobe": 16}}
         res = client.search(collection_name="apollo_sample",
         data=search_embeddings,
-        limit=10,
+        limit=15,
         search_params=search_params,
         output_fields=["text"]
         )

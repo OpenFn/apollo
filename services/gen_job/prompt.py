@@ -27,7 +27,7 @@ Here is more context about job writing and some revelant adaptor information:\n 
 
 def get_context(api_key: str, instruction: str) -> str:
     logger.info("Generating context...")
-    query = f"Get the job writing guide, Usage Examples, and Job Code Examples. Instruction: {instruction}"
+    query = f"Get the job writing guide, Usage Examples, and Job Code Examples."
 
     data_dict = {"query": query, "api_key": api_key}
     search_results = apollo("search", data_dict)
@@ -57,7 +57,7 @@ def generate_job_prompt(
         else ""
     )
 
-    user_prompt = f"Write a job in OpenFn's custom dsl and refer to the given context and adaptor information. {expression_info}. {state_info} and it uses the following adaptor: {adaptor}. Here is a simple text instruction what the user wants, refer to this but keep in mind the actual adaptor information and job writing rules: {instruction}"
+    user_prompt = f"Write a job in OpenFn's custom dsl and use the given job writing context and adaptor information. {expression_info}. {state_info} and it uses the following adaptor: {adaptor}. Here is a simple text instruction what the user wants, refer to this but keep in mind the actual adaptor information and job writing rules: {instruction}"
 
     prompt = [
         {"role": "system", "content": full_system_prompt},
