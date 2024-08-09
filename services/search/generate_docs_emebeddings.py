@@ -24,28 +24,24 @@ def split_md_by_sections(file_name, content):
     markdown_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on, strip_headers=False)
     md_header_splits = markdown_splitter.split_text(content)
 
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=512, chunk_overlap=64, length_function=len, is_separator_regex=False)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=900, chunk_overlap=256, length_function=len, is_separator_regex=False)
     splits = text_splitter.split_documents(md_header_splits)
-
-    # Log the first line of each section and the file name to stdout
-    for section in splits:
-        first_line = section.page_content.splitlines()[0] if section.page_content.splitlines() else "[Empty Section]"
-        print(f"File: {file_name}, Section Start: {first_line}")
 
     # Write the sections to disk
     output_dir = "./tmp/split_sections"
     os.makedirs(output_dir, exist_ok=True)
     with open(os.path.join(output_dir, f"{os.path.basename(file_name)}_sections.md"), "w", encoding="utf-8") as out_file:
         for section in splits:
-            out_file.write(f"## File: {file_name}\n")
-            out_file.write(f"### Section Start: {section.page_content.splitlines()[0] if section.page_content.splitlines() else '[Empty Section]'}\n")
-            out_file.write(section.page_content + "\n---\n")
+            out_file.write(f"## Section Start: " + "\n------\n")
+            out_file.write(section.page_content + "\n------\n")
 
     return splits
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Initialize Milvus with markdown files")
+    # Parse the command line arguments - repo_path and collection_name
+    parser = argparse.ArgumentParser(description="Initialize Milvus with markdown files")  
     parser.add_argument("repo_path", type=str, help="Path to the repository containing markdown files")
+    parser.add_argument("collection_name", type=str, help="Name of the Milvus collection")
     args = parser.parse_args()
 
     openai_key = os.getenv("OPENAI_API_KEY")
@@ -54,16 +50,24 @@ if __name__ == "__main__":
         api_key=openai_key
     )
 
-    # Read markdown files from the repo
+   # Read markdown files from the repo
     docs_path = args.repo_path
     corpus = []
     md_files_content = read_md_files(docs_path)
+    
+    file_embeddings_count = {}
+    
     for file_name, content in md_files_content:
         sections = split_md_by_sections(file_name, content)
         corpus.extend(section.page_content for section in sections)
-
-
+        file_embeddings_count[file_name] = len(sections)  # Store the count of embeddings per file
+  
+    # Log the number of embeddings per file
+    for file_name, count in file_embeddings_count.items():
+        print(f"File: {file_name} - Generated {count} embeddings")
+    
     print(f"Read {len(corpus)} documents from {docs_path}")
+
     # Embed the corpus
     embeddings = openai_ef.encode_documents(corpus)
 
@@ -74,7 +78,7 @@ if __name__ == "__main__":
     connections.connect("default", uri=zilliz_uri, token=token, db_name="openfn_docs")
 
     # Check if the collection exists
-    collection_name = "openfn_docs_jobs"
+    collection_name = args.collection_name
     check_collection = utility.has_collection(collection_name)
     if check_collection:
         drop_result = utility.drop_collection(collection_name)
@@ -82,7 +86,7 @@ if __name__ == "__main__":
     # Define field schemas
     id_field = FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True, description="primary id")
     embedding_field = FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=1536, description="vector")
-    text_field = FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=600, description="text data")
+    text_field = FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=950, description="text data")
 
     # Define collection schema
     schema = CollectionSchema(fields=[id_field, embedding_field, text_field], description="Corpus collection schema")

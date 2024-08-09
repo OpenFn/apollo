@@ -7,6 +7,8 @@ from the documents.
 This service primarily integrates Retrieval-Augmented Generation (RAG) with Apollo, enhancing the accuracy and 
 relevance of the results returned to the user.
 
+## Usage - Search service
+
 To make a search with curl:
 
 ```
@@ -24,6 +26,20 @@ To run direct from this repo (note that the server must be started):
 ```
 bun py search tmp/payload.json -O
 ```
+
+## Usage - Embedding OpenFn docs
+
+This service also includes the embedding of OpenFn docs to a vector database. The vector database used here is Zilliz.
+
+There are two ways to run the embedding service:
+- The first is use the poerty command to run the service using 
+```
+poetry run python services/search/generate_docs_emebeddings.py tmp/repo/docs/jobs openfn_docs_jobs
+``` 
+
+Here the `tmp/repo/docs/jobs` is the path to the OpenFn docs and `openfn_docs_jobs` is the name of the collection in the vector database.
+
+- The second is to run the docker file directly using `docker build --secret id=_env,src=.env -t apollo .`.
 
 ## Implementation
 

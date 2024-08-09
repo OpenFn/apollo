@@ -26,7 +26,7 @@ ENV PATH="${PATH}:/root/.bun/bin/"
 RUN bun install
 
 RUN --mount=type=secret,id=_env,dst=/.env cat /.env \
-    && poetry run python services/search/generate_docs_emebddings.py repo/docs/jobs
+    && poetry run python services/search/generate_docs_emebeddings.py repo/docs/jobs openfn_docs_jobs
 
 EXPOSE 3000
 
