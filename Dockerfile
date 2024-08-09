@@ -2,11 +2,6 @@ FROM python:3.11-bullseye
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y git
-RUN git clone --depth 1 https://github.com/OpenFn/docs.git /app/repo
-
-WORKDIR /app
-
 COPY ./pyproject.toml ./poetry.lock poetry.toml ./
 COPY ./package.json bun.lockb ./
 COPY ./tsconfig.json ./
@@ -14,6 +9,9 @@ COPY ./tsconfig.json ./
 COPY ./platform/ ./platform
 COPY ./services/ ./services
 COPY ./models/ ./models
+
+RUN apt-get update && apt-get install -y git
+RUN git clone --depth 1 https://github.com/OpenFn/docs.git /app/repo
 
 RUN python -m pip install --user pipx
 RUN python -m pipx install poetry
