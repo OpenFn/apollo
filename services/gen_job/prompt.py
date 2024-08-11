@@ -6,22 +6,7 @@ SYSTEM_PROMPT_TEMPLATE = """You are an agent helping a non-expert user write a j
 the world's leading digital public good for workflow automation.
 You are helping the user write a job in OpenFn's custom DSL, which
 is very similar to JAVASCRIPT. You should STRICTLY ONLY answer
-questions related to OpenFn, JavaScript programming, and workflow automation.
-Follow these rules while writing your job: 
-
-Each job uses exactly one Adaptor to perform its task. The Adaptor provides a
-collection of Operations (helper functions) which makes it easy to communicate with
-a data source. The adaptor API for this job is provided below.
-
-A job MUST NOT include an import or require statement.
-A job MUST NOT use the execute() function.
-A job MUST only contain function calls at the top level.
-A job MUST NOT include any other JavaScript statements at the top level.
-A job MUST NOT include assignments at the top level.
-A job SHOULD NOT use async/await or promises.
-A job SHOULD NOT use alterState, instead it should use fn for data transformation.
-
-Here is more context about job writing and some revelant adaptor information:\n {}
+questions related to OpenFn, JavaScript programming, and workflow automation and just return the javascript code.\n\n{}
 """
 
 
@@ -29,8 +14,8 @@ def get_context(api_key: str, instruction: str) -> str:
     logger.info("Generating context...")
     query = f"Get the job writing guide, Usage Examples, and Job Code Examples."
 
-    data_dict = {"query": query, "api_key": api_key}
-    search_results = apollo("search", data_dict)
+    dataDict = {"query": query, "api_key": api_key}
+    search_results = apollo("search", dataDict)
 
     return search_results
 
@@ -48,16 +33,32 @@ def generate_job_prompt(
     context = get_context(api_key=api_key, instruction=instruction)
     adaptor_description = describe_adaptor(adaptor)
 
-    full_system_prompt = SYSTEM_PROMPT_TEMPLATE.format(f"{context}\n\nAdaptor Description:\n{adaptor_description}")
+    full_system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
+            "Here is the context about job writing for and some revelant adaptor information: \n{context}"
+    )
 
-    state_info = f"Its current state is: {state}" if state else ""
+    state_info = f"Its state is: {state}." if state else ""
     expression_info = (
-        f"My code currently looks like this :```{existing_expression}```\n\n You should try and re-use any relevant user code in your response"
+        f"My code currently looks like this :```{existing_expression}```\n\n You should try and re-use any relevant user code in your response if possible"
         if existing_expression
         else ""
     )
 
-    user_prompt = f"Write a job in OpenFn's custom dsl and use the given job writing context and adaptor information. {expression_info}. {state_info} and it uses the following adaptor: {adaptor}. Here is a simple text instruction what the user wants, refer to this but keep in mind the actual adaptor information and job writing rules: {instruction}"
+    user_prompt = f"""Write a job expression for OpenFn.
+    Here is relevant context and code about the adaptor used: {adaptor_description}. 
+    Refer to the adaptor code and remember to use the correct attribute IDs (add comments if attribute ID is not available). 
+    Here is a simple text instruction of what the user wants: {instruction}. 
+    {expression_info} 
+    {state_info}. 
+
+    Step 1: Generate the initial job expression code.
+
+    Step 2: Analyze the generated code to ensure it matches the requirements (check for correct attribute IDs, correct syntax, and logical structure).
+
+    Step 3: If the code does not fully meet the requirements, refine the code and repeat Step 1 and 2.
+
+    Provide only the final, refined code as the output.
+    """
 
     prompt = [
         {"role": "system", "content": full_system_prompt},
