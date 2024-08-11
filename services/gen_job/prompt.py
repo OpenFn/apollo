@@ -34,10 +34,10 @@ def generate_job_prompt(
     adaptor_description = describe_adaptor(adaptor)
 
     full_system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
-            "Here is the context about job writing for and some revelant adaptor information: \n{context}"
+            "Here is the context about job writing for and some revelant adaptor information: \n{context} \n\n     Here is relevant context and code about the adaptor used: {adaptor_description}. "
     )
 
-    state_info = f"Its state is: {state}." if state else ""
+    state_info = f"The current state is: {state}." if state else ""
     expression_info = (
         f"My code currently looks like this :```{existing_expression}```\n\n You should try and re-use any relevant user code in your response if possible"
         if existing_expression
@@ -45,8 +45,7 @@ def generate_job_prompt(
     )
 
     user_prompt = f"""Write a job expression for OpenFn.
-    Here is relevant context and code about the adaptor used: {adaptor_description}. 
-    Refer to the adaptor code and remember to use the correct attribute IDs (add comments if attribute ID is not available). 
+    Refer to the adaptor code to generate the response and remember to use the correct attribute IDs (add comments if attribute ID is not provided or you are not sure). 
     Here is a simple text instruction of what the user wants: {instruction}. 
     {expression_info} 
     {state_info}. 
@@ -57,7 +56,7 @@ def generate_job_prompt(
 
     Step 3: If the code does not fully meet the requirements, refine the code and repeat Step 1 and 2.
 
-    Provide only the final, refined code as the output.
+    Strictly provide only the final, refined code as the output.
     """
 
     prompt = [
