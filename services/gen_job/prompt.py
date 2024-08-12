@@ -23,7 +23,7 @@ A job SHOULD NOT use async/await or promises.
 A job SHOULD NOT use alterState, instead it should use fn for data transformation.
 """
 
-def get_context(api_key: str, instruction: str) -> str:
+def get_context(api_key: str) -> str:
     logger.info("Generating context...")
     query = f"Get the job writing guide, Usage Examples, and Job Code Examples."
 
@@ -38,13 +38,32 @@ def describe_adaptor(adaptor: str) -> str:
     descriptions = [adaptor_docs[doc]["description"] for doc in adaptor_docs]
     return "\n".join(descriptions)
 
+def write_to_file(context: str, adaptor_description: str, filename: str = "tmp/context_and_adaptor_info.md") -> None:
+    logger.info(f"Saving context and adaptor description to file: {filename}")
+    with open(filename, "w") as file:
+        file.write("### Context Information ###\n\n")
+        file.write("\n".join(context) + "\n\n")
+        file.write("### Adaptor Description ###\n\n")
+        file.write(adaptor_description + "\n")
+    logger.info("Context and adaptor description successfully written to file.")
+
 def generate_job_prompt(
-    adaptor: str, instruction: str, api_key: str, state: dict = None, existing_expression: str = "", context: str = ""
+    adaptor: str, instruction: str, api_key: str, state: dict = None, existing_expression: str = "", use_embeddings: bool = True
 ) -> dict:
     adaptor_description = describe_adaptor(adaptor)
 
+    # Determine context based on use_embeddings flag
+    if use_embeddings:
+        logger.info("Using embeddings to retrieve context.")
+        context = get_context(api_key)
+    else:
+        logger.info("Skipping embeddings, using default context.")
+        context = "This is a default context for generating job expressions."
+
     # Add default job rules if context is empty or use_embeddings is False
     context_info = context if context else DEFAULT_JOB_RULES
+
+    write_to_file(context_info, adaptor_description)
 
     full_system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
         f"Here is the context about job writing and some relevant adaptor information:\n{context_info}\n\nHere is relevant context and code about the adaptor used:\n{adaptor_description}."

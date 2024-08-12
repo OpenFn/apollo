@@ -1,5 +1,5 @@
 from util import DictObj, createLogger
-from .prompt import generate_job_prompt, get_context
+from .prompt import generate_job_prompt, get_context, DEFAULT_JOB_RULES
 from .client import JobExpressionInferenceClient
 
 logger = createLogger(" job_generator")
@@ -19,23 +19,15 @@ def main(dataDict) -> str:
     # Instantiate your custom inference client
     client = JobExpressionInferenceClient(api_key=data.api_key)
 
-    # Determine context based on use_embeddings flag
-    if data.use_embeddings:
-        logger.info("Using embeddings to retrieve context.")
-        context = get_context(data.api_key, data.instruction)
-    else:
-        logger.info("Skipping embeddings, using default context.")
-        context = "This is a default context for generating job expressions."
-
     # Generate job expression
-    result = generate(client, data.adaptor, data.api_key, data.instruction, data.state, data.existing_expression, context)
+    result = generate(client, data.adaptor, data.instruction, data.api_key, data.state, data.existing_expression, data.use_embeddings)
 
     logger.info("Job expression generation complete!")
     return result
 
-def generate(client, adaptor, key, instruction, state, existing_expression, context) -> str:
+def generate(client, adaptor, instruction, api_key, state, existing_expression, use_embeddings) -> str:
     # Generate prompt with optional existing expression
-    prompt = generate_job_prompt(adaptor, instruction, key, state, existing_expression, context)
+    prompt = generate_job_prompt(adaptor, instruction, api_key, state, existing_expression, use_embeddings)
 
     # Generate job expression using the custom inference client
     result = client.generate(prompt)

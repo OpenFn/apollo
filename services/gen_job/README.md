@@ -39,7 +39,8 @@ The input payload is a JSON object with the following structure
     "existing_expression": "Your existing job expression",
     "adaptor": "@openfn/language-dhis2@4.0.3",
     "state": "Current state",
-    "instruction": "A simple text instruction."
+    "instruction": "A simple text instruction.",
+    "use_embeddings": true // set to false if you don't want to use RAG service
 }
 ```
 
