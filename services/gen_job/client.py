@@ -2,7 +2,7 @@ import os
 from openai import OpenAI
 from util import createLogger
 
-logger = createLogger("job_expression_generator")
+logger = createLogger(" job_generator.client")
 
 # Load API key from environment
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")

@@ -36,10 +36,10 @@ def main(dataDict) -> str:
 
         logger.info("Searching database for revelent info...")
 
-        search_params = {"metric_type": "COSINE", "params": {"nprobe": 16}}
+        search_params = {"metric_type": "COSINE", "params": {"nprobe": 10}}
         res = client.search(collection_name="openfn_docs_jobs",
         data=search_embeddings,
-        limit=15,
+        limit=5,
         search_params=search_params,
         output_fields=["text"]
         )

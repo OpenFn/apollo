@@ -1,6 +1,6 @@
 from util import createLogger, apollo
 
-logger = createLogger("job_expression_generator.prompts")
+logger = createLogger(" job_expression_generator.prompts")
 
 SYSTEM_PROMPT_TEMPLATE = """You are an agent helping a non-expert user write a job for OpenFn,
 the world's leading digital public good for workflow automation.
@@ -9,6 +9,19 @@ is very similar to JAVASCRIPT. You should STRICTLY ONLY answer
 questions related to OpenFn, JavaScript programming, and workflow automation and just return the javascript code.\n\n{}
 """
 
+## This is used in case the embeddings are not available or use_embeddings option is false
+DEFAULT_JOB_RULES = """Follow these rules while writing your job:
+Each job uses exactly one Adaptor to perform its task. The Adaptor provides a
+collection of Operations (helper functions) which makes it easy to communicate with
+a data source. The adaptor API for this job is provided below.
+A job MUST NOT include an import or require statement.
+A job MUST NOT use the execute() function.
+A job MUST only contain function calls at the top level.
+A job MUST NOT include any other JavaScript statements at the top level.
+A job MUST NOT include assignments at the top level.
+A job SHOULD NOT use async/await or promises.
+A job SHOULD NOT use alterState, instead it should use fn for data transformation.
+"""
 
 def get_context(api_key: str, instruction: str) -> str:
     logger.info("Generating context...")
@@ -19,22 +32,22 @@ def get_context(api_key: str, instruction: str) -> str:
 
     return search_results
 
-
 def describe_adaptor(adaptor: str) -> str:
     logger.info(f"Describing adaptor: {adaptor}")
     adaptor_docs = apollo("describe_adaptor", {"adaptor": adaptor})
     descriptions = [adaptor_docs[doc]["description"] for doc in adaptor_docs]
     return "\n".join(descriptions)
 
-
 def generate_job_prompt(
-    adaptor: str, instruction: str, api_key: str, state: dict = None, existing_expression: str = ""
+    adaptor: str, instruction: str, api_key: str, state: dict = None, existing_expression: str = "", context: str = ""
 ) -> dict:
-    context = get_context(api_key=api_key, instruction=instruction)
     adaptor_description = describe_adaptor(adaptor)
 
+    # Add default job rules if context is empty or use_embeddings is False
+    context_info = context if context else DEFAULT_JOB_RULES
+
     full_system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
-            "Here is the context about job writing for and some revelant adaptor information: \n{context} \n\n     Here is relevant context and code about the adaptor used: {adaptor_description}. "
+        f"Here is the context about job writing and some relevant adaptor information:\n{context_info}\n\nHere is relevant context and code about the adaptor used:\n{adaptor_description}."
     )
 
     state_info = f"The current state is: {state}." if state else ""
@@ -45,7 +58,7 @@ def generate_job_prompt(
     )
 
     user_prompt = f"""Write a job expression for OpenFn.
-    Refer to the adaptor code to generate the response and remember to use the correct attribute IDs (add comments if attribute ID is not provided or you are not sure). 
+    Refer to the adaptor code to generate the response and remember to use the correct attribute IDs (NOTE: add comments if attribute ID is not provided or you are not sure). 
     Here is a simple text instruction of what the user wants: {instruction}. 
     {expression_info} 
     {state_info}. 
