@@ -58,15 +58,12 @@ def generate_job_prompt(
         context = get_context(api_key)
     else:
         logger.info("Skipping embeddings, using default context.")
-        context = "This is a default context for generating job expressions."
+        context = DEFAULT_JOB_RULES
 
-    # Add default job rules if context is empty or use_embeddings is False
-    context_info = context if context else DEFAULT_JOB_RULES
-
-    write_to_file(context_info, adaptor_description)
+    write_to_file(context, adaptor_description)
 
     full_system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
-        f"Here is the context about job writing and some relevant adaptor information:\n{context_info}\n\nHere is relevant context and code about the adaptor used:\n{adaptor_description}."
+        f"Here is the context about job writing:\n{context}\n\nHere is relevant context and code about the adaptor used:\n{adaptor_description}."
     )
 
     state_info = f"The current state is: {state}." if state else ""

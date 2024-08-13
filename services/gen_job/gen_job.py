@@ -1,5 +1,5 @@
 from util import DictObj, createLogger
-from .prompt import generate_job_prompt, get_context, DEFAULT_JOB_RULES
+from .prompt import generate_job_prompt
 from .client import JobExpressionInferenceClient
 
 logger = createLogger(" job_generator")
