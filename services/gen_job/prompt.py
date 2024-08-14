@@ -1,4 +1,5 @@
-from util import createLogger, apollo
+import json
+from util import createLogger, apollo, DictObj
 
 logger = createLogger(" job_expression_generator.prompts")
 
@@ -66,7 +67,10 @@ def generate_job_prompt(
         f"Here is the context about job writing:\n{context}\n\nHere is relevant context and code about the adaptor used:\n{adaptor_description}."
     )
 
-    state_info = f"The current state is: {state}." if state else ""
+    if isinstance(state, DictObj):
+        state = state.toDict()
+    state_info = f"The current state is: {json.dumps(state, indent=2)}. Use this to write the relevant job expression" if state else ""
+
     expression_info = (
         f"My code currently looks like this :```{existing_expression}```\n\n You should try and re-use any relevant user code in your response if possible"
         if existing_expression
