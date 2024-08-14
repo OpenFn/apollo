@@ -72,3 +72,5 @@ tmp/
 services/inference/data/
 
 app.log
+package.json
+package-lock.json
