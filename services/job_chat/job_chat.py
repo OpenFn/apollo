@@ -39,11 +39,16 @@ def generate(content, history, context, api_key) -> str:
     logger.info("Anthropic client loaded")
     (system_message, prompt) = build_prompt(content, history, context)
 
-    logger.info("")
-    logger.info("--- PROMPT ---")
-    logger.info(prompt)
-    logger.info("--------------")
-    logger.info("")
+    # Useful in local dev but contains a lot of stuff, so uncommenting
+    # logger.info("")
+    # logger.info("--- SYSTEM ---")
+    # logger.info(system_message)
+    # logger.info("--------------")
+    # logger.info("")
+    # logger.info("--- PROMPT ---")
+    # logger.info(prompt)
+    # logger.info("--------------")
+    # logger.info("")
 
     try:
         logger.info("Generating")
