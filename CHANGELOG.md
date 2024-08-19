@@ -1,5 +1,11 @@
 # apollo
 
+## 0.4.0
+
+### Minor Changes
+
+- 4c8c7eb: use Claude for job_chat
+
 ## 0.3.2
 
 ### Patch Changes
