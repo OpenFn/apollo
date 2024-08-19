@@ -5,16 +5,12 @@ from .prompt import build_prompt
 
 logger = createLogger("job_chat")
 
-OPENAI_API_KEY = os.getenv(
-    "OPENAI_API_KEY",
-)
-
 ANTHROPIC_API_KEY = os.getenv(
     "ANTHROPIC_API_KEY",
 )
 
-claude_model = "claude-3-haiku-20240307"
-# claude_model = "claude-3-5-sonnet-20240620"
+# claude_model = "claude-3-haiku-20240307"
+claude_model = "claude-3-5-sonnet-20240620"
 max_tokens = 1024
 
 
@@ -62,6 +58,7 @@ def generate(content, history, context, api_key) -> str:
             logger.error("An error occurred during during chat generation")
         else:
             # we need to unpack the contents into a flat string
+            # TODO: consider supporting richer response types
             for r in message.content:
                 if r.type == "text":
                     response.append(r.text)

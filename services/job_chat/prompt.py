@@ -2,14 +2,12 @@ from util import createLogger, apollo
 
 logger = createLogger("job_chat.prompt")
 
-# RAG
-# Retrieval Augmented Generation
 system_message = """
 You are an agent helping a non-export user write a job for OpenFn,
-the worlds leading digital public good for workflow automation.
-You are helping the user write a job in OpenFn's custom dsl, which
-is very similar to JAVASCRIPT. You should STRICTLY ONLY answer
-questions related to OpenFn, javascript programming, and workflow automation.
+the world's leading digital public good for workflow automation.
+You should STRICTLY ONLY answer questions related to OpenFn,
+javascript programming, and workflow automation. Your responses
+short be short, accurate and friendly unless otherwise instructed.
 """
 
 # for now we're hard coding a sort of job writing 101 with code examples
@@ -17,26 +15,20 @@ questions related to OpenFn, javascript programming, and workflow automation.
 job_writing_summary = """
 Here is a guide to job writing in OpenFn.
 
-A Job is written in OpenFn DSL code to performs a particular task, like
-fetching data from Salesforce or converting JSON data to FHIR standard.
+A Job is written in a DSL which is very similar to Javascript.
 
-Each job uses exactly one Adaptor to perform its task. The Adaptor provides a
-collection of Operations (helper functions) which makes it easy to communicate with
-a data source. The adaptor API for this job is provided below.
+Job code does not use import statements or async/await.
 
-A job MUST NOT include an import or require statement.
+Job code must only contain function calls at the top level.
 
-A job MUST NOT use the execute() function.
+Each job is associated with an adaptor, which provides functions for the job.
+All jobs have the fn() and each() function, which are very important.
 
-A job MUST only contain function calls at the top level.
+DO NOT use the `alterState()` function. Use `fn()` instead.
 
-A job MUST NOT include any other JavaScript statements at the top level.
+The adaptor API may be attached.
 
-A job MUST NOT include assignments at the top level
-
-A job SHOULD NOT use async/await or promises.
-
-A job SHOULD NOT use `alterState`, instead it should use `fn` for data transformation.
+The functions provided by an adaptor are called Operations. 
 
 An Operation is a factory function which returns a function that takes state and returns state, like this:
 ```
@@ -52,7 +44,6 @@ but we can also pass a value from state:
 ```
 get(state => state.endpoint);
 ```
-
 Example job code with the HTTP adaptor:
 ```
 get('/patients');
@@ -107,21 +98,21 @@ def build_context(context, question):
         )
     )
 
-    # message.append("<job_writing_guide>{}</job_writing_guide>".format(job_writing_summary))
+    message.append("<job_writing_guide>{}</job_writing_guide>".format(job_writing_summary))
 
-    # if context.has("adaptor"):
-    #     message.append(
-    #         "<adaptor>I am using the OpenFn {} adaptor, use functions provided by its API".format(context.adaptor)
-    #     )
+    if context.has("adaptor"):
+        message.append(
+            "<adaptor>I am using the OpenFn {} adaptor, use functions provided by its API".format(context.adaptor)
+        )
 
-    #     adaptor_docs = apollo("describe_adaptor", {"adaptor": context.adaptor})
-    #     for doc in adaptor_docs:
-    #         message.append("Typescript definitions for doc")
-    #         message.append(adaptor_docs[doc]["description"])
-    #     message.append("</adaptor>")
+        adaptor_docs = apollo("describe_adaptor", {"adaptor": context.adaptor})
+        for doc in adaptor_docs:
+            message.append("Typescript definitions for doc")
+            message.append(adaptor_docs[doc]["description"])
+        message.append("</adaptor>")
 
-    # else:
-    #     message.append("I am using an OpenFn Adaptor to write my job.")
+    else:
+        message.append("I am using an OpenFn Adaptor to write my job.")
 
     if context.has("expression"):
         message.append(
