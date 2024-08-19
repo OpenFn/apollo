@@ -2,7 +2,7 @@
 
 The Job Chat service enables a chat interface to uses writing an OpenFn job.
 
-The services uses Anthropic Claude 3.5 Sonnet.
+The service uses Anthropic Claude 3.5 Sonnet.
 
 Clients must submit as much context about the job as they can (the current
 expression, adaptor, input etc), along with the chat history, and a response
