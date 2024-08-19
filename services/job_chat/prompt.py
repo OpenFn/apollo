@@ -103,6 +103,9 @@ def generate_system_message(context):
 
     message.append("<job_writing_guide>{}</job_writing_guide>".format(job_writing_summary))
 
+    # Add a cache breakpoint after the job writing guide
+    message.append({"type": "text", "text": ".", "cache_control": {"type": "ephemeral"}})
+
     if context.has("adaptor"):
         adaptor_string = "<adaptor>The user is using the OpenFn {} adaptor. Use functions provided by its API.".format(
             context.adaptor
@@ -118,6 +121,9 @@ def generate_system_message(context):
     else:
         message.append("The user is using an OpenFn Adaptor to write the job.")
 
+    # # Add a cache breakpoint after the adaptor static stuff
+    message.append({"type": "text", "text": ".", "cache_control": {"type": "ephemeral"}})
+
     if context.has("expression"):
         message.append("<user_code>{}</user_code>".format(context.expression))
 
@@ -130,7 +136,7 @@ def generate_system_message(context):
     if context.has("log"):
         message.append("<log>The user's last log output was :\n\n```{}```</output>".format(context.log))
 
-    return list(map(lambda text: {"type": "text", "text": text}, message))
+    return list(map(lambda text: text if "cache_control" in text else {"type": "text", "text": text}, message))
 
 
 def build_prompt(content, history, context):

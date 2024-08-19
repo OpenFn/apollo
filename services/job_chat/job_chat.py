@@ -53,9 +53,19 @@ def generate(content, history, context, api_key) -> str:
     try:
         logger.info("Generating")
 
-        message = client.messages.create(
+        message = client.beta.prompt_caching.messages.create(
             max_tokens=max_tokens, messages=prompt, model=claude_model, system=system_message
         )
+
+        # print("USAGE")
+        # print(message.usage)
+        # print("...")
+
+        if message.usage.cache_creation_input_tokens:
+            print("CACHE :: WRITE :: {} Tokens").format(message.usage.cache_creation_input_tokens)
+
+        if message.usage.cache_read_input_tokens:
+            print("CACHE :: READ :: {} Tokens").format(message.usage.cache_read_input_tokens)
 
         response = []
 
@@ -79,6 +89,7 @@ def generate(content, history, context, api_key) -> str:
         history.append({"role": "user", "content": content})
         history.append({"role": "assistant", "content": response})
 
+        # TODO maybe return usage ?
         return {"response": response, "history": history}
     except Exception as e:
         logger.error(f"An error occurred chat code generation:")
