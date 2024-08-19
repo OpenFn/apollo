@@ -1,5 +1,5 @@
 import os
-from openai import OpenAI
+from anthropic import Anthropic
 from util import DictObj, createLogger
 from .prompt import build_prompt
 
@@ -8,6 +8,14 @@ logger = createLogger("job_chat")
 OPENAI_API_KEY = os.getenv(
     "OPENAI_API_KEY",
 )
+
+ANTHROPIC_API_KEY = os.getenv(
+    "ANTHROPIC_API_KEY",
+)
+
+claude_model = "claude-3-haiku-20240307"
+# claude_model = "claude-3-5-sonnet-20240620"
+max_tokens = 1024
 
 
 class Payload(DictObj):
@@ -26,43 +34,50 @@ def main(dataDict) -> dict:
 
 
 def generate(content, history, context, api_key) -> str:
-    if api_key is None and isinstance(OPENAI_API_KEY, str):
+    if api_key is None and isinstance(ANTHROPIC_API_KEY, str):
         logger.warn("Using default API key from environment")
-        api_key = OPENAI_API_KEY
+        api_key = ANTHROPIC_API_KEY
 
-    # should we let users drive this?
-    model = "gpt-3.5-turbo"
+    client = Anthropic(api_key=api_key)
 
-    client = OpenAI(api_key=api_key)
-    logger.info("OpenAI client loaded with {}".format(model))
-    prompt = build_prompt(content, history, context)
+    logger.info("Anthropic client loaded")
+    (system_message, prompt) = build_prompt(content, history, context)
 
+    logger.info("")
     logger.info("--- PROMPT ---")
     logger.info(prompt)
     logger.info("--------------")
+    logger.info("")
 
     try:
         logger.info("Generating")
-        max_tokens = 256  # TODO maybe take an option for this?
-        response = client.chat.completions.create(
-            messages=prompt,
-            model="gpt-3.5-turbo",
-            temperature=0,
-            max_tokens=max_tokens,
+
+        message = client.messages.create(
+            max_tokens=max_tokens, messages=prompt, model=claude_model, system=system_message
         )
-        result = response.choices[0].message.content.strip()
-        if result is None:
-            logger.error("An error occurred during chat generation")
+
+        response = []
+
+        if response is None:
+            logger.error("An error occurred during during chat generation")
         else:
+            # we need to unpack the contents into a flat string
+            for r in message.content:
+                if r.type == "text":
+                    response.append(r.text)
+
+            response = "\n\n".join(response)
+
             logger.info("response from model:")
             logger.info("")
-            logger.info("\n" + result)
+            logger.info("\n" + response)
             logger.info("")
             logger.info("done")
 
         history.append({"role": "user", "content": content})
-        history.append({"role": "assistant", "content": result})
+        history.append({"role": "assistant", "content": response})
 
-        return {"response": result, "history": history}
+        return {"response": response, "history": history}
     except Exception as e:
-        logger.error(f"An error occurred chat code generation: {e}")
+        logger.error(f"An error occurred chat code generation:")
+        print(e)

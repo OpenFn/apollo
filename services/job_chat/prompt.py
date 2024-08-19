@@ -88,24 +88,40 @@ create(
   )
 );
 ```
------
 """
 
 
-def build_context(context):
-    message = [job_writing_summary]
+def build_context(context, question):
+    message = []
 
-    if context.has("adaptor"):
-        message.append("I am using the OpenFn {} adaptor, use functions provided by its API".format(context.adaptor))
+    message.append(
+        """Please help answer this question.
+        <question>
+        {}
+        </question>
 
-        adaptor_docs = apollo("describe_adaptor", {"adaptor": context.adaptor})
-        for doc in adaptor_docs:
-            message.append("Typescript definitions for doc")
-            message.append(adaptor_docs[doc]["description"])
-        message.append("-------------------------")
+        Additional context is provided below:
 
-    else:
-        message.append("I am using an OpenFn Adaptor to write my job.")
+        """.format(
+            question
+        )
+    )
+
+    # message.append("<job_writing_guide>{}</job_writing_guide>".format(job_writing_summary))
+
+    # if context.has("adaptor"):
+    #     message.append(
+    #         "<adaptor>I am using the OpenFn {} adaptor, use functions provided by its API".format(context.adaptor)
+    #     )
+
+    #     adaptor_docs = apollo("describe_adaptor", {"adaptor": context.adaptor})
+    #     for doc in adaptor_docs:
+    #         message.append("Typescript definitions for doc")
+    #         message.append(adaptor_docs[doc]["description"])
+    #     message.append("</adaptor>")
+
+    # else:
+    #     message.append("I am using an OpenFn Adaptor to write my job.")
 
     if context.has("expression"):
         message.append(
@@ -115,13 +131,13 @@ def build_context(context):
         )
 
     if context.has("input"):
-        "My input data is :\n\n```{}```".format(context.input)
+        "<input>My input data is :\n\n```{}```</input>".format(context.input)
 
     if context.has("output"):
-        "My last output data was :\n\n```{}```".format(context.output)
+        "<output>My last output data was :\n\n```{}```<output>".format(context.output)
 
     if context.has("log"):
-        "My last log output was :\n\n```{}```".format(context.log)
+        "<log>My last log output was :\n\n```{}```".format(context.log)
 
     return {"role": "user", "content": "\n\n".join(message)}
 
@@ -129,16 +145,10 @@ def build_context(context):
 def build_prompt(content, history, context):
     prompt = []
 
-    # push the system message
-    prompt.append({"role": "system", "content": system_message})
-
     # push the history
     prompt.extend(history)
 
-    # add context as a seperate message here
-    prompt.append(build_context(context))
+    # Add the question and context
+    prompt.append(build_context(context, content))
 
-    # Finally, append the latest message from the user
-    prompt.append({"role": "user", "content": content})
-
-    return prompt
+    return (system_message, prompt)

@@ -2,6 +2,8 @@
 
 The Job Chat service enables a chat interface to uses writing an OpenFn job.
 
+The services uses Anthropic Claude 3.5 Sonnet.
+
 Clients must submit as much context about the job as they can (the current
 expression, adaptor, input etc), along with the chat history, and a response
 will be generated (along with a new history).
@@ -43,7 +45,7 @@ bun py job_chat tmp/payload.json
 ## Implementation
 
 The service works by building a prompt with all the relevant context and sending
-that along to a GPT model.
+that along to the Anthropic API.
 
 If an adaptor is provided, a complete listing of the adaptor's API is sent to
 the model.
@@ -94,7 +96,7 @@ The server returns the following JSON response:
 
 ```json
 {
-  "response": "the GPT response as a string",
+  "response": "the model response as a string",
   "history": [
     /* Updated chat history */
   ]
