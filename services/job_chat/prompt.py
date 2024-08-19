@@ -34,7 +34,9 @@ An Operation is a factory function which returns a function that takes state and
 ```
 const myOperation = (arg) => (state) => { /* do something with arg and state */ return state; }
 ```
-For example, here's how we issue a GET request with the http adaptor:
+<examples>
+<example>
+Here's how we issue a GET request with the http adaptor:
 ```
 get('/patients');
 ```
@@ -44,6 +46,8 @@ but we can also pass a value from state:
 ```
 get(state => state.endpoint);
 ```
+</example>
+<example>
 Example job code with the HTTP adaptor:
 ```
 get('/patients');
@@ -55,6 +59,8 @@ fn(state => {
   return { ...state, data: { patients } };
 })
 post('/patients', dataValue('patients'));
+</example>
+<example>
 ```
 Example job code with the Salesforce adaptor:
 ```
@@ -67,6 +73,8 @@ each(
   }))
 );
 ```
+</example>
+<example>
 Example job code with the ODK adaptor:
 ```
 create(
@@ -79,6 +87,8 @@ create(
   )
 );
 ```
+</example>
+<examples>
 """
 
 
@@ -125,10 +135,10 @@ def build_context(context, question):
         "<input>My input data is :\n\n```{}```</input>".format(context.input)
 
     if context.has("output"):
-        "<output>My last output data was :\n\n```{}```<output>".format(context.output)
+        "<output>My last output data was :\n\n```{}```</output>".format(context.output)
 
     if context.has("log"):
-        "<log>My last log output was :\n\n```{}```".format(context.log)
+        "<log>My last log output was :\n\n```{}```</output>".format(context.log)
 
     return {"role": "user", "content": "\n\n".join(message)}
 
