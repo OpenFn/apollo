@@ -62,10 +62,10 @@ def generate(content, history, context, api_key) -> str:
         # print("...")
 
         if message.usage.cache_creation_input_tokens:
-            print("CACHE :: WRITE :: {} Tokens").format(message.usage.cache_creation_input_tokens)
+            print("CACHE :: WRITE :: {} Tokens".format(message.usage.cache_creation_input_tokens))
 
         if message.usage.cache_read_input_tokens:
-            print("CACHE :: READ :: {} Tokens").format(message.usage.cache_read_input_tokens)
+            print("CACHE :: READ :: {} Tokens".format(message.usage.cache_read_input_tokens))
 
         response = []
 

@@ -1,5 +1,11 @@
 # apollo
 
+## 0.4.1
+
+### Patch Changes
+
+- job chat: fix formatting issue
+
 ## 0.4.0
 
 ### Minor Changes
