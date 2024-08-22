@@ -105,6 +105,10 @@ def parse_workflow_steps(steps):
         }
     }
 
+    # Add the name and description fields
+    workflow["name"] = "open-project"
+    workflow["description"] = "Auto-generated workflow based on provided steps."
+
     previous_job = None
 
     for step in steps:
@@ -120,24 +124,20 @@ def parse_workflow_steps(steps):
 
         if previous_job:
             workflow["workflow-1"]["edges"].append({
-                f"{previous_job}->{job_name}": {
-                    "source_job": previous_job,
-                    "target_job": job_name,
-                    "condition_type": "on_job_success",
-                    "enabled": True
-                }
+                "source_job": previous_job,
+                "target_job": job_name,
+                "condition_type": "on_job_success",
+                "enabled": True
             })
         previous_job = job_name
 
     if previous_job:
         first_job = list(workflow["workflow-1"]["jobs"].keys())[0]
         workflow["workflow-1"]["edges"].insert(0, {
-            f"webhook->{first_job}": {
-                "source_trigger": "webhook",
-                "target_job": first_job,
-                "condition_type": "always",
-                "enabled": True
-            }
+            "source_trigger": "webhook",
+            "target_job": first_job,
+            "condition_type": "always",
+            "enabled": True
         })
 
     return workflow
