@@ -105,7 +105,6 @@ def parse_workflow_steps(steps):
         }
     }
 
-    # Add the name and description fields
     workflow["name"] = "open-project"
     workflow["description"] = "Auto-generated workflow based on provided steps."
 
