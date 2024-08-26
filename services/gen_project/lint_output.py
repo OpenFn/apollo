@@ -23,16 +23,9 @@ def lint_yaml(input_json_file, output_yaml_file):
         print(f"Error loading YAML content: {e}")
         return
 
-    # Add the name and description fields at the beginning
-    formatted_yaml_data = {
-        'name': 'Generated Project',  # Default name
-        'description': 'Auto-generated workflow based on provided steps.',  # Default description
-    }
-    formatted_yaml_data.update(yaml_data)
-
     # Write the formatted YAML content to the output file
     with open(output_yaml_file, 'w', encoding='utf-8') as f:
-        yaml.dump(formatted_yaml_data, f)
+        yaml.dump(yaml_data, f)
 
     print(f"Linted YAML has been written to {output_yaml_file}.")
 
