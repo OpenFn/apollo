@@ -149,7 +149,10 @@ def main(data):
 
     if output_format == 'json':
         workflow_output = json.dumps(workflow, indent=2)
+        output_filename = "workflow.json"
     else:
         workflow_output = yaml.dump(workflow, sort_keys=False)
+        output_filename = "project.yaml"
 
-    return {"files": {"project.yaml" if output_format == 'yaml' else "workflow.json": workflow_output}}
+    # Return with the file name as a string representation of a list
+    return {"files": {str([output_filename]): workflow_output}}
