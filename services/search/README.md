@@ -34,10 +34,10 @@ This service also includes the embedding of OpenFn docs to a vector database. Th
 There are two ways to run the embedding service:
 - The first is use the poerty command to run the service using 
 ```
-poetry run python services/search/generate_docs_emebeddings.py tmp/repo/docs/jobs openfn_docs_jobs
+poetry run python services/search/generate_docs_embeddings.py tmp/docs openfn_docs
 ``` 
 
-Here the `tmp/repo/docs/jobs` is the path to the OpenFn docs and `openfn_docs_jobs` is the name of the collection in the vector database.
+Here the `tmp/docs` is the path to the OpenFn docs and `openfn_docs_jobs` is the name of the collection in the vector database.
 
 - The second is to run the docker file directly using `docker build --secret id=_env,src=.env -t apollo .`.
 
