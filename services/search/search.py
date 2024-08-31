@@ -1,7 +1,8 @@
 import os
 import json
 from util import DictObj, createLogger
-from pymilvus import MilvusClient, model
+from langchain_openai import OpenAIEmbeddings
+from pymilvus import MilvusClient
 
 logger = createLogger("search")
 
@@ -14,9 +15,9 @@ def main(dataDict) -> str:
         data = Payload(dataDict)
 
         #Embedding model
-        openai_ef = model.dense.OpenAIEmbeddingFunction(
-        model_name='text-embedding-ada-002',
-        api_key=data.api_key,
+        openai_ef = OpenAIEmbeddings(
+        model="text-embedding-3-small", 
+        api_key=data.api_key
         )
 
         zilliz_uri= os.getenv('ZILLIZ_URI')
@@ -32,14 +33,14 @@ def main(dataDict) -> str:
 
         #Get embeddings for search
         logger.info("Encoding search string...")
-        search_embeddings = openai_ef.encode_documents([data.query])
+        search_embeddings = openai_ef.embed_documents([data.query])
 
         logger.info("Searching database for revelent info...")
 
-        search_params = {"metric_type": "COSINE", "params": {"nprobe": 30}}
-        res = client.search(collection_name="openfn_docs_jobs",
+        search_params = {"metric_type": "COSINE", "params": {"nprobe": 16}}
+        res = client.search(collection_name="openfn_docs",
         data=search_embeddings,
-        limit=10,
+        limit=3,
         search_params=search_params,
         output_fields=["text"]
         )
