@@ -9,12 +9,13 @@ from pymilvus import FieldSchema, CollectionSchema, DataType, utility, Collectio
 
 load_dotenv()
 
-def read_md_files(directory):
-    md_files = glob.glob(f"{directory}/**/*.md", recursive=True)
+def read_md_files(directories):
     docs = []
-    for file in md_files:
-        with open(file, "r", encoding="utf-8") as f:
-            docs.append((file, f.read()))  # Returning a tuple with file name and content
+    for directory in directories:
+        md_files = glob.glob(f"{directory}/**/*.md", recursive=True)
+        for file in md_files:
+            with open(file, "r", encoding="utf-8") as f:
+                docs.append((file, f.read()))  # Returning a tuple with file name and content
     return docs
 
 def split_md_by_sections(file_name, content, embed_model):
@@ -39,7 +40,6 @@ def split_md_by_sections(file_name, content, embed_model):
 
     # Calculate the max split length
     max_split_length = max(len(section.page_content) for section in splits)
-    print(f"File: {file_name} - Max Split Length: {max_split_length}")
 
     return splits, max_split_length
 
@@ -55,30 +55,32 @@ if __name__ == "__main__":
         model="text-embedding-3-small", 
         api_key=openai_key
     )
-    # Read markdown files from the repo
-    docs_path = args.repo_path
+
+    # Combine the base path with the additional folders
+    docs_to_embed = ["docs/jobs"]
+    docs_to_embed = [os.path.join(args.repo_path, folder) for folder in docs_to_embed]
     corpus = []
-    md_files_content = read_md_files(docs_path)
+    md_files_content = read_md_files(docs_to_embed)
 
     file_embeddings_count = {}
     max_overall_split_length = 0  # To store the maximum length across all splits
 
     print("Splitting docs semantically. This might take a few seconds.")
     start = time.time()
+
     for file_name, content in md_files_content:
         sections, max_split_length = split_md_by_sections(file_name, content, openai_ef)
         corpus.extend(section.page_content for section in sections)
         file_embeddings_count[file_name] = len(sections)  # Store the count of embeddings per file
-
-        # Update max_overall_split_length if the current file's max split length is greater
         max_overall_split_length = max(max_overall_split_length, max_split_length)
+    
     end = time.time()
 
     # Log the number of embeddings per file
     for file_name, count in file_embeddings_count.items():
         print(f"File: {file_name} - Generated {count} embeddings")
     
-    print(f"Read {len(corpus)} documents from {docs_path}")
+    print(f"Read {len(corpus)} documents.")
     print(f"Succeed in {round(end - start, 4)} seconds!")
 
     # Embed the corpus

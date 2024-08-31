@@ -11,7 +11,7 @@ COPY ./services/ ./services
 COPY ./models/ ./models
 
 RUN apt-get update && apt-get install -y git
-RUN git clone --depth 1 https://github.com/OpenFn/docs.git /app/repo
+RUN git clone --depth 1 https://github.com/OpenFn/docs.git /app/docs
 
 RUN python -m pip install --user pipx
 RUN python -m pipx install poetry
@@ -24,7 +24,7 @@ ENV PATH="${PATH}:/root/.bun/bin/"
 RUN bun install
 
 RUN --mount=type=secret,id=_env,dst=/.env cat /.env \
-    && poetry run python services/search/generate_docs_emebeddings.py repo/docs/jobs openfn_docs_jobs
+    && poetry run python services/search/generate_docs_embeddings.py docs openfn_docs_jobs
 
 EXPOSE 3000
 
