@@ -1,7 +1,7 @@
 import json
 from util import createLogger, apollo, DictObj
 
-logger = createLogger(" job_expression_generator.prompts")
+logger = createLogger("job_expression_generator.prompts")
 
 SYSTEM_PROMPT_TEMPLATE = """You are an agent helping a non-expert user write a job for OpenFn,
 the world's leading digital public good for workflow automation.
@@ -39,14 +39,11 @@ def describe_adaptor(adaptor: str) -> str:
     descriptions = [adaptor_docs[doc]["description"] for doc in adaptor_docs]
     return "\n".join(descriptions)
 
-def write_to_file(context: str, adaptor_description: str, filename: str = "tmp/context_and_adaptor_info.md") -> None:
-    logger.info(f"Saving context and adaptor description to file: {filename}")
+def write_to_file(content: str, filename: str = "tmp/context_and_adaptor_info.md") -> None:
+    logger.info(f"Saving content to file: {filename}")
     with open(filename, "w") as file:
-        file.write("### Context Information ###\n\n")
-        file.write("\n".join(context) + "\n\n")
-        file.write("### Adaptor Description ###\n\n")
-        file.write(adaptor_description + "\n")
-    logger.info("Context and adaptor description successfully written to file.")
+        file.write(content)
+    logger.info("Content successfully written to file.")
 
 def generate_job_prompt(
     adaptor: str, instruction: str, api_key: str, state: dict = None, existing_expression: str = "", use_embeddings: bool = True
@@ -61,7 +58,8 @@ def generate_job_prompt(
         logger.info("Skipping embeddings, using default context.")
         context = DEFAULT_JOB_RULES
 
-    write_to_file(context, adaptor_description)
+    context_and_adaptor_info = f"""### Context Information ###\n\n{context}\n\n### Adaptor Description ###\n\n{adaptor_description}\n"""
+    write_to_file(context_and_adaptor_info)
 
     full_system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
         f"Here is the context about job writing:\n{context}\n\nHere is relevant context and code about the adaptor used:\n{adaptor_description}."

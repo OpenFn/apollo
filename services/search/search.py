@@ -27,20 +27,19 @@ def main(dataDict) -> str:
         #Connect to milvus
         client = MilvusClient(
         uri=zilliz_uri,
-        token=zilliz_token,
-        db_name="openfn_docs"
+        token=zilliz_token
         )
 
         #Get embeddings for search
         logger.info("Encoding search string...")
-        search_embeddings = openai_ef.embed_documents([data.query])
+        search_embeddings = [openai_ef.embed_query(data.query)]
 
         logger.info("Searching database for revelent info...")
 
         search_params = {"metric_type": "COSINE", "params": {"nprobe": 16}}
         res = client.search(collection_name="openfn_docs",
         data=search_embeddings,
-        limit=3,
+        limit=5,
         search_params=search_params,
         output_fields=["text"]
         )
