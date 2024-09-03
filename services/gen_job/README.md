@@ -47,3 +47,51 @@ The input payload is a JSON object with the following structure
 ## Response Reference
 
 The server returns a job expression based on the provided query.
+
+## RAG service setup
+In order to use the RAG service we need to configure the vector database first. Create an account on [Zilliz](https://zilliz.com/) and create a free cluster. Obtain the URL and token to the cluster and add them to the env file. We will also need a OpenAI API key to create the embeddings. Then we run the docker command or the simply run the generate embeddings file. 
+
+Docker: 
+```
+docker build --secret id=_env,src=.env -t apollo .
+```
+With the docker command we do not need to setup the docs repository.
+
+Running the file:
+```
+poetry run python services/search/generate_docs_embeddings.py tmp/docs collection_name
+```
+Here we will need to clone the git repo using `git clone --depth 1 https://github.com/OpenFn/docs.git /tmp` and then run the above command. 
+
+For now we are just embedding the job writing docs into the vector database.
+
+## Job processor for multiple inputs
+
+This file helps you run multiple inputs with a single instruction (the server must be started with bun dev). The instrtuction to run this file is 
+```
+poetry run python services/gen_job/job_processor.py -i tmp/input.json -o tmp/output.md
+```
+Here the input file contains a array of inputs in this format:
+```json
+[
+  {
+    "api_key": "your_api_key",
+    "existing_expression": "",
+    "adaptor": "Adaptor-1",
+    "state": {},
+    "instruction": "Instruction for expample 1",
+    "use_embeddings":true
+  },
+  {
+    "api_key": "your_api_key",
+    "existing_expression": "",
+    "adaptor": "Adaptor-2",
+    "state": {},
+    "instruction": "Instruction for expample 2",
+    "use_embeddings": false
+  }
+]
+```
+A sample input file has been added to results/input.json
+
+You will need to add the zilliz database url and token to the env file in order to use the RAG serice. You can also skip the use of RAG by setting 'use_embeddings' option as false. 
