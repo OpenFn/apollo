@@ -40,4 +40,4 @@ def summarize_context(api_key: str, context: list[str], query: str) -> str:
     # Extract the summary from the response
     summary = response.choices[0].message.content.strip()
 
-    return summary
+    return [summary]
