@@ -1,43 +1,41 @@
-from openai import OpenAI
+import os
+import glob
+from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 
-def summarize_context(api_key: str, context: list[str], query: str) -> str:
-    client = OpenAI(api_key=api_key)
+def read_md_files(directories):
+    docs = []
+    for directory in directories:
+        md_files = glob.glob(f"{directory}/**/*.md", recursive=True)
+        for file in md_files:
+            with open(file, "r", encoding="utf-8") as f:
+                docs.append((file, f.read()))  # Returning a tuple with file name and content
+    return docs
 
-    # Combine all the context into a single string
-    context_text = "\n".join(context)
-
-    # Create the system prompt
-    system_prompt = (
-        "You are an expert assistant for OpenFn specialized in workflow automation."
-        "Your task is to help the user summarize information in a way that is highly relevant to their query. "
-        "Include everything that is directly related to the query."
-        "Add as many code snippets that might be available to you."
-        "DO NOT answer any query which is not related to the context."
+def split_docs(file_name, content):
+    headers_to_split_on = [
+        ("##", "Header 2"),	
+        ("###", "Header 3"),	     
+    ]	  
+    markdown_splitter = MarkdownHeaderTextSplitter(
+        headers_to_split_on=headers_to_split_on, 
+        strip_headers=False
+    )	    
+    md_header_splits = markdown_splitter.split_text(content)
+    
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1024, 
+        chunk_overlap=256, 
+        length_function=len, 
+        is_separator_regex=False
     )
+    splits = text_splitter.split_documents(md_header_splits)
 
-    # Create the user message with the context and the query
-    user_prompt = (
-        f"The user is asking for information related to the following query: '{query}'.\n\n"
-        "Here is the context:\n"
-        f"{context_text}\n\n"
-        "Please summarize the context based on the query, including all relevant information"
-    )
+    # Write the sections to disk
+    output_dir = "./tmp/split_sections"
+    os.makedirs(output_dir, exist_ok=True)
+    with open(os.path.join(output_dir, f"{os.path.basename(file_name)}_sections.md"), "w", encoding="utf-8") as out_file:
+        for section in splits:
+            out_file.write(f"## Section Start: " + "\n------\n")
+            out_file.write(section.page_content + "\n------\n")
 
-    # Define the messages to be sent to the OpenAI API
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
-    ]
-
-    # Call the OpenAI API to get the summary
-    response = client.chat.completions.create(
-        messages=messages,
-        model="gpt-3.5-turbo",
-        temperature=0.3,
-        max_tokens=512,
-    )
-
-    # Extract the summary from the response
-    summary = response.choices[0].message.content.strip()
-
-    return [summary]
+    return splits
