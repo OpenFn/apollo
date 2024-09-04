@@ -4,8 +4,7 @@ import argparse
 from openai import OpenAI
 from dotenv import load_dotenv
 from pymilvus import FieldSchema, CollectionSchema, DataType, utility, Collection, connections
-
-from utils import split_docs, read_md_files
+from utils import split_docs, read_md_files, read_paths_config
 
 load_dotenv()
 
@@ -19,9 +18,8 @@ if __name__ == "__main__":
     openai_key = os.getenv("OPENAI_API_KEY")
     client = OpenAI(api_key=openai_key)
 
-    # Combine the base path with the additional folders
-    docs_to_embed = ["docs/jobs","adaptors"]
-    docs_to_embed = [os.path.join(args.repo_path, folder) for folder in docs_to_embed]
+    # Read paths from the configuration file
+    docs_to_embed = read_paths_config("./path.config", args.repo_path)
     corpus = []
     md_files_content = read_md_files(docs_to_embed)
 
@@ -40,8 +38,8 @@ if __name__ == "__main__":
     # Embed the corpus
     print("Embedding documents...")
     vectors = [
-    vec.embedding
-    for vec in client.embeddings.create(input=corpus, model="text-embedding-3-small").data
+        vec.embedding
+        for vec in client.embeddings.create(input=corpus, model="text-embedding-3-small").data
     ]
 
     data = [

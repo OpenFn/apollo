@@ -5,6 +5,7 @@ WORKDIR /app
 COPY ./pyproject.toml ./poetry.lock poetry.toml ./
 COPY ./package.json bun.lockb ./
 COPY ./tsconfig.json ./
+COPY ./path.config ./
 
 COPY ./platform/ ./platform
 COPY ./services/ ./services

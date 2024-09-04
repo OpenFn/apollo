@@ -2,13 +2,19 @@ import os
 import glob
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 
-def read_md_files(directories):
+def read_md_files(file_paths):
+    """Read markdown files given a list of file paths."""
     docs = []
-    for directory in directories:
-        md_files = glob.glob(f"{directory}/**/*.md", recursive=True)
-        for file in md_files:
-            with open(file, "r", encoding="utf-8") as f:
-                docs.append((file, f.read()))  # Returning a tuple with file name and content
+    for file_path in file_paths:
+        if os.path.isfile(file_path):
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    docs.append((file_path, f.read()))
+            except Exception as e:
+                print(f"Error reading file {file_path}: {e}")
+        else:
+            print(f"Warning: File {file_path} does not exist.")
+    
     return docs
 
 def split_docs(file_name, content):
@@ -39,3 +45,36 @@ def split_docs(file_name, content):
             out_file.write(section.page_content + "\n------\n")
 
     return splits
+
+def read_paths_config(config_file, repo_path):
+    """Read paths from the configuration file and prepend repo_path to each path."""
+    paths = []
+    if not os.path.isfile(config_file):
+        raise FileNotFoundError(f"Configuration file {config_file} does not exist.")
+    
+    with open(config_file, 'r') as file:
+        for line in file:
+            pattern = line.strip()
+            if pattern:
+                # Prepend the repo_path to the pattern
+                full_pattern = os.path.join(repo_path, pattern)
+                
+                # Expand user home directory if present
+                full_pattern = os.path.expanduser(full_pattern)
+                
+                # Print the pattern being processed
+                print(f"Processing pattern: {full_pattern}")
+                
+                # Use glob to find matching paths
+                matched_paths = glob.glob(full_pattern, recursive=True)
+                
+                # Print the matched paths
+                print(f"Matched paths: {matched_paths}")
+                
+                # Ensure matched_paths is not empty
+                if matched_paths:
+                    paths.extend(matched_paths)
+                else:
+                    print(f"No matches found for pattern: {full_pattern}")
+                                    
+    return paths

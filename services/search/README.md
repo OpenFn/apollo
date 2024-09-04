@@ -23,6 +23,31 @@ To run directly from this repo (note that the server must be started):
 bun py search tmp/payload.json -O
 ```
 
+## Config Paths
+To make it easier to specify which documents should be embedded, we use a configuration file named `path.config` located at the root of the repository.
+
+### Adding Document Paths
+
+1. **Open the `path.config` file**: This file contains the paths to the markdown files that you want to embed into the vector database.
+
+2. **Specify one path per line**: Add each document path you wish to include, with one path per line. These paths should be relative to the docs folder within the repository.
+
+3. **Use standard glob patterns**: You can use standard glob patterns to match multiple files or directories. For example:
+   - `docs/jobs/*.md`: This pattern matches all markdown files in the `docs/jobs` directory.
+   - `docs/adaptors/**/*.md`: This pattern matches all markdown files within the `docs/adaptors` directory and any of its subdirectories.
+
+### Example `path.config`
+
+```plaintext
+docs/jobs/*.md
+docs/adaptors/**/*.md
+```
+In this example, all markdown files under docs/jobs and docs/adaptors (including subdirectories) will be processed and embedded.
+
+#### Important Note: 
+The paths specified in the `path.config` file are relative to the `docs` directory within your repository, not from the root folder.
+
+By following these instructions, you can easily manage and update the list of documents to be embedded without needing to dive into the underlying code.
 
 ## Usage - Embedding OpenFn Docs
 This service also includes the embedding of OpenFn docs to a vector database. The vector database used here is Zilliz. To obtain the env variables follow these steps:
@@ -54,7 +79,11 @@ docker build --secret id=_env,src=.env -t apollo .
 ```
 
 ## Implementation
-Currently, the service returns relevant data from the job docs stored in a vector database. The corpus is generated using the OpenAI Embedding Function and embeds the OpenFn Documentation into the database. This enables the retrieval of relevant context from the documents, thereby improving the results for other Apollo services. You also have an option to summarize the docs based on your query or increase the number of chunks retrieved from the database.
+The service retrieves relevant data from job documents stored in a vector database. 
+The document corpus is generated using the OpenAI Embedding Function, embedding the OpenFn 
+Documentation into the database. This setup allows for the retrieval of relevant context from 
+the documents, enhancing the performance of other Apollo services. 
+Additionally, you can adjust the number of chunks retrieved from the database.
 
 ## Payload Reference
 The input payload is a JSON object with the following structure:
