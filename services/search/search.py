@@ -1,47 +1,56 @@
 import os
 import json
+from openai import OpenAI
 from util import DictObj, createLogger
-from langchain_openai import OpenAIEmbeddings
 from pymilvus import MilvusClient
 
 logger = createLogger("search")
 
 class Payload(DictObj):
-    query: str
     api_key: str
+    query: str
+    collection_name: str = "openfn_docs" 
+    limit: int = 5  # Default limit value
+    summarize: bool = False
 
 def main(dataDict) -> str:
     try:
         data = Payload(dataDict)
 
-        #Embedding model
-        openai_ef = OpenAIEmbeddings(
-        model="text-embedding-3-small", 
-        api_key=data.api_key
-        )
+        # Validate the limit value
+        if not (1 <= data.limit <= 15):
+            raise ValueError("Limit must be between 1 and 15.")
 
-        zilliz_uri= os.getenv('ZILLIZ_URI')
+        zilliz_uri = os.getenv('ZILLIZ_URI')
         zilliz_token = os.getenv('ZILLIZ_TOKEN')
         print(f"Connecting to DB: {zilliz_uri}")
 
-        #Connect to milvus
+        # Connect to Milvus
         client = MilvusClient(
-        uri=zilliz_uri,
-        token=zilliz_token
+            uri=zilliz_uri,
+            token=zilliz_token,
+            db_name="openfn_docs"
         )
 
-        #Get embeddings for search
+        embedding_client = OpenAI(api_key=data.api_key)
+
+        # Get embeddings for search
         logger.info("Encoding search string...")
-        search_embeddings = [openai_ef.embed_query(data.query)]
+        response = embedding_client.embeddings.create(
+            model="text-embedding-3-small", 
+            input=data.query
+        )
+        search_embeddings = response.data[0].embedding
 
-        logger.info("Searching database for revelent info...")
+        logger.info("Searching database for relevant info...")
 
-        search_params = {"metric_type": "COSINE", "params": {"nprobe": 16}}
-        res = client.search(collection_name="openfn_docs",
-        data=search_embeddings,
-        limit=5,
-        search_params=search_params,
-        output_fields=["text"]
+        search_params = {"metric_type": "L2", "params": {"nprobe": 16}}
+        res = client.search(
+            collection_name=data.collection_name,
+            data=[search_embeddings],
+            limit=data.limit,
+            search_params=search_params,
+            output_fields=["text"]
         )
 
         logger.info("Extracting documents...")
@@ -51,8 +60,8 @@ def main(dataDict) -> str:
             if isinstance(hits, str):
                 hits = json.loads(hits)  # Parse string to list of dictionaries
             for hit in hits:
-                documents.append(hit['entity']['text'])        
-
+                documents.append(hit['entity']['text'])
+                 
         return documents    
     except Exception as e:
         logger.error(f"An error occurred during execution: {e}")
