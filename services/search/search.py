@@ -20,12 +20,13 @@ def main(dataDict) -> str:
         # Validate the limit value
         if not (1 <= data.limit <= 15):
             raise ValueError("Limit must be between 1 and 15.")
-
+        
+        logger.info("Connecting to database...")
         zilliz_uri = os.getenv('ZILLIZ_URI')
         zilliz_token = os.getenv('ZILLIZ_TOKEN')
-        print(f"Connecting to DB: {zilliz_uri}")
 
         # Connect to Milvus
+        print(f"Connecting to DB: {zilliz_uri}")
         client = MilvusClient(
             uri=zilliz_uri,
             token=zilliz_token,
@@ -44,7 +45,16 @@ def main(dataDict) -> str:
 
         logger.info("Searching database for relevant info...")
 
-        search_params = {"metric_type": "L2", "params": {"nprobe": 16}}
+        search_params = {
+            "metric_type": "L2",
+            "params": {
+                "nprobe": 16,        # Number of clusters to search in
+                "radius": 1.2,       # Search radius threshold
+                "level": 2           # Search precision level (1-3). Higher values yield more accurate results but slower performance.
+                # "range_filter": 0.7 - Filters out vectors beyond this threshold
+            }
+        }
+        
         res = client.search(
             collection_name=data.collection_name,
             data=[search_embeddings],
@@ -54,12 +64,12 @@ def main(dataDict) -> str:
         )
 
         logger.info("Extracting documents...")
-
         documents = []
         for hits in res:
             if isinstance(hits, str):
                 hits = json.loads(hits)  # Parse string to list of dictionaries
             for hit in hits:
+                logger.info("\n\n" + hit['entity']['text'] + "\n" + f"Distance: {hit['distance']}\n\n")
                 documents.append(hit['entity']['text'])
                  
         return documents    
