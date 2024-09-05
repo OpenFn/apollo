@@ -26,12 +26,15 @@ A job SHOULD NOT use alterState, instead it should use fn for data transformatio
 
 def get_context(api_key: str) -> str:
     logger.info("Generating context...")
-    query = f"Get the job writing guide, Usage Examples, and Job Code Examples."
+    query = "What are operations and states?"
 
-    dataDict = {"query": query, "api_key": api_key}
-    search_results = apollo("search", dataDict)
-
-    return search_results
+    dataDict = {"query": query, "api_key": api_key, "limit": 2}
+    try:
+        search_results = apollo("search", dataDict)
+        return search_results
+    except Exception as e:
+        logger.error(f"Error occurred while generating context: {e}")
+        return DEFAULT_JOB_RULES
 
 def describe_adaptor(adaptor: str) -> str:
     logger.info(f"Describing adaptor: {adaptor}")
