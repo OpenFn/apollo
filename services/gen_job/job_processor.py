@@ -34,8 +34,8 @@ def process_inputs(input_file, output_file):
             
             print(f"Output for {idx + 1}: {output}\n")
             # Write the output to the file
-            f_out.write(f"Input {idx + 1}:\n")
-            f_out.write(f"Generated Job Expression:\n")
+            f_out.write(f"## Input {idx + 1}:\n### Instruction: \n{input_data['instruction']}\n\n")
+            f_out.write(f"## Generated Job Expression:\n")
             f_out.write(output)
             f_out.write("\n\n" + "="*50 + "\n\n")  # Add a separator between outputs
 
