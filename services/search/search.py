@@ -70,7 +70,7 @@ def main(dataDict) -> str:
             if isinstance(hits, str):
                 hits = json.loads(hits)  # Parse string to list of dictionaries
             for hit in hits:
-                logger.info("\n\n" + hit['entity']['text'] + "\n" + f"Distance: {hit['distance']}\n\n")
+                logger.info(f"Distance: {hit['distance']}\n\n" + hit['entity']['text'] + "\n\n")
                 documents.append(hit['entity']['text'])
                  
         return documents    
