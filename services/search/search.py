@@ -16,9 +16,10 @@ class Payload(DictObj):
 def main(dataDict) -> str:
     try:
         data = Payload(dataDict)
+        limit= int(data.limit)
 
         # Validate the limit value
-        if not (1 <= data.limit <= 15):
+        if not (1 <= limit <= 15):
             raise ValueError("Limit must be between 1 and 15.")
         
         logger.info("Connecting to database...")
@@ -58,7 +59,7 @@ def main(dataDict) -> str:
         res = client.search(
             collection_name=data.collection_name,
             data=[search_embeddings],
-            limit=data.limit,
+            limit=limit,
             search_params=search_params,
             output_fields=["text"]
         )
