@@ -19,14 +19,6 @@ def parse_arguments():
     parser.add_argument("collection_name", type=str, help="Name of the Milvus collection")
     return parser.parse_args()
 
-def connect_openai(api_key: str) -> OpenAI:
-    """
-    Connects to the OpenAI API using the provided API key.
-    """
-    if not api_key:
-        raise ValueError("OpenAI API key is missing.")
-    return OpenAI(api_key=api_key)
-
 def create_collection(collection_name: str, max_chunk_length: int) -> Collection:
     """
     Creates a Milvus collection with the specified schema.
@@ -89,7 +81,7 @@ def main():
     openai_key = os.getenv("OPENAI_API_KEY")
 
     # Connect to OpenAI and Milvus
-    client = connect_openai(api_key=openai_key)
+    client = OpenAI(api_key=openai_key)
     connect_to_milvus()
 
     # Read and process markdown files

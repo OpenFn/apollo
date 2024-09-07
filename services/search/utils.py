@@ -3,7 +3,6 @@ import glob
 import logging
 import requests
 from pymilvus import MilvusClient,connections
-from openai import OpenAI
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 
 # Configure logging
