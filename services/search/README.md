@@ -88,10 +88,11 @@ The input payload is a JSON object with the following structure:
 {
     "api_key": "<OpenAI api key>",
     "query": "What are jobs in OpenFn?",
-    "limit": 10, // Custom limit for number of chunks retrieved (1 to 15)
-    "partition_name": "openfn_docs", // Name of the partition in the vector database
+    "limit": 10, // Custom limit for number of chunks retrieved (1 to 15). Default value is 5. (optional)
+    "partition_name": "openfn_docs", // Name of the partition in the vector database. (optional)
 }
 ```
+The `partition_name` is optional and the expected values are `normal_docs` or `adaptor_docs`.
 
 ## Response Reference
 The server returns an array of relevant strings from the documents based on the provided query.

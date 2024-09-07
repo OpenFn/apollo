@@ -25,6 +25,8 @@ def validate_payload(data: Payload):
         raise ValueError("API key is missing.")
     if not data.query:
         raise ValueError("Query string is missing.")
+    if data.partition_name and data.partition_name not in ["normal_docs", "adaptor_docs"]:
+        raise ValueError("Invalid partition_name. Expected values are 'normal_docs' or 'adaptor_docs'.")
 
 
 def get_search_embeddings(api_key: str, query: str) -> list:
