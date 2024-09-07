@@ -1,8 +1,6 @@
 ## Search (RAG)
 
-The Search service allows for the retrieval of data relevant to user queries. Clients are encouraged to provide as much context as possible in their queries to receive the most pertinent information from the documents.
-
-This service primarily integrates Retrieval-Augmented Generation (RAG) with Apollo, enhancing the accuracy and relevance of the results returned to the user.
+The Search Service integrates Retrieval-Augmented Generation (RAG) with Apollo to enhance the accuracy and relevance of data retrieval based on user queries. By leveraging this service, clients can obtain pertinent information from documents, provided they include sufficient context in their queries.
 
 ## Usage - Search Service
 
@@ -78,23 +76,20 @@ Alternatively, run the Docker file directly using:
 docker build --secret id=_env,src=.env -t apollo .
 ```
 
+**NOTE**:   The docs are split into chunks which can be seen in the `tmp/split_sections` folder.
+
 ## Implementation
-The service retrieves relevant data from job documents stored in a vector database. 
-The document corpus is generated using the OpenAI Embedding Function, embedding the OpenFn 
-Documentation into the database. This setup allows for the retrieval of relevant context from 
-the documents, enhancing the performance of other Apollo services. 
-Additionally, you can adjust the number of chunks retrieved from the database.
+The service retrieves data from job documents stored in a vector database. It uses the OpenAI Embedding Function to embed the OpenFn Documentation, allowing for relevant context retrieval and enhancing the performance of other Apollo services. You can also configure the number of chunks retrieved from the database.
 
 ## Payload Reference
 The input payload is a JSON object with the following structure:
 
-```json
+```js
 {
     "api_key": "<OpenAI api key>",
     "query": "What are jobs in OpenFn?",
-    "limit": 10, // A custom limit for number of chunks retrieved ranging from 1 to 15
-    "collection_name": "openfn_docs", // Might be helpful when we embed the adaptor docs to a new collection
-    "summarize": true // Summarizes context based on your query
+    "limit": 10, // Custom limit for number of chunks retrieved (1 to 15)
+    "partition_name": "openfn_docs", // Name of the partition in the vector database
 }
 ```
 
