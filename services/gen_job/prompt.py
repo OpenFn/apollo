@@ -1,3 +1,4 @@
+import os
 import json
 from util import createLogger, apollo, DictObj
 
@@ -25,10 +26,11 @@ A job SHOULD NOT use alterState, instead it should use fn for data transformatio
 """
 
 def get_context(api_key: str) -> str:
+    """Generates context for the job prompt using embeddings."""
     logger.info("Generating context...")
-    query = "What are operations and states?"
+    query = "Input and output state, State Keys, Input & output state for runs"
 
-    dataDict = {"query": query, "api_key": api_key, "limit": 2}
+    dataDict = {"query": query, "api_key": api_key}
     try:
         search_results = apollo("search", dataDict)
         return search_results
@@ -37,12 +39,23 @@ def get_context(api_key: str) -> str:
         return DEFAULT_JOB_RULES
 
 def describe_adaptor(adaptor: str) -> str:
+    """Retrieves and formats the description for a given adaptor."""
     logger.info(f"Describing adaptor: {adaptor}")
     adaptor_docs = apollo("describe_adaptor", {"adaptor": adaptor})
     descriptions = [adaptor_docs[doc]["description"] for doc in adaptor_docs]
     return "\n".join(descriptions)
 
 def write_to_file(content: str, filename: str = "tmp/context_and_adaptor_info.md") -> None:
+    """Writes content to a file and logs the process."""
+    # Delete the output file if it already exists
+    if os.path.exists(filename):
+        try:
+            os.remove(filename)
+            print(f"Existing output file '{filename}' has been deleted.")
+        except OSError as e:
+            print(f"Error deleting the file {filename}: {e}")
+            return
+    
     logger.info(f"Saving content to file: {filename}")
     with open(filename, "w") as file:
         file.write(content)
@@ -51,6 +64,7 @@ def write_to_file(content: str, filename: str = "tmp/context_and_adaptor_info.md
 def generate_job_prompt(
     adaptor: str, instruction: str, api_key: str, state: dict = None, existing_expression: str = "", use_embeddings: bool = True
 ) -> dict:
+    """Generates a structured prompt for writing a job expression in OpenFn."""
     adaptor_description = describe_adaptor(adaptor)
 
     # Determine context based on use_embeddings flag
@@ -88,7 +102,7 @@ def generate_job_prompt(
 
     Step 2: Analyze the generated code to ensure it matches the requirements (check for correct attribute IDs, correct syntax, and logical structure).
 
-    Step 3: If the code does not fully meet the requirements, refine the code and repeat Step 1 and 2.
+    Step 3: If the code does not fully meet the requirements, refine the code and repeat Steps 1 and 2.
 
     Strictly provide only the final, refined code as the output.
     """

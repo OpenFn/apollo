@@ -17,7 +17,7 @@ class JobExpressionInferenceClient:
         self.client = OpenAI(api_key=self.api_key)
         logger.info(f"OpenAI GPT-3.5 Turbo client initialized for job expression generation.")
 
-    def generate(self, prompt, max_tokens=256, temperature=0.3) -> str:
+    def generate(self, prompt, max_tokens=256, temperature=0.2) -> str:
         try:
             logger.info("Generating job expression from GPT-3.5 Turbo model.")
             response = self.client.chat.completions.create(
