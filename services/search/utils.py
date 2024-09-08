@@ -98,8 +98,16 @@ def write_to_file(output_dir, file_name, content, header="## Section Start:\n"):
     :param content: Content to write to the file
     :param header: Optional header to prepend to each section of content
     """
-    os.makedirs(output_dir, exist_ok=True)
     output_file = os.path.join(output_dir, file_name)
+
+    # Delete the output file if it already exists
+    if os.path.exists(output_file):
+        try:
+            os.remove(output_file)
+            print(f"Existing output file '{output_file}' has been deleted.")
+        except OSError as e:
+            print(f"Error deleting the file {output_file}: {e}")
+            return
     
     with open(output_file, "w", encoding="utf-8") as out_file:
         for section in content:

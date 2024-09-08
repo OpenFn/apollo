@@ -19,7 +19,7 @@ def validate_payload(data: Payload):
     :param data: Payload object containing the input data
     :raises ValueError: If any validation checks fail
     """
-    if not (1 <= data.limit <= 15):
+    if not (1 <= int(data.limit) <= 15):
         raise ValueError("Limit must be between 1 and 15.")
     if not data.api_key:
         raise ValueError("API key is missing.")
@@ -130,7 +130,8 @@ def main(dataDict) -> str:
         search_embeddings = get_search_embeddings(api_key=data.api_key, query=data.query)
 
         # Perform the search
-        res = search_database(client, search_embeddings, data.partition_name, data.limit)
+        limit = data.limit
+        res = search_database(client, search_embeddings, data.partition_name, limit)
 
         # Extract documents from search results
         documents = extract_documents(res)
