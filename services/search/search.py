@@ -130,7 +130,7 @@ def main(dataDict) -> str:
         search_embeddings = get_search_embeddings(api_key=data.api_key, query=data.query)
 
         # Perform the search
-        limit = data.limit
+        limit = int(data.limit)
         res = search_database(client, search_embeddings, data.partition_name, limit)
 
         # Extract documents from search results
