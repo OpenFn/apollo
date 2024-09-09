@@ -2,30 +2,11 @@ import os
 import glob
 import logging
 import requests
-from pymilvus import MilvusClient,connections
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-def connect_to_milvus() -> MilvusClient:
-    """
-    Connects to the Milvus database using environment variables.
-
-    :return: MilvusClient instance
-    :raises EnvironmentError: If required environment variables are not set
-    """
-    zilliz_uri = os.getenv('ZILLIZ_URI')
-    zilliz_token = os.getenv('ZILLIZ_TOKEN')
-
-    if not zilliz_uri or not zilliz_token:
-        raise EnvironmentError("ZILLIZ_URI or ZILLIZ_TOKEN environment variables are not set.")
-
-    logger.info(f"Connecting to Milvus database...")
-    connections.connect("default", uri=zilliz_uri, token=zilliz_token, db_name="openfn_docs")
-
-    return MilvusClient(uri=zilliz_uri, token=zilliz_token, db_name="openfn_docs")
+logger = logging.getLogger("RAG")
 
 def fetch_adaptor_data(url="https://raw.githubusercontent.com/OpenFn/adaptors/docs/docs/docs.json"):
     """
