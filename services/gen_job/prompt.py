@@ -30,7 +30,7 @@ def get_context(api_key: str) -> str:
     logger.info("Generating context...")
     query = "Input and output state, State Keys, Input & output state for runs"
 
-    dataDict = {"query": query, "api_key": api_key}
+    dataDict = {"query": query, "api_key": api_key, "limit": 2, "partition_name": "normal_docs"}
     try:
         search_results = apollo("search", dataDict)
         return search_results
