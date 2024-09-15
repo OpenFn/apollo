@@ -79,6 +79,7 @@ def write_to_file(output_dir, file_name, content, header="## Section Start:\n"):
     :param content: Content to write to the file
     :param header: Optional header to prepend to each section of content
     """
+    os.makedirs(output_dir, exist_ok=True)
     output_file = os.path.join(output_dir, file_name)
 
     # Delete the output file if it already exists
