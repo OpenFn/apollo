@@ -1,5 +1,7 @@
 ## Search (RAG)
 
+** RAG SEARCH IS AN EXPERIMENTAL FEATURE. IT IS NOT SUPPORTED BY THE STAGING SERVER**
+
 The Search Service integrates Retrieval-Augmented Generation (RAG) with Apollo to enhance the accuracy and relevance of data retrieval based on user queries. By leveraging this service, clients can obtain pertinent information from documents, provided they include sufficient context in their queries.
 
 ## Usage - Search Service
