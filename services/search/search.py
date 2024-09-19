@@ -1,8 +1,8 @@
+import os
 import json
 from openai import OpenAI
 from util import DictObj, createLogger
 from pymilvus import MilvusClient
-from .utils import connect_to_milvus
 
 logger = createLogger("search")
 
@@ -27,6 +27,23 @@ def validate_payload(data: Payload):
         raise ValueError("Query string is missing.")
     if data.partition_name and data.partition_name not in ["normal_docs", "adaptor_docs"]:
         raise ValueError("Invalid partition_name. Expected values are 'normal_docs' or 'adaptor_docs'.")
+ 
+def connect_to_milvus() -> MilvusClient:
+    """
+    Connects to the Milvus database client using environment variables.
+
+    :return: MilvusClient instance
+    :raises EnvironmentError: If required environment variables are not set
+    """
+    zilliz_uri = os.getenv('ZILLIZ_URI')
+    zilliz_token = os.getenv('ZILLIZ_TOKEN')
+
+    if not zilliz_uri or not zilliz_token:
+        raise EnvironmentError("ZILLIZ_URI or ZILLIZ_TOKEN environment variables are not set.")
+
+    logger.info(f"Connecting to Milvus database...")
+
+    return MilvusClient(uri=zilliz_uri, token=zilliz_token, db_name="openfn_docs")
 
 
 def get_search_embeddings(api_key: str, query: str) -> list:

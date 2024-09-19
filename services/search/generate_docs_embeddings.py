@@ -3,8 +3,8 @@ import time
 import argparse
 from openai import OpenAI
 from dotenv import load_dotenv
-from pymilvus import FieldSchema, CollectionSchema, DataType, utility, Collection
-from utils import split_docs, read_md_files, read_paths_config, fetch_adaptor_data, process_adaptor_data, connect_to_milvus
+from pymilvus import FieldSchema, CollectionSchema, DataType, utility, Collection, connections
+from utils import split_docs, read_md_files, read_paths_config, fetch_adaptor_data, process_adaptor_data, logger
 
 load_dotenv()
 
@@ -36,14 +36,14 @@ def create_collection(collection_name: str, max_chunk_length: int) -> Collection
     schema = CollectionSchema(fields=[id_field, embedding_field, text_field], description="Corpus collection schema")
 
     # Create the collection
-    print(f"Creating collection: {collection_name}")
-    collection = Collection(name=collection_name, schema=schema)
-    print("Collection created!")
+    logger.info(f"Creating collection: {collection_name}")
+    collection = Collection(name=collection_name, schema=schema)    
+    logger.info("Collection created!")
 
     # Create partitions
     collection.create_partition(partition_name="normal_docs")
     collection.create_partition(partition_name="adaptor_docs")
-    print("Partitions 'normal_docs' and 'adaptor_docs' created!")
+    logger.info("Partitions 'normal_docs' and 'adaptor_docs' created!")
 
     return collection
 
@@ -56,7 +56,7 @@ def embed_documents(client: OpenAI, corpus: list, adaptor_corpus: list) -> tuple
     :param adaptor_corpus: List of adaptor documents to embed
     :return: Tuple containing embedded normal and adaptor documents
     """
-    print("Embedding documents...")
+    logger.info("Embedding documents...")
     corpus_vectors = client.embeddings.create(input=corpus, model="text-embedding-3-small").data
     adaptor_vectors = client.embeddings.create(input=adaptor_corpus, model="text-embedding-3-small").data
     return corpus_vectors, adaptor_vectors
@@ -72,17 +72,20 @@ def insert_data(collection: Collection, vectors: list, texts: list, partition_na
     """
     data = [{"embedding": vec.embedding, "text": texts[i]} for i, vec in enumerate(vectors)]
     collection.insert(data=data, partition_name=partition_name)
-    print(f"Inserted {len(data)} documents into '{partition_name}' partition.")
+    logger.info(f"Inserted {len(data)} documents into '{partition_name}' partition.")
 
 def main():
     args = parse_arguments()
 
     # Fetch API keys and connection details
     openai_key = os.getenv("OPENAI_API_KEY")
+    zilliz_uri = os.getenv('ZILLIZ_URI')
+    zilliz_token = os.getenv('ZILLIZ_TOKEN')
 
     # Connect to OpenAI and Milvus
+    logger.info("Connecting to Milvus Database...")
     client = OpenAI(api_key=openai_key)
-    connect_to_milvus()
+    connections.connect("default", uri=zilliz_uri, token=zilliz_token, db_name="openfn_docs")
 
     # Read and process markdown files
     docs_to_embed = read_paths_config("./path.config", args.repo_path)
@@ -98,17 +101,17 @@ def main():
 
     # Log the number of embeddings per file
     for file_name, count in file_embeddings_count.items():
-        print(f"File: {file_name} - Generated {count} embeddings")
+        logger.info(f"File: {file_name} - Generated {count} embeddings")
     
-    print(f"Normal docs split: {len(corpus)}")
+    logger.info(f"Normal docs split: {len(corpus)}")
 
     # Fetch and process adaptor data
     adaptor_data = fetch_adaptor_data()
     adaptor_corpus, max_chunk_length = process_adaptor_data(adaptor_data)
-    print(f"Adaptor data split: {len(adaptor_corpus)}")
+    logger.info(f"Adaptor data split: {len(adaptor_corpus)}")
 
     # Combine normal and adaptor docs
-    print(f"Total documents after adding adaptors: {len(corpus) + len(adaptor_corpus)}")
+    logger.info(f"Total documents after adding adaptors: {len(corpus) + len(adaptor_corpus)}")
 
     collection_name = args.collection_name
     check_collection = utility.has_collection(collection_name)
@@ -125,24 +128,24 @@ def main():
     insert_data(collection, adaptor_vectors, adaptor_corpus, partition_name="adaptor_docs")
 
     # Flush and create index
-    print("Flushing...")
+    logger.info("Flushing...")
     start_flush = time.time()
     collection.flush()
     end_flush = time.time()
-    print(f"Succeeded in {round(end_flush - start_flush, 4)} seconds!")
+    logger.info(f"Succeeded in {round(end_flush - start_flush, 4)} seconds!")
 
-    print("Creating index...")
+    logger.info("Creating index...")
     default_index = {'index_type': 'IVF_FLAT', 'metric_type': 'L2', 'params': {'nlist': 1024}}
     collection.create_index(field_name="embedding", index_params=default_index)
 
     # Load collection
     t0 = time.time()
-    print("Loading collection...")
+    logger.info("Loading collection...")
     collection.load()
     t1 = time.time()
-    print(f"Loaded collection in {round(t1 - t0, 4)} seconds!")
+    logger.info(f"Loaded collection in {round(t1 - t0, 4)} seconds!")
 
-    print("Milvus database configured successfully!")
+    logger.info("Milvus database configured successfully!")
 
 if __name__ == "__main__":
     main()
