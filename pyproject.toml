@@ -15,10 +15,12 @@ openai = "^1.23.3"
 transformers = "^4.40.1"
 black = "^24.4.2"
 python-dotenv = "^1.0.1"
+anthropic = "^0.34.0"
+pymilvus = "^2.4.6"
+langchain-text-splitters = "^0.2.4"
 
 # These dependencies should only be needed for fine tuning
 # use poetry install --with ft
-anthropic = "^0.34.0"
 [tool.poetry.group.ft]
 optional = true
 
