@@ -1,5 +1,13 @@
 # apollo
 
+## 0.5.0
+
+### Minor Changes
+
+- 73096a0: Added project generator
+- d3da3cb: Add job generator service
+- 013506f: Added search service (RAG)
+
 ## 0.4.1
 
 ### Patch Changes
