@@ -2,38 +2,47 @@ from util import createLogger, apollo
 
 logger = createLogger("job_chat.prompt")
 
-# RAG
-# Retrieval Augmented Generation
-system_message = """
-you are an agent helping a non-export user write a job for OpenFn,
-the worlds leading digital public good for workflow automation.
-You are helping the user write a job in openfn's custom dsl, which
-is very similar to JAVASCRIPT. you should STRICTLY ONLY answer
-questions related to openfn, javascript programming, and workflow automation.
+system_role = """
+You are a software engineer helping a non-expert user write a job for OpenFn,
+the world's leading digital public good for workflow automation.
+
+DO NOT answer questions unrelated to OpenFn,
+javascript programming, and workflow automation.
+
+Your responses short be short, accurate and friendly unless otherwise instructed.
+
+Do not thank the user or be obsequious.
+
+Address the user directly.
+
+Additional context is attached.
 """
 
 # for now we're hard coding a sort of job writing 101 with code examples
 # Later we'll do some real RAG against the docsite
 job_writing_summary = """
-Here is a guide to job writing in OpenFn.
+An OpenFn Job is written in a DSL which is very similar to Javascript.
 
-A Job is a bunch of openfn dsl code which performs a particular task, like
-fetching data from Salesforce or converting JSON data to FHIR standard.
+Job code does not use import statements or async/await.
 
-Each job uses exactly one Adaptor to perform its task. The Adaptor provides a
-collection of Operations (helper functions) which makes it easy to communicate with
-a data source. The adaptor API for this job is provided below.
+Job code must only contain function calls at the top level.
 
-An Operation is a factory function returns a function that takes state and returns state. A
-In other words:
+Each job is associated with an adaptor, which provides functions for the job.
+All jobs have the fn() and each() function, which are very important.
+
+DO NOT use the `alterState()` function. Use `fn()` instead.
+
+The adaptor API may be attached.
+
+The functions provided by an adaptor are called Operations. 
+
+An Operation is a factory function which returns a function that takes state and returns state, like this:
 ```
 const myOperation = (arg) => (state) => { /* do something with arg and state */ return state; }
 ```
-
-The job code will be compiled into an array operation factories, which at runtime will be 
-executed in series, with state passed into each one.
-
-For example, here's how we issue a GET request with the http adaptor:
+<examples>
+<example>
+Here's how we issue a GET request with the http adaptor:
 ```
 get('/patients');
 ```
@@ -43,22 +52,21 @@ but we can also pass a value from state:
 ```
 get(state => state.endpoint);
 ```
-This works because each operation's arguments allow a function to be passed,
-which will be lazily invoked at runtime with the latest state value.
-
-Job code should only contain Operations at the top level/scope - you MUST NOT
-include any other JavaScript statements at the top level.
-
-Job code is written in modern JavaScript, and although async/await is allowed
-inside a callback function (never at the top level), it is rarely used.
-
+</example>
+<example>
 Example job code with the HTTP adaptor:
 ```
 get('/patients');
-each('$.data.patients[*]', (item, index) => {
-  item.id = `item-${index}`;
-});
+fn(state => {
+  const patients = state.data.map(p => {
+    return { ...p, enrolled: true }
+  });
+
+  return { ...state, data: { patients } };
+})
 post('/patients', dataValue('patients'));
+</example>
+<example>
 ```
 Example job code with the Salesforce adaptor:
 ```
@@ -71,72 +79,77 @@ each(
   }))
 );
 ```
+</example>
+<example>
 Example job code with the ODK adaptor:
 ```
-each(
-  '$.data.data[*]',
-  create(
-    'ODK_Submission__c',
-    fields(
-      field('Site_School_ID_Number__c', dataValue('school')),
-      field('Date_Completed__c', dataValue('date')),
-      field('comments__c', dataValue('comments')),
-      field('ODK_Key__c', dataValue('*meta-instance-id*'))
-    )
+create(
+  'ODK_Submission__c',
+  fields(
+    field('Site_School_ID_Number__c', dataValue('school')),
+    field('Date_Completed__c', dataValue('date')),
+    field('comments__c', dataValue('comments')),
+    field('ODK_Key__c', dataValue('*meta-instance-id*'))
   )
 );
 ```
------
+</example>
+<examples>
 """
 
 
-def build_context(context):
-    message = [job_writing_summary]
+def generate_system_message(context):
+    message = [system_role]
+
+    message.append("<job_writing_guide>{}</job_writing_guide>".format(job_writing_summary))
+
+    # Add a cache breakpoint after the job writing guide
+    message.append({"type": "text", "text": ".", "cache_control": {"type": "ephemeral"}})
 
     if context.has("adaptor"):
-        message.append("I am using the OpenFn {} adaptor, use functions provided by its API".format(context.adaptor))
+        adaptor_string = "<adaptor>The user is using the OpenFn {} adaptor. Use functions provided by its API.".format(
+            context.adaptor
+        )
 
         adaptor_docs = apollo("describe_adaptor", {"adaptor": context.adaptor})
         for doc in adaptor_docs:
-            message.append("Typescript definitions for doc")
-            message.append(adaptor_docs[doc]["description"])
-        message.append("-------------------------")
+            adaptor_string += "Typescript definitions for doc " + doc
+            adaptor_string += adaptor_docs[doc]["description"]
+        adaptor_string += "</adaptor>"
 
+        message.append(adaptor_string)
     else:
-        message.append("I am using an OpenFn Adaptor to write my job.")
+        message.append("The user is using an OpenFn Adaptor to write the job.")
+
+    # # Add a cache breakpoint after the adaptor static stuff
+    message.append({"type": "text", "text": ".", "cache_control": {"type": "ephemeral"}})
 
     if context.has("expression"):
-        message.append(
-            "My code currently looks like this :```{}```\n\n You should try and re-use any relevant user code in your response".format(
-                context.expression
-            )
-        )
+        message.append("<user_code>{}</user_code>".format(context.expression))
 
     if context.has("input"):
-        "My input data is :\n\n```{}```".format(context.input)
+        message.append("<input>The user's input data is :\n\n```{}```</input>".format(context.input))
 
     if context.has("output"):
-        "My last output data was :\n\n```{}```".format(context.output)
+        message.append("<output>The user's last output data was :\n\n```{}```</output>".format(context.output))
 
     if context.has("log"):
-        "My last log output was :\n\n```{}```".format(context.log)
+        message.append("<log>The user's last log output was :\n\n```{}```</output>".format(context.log))
 
-    return {"role": "user", "content": "\n\n".join(message)}
+    return list(map(lambda text: text if "cache_control" in text else {"type": "text", "text": text}, message))
 
 
 def build_prompt(content, history, context):
-    prompt = []
+    system_message = []
 
-    # push the system message
-    prompt.append({"role": "system", "content": system_message})
+    system_message = generate_system_message(context)
+
+    prompt = []
 
     # push the history
     prompt.extend(history)
 
-    # add context as a seperate message here
-    prompt.append(build_context(context))
-
-    # Finally, append the latest message from the user
+    # Add the question and context
     prompt.append({"role": "user", "content": content})
 
-    return prompt
+    return (system_message, prompt)

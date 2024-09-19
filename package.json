@@ -1,0 +1,31 @@
+{
+  "name": "apollo",
+  "module": "platform/index.ts",
+  "version": "0.4.1",
+  "type": "module",
+  "scripts": {
+    "start": "NODE_ENV=production bun platform/src/index.ts",
+    "dev": "bun  --watch platform/src/index.ts",
+    "build": "bun build platform/src/index.ts",
+    "test": "bun test platform/test ",
+    "py": "poetry run python services/entry.py "
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@changesets/cli": "^2.27.3",
+    "@elysiajs/html": "^1.0.2",
+    "elysia": "1.0.21"
+  },
+  "nodemonConfig": {
+    "watch": [
+      "platform/src",
+      "services"
+    ],
+    "ext": "ts, py"
+  }
+}

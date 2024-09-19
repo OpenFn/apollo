@@ -1,0 +1,105 @@
+[
+  {
+    "api_key": "your_api_key",
+    "existing_expression": "",
+    "adaptor": "@openfn/language-commcare@3.1.1",
+    "state": {
+      "data": {
+        "attachments": {},
+        "case_id": "17cf848d-a356-4e43-8d92-xxxx",
+        "ihs_number": "9539-91250-12490",
+        "closed": false,
+        "date_closed": null,
+        "date_modified": "2024-04-18T11:37:52.884000Z",
+        "domain": "bob",
+        "indices": {
+          "parent": {
+            "case_id": "6a3c4bd2-f660-4d0b-8393-yyyy",
+            "case_type": "orang",
+            "relationship": "child"
+          }
+        },
+        "properties": {
+          "next_step": "no_follow_up",
+          "gender": "male",
+          "visit_type": "doctor_consult",
+          "where_did_the_visit_take_place": "mobile_clinic",
+          "case_type": "kunjungan",
+          "site_id": "93a719f3-9aa7-4fdc-bece-xxxx",
+          "visit_date": "2024-04-18",
+          "how_many_alcoholic_drinks_per_week": "one_to_three",
+          "date_opened": "2024-04-18T11:37:52.884",
+          "prescription_5_amount": "",
+          "invoice_amount": "79000",
+          "provider": "Provider_Name_From_Staff_Lookup_Table",
+          "tuberculosis": "",
+          "prescription_5": "",
+          "non-prescribed_drug_use": "never_a_drug_user",
+          "allergies": "",
+          "prescription_5_dose": "",
+          "external_id": null,
+          "dusun_name": "Cali TEST",
+          "location_of_mobile_clinic": "Sempurna",
+          "mental_health_next_hg_visit_date": "2024-05-18",
+          "hepatitis": "",
+          "prescription_2": ""
+        },
+        "server_date_modified": "2024-04-18T11:37:52.944381Z",
+        "user_id": "aaaaabbbbbccccddd",
+        "xform_ids": ["fa8031ac-da15-4a59-833a-waffle"]
+      }
+    },
+    "instruction": "Create a job which filters an array of Commcare visit events. The visits will be passed downstream in state.data. Sort the events into two lists of patients: those with an IHS number (defined by the key 'ihs_number', and those without. Save the two arrays to state, remove any other data, and return the state for the next job."
+  },
+  {
+    "api_key": "your_api_key",
+    "existing_expression": "",
+    "adaptor": "@openfn/language-redis@1.2.0",
+    "state": {
+        "data": [
+            {
+                "ADOP": "2019-11-09",
+                "AMFR": "Wheatsheaf Industries",
+                "EMSV": "0.1.x",
+                 "LSER": "406c9f14667442a7924fbe6ac8b98185",
+                "records": [
+                    {
+                        "ABST": "20240524T172814Z",
+                        "BEMD": 14.4,
+                        "HAMB": 75.6,
+                        "TVC": 6.9,
+                        "TCON": 26.9
+                    },
+                    {
+                        "ABST": "20240524T173814Z",
+                        "BEMD": 14.4,
+                        "HAMB": 75.7,
+                        "TVC": 6.9,
+                        "TCON": 26.8
+                    },
+                    {
+                        "ABST": "20240524T174814Z",
+                        "BEMD": 14.4,
+                        "HAMB": 75.9,
+                        "TVC": 6.9,
+                        "TCON": 26.8
+                    }
+                ]
+            }
+        ]
+    },
+    "instruction": "Given a payload of metadata about fridge operating temperatures, aggregate all the records belonging to each fridge. The fridge id is in the LSER field.  There may be hundreds of items in the data, with dozens of records per item. Save the list of temperatures (TVC) for each fridge in an object on state, like `{ records:  { '406c9f14667442a7924fbe6ac8b98185': [6.9, 6.9, 7.0] } }`. Once the data has been aggregated, upload it to redis using the fridge id and date (ADOP) as the key, like '<fridge-id>:<ADOP>'"
+  },
+  {
+    "api_key": "your_api_key",
+    "existing_expression": "",
+    "adaptor": "@openfn/language-dhis2@1.2.3",
+    "state": {
+      "data": {
+        "name": "bukayo saka",
+        "gender": "male"
+      }
+    },
+    "instruction": "Create a new trackedEntityInstance 'person' in dhis2 for the 'dWOAzMcK2Wt' orgUnit."
+  }
+]
