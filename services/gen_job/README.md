@@ -1,5 +1,7 @@
 ## Job Generation Service
 
+** JOB GENERATION IS AN EXPERIMENTAL FEATURE. IT IS NOT SUPPORTED BY THE STAGING SERVER**
+
 The Job Generation service allows for the generation of job expresssions relevant to user queries. Job expressions are
 a important part of the OpenFn workflows. This service allows user to generate them based on simple text instructions along
 with the adaptor information and the current state.
