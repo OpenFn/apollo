@@ -1,5 +1,11 @@
 # apollo
 
+## 0.5.1
+
+### Patch Changes
+
+- Temporarily disable embeddings in build (search is disabled anyway)
+
 ## 0.5.0
 
 ### Minor Changes
