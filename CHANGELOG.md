@@ -1,5 +1,12 @@
 # apollo
 
+## 0.5.2
+
+### Patch Changes
+
+- Improve job_chat prompt to be less strict about talking about non-job-related
+  stuff (eg, it's a lot more willing to discuss adaptors and integrations"
+
 ## 0.5.1
 
 ### Patch Changes
