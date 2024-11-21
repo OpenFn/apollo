@@ -1,9 +1,7 @@
 import os
-import time
 import argparse
 from dotenv import load_dotenv
 from langchain_community.document_loaders import TextLoader, JSONLoader
-# from langchain.vectorstores import Zilliz #TODO add more
 from langchain_community.vectorstores import Zilliz
 from langchain_openai import OpenAIEmbeddings
 
@@ -22,18 +20,8 @@ def parse_arguments():
 
     return parser.parse_args()
 
-# TODO improve schema or add row json
 def get_json(f, jq_schema):
-    """
-    Get JSON as LangChain documents.
-    
-    Args:
-        f: File path to the JSON file to be loaded
-        jq_schema: Extract specific content from JSON
-    
-    Returns:
-        List of LangChain documents extracted from the JSON file
-    """
+    """Wrapper around LangChain JSONLoader, using the same arguments."""
     loader = JSONLoader(
         file_path=f,
         jq_schema=jq_schema,
@@ -74,6 +62,8 @@ def _get_vectorstore_config(vectorstore_type='zilliz', connection_args=None, **k
         vectorstore_type: Name of vectorstore class (lowercase)
         connection_args: Dictionary of connection arguments for specific vectorstores (e.g. Zilliz)
         **kwargs: Additional parameters for vectorstore initialisation
+    Returns:
+        A vectorstore LangChain class and the relevant arguments to use for it.
     """
     vectorstore_classes = {
         'zilliz': Zilliz
@@ -91,17 +81,30 @@ def _get_vectorstore_config(vectorstore_type='zilliz', connection_args=None, **k
         
         # Add connection args if provided
         if connection_args:
-            init_kwargs['connection_args'] = connection_args # keeping in here instead of kwargs to flag that it might be needed for some dbs
+            init_kwargs['connection_args'] = connection_args
             
         return VectorStoreClass, init_kwargs
         
     except KeyError:
         raise ValueError(f"Unsupported vectorstore type: {vectorstore_type}")
 
-def create_vectorstore(docs, collection_name='LangChainCollection', vectorstore_type='zilliz', embedding="openai",
+def create_store(docs, collection_name='LangChainCollection', vectorstore_type='zilliz', embedding="openai",
                         connection_args=None, auto_id=True, drop_old=True, **kwargs):
     """
-    Create a new vectorstore from documents with flexible vectorstore selection.
+   Create a new vectorstore from documents and initialise it with the specified settings.
+   
+   Args:
+       docs: List of documents to add to the vectorstore
+       collection_name: Name of the collection to create (default: 'LangChainCollection')
+       vectorstore_type: Type of vectorstore to create (e.g. 'zilliz')
+       embedding: Type of embedding model to use (e.g. 'openai')
+       connection_args: Connection arguments for the vectorstore if needed(e.g. URI, API key)
+       auto_id: Whether to automatically generate IDs (default: True)
+       drop_old: Whether to drop existing collection if it exists (default: True)
+       **kwargs: Additional arguments passed to vectorstore initialisation
+       
+   Returns:
+       Initialised vectorstore containing the input documents
     """
     VectorStoreClass, init_kwargs = _get_vectorstore_config(
         vectorstore_type=vectorstore_type,
@@ -113,14 +116,21 @@ def create_vectorstore(docs, collection_name='LangChainCollection', vectorstore_
     
     return VectorStoreClass.from_documents(documents=docs, embedding=_get_embedding_class(embedding), auto_id=auto_id, drop_old=drop_old, **init_kwargs)
 
-def get_existing_vectorstore(collection_name='LangChainCollection', vectorstore_type='zilliz', 
+def get_store(collection_name='LangChainCollection', vectorstore_type='zilliz', 
                            embedding="openai", connection_args=None, auto_id=True, **kwargs):
     """
-    Get existing vectorstore collection with flexible vectorstore selection.
+   Get an existing vectorstore collection and configure it with specified settings.
+   
+   Args:
+       collection_name: Name of the collection to retrieve (default: 'LangChainCollection')
+       vectorstore_type: Type of vectorstore to connect to (e.g. 'zilliz')
+       embedding: Type of embedding model to use (e.g. 'openai') 
+       connection_args: Connection arguments for the vectorstore (e.g. URI, API key)
+       auto_id: Whether to automatically generate IDs (default: True)
+       **kwargs: Additional arguments passed to vectorstore initialisation
 
-    Args:
-    ...
-
+   Returns:
+       Connected vectorstore instance with specified configuration
     """
     VectorStoreClass, init_kwargs = _get_vectorstore_config(
         vectorstore_type=vectorstore_type,
@@ -161,11 +171,10 @@ def main():
     # Fetch API keys and connection details
     load_dotenv()
 
-    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     ZILLIZ_CLOUD_URI = os.getenv('ZILLIZ_CLOUD_URI')
     ZILLIZ_CLOUD_API_KEY = os.getenv('ZILLIZ_CLOUD_API_KEY')
 
-    existing_store = get_existing_vectorstore(
+    existing_store = get_store(
         collection_name=args.collection_name,
         vectorstore_type=args.vectorstore_type, # currently Zilliz is available
         embedding=args.embedding_model, # currently OpenAI is available
