@@ -2,7 +2,6 @@ import os
 import argparse
 import warnings
 from dotenv import load_dotenv
-from langchain_community.document_loaders import TextLoader, JSONLoader
 from langchain_community.vectorstores import Zilliz
 from langchain_openai import OpenAIEmbeddings
 
@@ -57,11 +56,6 @@ class VectorStore:
         
         Args:
             docs: List of documents to add to the vectorstore
-            collection_name: Name of the collection to create (default: 'LangChainCollection')
-            vectorstore_type: Type of vectorstore to create (e.g. 'zilliz')
-            embedding: Type of embedding model to use (e.g. 'openai')
-            connection_args: Connection arguments for the vectorstore if needed(e.g. URI, API key)
-            auto_id: Whether to automatically generate IDs (default: True)
             drop_old: Whether to drop existing collection if it exists (default: True)
             **kwargs: Additional arguments passed to vectorstore initialisation
             
