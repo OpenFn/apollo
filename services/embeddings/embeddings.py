@@ -50,7 +50,7 @@ class VectorStore:
         except KeyError:
             raise ValueError(f"Unsupported vectorstore type: {self.vectorstore_type}")
     
-    def create_collection(self, docs, drop_old=True, **kwargs):
+    def add_docs(self, docs, drop_old=True, **kwargs):
         """
         Create a new vectorstore from documents and initialise it with the specified settings.
         
@@ -107,32 +107,3 @@ class VectorStore:
                 f"3. Connection issues"
         )
         return results
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Search similar texts in vector collection")
-    parser.add_argument("--input_text", type=str, required=True)
-    parser.add_argument("--collection_name", type=str, required=True)
-    parser.add_argument("--vectorstore_type", type=str, default="zilliz")
-    parser.add_argument("--embedding_model", type=str, default="openai")
-    args = parser.parse_args()
-
-    load_dotenv()
-    
-    connection_args = {
-        "uri": os.getenv('ZILLIZ_CLOUD_URI'),
-        "token": os.getenv('ZILLIZ_CLOUD_API_KEY')
-    }
-
-    store = VectorStore(
-        collection_name=args.collection_name,
-        vectorstore_type=args.vectorstore_type,
-        embedding_type=args.embedding_model,
-        connection_args=connection_args
-    )
-    
-    results = store.search(args.input_text)
-    print(results)
-
-if __name__ == "__main__":
-    main()
