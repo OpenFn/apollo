@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from embeddings.embeddings import VectorStore
+from embeddings.demo.example import get_demo_vectorstore
 from embeddings.utils import load_json
 
 load_dotenv()
@@ -8,19 +8,11 @@ load_dotenv()
 
 def run_demo(input_query):
 
-    # Get chat data to insert in database as LangChain documents
-    docs = load_json("embeddings_demo/demo_data/data.json", jq_schema='.messages[].content')
-
     # Initialise the vector store instance
-    store = VectorStore(
-        collection_name="demo_project",
-        vectorstore_type="zilliz",
-        embedding_type="openai",
-        connection_args = {
-            "uri": os.getenv('ZILLIZ_CLOUD_URI'),
-            "token": os.getenv('ZILLIZ_CLOUD_API_KEY')
-        }
-    )
+    store = get_demo_vectorstore()
+
+    # Get chat data to insert in database as LangChain documents
+    docs = load_json("embeddings/demo/data/demo_data.json", jq_schema='.messages[].content')
 
     # Create a new collection in the vector store and add the chat data
     store.add_docs(docs)
