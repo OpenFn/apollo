@@ -28,7 +28,7 @@ def validate_payload(data: Payload):
     if data.partition_name and data.partition_name not in ["normal_docs", "adaptor_docs"]:
         raise ValueError("Invalid partition_name. Expected values are 'normal_docs' or 'adaptor_docs'.")
  
-def connect_to_milvus() -> MilvusClient:
+def connect_to_milvus(db_name="openfn_docs") -> MilvusClient:
     """
     Connects to the Milvus database client using environment variables.
 
@@ -43,7 +43,7 @@ def connect_to_milvus() -> MilvusClient:
 
     logger.info(f"Connecting to Milvus database...")
 
-    return MilvusClient(uri=zilliz_uri, token=zilliz_token, db_name="openfn_docs")
+    return MilvusClient(uri=zilliz_uri, token=zilliz_token, db_name=db_name)
 
 
 def get_search_embeddings(api_key: str, query: str) -> list:
