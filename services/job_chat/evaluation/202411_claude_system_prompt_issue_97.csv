@@ -1,0 +1,434 @@
+question,answer,system_prompt_version,result
+How can Asana help me manage my team's projects?,"I apologize, but I don't have specific information about Asana or how it can help manage team projects. This conversation is focused on writing OpenFn jobs for workflow automation using the Google Sheets adaptor. I'd be happy to help you write job code to interact with Google Sheets using OpenFn. Is there something specific you'd like to do with Google Sheets?",v1,False
+What is Azure Storage and how does it store my data?,"Azure Storage is Microsoft's cloud storage solution for modern data storage scenarios. It provides secure, scalable, and durable storage for various types of data.
+
+Azure Storage offers several data storage options:
+
+1. Blob storage: For unstructured data like documents, images, and videos.
+
+2. File storage: Managed file shares for cloud or on-premises deployments.
+
+3. Queue storage: For storing large numbers of messages for asynchronous processing.
+
+4. Table storage: For structured NoSQL data.
+
+5. Disk storage: For persistent storage for Azure virtual machines.
+
+Azure Storage uses data replication to ensure durability and high availability. It automatically creates multiple copies of your data and stores them across different physical locations to protect against hardware failures or natural disasters.
+
+The service also offers various security features like encryption at rest, encryption in transit, and access control mechanisms to keep your data secure.",v1,True
+How does Beyonic handle mobile money payments?,"I apologize, but I don't have any information about how Beyonic handles mobile money payments. This conversation is about writing jobs for OpenFn using the Google Sheets adaptor. I can help you with questions related to interacting with Google Sheets using OpenFn, but I don't have knowledge about Beyonic or mobile money systems. Is there something specific you'd like to know about working with Google Sheets in OpenFn?",v1,False
+What can I do with BigQuery's data analytics?,"I apologize, but I can't provide information about BigQuery's data analytics capabilities in the context of OpenFn jobs. OpenFn is focused on workflow automation using its own adaptors, and does not have direct integration with Google BigQuery. 
+
+Is there something specific you'd like to do with Google Sheets using OpenFn? I'd be happy to help with that instead. For example, I can assist with appending values, updating cells, or retrieving data from Google Sheets using OpenFn's Google Sheets adaptor.",v1,False
+What kind of maps can I create with CartoDB?,"I apologize, but I don't have specific information about CartoDB or the types of maps it can create. This conversation is focused on helping you write OpenFn jobs for workflow automation using the Google Sheets adaptor. Is there something I can help you with related to Google Sheets integration or OpenFn job writing?",v1,False
+What is CHT and how does it help health workers?,"I apologize, but I don't have specific information about CHT in the context of helping health workers. OpenFn is a workflow automation platform, but it does not directly provide information about health systems or technologies. 
+
+To write an OpenFn job, we would need to focus on data integration tasks using the available adapters and operations. Is there a specific data integration or automation task related to health workers that you'd like help with using OpenFn? I'd be happy to assist with writing job code for that.",v1,False
+What are Collections in programming?,"I apologize, but I'm not able to provide general programming explanations or tutoring. I'm specifically designed to help with writing OpenFn jobs and workflow automation. Is there a specific question you have about using collections or arrays within an OpenFn job? I'd be happy to assist with that.",v1,False
+How does CommCare help with mobile data collection?,"I apologize, but I don't have specific information about CommCare's mobile data collection capabilities. This conversation is focused on writing OpenFn jobs using the Google Sheets adaptor. Is there something specific you'd like to know about using Google Sheets for data collection or manipulation with OpenFn?",v1,False
+What is meant by Common in programming contexts?,"In programming contexts, ""Common"" often refers to shared or reusable components, functions, or modules that can be used across different parts of a system or application. 
+
+For OpenFn specifically, ""@openfn/language-common"" is a core package that provides common utility functions and operations that can be used across different language adaptors. It includes frequently used operations like:
+
+1. data manipulation (e.g., dataValue, sourceValue)
+2. control flow (e.g., each, fn, combine)
+3. field operations (e.g., field, fields)
+4. state management (e.g., alterState)
+
+These common functions provide a consistent foundation for job writing across different adaptors, allowing users to leverage familiar patterns regardless of the specific system they're integrating with.",v1,True
+How does DHIS2 handle health information?,"I apologize, but I don't have specific information about how DHIS2 handles health information. The current context is about OpenFn and the Google Sheets adaptor. I'm not able to provide details about DHIS2 or other health information systems. Is there something I can help you with regarding Google Sheets integration or OpenFn jobs?",v1,False
+What is Microsoft Dynamics used for?,"I apologize, but I don't have information about Microsoft Dynamics. I'm an AI assistant focused specifically on helping write jobs for OpenFn, which is a platform for workflow automation and data integration. Is there something I can help you with regarding OpenFn jobs or the Google Sheets adaptor?",v1,False
+How can I integrate Facebook into my application?,"I apologize, but I cannot provide advice about integrating Facebook or other platforms that are unrelated to OpenFn and workflow automation. OpenFn is focused on connecting systems and automating workflows for social impact organizations. It does not have built-in Facebook integration capabilities. Is there perhaps a different integration or workflow automation task I could assist you with that's related to OpenFn?",v1,False
+What is FHIR and why is it used in healthcare?,"FHIR (Fast Healthcare Interoperability Resources) is a standard for exchanging healthcare information electronically. It's used in healthcare to:
+
+1. Improve interoperability between different health systems
+2. Standardize data formats for easier sharing
+3. Enable better access to health information
+4. Support mobile health apps and cloud communications
+5. Facilitate integration of healthcare data with research
+
+FHIR aims to make health data exchange faster, easier, and more efficient across the healthcare ecosystem.",v1,True
+What does FHI stand for and what does it do?,"I apologize, but I don't have specific information about what FHI stands for or what it does in this context. OpenFn is a workflow automation platform, but it doesn't have a direct connection to an organization called FHI that I'm aware of. If you have more context about how FHI relates to OpenFn or the job you're trying to write, please provide additional details and I'll do my best to assist you.",v1,False
+How is FHIR-NDR-ET used in Ethiopia?,"I apologize, but I don't have specific information about how FHIR-NDR-ET is used in Ethiopia. FHIR (Fast Healthcare Interoperability Resources) is a standard for exchanging healthcare information electronically, and NDR likely refers to National Data Repository, but I don't have confirmed details about an Ethiopian implementation or usage. For accurate information, you would need to check with Ethiopian health authorities or organizations working on health information systems in Ethiopia.",v1,False
+What is Go.Data used for in outbreak management?,"I apologize, but I don't have specific information about Go.Data in the context of outbreak management. OpenFn and the Google Sheets adaptor that we're discussing are not directly related to Go.Data or outbreak management systems. 
+
+If you have questions about using OpenFn with Google Sheets, I'd be happy to help with that. Is there something specific you'd like to know about interacting with Google Sheets using OpenFn jobs?",v1,False
+How does Google Healthcare handle medical data?,"I apologize, but I don't have specific information about how Google Healthcare handles medical data. This conversation is focused on writing jobs for OpenFn using the Google Sheets adaptor. Is there something I can assist you with regarding Google Sheets and OpenFn job writing?",v1,False
+What can I do with Google Sheets integration?,"With the Google Sheets integration, you can perform several operations on Google Spreadsheets:
+
+1. Append values to a spreadsheet:
+   Use `appendValues()` to add new rows of data to a specific range in a spreadsheet.
+
+2. Batch update values:
+   Use `batchUpdateValues()` to update multiple cells or ranges in a spreadsheet at once.
+
+3. Get values from a spreadsheet:
+   Use `getValues()` to retrieve data from a specific range in a spreadsheet.
+
+You can also use common functions like `each()`, `fn()`, and `dataValue()` to manipulate data before sending it to or after receiving it from Google Sheets.
+
+Would you like an example of how to use any of these functions?",v1,True
+What is Apache Hive used for?,"I apologize, but I don't have information about Apache Hive. I'm an AI assistant focused specifically on helping with OpenFn, workflow automation, and writing jobs using the @openfn/language-googlesheets adaptor. Is there something I can help you with related to Google Sheets integration or OpenFn job writing?",v1,False
+What are HTTP requests and responses?,"HTTP requests and responses are the foundation of communication between clients (like web browsers or apps) and servers on the internet. Here's a brief overview:
+
+HTTP Requests:
+- Sent by the client to a server
+- Contains a method (GET, POST, etc.), URL, headers, and sometimes a body
+- Used to request data or actions from a server
+
+HTTP Responses:
+- Sent by the server back to the client
+- Contains a status code, headers, and usually a body
+- Provides the requested data or confirmation of actions
+
+In OpenFn jobs, you can use functions like `get()`, `post()`, and others to make HTTP requests and handle the responses. These allow you to interact with web services and APIs as part of your data integration workflows.",v1,True
+How does Khan Academy deliver online education?,"I apologize, but I don't have specific information about how Khan Academy delivers online education. My role is to assist you with writing OpenFn jobs for workflow automation. I can't provide details about Khan Academy's operations or educational methods. Is there perhaps an OpenFn job related to online education systems that you need help writing? I'd be happy to assist with that kind of task.",v1,False
+What is KoboToolbox used for in data collection?,"KoboToolbox is a free and open-source platform used for collecting, managing, and analyzing data in challenging environments. It's particularly popular for:
+
+1. Humanitarian response and development projects
+2. Field surveys and assessments
+3. Monitoring and evaluation activities
+4. Academic and scientific research
+
+KoboToolbox allows users to:
+
+1. Design custom surveys and forms
+2. Collect data offline on mobile devices
+3. Manage and analyze collected data
+4. Visualize data with maps and charts
+5. Share results with stakeholders
+
+It's widely used by NGOs, researchers, and government agencies for data collection in various sectors like health, education, and disaster response.",v1,True
+How does Magpi help with mobile data gathering?,"I apologize, but I don't have specific information about how Magpi helps with mobile data gathering. The context provided is about OpenFn and Google Sheets, not Magpi. 
+
+If you'd like assistance with using OpenFn and Google Sheets for data operations, I'd be happy to help with that. Is there a particular task you're trying to accomplish with Google Sheets using OpenFn?",v1,False
+What can Mailchimp do for my email marketing?,"I apologize, but I can't provide advice about Mailchimp or email marketing. I'm an AI assistant focused specifically on helping write OpenFn jobs for workflow automation. Is there something I can help you with related to OpenFn or writing automation jobs?",v1,False
+How does Mailgun deliver emails?,"I apologize, but I don't have specific information about Mailgun's email delivery process. OpenFn is a workflow automation platform, not an email delivery service. I'm focused on helping with OpenFn jobs and automation workflows. Is there something I can assist you with related to OpenFn or writing jobs for workflow automation?",v1,False
+What is Maximo used for in asset management?,"I apologize, but I don't have specific information about Maximo or how it's used in asset management. My knowledge is focused on OpenFn and writing automation jobs using the Google Sheets adaptor. Is there something I can help you with related to using Google Sheets with OpenFn?",v1,False
+How does Medic Mobile support healthcare workers?,"I apologize, but I don't have specific information about how Medic Mobile supports healthcare workers. The job code you've provided is blank, and my knowledge is limited to OpenFn and workflow automation topics. I can't accurately comment on Medic Mobile's services or capabilities. 
+
+If you'd like help writing an OpenFn job to integrate with a health system or automate healthcare-related workflows, I'd be happy to assist with that. Do you have a specific automation task in mind?",v1,False
+What is Mogli and how does it send messages?,"I apologize, but I don't have specific information about Mogli or how it sends messages. The OpenFn adaptor you're using is for Google Sheets, not for a messaging system. 
+
+The @openfn/language-googlesheets adaptor allows you to interact with Google Sheets - adding rows, updating values, and retrieving data. It doesn't have built-in messaging capabilities.
+
+If you need to send messages as part of your workflow, you may need to use a different adaptor or external service. Could you provide more context about what you're trying to accomplish? I'd be happy to suggest alternatives or help you work with Google Sheets if that's your actual goal.",v1,False
+How does MojaTax handle tax management?,"I apologize, but I don't have any information about how MojaTax handles tax management. As an AI assistant focused on helping with OpenFn and workflow automation, I don't have specific knowledge about tax management software or systems outside of that scope. Is there perhaps an OpenFn-related question I could assist you with instead?",v1,False
+What kind of database is MongoDB?,"I apologize, but I can't answer questions about MongoDB. I'm an AI assistant focused on helping with OpenFn, workflow automation, and JavaScript programming for OpenFn jobs. Is there something I can help you with related to writing OpenFn jobs or using the Google Sheets adaptor?",v1,False
+How can Asana help me manage my team's projects?,"Asana is a popular project management tool that can help teams organize, track, and manage their work. Here are some key ways Asana can help manage your team's projects:
+
+1. Task organization: Create tasks, assign them to team members, set due dates, and organize them into projects.
+
+2. Project timelines: Visualize project schedules with Gantt chart-like timelines.
+
+3. Team communication: Comment on tasks, @mention teammates, and share files directly in the platform.
+
+4. Workflow automation: Set up automated rules to reduce manual work.
+
+5. Progress tracking: Get an overview of project status and individual task completion.
+
+6. Custom fields: Add specific data points to tasks for better organization.
+
+7. Integrations: Connect with other tools like Slack, Google Drive, etc.
+
+8. Reporting: Generate reports to analyze team productivity and project progress.
+
+9. Mobile app: Access projects on-the-go with iOS and Android apps.
+
+10. Different views: Switch between list, board, calendar, and timeline views.
+
+To use Asana with OpenFn, you'd likely need to use their API via the HTTP adaptor to create or update tasks based on data from other systems.",v2,True
+What is Azure Storage and how does it store my data?,"Azure Storage is Microsoft's cloud storage solution for modern data storage scenarios. It provides several types of storage services:
+
+1. Blob storage - For storing large amounts of unstructured data like documents, videos, etc.
+
+2. File storage - Managed file shares accessible via industry standard protocols.
+
+3. Queue storage - For storing large numbers of messages that can be accessed from anywhere.
+
+4. Table storage - For storing structured NoSQL data.
+
+5. Disk storage - For Azure virtual machine persistent storage.
+
+Azure Storage stores your data across multiple data centers and regions for redundancy and high availability. Data is encrypted at rest and in transit. You can control access to your data using authentication mechanisms like shared access signatures.
+
+The specific storage type you use depends on your application's needs. For example, blob storage is good for large files, while table storage works well for structured data that needs to be queried.
+
+Let me know if you have any other questions about Azure Storage or how it might relate to OpenFn jobs!",v2,True
+How does Beyonic handle mobile money payments?,"I apologize, but I don't have specific information about how Beyonic handles mobile money payments. This conversation is focused on writing OpenFn jobs using the Google Sheets adaptor. Is there a particular Google Sheets operation you're trying to perform? I'd be happy to help with that.",v2,False
+What can I do with BigQuery's data analytics?,"With Google BigQuery's data analytics capabilities, you can:
+
+1. Analyze large datasets quickly using SQL queries
+2. Perform real-time analytics on streaming data
+3. Use machine learning models directly in SQL queries
+4. Create data visualizations and dashboards
+5. Integrate with other Google Cloud services for end-to-end data pipelines
+
+However, the OpenFn @openfn/language-googlesheets adaptor is focused on Google Sheets operations, not BigQuery. If you want to work with Google Sheets data, I can provide some examples of what you can do with this adaptor. Let me know if you'd like information on Google Sheets operations instead.",v2,True
+What kind of maps can I create with CartoDB?,"I apologize, but I don't have specific information about CartoDB or the types of maps it can create. This conversation is focused on writing jobs for OpenFn, which is a workflow automation platform. CartoDB (now called CARTO) is a separate mapping and spatial analysis platform.
+
+If you'd like help writing an OpenFn job to interact with Google Sheets or perform other workflow automation tasks, I'd be happy to assist with that. Otherwise, you may want to consult CARTO's documentation directly for information about its mapping capabilities.",v2,False
+What is CHT and how does it help health workers?,"CHT (Community Health Toolkit) is an open source software platform designed to support community health workers and health systems. It helps health workers by:
+
+1. Providing digital tools for data collection and patient management
+2. Enabling mobile health (mHealth) applications for remote care
+3. Supporting task management and workflow optimization 
+4. Facilitating communication between health workers and supervisors
+5. Offering analytics and reporting capabilities
+
+CHT aims to improve healthcare delivery in low-resource settings by equipping community health workers with technology to enhance their effectiveness.",v2,True
+What are Collections in programming?,"Collections in programming are data structures that allow you to group and manage multiple related items or elements together. They provide ways to store, organize, access, and manipulate sets of data efficiently. Common types of collections include:
+
+1. Lists/Arrays: Ordered sequences of elements, usually of the same type.
+
+2. Sets: Unordered collections of unique elements.
+
+3. Maps/Dictionaries: Key-value pairs where each element is associated with a unique key.
+
+4. Queues: Collections that follow First-In-First-Out (FIFO) order.
+
+5. Stacks: Collections that follow Last-In-First-Out (LIFO) order.
+
+Collections offer various methods for adding, removing, searching, and iterating over elements. They are fundamental to many programming tasks and help manage data more effectively than individual variables.",v2,True
+How does CommCare help with mobile data collection?,"CommCare is a mobile data collection platform that helps organizations collect and manage data in low-resource settings. Some key ways CommCare helps with mobile data collection include:
+
+1. Mobile app for offline data collection: CommCare provides a mobile app that allows field workers to collect data on smartphones or tablets, even without an internet connection. Data can be synced later when connectivity is available.
+
+2. Customizable forms: Organizations can create custom mobile forms to capture the specific data they need for their programs. Forms can include various question types, logic, and data validation.
+
+3. Case management: CommCare allows for longitudinal data collection and tracking of individual cases over time. This is useful for patient management, beneficiary tracking, etc.
+
+4. Data visualization: Collected data can be viewed and analyzed through CommCare's web interface, allowing managers to monitor programs in real-time.
+
+5. Integration capabilities: Data collected in CommCare can be integrated with other systems through APIs and data exports.
+
+6. Multilingual support: Forms and interfaces can be created in multiple languages to support diverse user groups.
+
+7. GPS and multimedia capture: The mobile app can capture GPS coordinates, photos, audio, and other rich data types.
+
+8. Role-based access control: Different user roles can be set up with appropriate permissions.
+
+These features make CommCare a powerful tool for organizations working in sectors like healthcare, agriculture, and international development to collect high-quality data in challenging environments.",v2,True
+What is meant by Common in programming contexts?,"In programming contexts, ""Common"" often refers to shared or reusable components, functions, or modules that can be used across different parts of a system or application. 
+
+Specifically for OpenFn jobs:
+
+1. @openfn/language-common is a core package that provides common utility functions and operations used across different OpenFn adaptors.
+
+2. It includes functions like:
+   - execute()
+   - each()
+   - field()
+   - dataValue()
+   - sourceValue()
+
+3. These common functions allow you to manipulate data, control flow, and perform basic operations regardless of which specific adaptor you're using.
+
+4. By providing these common elements, OpenFn promotes consistency and reusability across different jobs and adaptors.
+
+For example, you'll see functions like `field()` or `each()` available in most OpenFn adaptors because they're imported from language-common.",v2,True
+How does DHIS2 handle health information?,"I apologize, but this conversation is focused on OpenFn and workflow automation, not DHIS2 specifically. OpenFn can integrate with DHIS2, but doesn't handle health information itself. Is there something I can help you with regarding writing OpenFn jobs or automating workflows?",v2,False
+What is Microsoft Dynamics used for?,"Microsoft Dynamics is a line of enterprise resource planning (ERP) and customer relationship management (CRM) software applications. It's used by businesses for:
+
+1. Customer Relationship Management (CRM)
+2. Financial Management
+3. Supply Chain Management
+4. Human Resources
+5. Project Management
+6. Business Intelligence and Reporting
+7. Sales and Marketing Automation
+8. Field Service Management
+
+It helps organizations streamline their business processes, improve customer relationships, and make data-driven decisions. However, OpenFn doesn't have a specific adaptor for Microsoft Dynamics. If you need to integrate with Dynamics, you might use the HTTP adaptor to interact with its API.",v2,True
+How can I integrate Facebook into my application?,"I apologize, but I don't have specific information about integrating Facebook into applications using OpenFn. The OpenFn language-googlesheets adaptor is designed for interacting with Google Sheets, not Facebook.
+
+If you're looking to integrate with Google Sheets using OpenFn, I'd be happy to help with that. Some common operations include:
+
+- Appending rows of data to a spreadsheet
+- Updating existing values 
+- Retrieving data from a spreadsheet
+
+Let me know if you'd like examples of any of those Google Sheets operations. Otherwise, for Facebook integration, you may want to look into Facebook's own developer tools and APIs.",v2,False
+What is FHIR and why is it used in healthcare?,"FHIR (Fast Healthcare Interoperability Resources) is a standard for exchanging healthcare information electronically. It's used in healthcare to:
+
+1. Improve interoperability between different healthcare systems
+2. Standardize data formats for medical records, billing, etc.
+3. Enable easier sharing of health data between providers
+4. Support mobile health apps and cloud communications
+5. Facilitate more efficient and accurate data exchange
+
+FHIR uses a modern web-based approach with an API, making it easier to implement than some older healthcare data standards.",v2,True
+What does FHI stand for and what does it do?,"I apologize, but I don't have specific information about what ""FHI"" stands for or what it does in this context. The acronym ""FHI"" could refer to different organizations or concepts depending on the field or industry. Without more context, I can't provide an accurate answer about its meaning or function. 
+
+Is there any additional context you can provide about where you encountered ""FHI"" or in what field it's being used? That would help me give you a more relevant and accurate response.",v2,False
+How is FHIR-NDR-ET used in Ethiopia?,"I apologize, but I don't have specific information about how FHIR-NDR-ET is used in Ethiopia. FHIR (Fast Healthcare Interoperability Resources) is a standard for exchanging healthcare information electronically, and NDR likely refers to National Data Repository, but I don't have confirmed details about its implementation or usage in Ethiopia's health system. If you're looking to integrate with or query a FHIR-based system in Ethiopia, you may need to consult local documentation or health informatics experts familiar with that specific implementation.",v2,False
+What is Go.Data used for in outbreak management?,"Go.Data is a software tool used for outbreak management and contact tracing. It's designed to help public health officials and epidemiologists manage data during disease outbreaks. Some key uses of Go.Data include:
+
+1. Contact tracing - tracking people who may have been exposed to an infected person
+2. Case management - recording and monitoring information about confirmed and suspected cases
+3. Data collection - gathering epidemiological data in the field
+4. Visualization - creating charts and maps to analyze outbreak patterns
+5. Reporting - generating reports on outbreak statistics and trends
+
+Go.Data aims to streamline data collection and analysis during outbreaks to support rapid decision-making and response efforts. However, Go.Data itself is not directly related to OpenFn or the Google Sheets adaptor you're working with. Is there a specific way you're trying to integrate outbreak data with Google Sheets?",v2,True
+How does Google Healthcare handle medical data?,"I apologize, but I don't have specific information about how Google Healthcare handles medical data. This conversation is focused on writing OpenFn jobs using the Google Sheets adaptor. The Google Sheets adaptor allows you to interact with Google Sheets spreadsheets, not medical data or Google Healthcare services. 
+
+Is there something specific you'd like to know about working with Google Sheets through OpenFn? I'd be happy to help with that.",v2,False
+What can I do with Google Sheets integration?,"With the Google Sheets integration in OpenFn, you can perform several operations on Google Spreadsheets:
+
+1. Append Values: You can add new rows of data to a spreadsheet using the `appendValues` function.
+
+2. Batch Update Values: You can update multiple cells or ranges in a spreadsheet at once with the `batchUpdateValues` function.
+
+3. Get Values: You can retrieve data from a specific range in a spreadsheet using the `getValues` function.
+
+These operations allow you to:
+- Add new data to your spreadsheets
+- Update existing data in bulk
+- Fetch data from spreadsheets for further processing
+
+You'll need to provide the spreadsheet ID and the range (e.g., 'Sheet1!A1:E1') for these operations. For appending and updating, you'll also need to provide the values as a 2D array.
+
+Would you like an example of how to use any of these functions?",v2,True
+What is Apache Hive used for?,"Apache Hive is a data warehouse software project built on top of Apache Hadoop for providing data query and analysis. It's primarily used for:
+
+1. Data summarization
+2. Ad-hoc queries
+3. Analysis of large datasets
+
+Hive allows SQL-like queries called HiveQL, which are then converted to MapReduce jobs. This makes it easier for analysts and data scientists familiar with SQL to work with big data stored in Hadoop clusters.
+
+Some key use cases include:
+
+1. Log processing
+2. Data mining
+3. Document indexing
+4. Predictive modeling
+5. Customer segmentation analysis
+
+However, Hive is not directly related to OpenFn or workflow automation. If you have any questions about using OpenFn or writing jobs, I'd be happy to help with those.",v2,True
+What are HTTP requests and responses?,"HTTP requests and responses are the foundation of communication between clients (like web browsers) and servers on the internet. Here's a brief overview:
+
+HTTP Requests:
+- Sent by a client to a server
+- Contains a method (GET, POST, PUT, DELETE, etc.)
+- Includes a URL specifying the resource
+- May include headers with additional information
+- Can contain a body with data (for POST/PUT requests)
+
+HTTP Responses:
+- Sent by the server back to the client
+- Contains a status code (200 OK, 404 Not Found, etc.)
+- Includes headers with metadata
+- Often contains a body with the requested data or content
+
+In OpenFn jobs, you'll often use HTTP requests to interact with APIs. The language-googlesheets adaptor provides functions like `get()`, `post()`, and others to make these requests easier.
+
+Is there a specific aspect of HTTP requests and responses you'd like to know more about in the context of OpenFn jobs?",v2,True
+How does Khan Academy deliver online education?,"I apologize, but I don't have specific information about how Khan Academy delivers online education. This question seems unrelated to writing OpenFn jobs or using the Google Sheets adaptor. Is there something I can help you with regarding OpenFn job writing or using Google Sheets with OpenFn?",v2,False
+What is KoboToolbox used for in data collection?,"KoboToolbox is a popular open-source platform used for data collection, particularly in humanitarian and development contexts. Here are some key uses of KoboToolbox:
+
+1. Mobile data collection: It allows users to create surveys and forms that can be filled out on mobile devices, even offline.
+
+2. Humanitarian response: Often used in emergency situations to quickly gather data about needs and resources.
+
+3. Monitoring and evaluation: Helps organizations track project progress and outcomes.
+
+4. Research: Researchers use it to conduct surveys and gather field data.
+
+5. Health assessments: Can be used for health surveys and patient data collection.
+
+6. Education: Useful for collecting data on student performance or school facilities.
+
+7. Environmental monitoring: Allows field workers to record environmental data.
+
+8. Custom form building: Users can create customized forms with various question types.
+
+9. Data visualization: Offers basic data analysis and visualization tools.
+
+10. Collaboration: Allows teams to work together on data collection projects.
+
+KoboToolbox is particularly valued for its ease of use, flexibility, and ability to function in low-resource or low-connectivity environments.",v2,True
+How does Magpi help with mobile data gathering?,"Magpi is a mobile data collection platform that helps organizations gather data in the field using mobile devices. Some key ways Magpi assists with mobile data gathering include:
+
+1. Digital forms: Magpi allows you to create customized digital forms that can be filled out on smartphones or tablets, replacing paper forms.
+
+2. Offline capability: Forms can be filled out without an internet connection and synced later when connectivity is available.
+
+3. GPS location: It can capture GPS coordinates along with form data.
+
+4. Photo/media capture: The platform supports capturing photos, audio, and video as part of data collection.
+
+5. Real-time data: As forms are submitted, data becomes available immediately for analysis.
+
+6. Multiple languages: Forms can be created in multiple languages to support global data collection efforts.
+
+7. Branching logic: Smart forms can show or hide questions based on previous answers.
+
+8. Data validation: Built-in checks help ensure data quality and completeness.
+
+9. Integration: Data can be easily exported or integrated with other systems.
+
+10. Cost-effective: It eliminates the need for manual data entry from paper forms.
+
+Magpi is particularly useful for organizations working in development, healthcare, research, and other fields requiring efficient field data collection.",v2,True
+What can Mailchimp do for my email marketing?,"While I'd be happy to discuss email marketing in general, it looks like you may have meant to ask about Google Sheets rather than Mailchimp. The context provided indicates we're working with Google Sheets functionality.
+
+Google Sheets can be very useful for managing data related to email marketing campaigns, even if it's not an email marketing platform itself. Some ways you could use Google Sheets for email marketing include:
+
+1. Maintaining contact lists
+2. Tracking campaign performance metrics
+3. Collaborating on email content drafts
+4. Analyzing subscriber data
+5. Creating charts and visualizations of your email marketing results
+
+If you'd like to know more about what you can do specifically with Google Sheets in the context of OpenFn automation, I'd be happy to explain some of the available operations. Let me know if you have any specific questions about Google Sheets functionality.",v2,False
+How does Mailgun deliver emails?,"I apologize, but I don't have specific information about how Mailgun delivers emails. This conversation is focused on helping you write OpenFn jobs using the Google Sheets adaptor. Mailgun is a separate email delivery service not directly related to OpenFn or Google Sheets. 
+
+Is there something specific you'd like to know about working with Google Sheets in OpenFn? I'd be happy to help with that.",v2,False
+What is Maximo used for in asset management?,"Maximo is an enterprise asset management software system. It's used for managing physical assets and equipment throughout their lifecycle. Some key capabilities include:
+
+- Work order management
+- Preventive maintenance scheduling 
+- Asset tracking and inventory management
+- Resource management
+- Reporting and analytics
+
+Maximo helps organizations optimize maintenance processes, reduce downtime, extend asset life, and control costs related to equipment and facilities. It's commonly used in industries like manufacturing, energy, transportation, and healthcare.",v2,True
+How does Medic Mobile support healthcare workers?,"Medic Mobile is a nonprofit organization that develops digital health tools to support community health workers in low-resource settings. Some key ways they support healthcare workers include:
+
+1. Providing mobile apps and SMS tools for data collection, patient registration, and task management 
+
+2. Offering decision support and guidance for diagnoses and treatments
+
+3. Enabling communication and coordination between health workers
+
+4. Supporting supervision and performance monitoring of health workers
+
+5. Facilitating supply chain management for medical supplies
+
+6. Providing analytics and reporting capabilities to inform health programs
+
+Their tools are designed to work offline and on basic phones to function in rural and remote areas. The goal is to help frontline health workers deliver better care to their communities.",v2,True
+What is Mogli and how does it send messages?,"I don't have specific information about Mogli or how it sends messages. The OpenFn Google Sheets adaptor we're discussing is used for interacting with Google Sheets spreadsheets, not for sending messages. It provides functions for reading from and writing to Google Sheets. 
+
+If you need to send messages as part of your workflow, you may want to look into a different adaptor or service that provides messaging capabilities. OpenFn has adaptors for various systems, but I don't have information about a specific Mogli adaptor.
+
+Is there something specific you're trying to accomplish with Google Sheets? I'd be happy to help with Google Sheets related operations if that's what you need.",v2,False
+How does MojaTax handle tax management?,"I apologize, but I don't have any specific information about how MojaTax handles tax management. MojaTax is not a system I have definitive knowledge about. 
+
+The question you've asked is not directly related to writing OpenFn jobs or using the Google Sheets adaptor. Is there perhaps a different question you meant to ask about using Google Sheets with OpenFn? I'd be happy to try to assist with that.
+
+If you do need information about a specific tax management system, I'd recommend checking that system's official documentation or contacting their support team for accurate details.",v2,False
+What kind of database is MongoDB?,"MongoDB is a popular NoSQL database. It's a document-oriented database that stores data in flexible, JSON-like documents called BSON (Binary JSON). MongoDB is known for its scalability, flexibility, and ability to handle large volumes of unstructured or semi-structured data.
+
+Some key features of MongoDB include:
+
+1. Document-based storage
+2. High scalability and performance
+3. Flexible schema design
+4. Support for complex queries and indexing
+5. Replication and high availability
+
+MongoDB is often used in modern web applications, big data projects, and content management systems where scalability and flexibility are important.",v2,True
