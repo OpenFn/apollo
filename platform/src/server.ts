@@ -1,12 +1,14 @@
 import { Elysia } from "elysia";
+import { cors } from "@elysiajs/cors";
+import { html } from "@elysiajs/html";
 
 import setupDir from "./middleware/dir";
 import setupServices from "./middleware/services";
-import { html } from "@elysiajs/html";
 
 export const app = new Elysia();
 
 app.use(html());
+app.use(cors());
 
 export default async (port: number | string = 3000) => {
   await setupDir(app);

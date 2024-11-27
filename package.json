@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@changesets/cli": "^2.27.3",
+    "@elysiajs/cors": "^1.1.1",
     "@elysiajs/html": "^1.0.2",
     "elysia": "1.0.21"
   },
