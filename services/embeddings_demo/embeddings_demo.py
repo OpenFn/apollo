@@ -9,6 +9,9 @@ def run_demo(input_query):
     # Initialise the vector store instance
     store = example.connect()
 
+    # Add data to the vector store instance
+    example.load_default_data(store)
+
     # Search the chat data in the store with an input text
     results = store.search("manual data entry", search_kwargs={"k": 1})
     return results
