@@ -17,6 +17,7 @@ This service is currently not designed to be used directly from this repo.
 The VectorStore class that this service provides can be imported, instantiated and searched by another service like this:
 
 ```py
+# example_store.py
 from embeddings.embeddings import VectorStore
 
 store = VectorStore(
@@ -28,6 +29,18 @@ store = VectorStore(
         "token": os.getenv('ZILLIZ_CLOUD_API_KEY')
     }
 )
+
+docs = load_json("embeddings/data/demo/demo_data.json", jq_schema='.messages[].content')
+
+store.add_docs(docs)
+```
+
+Client services can then import and use the store to search (or add more documents)
+
+```py
+# client.py
+
+from embeddings.example_store import store
 
 results = store.search("my input query", search_kwargs={"k": 1})
 ```

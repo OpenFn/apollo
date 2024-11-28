@@ -1,9 +1,10 @@
 import os
 from dotenv import load_dotenv
 from embeddings.embeddings import VectorStore
+from embeddings.utils import load_json
 
-def get_demo_vectorstore():
-    """Initialise the vector store instance to be used by the embeddings_demo service."""
+def connect():
+    """Initialise and populate the vector store instance to be used by the embeddings_demo service."""
 
     load_dotenv()
 
@@ -16,5 +17,11 @@ def get_demo_vectorstore():
             "token": os.getenv( 'ZILLIZ_CLOUD_API_KEY')
         }
     )
+
+    # Get chat data as LangChain documents
+    docs = load_json("embeddings/data/demo/demo_data.json", jq_schema='.messages[].content')
+
+    # Create a new collection in the vector store and add the chat data
+    store.add_docs(docs)
 
     return store
