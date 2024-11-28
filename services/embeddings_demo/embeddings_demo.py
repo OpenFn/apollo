@@ -1,21 +1,13 @@
 import os
 from dotenv import load_dotenv
-from embeddings.demo.example import get_demo_vectorstore
-from embeddings.utils import load_json
+from embeddings import example
 
-load_dotenv()
-
+load_dotenv(override=True)
 
 def run_demo(input_query):
 
     # Initialise the vector store instance
-    store = get_demo_vectorstore()
-
-    # Get chat data to insert in database as LangChain documents
-    docs = load_json("embeddings/demo/data/demo_data.json", jq_schema='.messages[].content')
-
-    # Create a new collection in the vector store and add the chat data
-    store.add_docs(docs)
+    store = example.connect()
 
     # Search the chat data in the store with an input text
     results = store.search("manual data entry", search_kwargs={"k": 1})

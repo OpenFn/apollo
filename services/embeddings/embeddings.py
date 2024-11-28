@@ -52,7 +52,7 @@ class VectorStore:
     
     def add_docs(self, docs, drop_old=True, **kwargs):
         """
-        Create a new vectorstore from documents and initialise it with the specified settings.
+        Create a new collection from documents and initialise it with the specified settings.
         
         Args:
             docs: List of documents to add to the vectorstore
