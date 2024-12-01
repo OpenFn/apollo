@@ -2,6 +2,9 @@ import logging
 import sys
 import requests
 
+from dataclasses import dataclass
+from typing import Optional, Any
+
 
 # Thanks Joel! https://joelmccune.com/python-dictionary-as-object/
 class DictObj:
@@ -68,3 +71,20 @@ def apollo(name, payload):
     url = "http://127.0.0.1:{}/services/{}".format(apollo_port, name)
     r = requests.post(url, payload)
     return r.json()
+
+@dataclass
+class ApolloError(Exception):
+    error_code: int
+    error_type: str
+    error_message: str
+    error_details: Optional[dict[str, Any]] = None
+
+    def to_dict(self) -> dict:
+        error_dict = {
+            "errorCode": self.error_code,
+            "errorType": self.error_type,
+            "errorMessage": self.error_message,
+        }
+        if self.error_details:
+            error_dict["errorDetails"] = self.error_details
+        return error_dict
