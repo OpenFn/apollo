@@ -13,8 +13,8 @@ def connect():
         vectorstore_type="zilliz",
         embedding_type="openai",
         connection_args = {
-            "uri": os.getenv('ZILLIZ_CLOUD_URI'),
-            "token": os.getenv( 'ZILLIZ_CLOUD_API_KEY')
+            "uri": os.getenv('ZILLIZ_URI'),
+            "token": os.getenv( 'ZILLIZ_TOKEN')
         }
     )
 
