@@ -62,7 +62,7 @@ def main():
             print(f"Setting Apollo port to {apollo_port}")
             set_apollo_port(apollo_port)
 
-    print(f"Calling service: {mod_name}...")
+    print(f"Calling services/{mod_name} ...")
     print()
 
     result = call(mod_name, input_path, output_path)

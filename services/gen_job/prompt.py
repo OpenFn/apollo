@@ -83,7 +83,7 @@ def generate_job_prompt(
     )
 
     if isinstance(state, DictObj):
-        state = state.toDict()
+        state = state.to_dict()
     state_info = f"The current state is: {json.dumps(state, indent=2)}. Use this to write the relevant job expression" if state else ""
 
     expression_info = (
