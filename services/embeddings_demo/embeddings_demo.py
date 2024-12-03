@@ -14,7 +14,9 @@ def run_demo(input_query):
 
     # Search the chat data in the store with an input text
     results = store.search("manual data entry", search_kwargs={"k": 1})
-    return results
+
+    # Return just the texts, no metadata, from the SearchResult objects
+    return [r.text for r in results]
 
 
 def main(data):

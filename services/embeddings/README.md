@@ -42,7 +42,24 @@ Client services can then import and use the store to search (or add more documen
 
 from embeddings.example_store import store
 
-results = store.search("my input query", search_kwargs={"k": 1})
+search_results = store.search("my input query", search_kwargs={"k": 1})
+```
+
+The VectorStore search returns a list of SearchResult objects with text, metadata and score attributes.
+
+```py
+# client.py
+
+for result in search_results:
+    print(result.text)
+```
+
+The SearchResult also has a `to_json` method which can be used to convert the results to JSON:
+
+```py
+# client.py
+
+json_results = [result.to_json() for result in search_results]
 ```
 
 For more details, see the embeddings_demo service.

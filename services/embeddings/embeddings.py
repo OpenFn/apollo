@@ -1,9 +1,23 @@
 import os
 import argparse
+from dataclasses import dataclass, asdict
 import warnings
 from dotenv import load_dotenv
 from langchain_community.vectorstores import Zilliz
 from langchain_openai import OpenAIEmbeddings
+
+@dataclass
+class SearchResult:
+    """
+    Dataclass for VectorStore search results.
+    """
+    text: str
+    metadata: dict
+    score: float = None
+    
+    def to_json(self):
+        return {k: v for k, v in asdict(self).items()}
+
 
 class VectorStore:
     """
@@ -79,7 +93,8 @@ class VectorStore:
     
     def search(self, input_text, search_type="similarity", search_kwargs={"k": 2}):
         """
-        Retrieve similar texts from a vectorstore based on input text.
+        Retrieve similar texts from a vectorstore based on input text. Allows for different types of similarity
+        searches, but does not return scores/distances.
         
         Args:
             input_text: Text string to use for similarity search
@@ -97,13 +112,22 @@ class VectorStore:
         )
         retriever = store.as_retriever(search_type=search_type, search_kwargs=search_kwargs)
         retrieved_docs = retriever.invoke(input_text)
-        results = [t.page_content for t in retrieved_docs]
+        retrieved_texts = [t.page_content for t in retrieved_docs]
 
-        if not results:
+        if not retrieved_texts:
             warnings.warn(
                 f"\nNo results found. This could mean:\n"
                 f"1. Collection '{self.collection_name}' doesn't exist (run create_collection first)\n"
                 f"2. No similar documents found (check the input or the search criteria)\n"
                 f"3. Connection issues"
         )
-        return results
+            return None
+        else:
+            results = []
+            metadata_dicts = [t.metadata for t in retrieved_docs]
+
+            for text, metadata in zip(retrieved_texts, metadata_dicts):
+                results.append(SearchResult(text, metadata))
+            
+            return results
+    
