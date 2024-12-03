@@ -1,11 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import { app } from "../src/server";
+import setup from "../src/server";
 
 const port = 9865;
 
 const baseUrl = `http://localhost:${port}`;
 
-app.listen(port);
+const app = await setup(port);
 
 const get = (path: string) => {
   return new Request(`${baseUrl}/${path}`);
