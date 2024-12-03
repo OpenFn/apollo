@@ -37,7 +37,7 @@ export default async (app: Elysia, port: number) => {
         
         if (isApolloError(result)) {
           return new Response(JSON.stringify(result), {
-            status: result.errorCode,
+            status: result.code,
             headers: {
               'Content-Type': 'application/json'
             }

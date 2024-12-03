@@ -94,10 +94,10 @@ describe("Python Services", () => {
       
       const body = await response.json();
       expect(body).toEqual({
-        errorCode: 429,
-        errorType: "RATE_LIMIT",
-        errorMessage: "Rate limit exceeded, please try again later",
-        errorDetails: { retry_after: 60 }
+        code: 429,
+        type: "RATE_LIMIT",
+        message: "Rate limit exceeded, please try again later",
+        details: { retry_after: 60 }
       });
     });
 
@@ -109,9 +109,9 @@ describe("Python Services", () => {
       expect(response.status).toBe(500);
       
       const body = await response.json();
-      expect(body.errorCode).toBe(500);
-      expect(body.errorType).toBe("INTERNAL_ERROR");
-      expect(body.errorMessage).toBeDefined();
+      expect(body.code).toBe(500);
+      expect(body.type).toBe("INTERNAL_ERROR");
+      expect(body.message).toBeDefined();
     });
 
     it("returns 200 for successful responses", async () => {
