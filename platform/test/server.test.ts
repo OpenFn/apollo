@@ -1,11 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import { app } from "../src/server";
+import setup from "../src/server";
 
 const port = 9865;
 
 const baseUrl = `http://localhost:${port}`;
 
-app.listen(port);
+const app = await setup(port);
 
 const get = (path: string) => {
   return new Request(`${baseUrl}/${path}`);
@@ -81,6 +81,48 @@ describe("Python Services", () => {
           );
         });
       });
+    });
+  });
+
+  describe("Error handling", () => {
+    it("returns correct error structure for rate limits", async () => {
+      const response = await app.handle(
+        post("services/test_errors", { trigger: "RATE_LIMIT" })
+      );
+
+      expect(response.status).toBe(429);
+      
+      const body = await response.json();
+      expect(body).toEqual({
+        code: 429,
+        type: "RATE_LIMIT",
+        message: "Rate limit exceeded, please try again later",
+        details: { retry_after: 60 }
+      });
+    });
+
+    it("returns 500 for unexpected errors", async () => {
+      const response = await app.handle(
+        post("services/test_errors", { trigger: "UNEXPECTED" })
+      );
+
+      expect(response.status).toBe(500);
+      
+      const body = await response.json();
+      expect(body.code).toBe(500);
+      expect(body.type).toBe("INTERNAL_ERROR");
+      expect(body.message).toBeDefined();
+    });
+
+    it("returns 200 for successful responses", async () => {
+      const response = await app.handle(
+        post("services/test_errors", { trigger: "SUCCESS" })
+      );
+
+      expect(response.status).toBe(200);
+      
+      const body = await response.json();
+      expect(body).toEqual({ success: true });
     });
   });
 });

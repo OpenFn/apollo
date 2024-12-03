@@ -1,10 +1,10 @@
 import os
 import json
 from openai import OpenAI
-from util import DictObj, createLogger
+from util import DictObj, create_logger
 from pymilvus import MilvusClient
 
-logger = createLogger("search")
+logger = create_logger("search")
 
 class Payload(DictObj):
     api_key: str

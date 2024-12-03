@@ -2,9 +2,9 @@ import os
 
 from openai import OpenAI
 
-from util import createLogger
+from util import create_logger
 
-logger = createLogger("inference.gpt_ft")
+logger = create_logger("inference.gpt_ft")
 
 OPENAI_API_KEY = os.getenv(
     "OPENAI_API_KEY",

@@ -1,4 +1,4 @@
-from util import DictObj, createLogger
+from util import DictObj, create_logger
 
 from .utils import (
     generate_code_prompt,
@@ -7,7 +7,7 @@ from .utils import (
 from inference import inference
 
 
-logger = createLogger("code_generator")
+logger = create_logger("code_generator")
 
 
 class Payload(DictObj):

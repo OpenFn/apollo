@@ -1,60 +1,76 @@
 import sys
 import json
-from dotenv import load_dotenv
-from util import set_apollo_port
 import uuid
+from dotenv import load_dotenv
+from util import set_apollo_port, ApolloError
 
-# This will load from the ../.env file (at root)
 load_dotenv()
 
 
-# This module is a sort of "router"
-# Given a module name (ie, inference)
-# it will import it dynamically and invoke the main
-# function with the second argument
-# args is a list of the form (serviceName, args)
-def call(service, input_path, output_path):
-    module_name = "{0}.{0}".format(service)
+def call(service: str, input_path: str, output_path: str) -> dict:
+    """
+    Dynamically imports a module and invokes its main function with input data.
 
-    f = open(input_path, "r")
-    data = json.load(f)
-    f.close()
+    :param service: The name of the service/module to invoke.
+    :param input_path: Path to the input JSON file.
+    :param output_path: Path to write the output JSON file.
+    :return: Result from the service as a dictionary.
+    """
+    module_name = f"{service}.{service}"
 
-    m = __import__(module_name, fromlist=["main"])
-    result = m.main(data)
+    with open(input_path, "r") as f:
+        data = json.load(f)
 
-    f = open(output_path, "w")
-    f.write(json.dumps(result))
-    f.close()
+    try:
+        m = __import__(module_name, fromlist=["main"])
+        result = m.main(data)
+    except ApolloError as e:
+        result = e.to_dict()
+    except Exception as e:
+        result = ApolloError(
+            code=500,
+            message=str(e),
+            type="INTERNAL_ERROR"
+        ).to_dict()
+
+    with open(output_path, "w") as f:
+        json.dump(result, f)
 
     return result
 
 
-# When called from main, read the input and output path from stdin
-# If output is not present, generate it
-if __name__ == "__main__":
+def main():
+    """
+    Entry point when the script is run directly.
+    Reads arguments from stdin and calls the appropriate service.
+    """
     mod_name = sys.argv[1]
     input_path = sys.argv[2]
     output_path = None
 
-    if len(sys.argv) == 5:
+    if len(sys.argv) >= 5:
         output_path = sys.argv[3]
     else:
-        print("auto-generating output path")
+        print("Auto-generating output path...")
         id = uuid.uuid4()
-        output_path = "tmp/data/{}.json".format(id)
-        print("Result will be output to {}".format(output_path))
+        output_path = f"tmp/data/{id}.json"
+        print(f"Result will be output to {output_path}")
 
     if len(sys.argv) >= 5:
         apollo_port = sys.argv[4]
-        if apollo_port is not None:
-            print("Setting apollo port to {}".format(apollo_port))
+        if apollo_port:
+            print(f"Setting Apollo port to {apollo_port}")
             set_apollo_port(apollo_port)
 
-    print("Calling services/{} ...".format(mod_name))
-
+    print(f"Calling services/{mod_name} ...")
     print()
+
     result = call(mod_name, input_path, output_path)
+
     print()
     print("Done!")
     print(result)
+
+
+if __name__ == "__main__":
+    main()

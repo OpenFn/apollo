@@ -1,8 +1,8 @@
 import os
 import json
-from util import createLogger, apollo, DictObj
+from util import create_logger, apollo, DictObj
 
-logger = createLogger("job_expression_generator.prompts")
+logger = create_logger("job_expression_generator.prompts")
 
 SYSTEM_PROMPT_TEMPLATE = """You are an agent helping a non-expert user write a job for OpenFn,
 the world's leading digital public good for workflow automation.
@@ -83,7 +83,7 @@ def generate_job_prompt(
     )
 
     if isinstance(state, DictObj):
-        state = state.toDict()
+        state = state.to_dict()
     state_info = f"The current state is: {json.dumps(state, indent=2)}. Use this to write the relevant job expression" if state else ""
 
     expression_info = (

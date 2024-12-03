@@ -1,8 +1,8 @@
-from util import DictObj, createLogger
+from util import DictObj, create_logger
 from .prompt import generate_job_prompt
 from .client import JobExpressionInferenceClient
 
-logger = createLogger(" job_generator")
+logger = create_logger(" job_generator")
 
 class Payload(DictObj):
     api_key: str = ""
