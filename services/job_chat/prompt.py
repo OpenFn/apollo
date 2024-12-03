@@ -97,22 +97,20 @@ create(
 <examples>
 """
 
+
 class Context:
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
-    
+
     def has(self, key):
         return hasattr(self, key) and getattr(self, key) is not None
 
+
 def generate_system_message(context_dict):
-    # Convert dict to Context object if needed
     context = context_dict if isinstance(context_dict, Context) else Context(**context_dict)
-    
+
     message = [system_role]
-
     message.append("<job_writing_guide>{}</job_writing_guide>".format(job_writing_summary))
-
-    # Add a cache breakpoint after the job writing guide
     message.append({"type": "text", "text": ".", "cache_control": {"type": "ephemeral"}})
 
     if context.has("adaptor"):
@@ -121,6 +119,7 @@ def generate_system_message(context_dict):
         )
 
         adaptor_docs = apollo("describe_adaptor", {"adaptor": context.adaptor})
+
         for doc in adaptor_docs:
             adaptor_string += "Typescript definitions for doc " + doc
             adaptor_string += adaptor_docs[doc]["description"]
@@ -130,7 +129,6 @@ def generate_system_message(context_dict):
     else:
         message.append("The user is using an OpenFn Adaptor to write the job.")
 
-    # Add a cache breakpoint after the adaptor static stuff
     message.append({"type": "text", "text": ".", "cache_control": {"type": "ephemeral"}})
 
     if context.has("expression"):
@@ -146,6 +144,7 @@ def generate_system_message(context_dict):
         message.append("<log>The user's last log output was :\n\n```{}```</log>".format(context.log))
 
     return list(map(lambda text: text if isinstance(text, dict) else {"type": "text", "text": text}, message))
+
 
 def build_prompt(content, history, context):
     system_message = generate_system_message(context)
