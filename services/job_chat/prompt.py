@@ -20,8 +20,6 @@ Address the user directly.
 Additional context is attached.
 """
 
-# for now we're hard coding a sort of job writing 101 with code examples
-# Later we'll do some real RAG against the docsite
 job_writing_summary = """
 An OpenFn Job is written in a DSL which is very similar to Javascript.
 
@@ -99,8 +97,17 @@ create(
 <examples>
 """
 
+class Context:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+    
+    def has(self, key):
+        return hasattr(self, key) and getattr(self, key) is not None
 
-def generate_system_message(context):
+def generate_system_message(context_dict):
+    # Convert dict to Context object if needed
+    context = context_dict if isinstance(context_dict, Context) else Context(**context_dict)
+    
     message = [system_role]
 
     message.append("<job_writing_guide>{}</job_writing_guide>".format(job_writing_summary))
@@ -123,7 +130,7 @@ def generate_system_message(context):
     else:
         message.append("The user is using an OpenFn Adaptor to write the job.")
 
-    # # Add a cache breakpoint after the adaptor static stuff
+    # Add a cache breakpoint after the adaptor static stuff
     message.append({"type": "text", "text": ".", "cache_control": {"type": "ephemeral"}})
 
     if context.has("expression"):
@@ -136,22 +143,15 @@ def generate_system_message(context):
         message.append("<output>The user's last output data was :\n\n```{}```</output>".format(context.output))
 
     if context.has("log"):
-        message.append("<log>The user's last log output was :\n\n```{}```</output>".format(context.log))
+        message.append("<log>The user's last log output was :\n\n```{}```</log>".format(context.log))
 
-    return list(map(lambda text: text if "cache_control" in text else {"type": "text", "text": text}, message))
-
+    return list(map(lambda text: text if isinstance(text, dict) else {"type": "text", "text": text}, message))
 
 def build_prompt(content, history, context):
-    system_message = []
-
     system_message = generate_system_message(context)
 
     prompt = []
-
-    # push the history
     prompt.extend(history)
-
-    # Add the question and context
     prompt.append({"role": "user", "content": content})
 
     return (system_message, prompt)

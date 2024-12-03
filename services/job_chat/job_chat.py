@@ -13,6 +13,7 @@ from anthropic import (
     InternalServerError
 )
 from util import ApolloError, create_logger
+from .prompt import build_prompt
 
 logger = create_logger("job_chat")
 
@@ -109,7 +110,7 @@ class ClaudeClient:
             return ChatResponse(
                 content=response,
                 history=updated_history,
-                usage=message.usage._asdict() if hasattr(message, 'usage') else {}
+                usage=message.usage.model_dump() if hasattr(message, 'usage') else {}
             )
 
         except Exception as e:
