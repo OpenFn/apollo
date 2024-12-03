@@ -193,3 +193,4 @@ def main(data_dict: dict) -> dict:
     except Exception as e:
         logger.error(f"Unexpected error during chat generation: {str(e)}")
         raise ApolloError(500, str(e))
+    
