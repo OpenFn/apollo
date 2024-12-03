@@ -139,6 +139,13 @@ def main(data_dict: dict) -> dict:
             "history": result.history,
             "usage": result.usage
         }
+    
+    except ValueError as e:
+        raise ApolloError(
+            400,
+            str(e),
+            type="BAD_REQUEST"
+        )
         
     except APIConnectionError as e:
         raise ApolloError(
