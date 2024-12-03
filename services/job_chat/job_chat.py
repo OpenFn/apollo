@@ -125,7 +125,7 @@ def main(data_dict: dict) -> dict:
             503, "Unable to reach AI service", type="CONNECTION_ERROR", details={"cause": str(e.__cause__)}
         )
     except AuthenticationError as e:
-        raise ApolloError(401, "Invalid API key", type="AUTH_ERROR")
+        raise ApolloError(401, "Authentication failed. Please check your credentials.", type="AUTH_ERROR")
     except RateLimitError as e:
         raise ApolloError(
             429, "Rate limit exceeded, please try again later", type="RATE_LIMIT", details={"retry_after": 60}
