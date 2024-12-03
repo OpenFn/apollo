@@ -3,9 +3,9 @@ from .models.codet5 import generate as codet5
 from .models.gpt_ft import generate as gpt_ft
 from util import DictObj
 
-from util import createLogger
+from util import create_logger
 
-logger = createLogger("inference.prompts")
+logger = create_logger("inference.prompts")
 
 
 # all http calls to inference need a model and prompt, and optionally an args dict

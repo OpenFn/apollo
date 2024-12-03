@@ -1,9 +1,9 @@
 import os
 from anthropic import Anthropic
-from util import DictObj, createLogger
+from util import DictObj, create_logger
 from .prompt import build_prompt
 
-logger = createLogger("job_chat")
+logger = create_logger("job_chat")
 
 ANTHROPIC_API_KEY = os.getenv(
     "ANTHROPIC_API_KEY",

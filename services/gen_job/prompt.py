@@ -1,8 +1,8 @@
 import os
 import json
-from util import createLogger, apollo, DictObj
+from util import create_logger, apollo, DictObj
 
-logger = createLogger("job_expression_generator.prompts")
+logger = create_logger("job_expression_generator.prompts")
 
 SYSTEM_PROMPT_TEMPLATE = """You are an agent helping a non-expert user write a job for OpenFn,
 the world's leading digital public good for workflow automation.

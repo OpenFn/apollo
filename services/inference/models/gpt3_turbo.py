@@ -2,9 +2,9 @@ import os
 
 from openai import OpenAI
 
-from util import createLogger
+from util import create_logger
 
-logger = createLogger("inference.gpt3_turbo")
+logger = create_logger("inference.gpt3_turbo")
 
 
 OPENAI_API_KEY = os.getenv(

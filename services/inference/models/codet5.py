@@ -3,9 +3,9 @@ import os
 
 from transformers import RobertaTokenizer, T5ForConditionalGeneration
 
-from util import createLogger
+from util import create_logger
 
-logger = createLogger("inference.codet5")
+logger = create_logger("inference.codet5")
 
 
 """

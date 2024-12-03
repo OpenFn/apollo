@@ -1,6 +1,6 @@
-from util import createLogger, apollo
+from util import create_logger, apollo
 
-logger = createLogger("job_chat.prompt")
+logger = create_logger("job_chat.prompt")
 
 system_role = """
 You are a software engineer helping a non-expert user write a job for OpenFn,

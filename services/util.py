@@ -1,13 +1,15 @@
 import logging
 import sys
 import requests
-
 from dataclasses import dataclass
 from typing import Optional, Any
 
 
-# Thanks Joel! https://joelmccune.com/python-dictionary-as-object/
 class DictObj:
+    """
+    A utility class that wraps a dictionary for dot-accessible attributes.
+    Thanks Joel! https://joelmccune.com/python-dictionary-as-object/
+    """
     def __init__(self, in_dict: dict):
         self._dict = in_dict
         assert isinstance(in_dict, dict)
@@ -18,73 +20,76 @@ class DictObj:
                 setattr(self, key, DictObj(val) if isinstance(val, dict) else val)
 
     def get(self, key):
-        if key in self._dict:
-            return self._dict[key]
-        return None
+        return self._dict.get(key)
 
     def has(self, key):
         return key in self._dict
 
-    def toDict(self):
+    def to_dict(self):
         return self._dict
 
 
+@dataclass
+class ApolloError(Exception):
+    """Standard error class for Apollo services"""
+    code: int
+    message: str
+    type: str = "APOLLO_ERROR"
+    details: Optional[dict[str, Any]] = None
+
+    def to_dict(self) -> dict:
+        """Serialize the error to a dictionary format"""
+        error_dict = {
+            "code": self.code,
+            "type": self.type,
+            "message": self.message,
+        }
+        if self.details:
+            error_dict["details"] = self.details
+        return error_dict
+
+
 filename = None
-
 loggers = {}
-
 apollo_port = 3000
 
 
-def setLogOutput(f):
+def set_log_output(f):
+    """Set the output file for logging."""
     global filename
 
     if f is not None:
-        print("[entry.py] writing logs to {}".format(f))
+        print(f"[entry.py] writing logs to {f}")
 
     filename = f
 
 
-def set_apollo_port(p):
-    global apollo_port
-
-    apollo_port = p
-
-
-def createLogger(name):
-    # hmm. If I use a stream other than stdout,
-    # I could send logger statements elsewhere
-    # but I wouldn't be able to read it from the outside
+def create_logger(name):
+    """
+    Create or retrieve a logger with the given name.
+    Logs to stdout by default.
+    """
     logging.basicConfig(level=logging.INFO, stream=sys.stdout)
-    if not name in loggers:
+    if name not in loggers:
         logger = logging.getLogger(name)
-
         loggers[name] = logger
-
     return loggers[name]
 
 
-# call out to another apollo service through http
-def apollo(name, payload):
+def set_apollo_port(p):
+    """Set the port for Apollo services."""
     global apollo_port
+    apollo_port = p
 
-    url = "http://127.0.0.1:{}/services/{}".format(apollo_port, name)
+
+def apollo(name, payload):
+    """
+    Call out to an Apollo service through HTTP.
+    :param name: Name of the service.
+    :param payload: Payload to send in the POST request.
+    :return: JSON response.
+    """
+    global apollo_port
+    url = f"http://127.0.0.1:{apollo_port}/services/{name}"
     r = requests.post(url, payload)
     return r.json()
-
-@dataclass
-class ApolloError(Exception):
-    error_code: int
-    error_type: str
-    error_message: str
-    error_details: Optional[dict[str, Any]] = None
-
-    def to_dict(self) -> dict:
-        error_dict = {
-            "errorCode": self.error_code,
-            "errorType": self.error_type,
-            "errorMessage": self.error_message,
-        }
-        if self.error_details:
-            error_dict["errorDetails"] = self.error_details
-        return error_dict

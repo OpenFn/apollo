@@ -10,9 +10,9 @@ from util import DictObj
 
 from inference import inference
 
-from util import createLogger
+from util import create_logger
 
-logger = createLogger("signature_generator")
+logger = create_logger("signature_generator")
 
 
 class Payload(DictObj):

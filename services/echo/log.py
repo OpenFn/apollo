@@ -1,6 +1,6 @@
-from util import createLogger
+from util import create_logger
 
-logger = createLogger("echo")
+logger = create_logger("echo")
 
 
 def log(x):

@@ -3,9 +3,9 @@ from util import DictObj
 
 from signature_generator import signature_generator as sig_gen
 from code_generator import code_generator as code_gen
-from util import createLogger
+from util import create_logger
 
-logger = createLogger("adaptor_gen")
+logger = create_logger("adaptor_gen")
 
 
 class Payload(DictObj):

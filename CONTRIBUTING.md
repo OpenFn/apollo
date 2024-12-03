@@ -56,9 +56,9 @@ to `entry.py`.
 A utility library is provided for you to create a logger:
 
 ```python
-from util import createLogger
+from util import create_logger
 
-logger = createLogger("myservice.filename")
+logger = create_logger("myservice.filename")
 ```
 
 You can use whatever name you like for the logger (including `__name__`).

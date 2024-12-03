@@ -1,9 +1,9 @@
 import spacy
 from spacy.tokens import Doc, Token
 
-from util import createLogger
+from util import create_logger
 
-logger = createLogger("signature_generator.utils")
+logger = create_logger("signature_generator.utils")
 
 # Load the English language model
 nlp = spacy.load("en_core_web_sm")

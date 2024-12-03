@@ -1,7 +1,7 @@
 import copy
-from util import createLogger
+from util import create_logger
 
-logger = createLogger("code_generator.prompts")
+logger = create_logger("code_generator.prompts")
 
 
 prompts = {
