@@ -54,7 +54,7 @@ class ChatResponse:
     usage: Dict[str, Any]
 
 
-class ClaudeClient:
+class AnthropicClient:
     def __init__(self, config: Optional[ChatConfig] = None):
         self.config = config or ChatConfig()
         self.api_key = self.config.api_key or os.getenv("ANTHROPIC_API_KEY")
@@ -111,7 +111,7 @@ def main(data_dict: dict) -> dict:
         data = Payload.from_dict(data_dict)
 
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
-        client = ClaudeClient(config)
+        client = AnthropicClient(config)
 
         result = client.generate(content=data.content, history=data_dict.get("history", []), context=data.context)
 
@@ -122,10 +122,13 @@ def main(data_dict: dict) -> dict:
 
     except APIConnectionError as e:
         raise ApolloError(
-            503, "Unable to reach AI service", type="CONNECTION_ERROR", details={"cause": str(e.__cause__)}
+            503,
+            "Unable to reach the Anthropic AI Service",
+            type="CONNECTION_ERROR",
+            details={"cause": str(e.__cause__)},
         )
     except AuthenticationError as e:
-        raise ApolloError(401, "Authentication failed. Please check your credentials.", type="AUTH_ERROR")
+        raise ApolloError(401, "Authentication failed", type="AUTH_ERROR")
     except RateLimitError as e:
         raise ApolloError(
             429, "Rate limit exceeded, please try again later", type="RATE_LIMIT", details={"retry_after": 60}
@@ -139,7 +142,7 @@ def main(data_dict: dict) -> dict:
     except UnprocessableEntityError as e:
         raise ApolloError(422, str(e), type="INVALID_REQUEST")
     except InternalServerError as e:
-        raise ApolloError(500, "AI service encountered an error", type="PROVIDER_ERROR")
+        raise ApolloError(500, "The Anthropic AI Service encountered an error", type="PROVIDER_ERROR")
     except Exception as e:
         logger.error(f"Unexpected error during chat generation: {str(e)}")
         raise ApolloError(500, str(e))
