@@ -1,5 +1,11 @@
 # apollo
 
+## 0.5.3
+
+### Patch Changes
+
+- job-chat: return standardised and detailed error messages
+
 ## 0.5.2
 
 ### Patch Changes
