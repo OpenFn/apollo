@@ -11,7 +11,7 @@ professional platforms or programming. You may provide general information aroun
 e.g. general programming assistance unrelated to job writing.
 If a question is entirely irrelevant, do not answer it.
 
-Your responses short be short, accurate and friendly unless otherwise instructed.
+Your responses should be short, accurate and friendly unless otherwise instructed.
 
 Do not thank the user or be obsequious.
 
@@ -20,8 +20,6 @@ Address the user directly.
 Additional context is attached.
 """
 
-# for now we're hard coding a sort of job writing 101 with code examples
-# Later we'll do some real RAG against the docsite
 job_writing_summary = """
 An OpenFn Job is written in a DSL which is very similar to Javascript.
 
@@ -100,22 +98,30 @@ create(
 """
 
 
-def generate_system_message(context):
+class Context:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+    def has(self, key):
+        return hasattr(self, key) and getattr(self, key) is not None
+
+
+def generate_system_message(context_dict):
+    context = context_dict if isinstance(context_dict, Context) else Context(**context_dict)
+
     message = [system_role]
-
-    message.append("<job_writing_guide>{}</job_writing_guide>".format(job_writing_summary))
-
-    # Add a cache breakpoint after the job writing guide
+    message.append(f"<job_writing_guide>{job_writing_summary}</job_writing_guide>")
     message.append({"type": "text", "text": ".", "cache_control": {"type": "ephemeral"}})
 
     if context.has("adaptor"):
-        adaptor_string = "<adaptor>The user is using the OpenFn {} adaptor. Use functions provided by its API.".format(
-            context.adaptor
+        adaptor_string = (
+            f"<adaptor>The user is using the OpenFn {context.adaptor} adaptor. Use functions provided by its API."
         )
 
         adaptor_docs = apollo("describe_adaptor", {"adaptor": context.adaptor})
+
         for doc in adaptor_docs:
-            adaptor_string += "Typescript definitions for doc " + doc
+            adaptor_string += f"Typescript definitions for doc {doc}"
             adaptor_string += adaptor_docs[doc]["description"]
         adaptor_string += "</adaptor>"
 
@@ -123,35 +129,28 @@ def generate_system_message(context):
     else:
         message.append("The user is using an OpenFn Adaptor to write the job.")
 
-    # # Add a cache breakpoint after the adaptor static stuff
     message.append({"type": "text", "text": ".", "cache_control": {"type": "ephemeral"}})
 
     if context.has("expression"):
-        message.append("<user_code>{}</user_code>".format(context.expression))
+        message.append(f"<user_code>{context.expression}</user_code>")
 
     if context.has("input"):
-        message.append("<input>The user's input data is :\n\n```{}```</input>".format(context.input))
+        message.append(f"<input>The user's input data is :\n\n```{context.input}```</input>")
 
     if context.has("output"):
-        message.append("<output>The user's last output data was :\n\n```{}```</output>".format(context.output))
+        message.append(f"<output>The user's last output data was :\n\n```{context.output}```</output>")
 
     if context.has("log"):
-        message.append("<log>The user's last log output was :\n\n```{}```</output>".format(context.log))
+        message.append(f"<log>The user's last log output was :\n\n```{context.log}```</log>")
 
-    return list(map(lambda text: text if "cache_control" in text else {"type": "text", "text": text}, message))
+    return list(map(lambda text: text if isinstance(text, dict) else {"type": "text", "text": text}, message))
 
 
 def build_prompt(content, history, context):
-    system_message = []
-
     system_message = generate_system_message(context)
 
     prompt = []
-
-    # push the history
     prompt.extend(history)
-
-    # Add the question and context
     prompt.append({"role": "user", "content": content})
 
     return (system_message, prompt)

@@ -1,96 +1,148 @@
 import os
-from anthropic import Anthropic
-from util import DictObj, create_logger
+from typing import List, Optional, Dict, Any
+from dataclasses import dataclass
+from anthropic import (
+    Anthropic,
+    APIConnectionError,
+    BadRequestError,
+    AuthenticationError,
+    PermissionDeniedError,
+    NotFoundError,
+    UnprocessableEntityError,
+    RateLimitError,
+    InternalServerError,
+)
+from util import ApolloError, create_logger
 from .prompt import build_prompt
 
 logger = create_logger("job_chat")
 
-ANTHROPIC_API_KEY = os.getenv(
-    "ANTHROPIC_API_KEY",
-)
 
-# claude_model = "claude-3-haiku-20240307"
-claude_model = "claude-3-5-sonnet-20240620"
-max_tokens = 1024
+@dataclass
+class Payload:
+    """
+    Data class for validating and storing input parameters.
+    Required fields will raise TypeError if not provided.
+    """
 
-
-class Payload(DictObj):
-    api_key: str
     content: str
-    # history # list of {role , content } dicts
-    # context { expression, adaptor, input, output, log  }
+    context: Optional[str] = None
+    api_key: Optional[str] = None
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "Payload":
+        """
+        Create a Payload instance from a dictionary, validating required fields.
+        """
+        if "content" not in data:
+            raise ValueError("'content' is required")
+
+        return cls(content=data["content"], context=data.get("context"), api_key=data.get("api_key"))
 
 
-def main(dataDict) -> dict:
-    data = Payload(dataDict)
-    result = generate(
-        data.content, dataDict["history"] if "history" in dataDict else [], data.context, data.get("api_key")
-    )
-    return result
+@dataclass
+class ChatConfig:
+    model: str = "claude-3-5-sonnet-20240620"
+    max_tokens: int = 1024
+    api_key: Optional[str] = None
 
 
-def generate(content, history, context, api_key) -> str:
-    if api_key is None and isinstance(ANTHROPIC_API_KEY, str):
-        logger.warn("Using default API key from environment")
-        api_key = ANTHROPIC_API_KEY
+@dataclass
+class ChatResponse:
+    content: str
+    history: List[Dict[str, str]]
+    usage: Dict[str, Any]
 
-    client = Anthropic(api_key=api_key)
 
-    logger.info("Anthropic client loaded")
-    (system_message, prompt) = build_prompt(content, history, context)
+class AnthropicClient:
+    def __init__(self, config: Optional[ChatConfig] = None):
+        self.config = config or ChatConfig()
+        self.api_key = self.config.api_key or os.getenv("ANTHROPIC_API_KEY")
+        if not self.api_key:
+            raise ValueError("API key must be provided")
+        self.client = Anthropic(api_key=self.api_key)
 
-    # Useful in local dev but contains a lot of stuff, so uncommenting
-    # logger.info("")
-    # logger.info("--- SYSTEM ---")
-    # logger.info(system_message)
-    # logger.info("--------------")
-    # logger.info("")
-    # logger.info("--- PROMPT ---")
-    # logger.info(prompt)
-    # logger.info("--------------")
-    # logger.info("")
+    def generate(
+        self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[str] = None
+    ) -> ChatResponse:
+        """
+        Generate a response using the Claude API with improved error handling and response processing.
+        """
+        history = history.copy() if history else []
 
-    try:
-        logger.info("Generating")
+        system_message, prompt = build_prompt(content, history, context)
 
-        message = client.beta.prompt_caching.messages.create(
-            max_tokens=max_tokens, messages=prompt, model=claude_model, system=system_message
+        message = self.client.beta.prompt_caching.messages.create(
+            max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
         )
 
-        # print("USAGE")
-        # print(message.usage)
-        # print("...")
+        if hasattr(message, "usage"):
+            if message.usage.cache_creation_input_tokens:
+                logger.info(f"Cache write: {message.usage.cache_creation_input_tokens} tokens")
+            if message.usage.cache_read_input_tokens:
+                logger.info(f"Cache read: {message.usage.cache_read_input_tokens} tokens")
 
-        if message.usage.cache_creation_input_tokens:
-            print("CACHE :: WRITE :: {} Tokens".format(message.usage.cache_creation_input_tokens))
+        response_parts = []
+        for content_block in message.content:
+            if content_block.type == "text":
+                response_parts.append(content_block.text)
+            else:
+                logger.warning(f"Unhandled content type: {content_block.type}")
 
-        if message.usage.cache_read_input_tokens:
-            print("CACHE :: READ :: {} Tokens".format(message.usage.cache_read_input_tokens))
+        response = "\n\n".join(response_parts)
 
-        response = []
+        updated_history = history + [
+            {"role": "user", "content": content},
+            {"role": "assistant", "content": response},
+        ]
 
-        if response is None:
-            logger.error("An error occurred during during chat generation")
-        else:
-            # we need to unpack the contents into a flat string
-            # TODO: consider supporting richer response types
-            for r in message.content:
-                if r.type == "text":
-                    response.append(r.text)
+        return ChatResponse(
+            content=response,
+            history=updated_history,
+            usage=message.usage.model_dump() if hasattr(message, "usage") else {},
+        )
 
-            response = "\n\n".join(response)
 
-            logger.info("response from model:")
-            logger.info("")
-            logger.info("\n" + response)
-            logger.info("")
-            logger.info("done")
+def main(data_dict: dict) -> dict:
+    """
+    Main entry point with improved error handling and input validation.
+    """
+    try:
+        data = Payload.from_dict(data_dict)
 
-        history.append({"role": "user", "content": content})
-        history.append({"role": "assistant", "content": response})
+        config = ChatConfig(api_key=data.api_key) if data.api_key else None
+        client = AnthropicClient(config)
 
-        # TODO maybe return usage ?
-        return {"response": response, "history": history}
+        result = client.generate(content=data.content, history=data_dict.get("history", []), context=data.context)
+
+        return {"response": result.content, "history": result.history, "usage": result.usage}
+
+    except ValueError as e:
+        raise ApolloError(400, str(e), type="BAD_REQUEST")
+
+    except APIConnectionError as e:
+        raise ApolloError(
+            503,
+            "Unable to reach the Anthropic AI Service",
+            type="CONNECTION_ERROR",
+            details={"cause": str(e.__cause__)},
+        )
+    except AuthenticationError as e:
+        raise ApolloError(401, "Authentication failed", type="AUTH_ERROR")
+    except RateLimitError as e:
+        raise ApolloError(
+            429, "Rate limit exceeded, please try again later", type="RATE_LIMIT", details={"retry_after": 60}
+        )
+    except BadRequestError as e:
+        raise ApolloError(400, str(e), type="BAD_REQUEST")
+    except PermissionDeniedError as e:
+        raise ApolloError(403, "Not authorized to perform this action", type="FORBIDDEN")
+    except NotFoundError as e:
+        raise ApolloError(404, "Resource not found", type="NOT_FOUND")
+    except UnprocessableEntityError as e:
+        raise ApolloError(422, str(e), type="INVALID_REQUEST")
+    except InternalServerError as e:
+        raise ApolloError(500, "The Anthropic AI Service encountered an error", type="PROVIDER_ERROR")
     except Exception as e:
-        logger.error(f"An error occurred chat code generation:")
-        print(e)
+        logger.error(f"Unexpected error during chat generation: {str(e)}")
+        raise ApolloError(500, str(e))
