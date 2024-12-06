@@ -1,0 +1,59 @@
+{
+    "image": {
+    "creation_timestamp": 1057017600,
+    "uri": "summer_evening_longbourn_1803.jpg"
+    },
+    "is_still_participant": true,
+    "joinable_mode": {
+    "link": "",
+    "mode": 1
+    },
+    "magic_words": [],
+    "messages": [
+    {
+    "content": "I must take my leave, Miss Bennet. The estate requires my attention.",
+    "sender_name": "Mr. Darcy",
+    "timestamp_ms": 1057190400000
+    },
+    {
+    "content": "Come now, Mr. Darcy, a man of your consequence must employ nothing but the finest automation tools. Or do you still prefer manual data entry?",
+    "sender_name": "Lizzy",
+    "timestamp_ms": 1057190300000
+    },
+    {
+    "content": "I must confess, the OpenFn integrations have transformed our estate management beyond measure.",
+    "sender_name": "Mr. Darcy",
+    "timestamp_ms": 1057189200000
+    },
+    {
+    "content": "The automated data flows have reduced out clerical staff by three persons, and we now employ them as teachers and event organisers for the Lambton community.",
+    "sender_name": "Mr. Darcy",
+    "timestamp_ms": 1057188100000
+    },
+    {
+    "photos": [
+    {
+    "creation_timestamp": 1057188000,
+    "uri": "pemberley_workflow_diagram_1803.jpg"
+    }
+    ],
+    "sender_name": "Mr. Darcy",
+    "timestamp_ms": 1057188000000
+    },
+    {
+    "content": "Indeed, Mr. Darcy. May your workflow automations bring you much efficiency.",
+    "sender_name": "Lizzy",
+    "timestamp_ms": 1057104000000
+    }
+    ],
+    "participants": [
+    {
+    "name": "Lizzy"
+    },
+    {
+    "name": "Mr. Darcy"
+    }
+    ],
+    "thread_path": "inbox/Bennet_Darcy_correspondence",
+    "title": "Lizzy and Mr. Darcy chat"
+    }
