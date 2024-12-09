@@ -1,5 +1,11 @@
 # apollo
 
+## 0.6.0
+
+### Minor Changes
+
+- 032f387: Added embeddings service
+
 ## 0.5.3
 
 ### Patch Changes
