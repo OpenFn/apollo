@@ -48,7 +48,7 @@ def main():
     input_path = sys.argv[2]
     output_path = None
 
-    if len(sys.argv) == 4:
+    if len(sys.argv) == 5:
         output_path = sys.argv[3]
     else:
         print("Auto-generating output path...")
