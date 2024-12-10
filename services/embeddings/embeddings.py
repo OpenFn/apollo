@@ -1,9 +1,23 @@
 import os
 import argparse
+from dataclasses import dataclass, asdict
 import warnings
 from dotenv import load_dotenv
 from langchain_community.vectorstores import Zilliz
+from langchain_pinecone import Pinecone
 from langchain_openai import OpenAIEmbeddings
+
+@dataclass
+class SearchResult:
+    """
+    Dataclass for VectorStore search results.
+    """
+    text: str
+    metadata: dict
+    score: float = None
+    
+    def to_json(self):
+        return {k: v for k, v in asdict(self).items()}
 
 class VectorStore:
     """
@@ -14,26 +28,42 @@ class VectorStore:
         vectorstore_type (str): Type of vector store (e.g., 'zilliz')
         embedding_type (str): Type of embedding model (e.g., 'openai')
         connection_args (dict): Connection arguments for the vector store
-        auto_id (bool): Whether to automatically generate IDs
     """
     def __init__(self, collection_name='LangChainCollection', vectorstore_type='zilliz', 
-                 embedding_type='openai', connection_args=None, auto_id=True):
+                 embedding_type='openai', connection_args=None, index_name=None):
         self.collection_name = collection_name
         self.vectorstore_type = vectorstore_type.lower()
         self.embedding_type = embedding_type.lower()
         self.connection_args = connection_args
-        self.auto_id = auto_id
+        self.index_name = index_name
         
         self.embedding_classes = {
             'openai': OpenAIEmbeddings
         }
+
+        self.embedding_function = self._get_embedding_class()
         
         self.vectorstore_classes = {
-            'zilliz': Zilliz
+            'zilliz': Zilliz,
+            'pinecone': Pinecone
+        }
+
+        self.store_kwargs_mappings = {
+            'zilliz': {'collection_name': self.collection_name,'connection_args':self.connection_args, 'drop_old': True, 'auto_id':True},
+            'pinecone': {'namespace': self.collection_name, 'index_name': self.index_name},
+        }
+
+        self.search_init_kwargs_mappings = {
+            'zilliz': {'embedding_function': self.embedding_function, 'collection_name': self.collection_name, 'connection_args':self.connection_args},
+            'pinecone': {'embedding': self.embedding_function, 'namespace': self.collection_name, 'index_name': self.index_name},
         }
         
-        self.embedding_function = self._get_embedding_class()
+
         self.VectorStoreClass = self._get_vectorstore_class()
+        self.store_kwargs = self._get_vectorstore_kwargs()
+        self.search_init_kwargs = self._get_search_init_kwargs()
+
+
     
     def _get_embedding_class(self):
         """Get embedding class based on the specified type."""
@@ -50,7 +80,22 @@ class VectorStore:
         except KeyError:
             raise ValueError(f"Unsupported vectorstore type: {self.vectorstore_type}")
     
-    def add_docs(self, docs, drop_old=True, **kwargs):
+    def _get_vectorstore_kwargs(self):
+        """Get vectorstore settings based on the specified type."""
+        try:
+            return self.store_kwargs_mappings[self.vectorstore_type]
+        except KeyError:
+            raise ValueError(f"Unsupported vectorstore type: {self.vectorstore_type}")
+        
+    def _get_search_init_kwargs(self):
+        """Get vectorstore settings based on the specified type."""
+        try:
+            return self.search_init_kwargs_mappings[self.vectorstore_type]
+        except KeyError:
+            raise ValueError(f"Unsupported vectorstore type: {self.vectorstore_type}")  
+    
+    
+    def add_docs(self, docs, **kwargs):
         """
         Create a new collection from documents and initialise it with the specified settings.
         
@@ -62,19 +107,11 @@ class VectorStore:
         Returns:
             Initialised vectorstore containing the input documents
         """
-        store_kwargs = {
-            'collection_name': self.collection_name,
-            **kwargs
-        }
-        if self.connection_args:
-            store_kwargs['connection_args'] = self.connection_args
-            
+
         return self.VectorStoreClass.from_documents(
             documents=docs,
             embedding=self.embedding_function,
-            auto_id=self.auto_id,
-            drop_old=drop_old,
-            **store_kwargs
+            **self.store_kwargs,
         )
     
     def search(self, input_text, search_type="similarity", search_kwargs={"k": 2}):
@@ -90,20 +127,25 @@ class VectorStore:
             List of page contents of the most similar documents
         """
         store = self.VectorStoreClass(
-            embedding_function=self.embedding_function,
-            auto_id=self.auto_id,
-            collection_name=self.collection_name,
-            connection_args=self.connection_args
+            **self.search_init_kwargs,
         )
         retriever = store.as_retriever(search_type=search_type, search_kwargs=search_kwargs)
         retrieved_docs = retriever.invoke(input_text)
-        results = [t.page_content for t in retrieved_docs]
+        retrieved_texts = [t.page_content for t in retrieved_docs]
 
-        if not results:
+        if not retrieved_texts:
             warnings.warn(
                 f"\nNo results found. This could mean:\n"
-                f"1. Collection '{self.collection_name}' doesn't exist (run create_collection first)\n"
+                f"1. Collection '{self.collection_name}' doesn't exist (run add_docs first)\n"
                 f"2. No similar documents found (check the input or the search criteria)\n"
                 f"3. Connection issues"
         )
-        return results
+            return None
+        else:
+            results = []
+            metadata_dicts = [t.metadata for t in retrieved_docs]
+
+            for text, metadata in zip(retrieved_texts, metadata_dicts):
+                results.append(SearchResult(text, metadata))
+            
+            return results
