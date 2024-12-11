@@ -29,6 +29,15 @@ class VectorStore:
         embedding_type (str): Type of embedding model (e.g., 'openai')
         connection_args (dict): Connection arguments for the vector store
     """
+
+    EMBEDDING_CLASSES = {
+        'openai': OpenAIEmbeddings
+    }
+    VECTORSTORE_CLASSES = {
+        'zilliz': Zilliz,
+        'pinecone': Pinecone
+    }
+
     def __init__(self, collection_name='LangChainCollection', vectorstore_type='zilliz', 
                  embedding_type='openai', connection_args=None, index_name=None):
         self.collection_name = collection_name
@@ -36,39 +45,23 @@ class VectorStore:
         self.embedding_type = embedding_type.lower()
         self.connection_args = connection_args
         self.index_name = index_name
-        
-        self.embedding_classes = {
-            'openai': OpenAIEmbeddings
-        }
-
         self.embedding_function = self._get_embedding_class()
-        
-        self.vectorstore_classes = {
-            'zilliz': Zilliz,
-            'pinecone': Pinecone
-        }
-
         self.store_kwargs_mappings = {
             'zilliz': {'collection_name': self.collection_name,'connection_args':self.connection_args, 'drop_old': True, 'auto_id':True},
             'pinecone': {'namespace': self.collection_name, 'index_name': self.index_name},
         }
-
         self.search_init_kwargs_mappings = {
             'zilliz': {'embedding_function': self.embedding_function, 'collection_name': self.collection_name, 'connection_args':self.connection_args},
             'pinecone': {'embedding': self.embedding_function, 'namespace': self.collection_name, 'index_name': self.index_name},
         }
-        
-
         self.VectorStoreClass = self._get_vectorstore_class()
         self.store_kwargs = self._get_vectorstore_kwargs()
         self.search_init_kwargs = self._get_search_init_kwargs()
-
-
     
     def _get_embedding_class(self):
         """Get embedding class based on the specified type."""
         try:
-            EmbeddingClass = self.embedding_classes[self.embedding_type]
+            EmbeddingClass = VectorStore.EMBEDDING_CLASSES[self.embedding_type]
             return EmbeddingClass()
         except KeyError:
             raise ValueError(f"Unsupported embedding type: {self.embedding_type}")
@@ -76,7 +69,7 @@ class VectorStore:
     def _get_vectorstore_class(self):
         """Get vectorstore class based on the specified type."""
         try:
-            return self.vectorstore_classes[self.vectorstore_type]
+            return VectorStore.VECTORSTORE_CLASSES[self.vectorstore_type]
         except KeyError:
             raise ValueError(f"Unsupported vectorstore type: {self.vectorstore_type}")
     
@@ -121,7 +114,7 @@ class VectorStore:
         Args:
             input_text: Text string to use for similarity search
             search_type: Type of search to perform (default is 'similarity'; others e.g 'similarity_score_threshold')
-            search_kwargs: Additional arguments for the search (default retrieves top 2 results)
+            search_kwargs: Additional arguments for the search (default retrieves top 2 results, and uses no filter)
         
         Returns:
             List of page contents of the most similar documents
