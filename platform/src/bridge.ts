@@ -30,38 +30,16 @@ export const run = async (
     console.log("Initing output file at", outputPath);
     await Bun.write(outputPath, "");
 
-    // const proc = Bun.spawn(
-    //   [
-    //     "poetry",
-    //     "run",
-    //     "python",
-    //     "services/entry.py",
-    //     scriptName,
-    //     JSON.stringify(args),
-    //   ],
-    //   {
-    //     onExit: async (proc, exitCode, signalCode, error) => {
-    //       // exit handler
-    //       const result = Bun.file("out.json");
-    //       const text = await result.text();
-    //       resolve(JSON.parse(text));
-    //     },
-    //   }
-    // );
-
-    // Use nodejs spawn
-    // I seem to have to use this because the bun stream doesn't work with readline
-
     const proc = spawn(
       "poetry",
       [
         "run",
         "python",
         "services/entry.py",
-        scriptName,
-        inputPath,
-        outputPath,
-        `${port}`,
+        "--service", scriptName,
+        "--input", inputPath,
+        "--output", outputPath,
+        "--port", `${port}`,
       ],
       {}
     );
