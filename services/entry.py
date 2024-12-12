@@ -8,14 +8,14 @@ from util import set_apollo_port, ApolloError
 load_dotenv()
 
 
-def call(*, service: str, input_path: str, output_path: str, apollo_port: int = None) -> dict:
+def call(*, service: str, input_path: str, output_path: str, apollo_port: int) -> dict:
     """
     Dynamically imports a module and invokes its main function with input data.
 
     :param service: The name of the service/module to invoke
     :param input_path: Path to the input JSON file
     :param output_path: Path to write the output JSON file
-    :param apollo_port: Optional port number for Apollo server
+    :param apollo_port: Port number for Apollo server
     :return: Result from the service as a dictionary
     """
     module_name = f"{service}.{service}"
@@ -32,11 +32,7 @@ def call(*, service: str, input_path: str, output_path: str, apollo_port: int = 
     except ApolloError as e:
         result = e.to_dict()
     except Exception as e:
-        result = ApolloError(
-            code=500,
-            message=str(e),
-            type="INTERNAL_ERROR"
-        ).to_dict()
+        result = ApolloError(code=500, message=str(e), type="INTERNAL_ERROR").to_dict()
 
     with open(output_path, "w") as f:
         json.dump(result, f)
@@ -47,17 +43,13 @@ def call(*, service: str, input_path: str, output_path: str, apollo_port: int = 
 def main():
     """
     Entry point when the script is run directly.
-    Uses argparse for better argument handling.
+    Reads arguments from stdin and calls the appropriate service.
     """
-    parser = argparse.ArgumentParser(description='OpenFn Apollo Service Runner')
-    parser.add_argument('--service', '-s', required=True,
-                      help='Name of the service to run')
-    parser.add_argument('--input', '-i', required=True,
-                      help='Path to input JSON file')
-    parser.add_argument('--output', '-o',
-                      help='Path to output JSON file (auto-generated if not provided)')
-    parser.add_argument('--port', '-p', type=int,
-                      help='Apollo server port number')
+    parser = argparse.ArgumentParser(description="OpenFn Apollo Service Runner")
+    parser.add_argument("--service", "-s", required=True, help="Name of the service to run")
+    parser.add_argument("--input", "-i", required=True, help="Path to input JSON file")
+    parser.add_argument("--output", "-o", help="Path to output JSON file (auto-generated if not provided)")
+    parser.add_argument("--port", "-p", type=int, help="Apollo server port number")
 
     args = parser.parse_args()
 
@@ -73,12 +65,7 @@ def main():
     print(f"Calling services/{args.service} ...")
     print()
 
-    result = call(
-        service=args.service,
-        input_path=args.input,
-        output_path=args.output,
-        apollo_port=args.port
-    )
+    result = call(service=args.service, input_path=args.input, output_path=args.output, apollo_port=args.port)
 
     print()
     print("Done!")
