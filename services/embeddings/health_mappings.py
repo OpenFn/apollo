@@ -5,34 +5,35 @@ from embeddings.embeddings import VectorStore
 from embeddings.utils import load_json
 from datasets import load_dataset
 from langchain_community.document_loaders import DataFrameLoader
+import pandas as pd
 
 def connect_loinc():
     """Initialise the vector store for LOINC embeddings."""
 
     load_dotenv()
 
-    pc_store = VectorStore(
+    store = VectorStore(
         collection_name="loinc_mappings",
         index_name="apollo-mappings",
         vectorstore_type="pinecone",
         embedding_type="openai"
     )
 
-    return pc_store
+    return store
 
 def connect_snomed():
     """Initialise the vector store for SNOMED embeddings."""
 
     load_dotenv()
 
-    pc_store = VectorStore(
+    store = VectorStore(
         collection_name="snomed_mappings",
         index_name="apollo-mappings",
         vectorstore_type="pinecone",
         embedding_type="openai"
     )
 
-    return pc_store
+    return store
 
 def preprocess_loinc(df, keep_cols, embed_cols):
     """Preprocess a Huggingface LOINC dataframe and populate a Pinecone vector store instance with the data."""
@@ -85,7 +86,7 @@ def upload_loinc_data(store,
     docs = loader.load()
     store.add_docs(docs)
 
-    return pc_store
+    return store
 
 def upload_snomed_data(store, 
                        keep_cols=["Value Set Name", "Code", "Description", "Purpose: Clinical Focus"],
@@ -105,4 +106,5 @@ def upload_snomed_data(store,
     docs = loader.load()
     store.add_docs(docs)
 
-    return pc_store
+    return store
+
