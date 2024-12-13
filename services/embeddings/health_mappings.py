@@ -36,7 +36,7 @@ def connect_snomed():
     return store
 
 def preprocess_loinc(df, keep_cols, embed_cols):
-    """Preprocess a Huggingface LOINC dataframe and populate a Pinecone vector store instance with the data."""
+    """Preprocess a Huggingface LOINC dataframe."""
 
     # Select dataset columns to include
     df = df[keep_cols]
@@ -53,7 +53,7 @@ def preprocess_loinc(df, keep_cols, embed_cols):
     return df
 
 def preprocess_snomed(df, keep_cols, embed_cols, project_value_sets):
-    """Preprocess a Huggingface SNOMED dataframe and populate a Pinecone vector store instance with the data."""
+    """Preprocess a Huggingface SNOMED dataframe."""
 
     # Select dataset columns to include
     df = df[keep_cols]
