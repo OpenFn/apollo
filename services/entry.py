@@ -31,9 +31,9 @@ def call(
             with open(input_path, "r") as f:
                 data = json.load(f)
         except FileNotFoundError:
-            return {"type": "INTERNAL_ERROR", "code": 500, "message": f"Input file not found: {input_path}"}
+            return ApolloError(code=500, message=f"Input file not found: {input_path}", type="INTERNAL_ERROR").to_dict()
         except json.JSONDecodeError:
-            return {"type": "INTERNAL_ERROR", "code": 500, "message": "Invalid JSON input"}
+            return ApolloError(code=500, message="Invalid JSON input", type="INTERNAL_ERROR").to_dict()
 
     try:
         m = __import__(module_name, fromlist=["main"])
