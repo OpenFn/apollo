@@ -36,14 +36,10 @@ export const run = async (
         "run",
         "python",
         "services/entry.py",
-        "--service",
         scriptName,
-        "--input",
-        inputPath,
-        "--output",
-        outputPath,
-        "--port",
-        `${port}`,
+        ...(inputPath ? ["--input", inputPath] : []),
+        ...(outputPath ? ["--output", outputPath] : []),
+        ...(port ? ["--port", `${port}`] : []),
       ],
       {}
     );

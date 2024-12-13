@@ -2,55 +2,118 @@ import pytest
 import json
 import os
 from pathlib import Path
-from entry import call
+from entry import call, main
+import argparse
+from unittest.mock import patch
+from util import set_apollo_port, apollo  # Add apollo import
 
+def setup_module():
+    """Setup test directories"""
+    Path("tmp/data").mkdir(parents=True, exist_ok=True)
+    # Reset apollo_port to default
+    set_apollo_port(3000)
 
-def test_echo_service():
-    # Setup test paths
+def test_minimal_call():
+    """Test calling with just the service name"""
+    result = call("echo")  # Only service name required
+    assert result == {}  # Empty dict when no input provided
+
+def test_call_with_input():
+    """Test calling with service name and input"""
     input_path = "tmp/test_input.json"
-    output_path = "tmp/test_output.json"
     test_data = {"test": "data"}
 
-    # Ensure tmp directory exists
-    Path("tmp").mkdir(exist_ok=True)
-
-    # Write test input
     with open(input_path, "w") as f:
         json.dump(test_data, f)
 
+    result = call("echo", input_path=input_path)
+    assert result == test_data
+
+def test_command_line_minimal():
+    """Test the absolute minimum command line usage"""
+    test_args = argparse.Namespace(
+        service="echo",  # Only required argument
+        input=None,
+        output=None,
+        port=None
+    )
+
+    with patch('argparse.ArgumentParser.parse_args', return_value=test_args):
+        result = main()
+        assert result == {}
+
+def test_auto_generated_output():
+    """Test that output path is auto-generated when not provided"""
+    test_args = argparse.Namespace(
+        service="echo",
+        input=None,
+        output=None,
+        port=None
+    )
+
+    with patch('argparse.ArgumentParser.parse_args', return_value=test_args):
+        result = main()
+        # Check that an output file was created in tmp/data
+        files = list(Path("tmp/data").glob("*.json"))
+        assert len(files) > 0
+
+def test_port_setting():
+    """Test that port is properly set when provided"""
+    test_args = argparse.Namespace(
+        service="echo",
+        input=None,
+        output=None,
+        port=5000
+    )
+
+    with patch('argparse.ArgumentParser.parse_args', return_value=test_args):
+        # Reset port before test
+        set_apollo_port(3000)
+        result = main()
+        
+        # Instead of checking the global variable, verify the behavior
+        # by making a request using the apollo() function
+        with patch('requests.post') as mock_post:
+            mock_post.return_value.json.return_value = {"test": "data"}
+            apollo("test", {})
+            # Verify the URL used contains the correct port
+            mock_post.assert_called_with(
+                "http://127.0.0.1:5000/services/test",
+                {}
+            )
+
+def test_invalid_service():
+    """Test handling of invalid service name"""
+    result = call("nonexistent_service")
+    assert result["type"] == "INTERNAL_ERROR"  # Check error structure instead
+    assert result["code"] == 500
+    assert "No module named" in result["message"]
+
+def test_invalid_input_file():
+    """Test handling of nonexistent input file"""
     try:
-        # Call echo service with named arguments
-        result = call(service="echo", input_path=input_path, output_path=output_path, apollo_port=3000)
-
-        # Verify result
-        assert result == test_data
-
-        # Verify output file
-        with open(output_path, "r") as f:
-            output_data = json.load(f)
-        assert output_data == test_data
-
-    finally:
-        # Cleanup
-        for file in [input_path, output_path]:
-            if os.path.exists(file):
-                os.remove(file)
-
-
-def test_error_handling():
-    input_path = "tmp/test_input.json"
-    output_path = "tmp/test_output.json"
-
-    # Write invalid JSON
-    with open(input_path, "w") as f:
-        f.write("invalid json")
-
-    try:
-        result = call(service="non_existent_service", input_path=input_path, output_path=output_path, apollo_port=3000)
+        result = call("echo", input_path="nonexistent.json")
         assert result["type"] == "INTERNAL_ERROR"
         assert result["code"] == 500
-    finally:
-        # Cleanup
-        for file in [input_path, output_path]:
-            if os.path.exists(file):
-                os.remove(file)
+    except FileNotFoundError:
+        # Update entry.py to handle this error case
+        pytest.fail("FileNotFoundError should be caught and returned as error dict")
+
+def test_output_file_writing():
+    """Test that output is written to specified file"""
+    output_path = "tmp/test_output.json"
+    test_data = {"test": "data"}
+    
+    result = call("echo", output_path=output_path)
+    
+    assert os.path.exists(output_path)
+    with open(output_path, "r") as f:
+        written_data = json.load(f)
+    assert written_data == result
+
+def teardown_module():
+    """Clean up test files"""
+    for f in Path("tmp").glob("test_*.json"):
+        f.unlink(missing_ok=True)
+    # Reset apollo_port to default
+    set_apollo_port(3000)
