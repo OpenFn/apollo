@@ -39,7 +39,7 @@ def call(
         m = __import__(module_name, fromlist=["main"])
         result = m.main(data)
     except ModuleNotFoundError as e:
-        return {"type": "INTERNAL_ERROR", "code": 500, "message": str(e)}
+        return ApolloError(code=500, message=str(e), type="INTERNAL_ERROR").to_dict()
     except ApolloError as e:
         result = e.to_dict()
     except Exception as e:
