@@ -8,7 +8,9 @@ from util import set_apollo_port, ApolloError
 load_dotenv()
 
 
-def call(service: str, *, input_path: str | None = None, output_path: str | None = None, apollo_port: int | None = None) -> dict:
+def call(
+    service: str, *, input_path: str | None = None, output_path: str | None = None, apollo_port: int | None = None
+) -> dict:
     """
     Dynamically imports a module and invokes its main function with input data.
 
@@ -19,8 +21,8 @@ def call(service: str, *, input_path: str | None = None, output_path: str | None
     :return: Result from the service as a dictionary
     """
     if apollo_port is not None:
-        set_apollo_port(apollo_port)  # Set the port if provided
-        
+        set_apollo_port(apollo_port)
+
     module_name = f"{service}.{service}"
 
     data = {}
@@ -75,17 +77,12 @@ def main():
     print(f"Calling services/{args.service} ...")
     print()
 
-    result = call(
-        service=args.service, 
-        input_path=args.input, 
-        output_path=args.output, 
-        apollo_port=args.port
-    )
+    result = call(service=args.service, input_path=args.input, output_path=args.output, apollo_port=args.port)
 
     print()
     print("Done!")
     print(result)
-    
+
     return result
 
 
