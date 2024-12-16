@@ -6,7 +6,7 @@ import { run } from "../bridge";
 import describeModules, {
   type ModuleDescription,
 } from "../util/describe-modules";
-import { isApolloError } from '../util/errors';
+import { isApolloError } from "../util/errors";
 
 const callService = (
   m: ModuleDescription,
@@ -34,16 +34,16 @@ export default async (app: Elysia, port: number) => {
         console.log(`POST to /services/${name}`);
         const payload = ctx.body;
         const result = await callService(m, port, payload as any);
-        
+
         if (isApolloError(result)) {
           return new Response(JSON.stringify(result), {
             status: result.code,
             headers: {
-              'Content-Type': 'application/json'
-            }
+              "Content-Type": "application/json",
+            },
           });
         }
-        
+
         return result;
       });
 

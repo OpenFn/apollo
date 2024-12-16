@@ -16,6 +16,8 @@ import pkg from "../../../package.json" assert { type: "json" };
 
 /**
  * Generates a listing of the available services
+ *
+ * TODO: list services a json
  */
 export default async (app: Elysia) => {
   // jsx templates!
