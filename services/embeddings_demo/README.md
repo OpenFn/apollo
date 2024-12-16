@@ -13,5 +13,5 @@ This demo currently uses the Zilliz embedding storage provider for OpenAI embedd
 This demo can be run from the services folder via the entry.py module:
 
 ```bash
-python entry.py embeddings_demo embeddings_demo/demo_data/input_data.json tmp/output.json
+python entry.py embeddings_demo --input embeddings_demo/demo_data/input_data.json --output tmp/output.json
 ```
