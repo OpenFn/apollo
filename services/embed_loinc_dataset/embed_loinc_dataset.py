@@ -44,7 +44,7 @@ def upload_loinc_data(store,
 
     return store
 
-def embed_loinc_dataset(input_query):
+def embed_loinc_dataset():
     # Initialise the vector store instance
     store = loinc_store.connect_loinc()
 
@@ -57,8 +57,9 @@ def main(data):
     store = embed_loinc_dataset()
     print("Embedded and uploaded LOINC dataset to a Pinecone vectorstore")
 
-    print("Test: Searching for similar texts to 'nasal'")
-    print(store.search("nasal", search_type="similarity_score_threshold", search_kwargs={"score_threshold": 0.88}))
+    input_query = data.get("query", "")
+    print(f"Test: Searching for similar texts to {input_query}")
+    print(store.search(input_query, search_type="similarity_score_threshold", search_kwargs={"score_threshold": 0.88}))
 
 if __name__ == "__main__":
     main()

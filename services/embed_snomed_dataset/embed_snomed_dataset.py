@@ -37,6 +37,7 @@ def upload_snomed_data(store,
 
     # Preprocess and filter the dataframe
     df = preprocess_snomed(df, keep_cols, embed_cols, project_value_sets)
+    print("Dataset preprocessed")
 
     # Create a new collection in the vector store and add the data
     loader = DataFrameLoader(df, page_content_column="text")
@@ -45,7 +46,7 @@ def upload_snomed_data(store,
 
     return store
 
-def embed_snomed_dataset(input_query):
+def embed_snomed_dataset():
     # Initialise the vector store instance
     store = snomed_store.connect_snomed()
 
@@ -55,11 +56,19 @@ def embed_snomed_dataset(input_query):
     return store
 
 def main(data):
+    print("Starting...")
     store = embed_snomed_dataset()
     print("Embedded and uploaded SNOMED dataset to a Pinecone vectorstore")
 
-    print("Test: Searching for similar texts to 'nasal'")
-    print(store.search("nasal", search_type="similarity_score_threshold", search_kwargs={"score_threshold": 0.88}))
+    input_query = data.get("query", "")
+    print(f"Test: Searching for similar texts to {input_query}")
+    results = store.search(input_query, search_type="similarity_score_threshold", search_kwargs={"score_threshold": 0.88})
+    print(results)
+
+    return {
+            "input_text": input_query,
+            "similar_text": results[0]
+        }
 
 if __name__ == "__main__":
     main()
