@@ -8,7 +8,7 @@ def connect_loinc():
     load_dotenv()
 
     store = VectorStore(
-        collection_name="loinc-mappings",
+        collection_name="loinc-mappings-v2",
         index_name="apollo-mappings",
         vectorstore_type="pinecone",
         embedding_type="openai"

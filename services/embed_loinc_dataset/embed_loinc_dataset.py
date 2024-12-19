@@ -26,8 +26,8 @@ def preprocess_loinc(df, keep_cols, embed_cols):
     return df
 
 def upload_loinc_data(store, 
-                       keep_cols=["LONG_COMMON_NAME", "METHOD_TYP", "CLASS", "SYSTEM"],
-                       embed_cols=["LONG_COMMON_NAME", "METHOD_TYP", "CLASS", "SYSTEM"]):
+                       keep_cols=["LOINC_NUM","LONG_COMMON_NAME", "METHOD_TYP", "CLASS", "SYSTEM"],
+                       embed_cols=["LOINC_NUM","LONG_COMMON_NAME", "METHOD_TYP", "CLASS", "SYSTEM"]):
     """Preprocess a Huggingface LOINC dataset and populate a Pinecone vector store instance with the data."""
     
     # Get the data as a dataframe
