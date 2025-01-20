@@ -1,50 +1,42 @@
 import json
 from typing import List, Dict
 import pandas as pd
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from langchain_anthropic import ChatAnthropic
-from langchain_core.runnables import RunnablePassthrough
+import anthropic
 
+EXPANSION_SYSTEM_PROMPT = """You are an assistant for matching terminology between health record systems. 
+You will be given a source text from one health record system, which might be in another language. 
+Output up to 15 of the most probable equivalent LOINC clinical terminology names (long names only, no codes). 
+Only include terms that match the specificity level of the input - do not add qualifiers or measurement methods unless they are explicitly stated in the input or accompanying context.
+Add each result on a new line without numbering."""
 
-EXPANSION_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", """You are an assistant for matching terminology between health record systems. 
-    You will be given a source text from one health record system, which might be in another language. 
-    Output up to 15 of the most probable equivalent LOINC clinical terminology names (long names only, no codes). 
-    Only include terms that match the specificity level of the input - do not add qualifiers or measurement methods unless they are explicitly stated in the input or accompanying context.
-    Add each result on a new line without numbering."""),
-    ("user", """{general_info}
-    
-    Source text for which to output LOINC terms: "{input_text}"
-    {specific_info}""")
-])
+EXPANSION_USER_PROMPT = """{general_info}
 
-SHORTLIST_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", """You are an assistant for matching terminology between health record systems. 
-    You will be given an entry from a source health record system, and a list of possible target LOINC terms. Select 10 target LOINC terms that reflect the original source term best. 
-    To help you, you will be given a list of likely entry names to look out for. Additional contextual information may also be given.
-    Only consider terms that match the specificity level of the source text - do not add qualifiers or measurement methods unless they are explicitly stated in the input or accompanying context.
-    Give your response as just a list of the LONG_COMMON_NAMEs and the LOINC_NUMBERs separated by a semicolon."""),
-    ("user", """{general_info}
-    Original source term for which to look for a LOINC entry: {input_text}
-    {specific_info}
-    The correct target LOINC entry text is likely to look like one of these: {expanded_terms}
-    LOINC entries to select from: "{search_results}" """)
-])
+Source text for which to output LOINC terms: "{input_text}"
+{specific_info}"""
 
-FINAL_SELECTION_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", """You are an assisstant for matching terminology between health record systems. 
-    You will be given an entry from a source health record system, and a list of possible target LOINC terms. Select just ONE target LOINC term that reflects the original source term best. 
-    To help you, you will be given a list of likely entry names to look out for. Additional contextual information may also be given.
-    Only consider terms that match the specificity level of the source text - do not add qualifiers or measurement methods unless they are explicitly stated in the input or accompanying context.
-    Give your response as just the LONG_COMMON_NAME and the LOINC_NUMBER separated by a semicolon."""),
-    ("user", """{general_info}
-    Original source term for which to look for a LOINC entry: {input_text}
-    {specific_info}
-    The correct target LOINC entry text is likely to look like one of these: {expanded_terms}
-    LOINC entries to select from: "{search_results}" """)
-])
+SHORTLIST_SYSTEM_PROMPT = """You are an assistant for matching terminology between health record systems. 
+You will be given an entry from a source health record system, and a list of possible target LOINC terms. Select 10 target LOINC terms that reflect the original source term best. 
+To help you, you will be given a list of likely entry names to look out for. Additional contextual information may also be given.
+Only consider terms that match the specificity level of the source text - do not add qualifiers or measurement methods unless they are explicitly stated in the input or accompanying context.
+Give your response as just a list of the LONG_COMMON_NAMEs and the LOINC_NUMBERs separated by a semicolon."""
 
+SHORTLIST_USER_PROMPT = """{general_info}
+Original source term for which to look for a LOINC entry: {input_text}
+{specific_info}
+The correct target LOINC entry text is likely to look like one of these: {expanded_terms}
+LOINC entries to select from: "{search_results}" """
+
+FINAL_SELECTION_SYSTEM_PROMPT = """You are an assistant for matching terminology between health record systems. 
+You will be given an entry from a source health record system, and a list of possible target LOINC terms. Select just ONE target LOINC term that reflects the original source term best. 
+To help you, you will be given a list of likely entry names to look out for. Additional contextual information may also be given.
+Only consider terms that match the specificity level of the source text - do not add qualifiers or measurement methods unless they are explicitly stated in the input or accompanying context.
+Give your response as just the LONG_COMMON_NAME and the LOINC_NUMBER separated by a semicolon."""
+
+FINAL_SELECTION_USER_PROMPT = """{general_info}
+Original source term for which to look for a LOINC entry: {input_text}
+{specific_info}
+The correct target LOINC entry text is likely to look like one of these: {expanded_terms}
+LOINC entries to select from: "{search_results}" """
 
 class VocabMapper:
     def __init__(self, 
@@ -52,25 +44,40 @@ class VocabMapper:
                  vectorstore,
                  dataset: pd.DataFrame):
         """Initialize the vocab mapper."""
-        self.llm = ChatAnthropic(
-            model="claude-3-5-sonnet-20241022",
-            max_tokens=500,
-            temperature=0,
-            anthropic_api_key=anthropic_api_key
-        )
+        self.client = anthropic.Anthropic(api_key=anthropic_api_key)
         self.vectorstore = vectorstore
         self.dataset = dataset
         self.loinc_num_dict = dict(zip(dataset.LONG_COMMON_NAME, dataset.LOINC_NUM))
 
+    def _call_llm(self, system_prompt: str, user_prompt: str) -> str:
+        """Helper method to make LLM calls."""
+        message = self.client.messages.create(
+            model="claude-3-5-sonnet-20241022",
+            max_tokens=500,
+            temperature=0,
+            system=system_prompt,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": user_prompt
+                        }
+                    ]
+                }
+            ]
+        )
+        return message.content[0].text
+
     def get_expanded_terms(self, input_text: str, general_info: str, specific_info: str) -> str:
         """Step 1: Get expanded list of possible terms."""
-        chain = EXPANSION_PROMPT | self.llm | StrOutputParser()
-        expanded_terms = chain.invoke({
-            "input_text": input_text,
-            "general_info": general_info,
-            "specific_info": specific_info
-        })
-        return expanded_terms
+        user_prompt = EXPANSION_USER_PROMPT.format(
+            input_text=input_text,
+            general_info=general_info,
+            specific_info=specific_info
+        )
+        return self._call_llm(EXPANSION_SYSTEM_PROMPT, user_prompt)
 
     def search_database(self, expanded_terms: str) -> list:
         """Step 2: Search the database for the expanded terms."""
@@ -101,30 +108,28 @@ class VocabMapper:
     def get_shortlist(self, input_text: str, general_info: str, specific_info: str, 
                      expanded_terms: str, search_results: list) -> str:
         """Step 3: Get a shortlist of the best matches."""
-        chain = SHORTLIST_PROMPT | self.llm | StrOutputParser()
-        shortlist = chain.invoke({
-            "input_text": input_text,
-            "general_info": general_info,
-            "specific_info": specific_info,
-            "expanded_terms": expanded_terms,
-            "search_results": search_results
-        })
-        return shortlist
+        user_prompt = SHORTLIST_USER_PROMPT.format(
+            input_text=input_text,
+            general_info=general_info,
+            specific_info=specific_info,
+            expanded_terms=expanded_terms,
+            search_results=search_results
+        )
+        return self._call_llm(SHORTLIST_SYSTEM_PROMPT, user_prompt)
 
     def get_final_selection(self, input_text: str, general_info: str, specific_info: str,
-                          expanded_terms: str, search_results: list, shortlist: str) -> str:
+                          expanded_terms: str, search_results: list) -> str:
         """Step 4: Get the best match."""
-        chain = FINAL_SELECTION_PROMPT | self.llm | StrOutputParser()
-        final_selection = chain.invoke({
-            "input_text": input_text,
-            "general_info": general_info,
-            "specific_info": specific_info,
-            "expanded_terms": expanded_terms,
-            "search_results": search_results
-        })
-        return final_selection
+        user_prompt = FINAL_SELECTION_USER_PROMPT.format(
+            input_text=input_text,
+            general_info=general_info,
+            specific_info=specific_info,
+            expanded_terms=expanded_terms,
+            search_results=search_results
+        )
+        return self._call_llm(FINAL_SELECTION_SYSTEM_PROMPT, user_prompt)
 
-    def map_term(self, input_term: str, general_info: str, specific_info: str = "") -> dict:
+    def map_term(self, input_term: str, general_info: str = "", specific_info: str = "") -> dict:
         """Map an input term using the target dataset."""
         # Step 1: Get expanded terms
         expanded_terms = self.get_expanded_terms(input_term, general_info, specific_info)
@@ -141,18 +146,18 @@ class VocabMapper:
         # Step 4: Select the best term (from the full search results)
         final_selection = self.get_final_selection(
             input_term, general_info, specific_info,
-            expanded_terms, search_results, shortlist
+            expanded_terms, search_results
         )
         
         # Return all results
         return {
             "expanded_terms": expanded_terms,
-            # "search_results": search_results, # large - can add back in for debugging
+            # "search_results": search_results,  # large - can add back in for debugging
             "shortlist": shortlist,
             "final_selection": final_selection
         }
 
-def process_inputs(input_data: List[Dict], mapper) -> List[Dict]:
+def process_inputs(input_data: List[Dict], mapper: VocabMapper) -> List[Dict]:
     """Process inputs to map one by one."""
     results = []
     for row in input_data:
@@ -167,14 +172,12 @@ def process_inputs(input_data: List[Dict], mapper) -> List[Dict]:
         })
     return results
 
-def main(data):
+def main(data: List[Dict]):
     """Input data will be a list of dictionaries with input_term, general_info, specific_info keys."""
-
     import os
     from dotenv import load_dotenv
     from embeddings import loinc_store
     from datasets import load_dataset
-    from langchain_community.document_loaders import DataFrameLoader
 
     load_dotenv(override=True)
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
@@ -190,5 +193,4 @@ def main(data):
 
     results = process_inputs(data, mapper)
     print(results)
-
     return results
