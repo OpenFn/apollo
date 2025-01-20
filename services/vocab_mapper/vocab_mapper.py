@@ -53,7 +53,9 @@ class VocabMapper:
                  dataset: pd.DataFrame):
         """Initialize the vocab mapper."""
         self.llm = ChatAnthropic(
-            model="claude-3-sonnet-20240229",
+            model="claude-3-5-sonnet-20241022",
+            max_tokens=500,
+            temperature=0,
             anthropic_api_key=anthropic_api_key
         )
         self.vectorstore = vectorstore
@@ -187,5 +189,6 @@ def main(data):
     )
 
     results = process_inputs(data, mapper)
+    print(results)
 
     return results
