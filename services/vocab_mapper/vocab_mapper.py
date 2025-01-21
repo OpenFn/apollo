@@ -185,12 +185,15 @@ def main(data: List[Dict]):
     loinc_df = load_dataset("awacke1/LOINC-Clinical-Terminology")
     loinc_df = pd.DataFrame(loinc_df['train'])
 
+    vectorstore = loinc_store.connect_loinc()
+
     mapper = VocabMapper(
         anthropic_api_key=ANTHROPIC_API_KEY,
-        vectorstore=loinc_store,
+        vectorstore=vectorstore,
         dataset=loinc_df
     )
 
     results = process_inputs(data, mapper)
     print(results)
+
     return results
