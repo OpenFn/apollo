@@ -1,42 +1,10 @@
 import json
-from typing import List, Dict
-import pandas as pd
 import anthropic
+import pandas as pd
 
-EXPANSION_SYSTEM_PROMPT = """You are an assistant for matching terminology between health record systems. 
-You will be given a source text from one health record system, which might be in another language. 
-Output up to 15 of the most probable equivalent LOINC clinical terminology names (long names only, no codes). 
-Only include terms that match the specificity level of the input - do not add qualifiers or measurement methods unless they are explicitly stated in the input or accompanying context.
-Add each result on a new line without numbering."""
-
-EXPANSION_USER_PROMPT = """{general_info}
-
-Source text for which to output LOINC terms: "{input_text}"
-{specific_info}"""
-
-SHORTLIST_SYSTEM_PROMPT = """You are an assistant for matching terminology between health record systems. 
-You will be given an entry from a source health record system, and a list of possible target LOINC terms. Select 10 target LOINC terms that reflect the original source term best. 
-To help you, you will be given a list of likely entry names to look out for. Additional contextual information may also be given.
-Only consider terms that match the specificity level of the source text - do not add qualifiers or measurement methods unless they are explicitly stated in the input or accompanying context.
-Give your response as just a list of the LONG_COMMON_NAMEs and the LOINC_NUMBERs separated by a semicolon."""
-
-SHORTLIST_USER_PROMPT = """{general_info}
-Original source term for which to look for a LOINC entry: {input_text}
-{specific_info}
-The correct target LOINC entry text is likely to look like one of these: {expanded_terms}
-LOINC entries to select from: "{search_results}" """
-
-FINAL_SELECTION_SYSTEM_PROMPT = """You are an assistant for matching terminology between health record systems. 
-You will be given an entry from a source health record system, and a list of possible target LOINC terms. Select just ONE target LOINC term that reflects the original source term best. 
-To help you, you will be given a list of likely entry names to look out for. Additional contextual information may also be given.
-Only consider terms that match the specificity level of the source text - do not add qualifiers or measurement methods unless they are explicitly stated in the input or accompanying context.
-Give your response as just the LONG_COMMON_NAME and the LOINC_NUMBER separated by a semicolon."""
-
-FINAL_SELECTION_USER_PROMPT = """{general_info}
-Original source term for which to look for a LOINC entry: {input_text}
-{specific_info}
-The correct target LOINC entry text is likely to look like one of these: {expanded_terms}
-LOINC entries to select from: "{search_results}" """
+from vocab_mapper.prompts import *
+from vocab_mapper.tools import process_inputs
+from vocab_mapper.dataset_tools import format_google_sheets_input, format_google_sheets_output
 
 class VocabMapper:
     def __init__(self, 
@@ -156,44 +124,36 @@ class VocabMapper:
             "shortlist": shortlist,
             "final_selection": final_selection
         }
+    
 
-def process_inputs(input_data: List[Dict], mapper: VocabMapper) -> List[Dict]:
-    """Process inputs to map one by one."""
-    results = []
-    for row in input_data:
-        result = mapper.map_term(
-            input_term=row['input_term'],
-            general_info=row.get('general_info', ''),
-            specific_info=row.get('specific_info', '')
-        )
-        results.append({
-            'input': row,
-            'mapping': result
-        })
-    return results
-
-def main(data: List[Dict]):
-    """Input data will be a list of dictionaries with input_term, general_info, specific_info keys."""
+def main(data):
+    """Map vocab with the VocabMapper using Google Sheets input data. Format output for Google Sheets."""
     import os
     from dotenv import load_dotenv
     from embeddings import loinc_store
     from datasets import load_dataset
 
+    # Format Google Sheets data
+    input_data, column_indices, original_values = format_google_sheets_input(data)
+
+    # Initialize and setup mapper
     load_dotenv(override=True)
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-
     loinc_df = load_dataset("awacke1/LOINC-Clinical-Terminology")
     loinc_df = pd.DataFrame(loinc_df['train'])
-
     vectorstore = loinc_store.connect_loinc()
-
     mapper = VocabMapper(
         anthropic_api_key=ANTHROPIC_API_KEY,
         vectorstore=vectorstore,
         dataset=loinc_df
     )
 
-    results = process_inputs(data, mapper)
-    print(results)
+    # Process the inputs
+    mapping_results = process_inputs(input_data, mapper)
+    print(mapping_results)
 
-    return results
+    # Format results back to Google Sheets format
+    formatted_results = format_google_sheets_output(data, mapping_results, column_indices, original_values)
+    print(formatted_results)
+    
+    return formatted_results
