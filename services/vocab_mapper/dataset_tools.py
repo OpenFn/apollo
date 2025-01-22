@@ -1,3 +1,7 @@
+from util import create_logger
+
+logger = create_logger("vocab_mapper_dataset_tools")
+
 def format_google_sheets_input(data):
     """Format Google Sheets input data to process with process_inputs."""
     # values = data['data']['values']
@@ -9,7 +13,9 @@ def format_google_sheets_input(data):
     try:
         input_field_idx = headers.index('input_field')
     except ValueError as e:
-        raise ValueError(f"Required column 'input_field' not found in headers: {e}")
+        msg = f"Required column 'input_field' not found in headers: {e}"
+        logger.error(msg)
+        raise ValueError(msg)
 
     # Get indices for all possible columns, None if not present
     column_indices = {

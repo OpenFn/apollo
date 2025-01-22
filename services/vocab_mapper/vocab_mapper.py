@@ -1,10 +1,16 @@
 import json
 import anthropic
 import pandas as pd
+import logging
 
 from vocab_mapper.prompts import *
 from vocab_mapper.tools import process_inputs
 from vocab_mapper.dataset_tools import format_google_sheets_input, format_google_sheets_output
+from util import create_logger
+
+logger = create_logger("vocab_mapper")
+logging.getLogger('pinecone_plugin_interface.logging').setLevel(logging.WARNING)
+logging.getLogger('httpx').setLevel(logging.WARNING)
 
 class VocabMapper:
     def __init__(self, 
@@ -133,10 +139,10 @@ def main(data):
     from embeddings import loinc_store
     from datasets import load_dataset
     
-    print("input data: ", data)
+    logger.info(f"Input data: {data}")
     # Format Google Sheets data
     input_data, column_indices, original_values = format_google_sheets_input(data)
-    print("formatted input data: ", input_data)
+    logger.info(f"Formatted input data: {input_data}")
 
     # Get API key
     if 'anthropic_key' in data:
@@ -145,7 +151,9 @@ def main(data):
         load_dotenv(override=True)
         ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
         if ANTHROPIC_API_KEY is None:
-            raise ValueError("No API key found in data or environment variables")
+            msg = "No API key found in data or environment variables"
+            logger.error(msg)
+            raise ValueError(msg)
     
     # Initialize mapper
     loinc_df = load_dataset("awacke1/LOINC-Clinical-Terminology")
@@ -159,10 +167,10 @@ def main(data):
 
     # Process the inputs
     mapping_results = process_inputs(input_data, mapper)
-    print("mapping results: ", mapping_results)
+    logger.info(f"Mapping results: {mapping_results}")
 
     # Format results back to Google Sheets format
     formatted_results = format_google_sheets_output(data, mapping_results, column_indices, original_values)
-    print("formatted results: ", formatted_results)
+    logger.info(f"Formatted results: {formatted_results}")
     
     return formatted_results
