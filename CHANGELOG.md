@@ -1,5 +1,15 @@
 # apollo
 
+## 0.7.0
+
+### Minor Changes
+
+- ed5ff26: Add vocab mapper service
+
+### Patch Changes
+
+- ef9f9d2: Add version number to the service listing and healthcheck
+
 ## 0.6.0
 
 ### Minor Changes
