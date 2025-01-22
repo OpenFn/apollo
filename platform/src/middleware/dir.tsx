@@ -1,11 +1,14 @@
 import { Elysia } from "elysia";
 import path from "node:path";
-import describeModules, { type ModuleDescription } from "../util/describe-modules";
+import describeModules, {
+  type ModuleDescription,
+} from "../util/describe-modules";
 
+import pkg from "../../../package.json" assert { type: "json" };
 
 /**
  * TODO
- * 
+ *
  * - sort services alphabetically
  *  - link to (and serve!) readme
  *  - include the first section of the readme in the listing (basic formattitng). Maybe show first sentence + expand?
@@ -13,6 +16,8 @@ import describeModules, { type ModuleDescription } from "../util/describe-module
 
 /**
  * Generates a listing of the available services
+ *
+ * TODO: list services a json
  */
 export default async (app: Elysia) => {
   // jsx templates!
@@ -26,14 +31,13 @@ export default async (app: Elysia) => {
           <title>OpenFn Apollo Service Listing</title>
         </head>
         <body>
-          <h1>OpenFn Apollo Service Listing</h1>
+          <h1>OpenFn Apollo Service Listing v{pkg.version}</h1>
           <div>
-            <ul>
-              {modules.map((m) => service(m))}
-            </ul>
+            <ul>{modules.map((m) => service(m))}</ul>
           </div>
           <footer style="margin-top: 30px;font-size: small;">
-          &copy; Open Function Group {new Date().getUTCFullYear()}
+            v{pkg.version} &copy; Open Function Group{" "}
+            {new Date().getUTCFullYear()}
           </footer>
         </body>
       </html>
@@ -42,10 +46,14 @@ export default async (app: Elysia) => {
 };
 
 function service(srv: ModuleDescription) {
-  return <li style="margin-bottom: 16px">
-    <p style="margin-bottom: 8px;"><b>{srv.name}</b> <a href={`/services/${srv.name}/README.md`}>README</a></p>
-    <p style="margin-left: 16px; margin-top: 0; padding-left: 6px; border-left: solid 2px #c0c0c0;">
-      {srv.summary}
-    </p>
-  </li>
+  return (
+    <li style="margin-bottom: 16px">
+      <p style="margin-bottom: 8px;">
+        <b>{srv.name}</b> <a href={`/services/${srv.name}/README.md`}>README</a>
+      </p>
+      <p style="margin-left: 16px; margin-top: 0; padding-left: 6px; border-left: solid 2px #c0c0c0;">
+        {srv.summary}
+      </p>
+    </li>
+  );
 }
