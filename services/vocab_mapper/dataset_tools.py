@@ -1,6 +1,7 @@
 def format_google_sheets_input(data):
     """Format Google Sheets input data to process with process_inputs."""
-    values = data['data']['values']
+    # values = data['data']['values']
+    values = data['values']
     headers = values[0]
     input_data = []
 
@@ -69,10 +70,7 @@ def format_google_sheets_output(data, mapping_results, column_indices, original_
         output_values.append(new_row)
 
     return {
-        "data": {
-            "majorDimension": data['data']['majorDimension'],
-            "range": data['data']['range'],
+            "majorDimension": data['majorDimension'],
+            "range": data['range'],
             "values": output_values
-        },
-        "references": data['references']
-    }
+            }

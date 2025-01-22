@@ -132,13 +132,22 @@ def main(data):
     from dotenv import load_dotenv
     from embeddings import loinc_store
     from datasets import load_dataset
-
+    
+    print("input data: ", data)
     # Format Google Sheets data
     input_data, column_indices, original_values = format_google_sheets_input(data)
+    print("formatted input data: ", input_data)
 
-    # Initialize and setup mapper
-    load_dotenv(override=True)
-    ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+    # Get API key
+    if 'anthropic_key' in data:
+        ANTHROPIC_API_KEY = data['anthropic_key']
+    else:
+        load_dotenv(override=True)
+        ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+        if ANTHROPIC_API_KEY is None:
+            raise ValueError("No API key found in data or environment variables")
+    
+    # Initialize mapper
     loinc_df = load_dataset("awacke1/LOINC-Clinical-Terminology")
     loinc_df = pd.DataFrame(loinc_df['train'])
     vectorstore = loinc_store.connect_loinc()
@@ -150,10 +159,10 @@ def main(data):
 
     # Process the inputs
     mapping_results = process_inputs(input_data, mapper)
-    print(mapping_results)
+    print("mapping results: ", mapping_results)
 
     # Format results back to Google Sheets format
     formatted_results = format_google_sheets_output(data, mapping_results, column_indices, original_values)
-    print(formatted_results)
+    print("formatted results: ", formatted_results)
     
     return formatted_results
