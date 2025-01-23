@@ -8,7 +8,7 @@ readme = "README.md"
 package-mode = false
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = "3.11.*"
 spacy = "^3.7.4"
 en-core-web-sm = { path = "models/en_core_web_sm-3.7.1-py3-none-any.whl" }
 openai = "^1.23.3"
@@ -17,10 +17,13 @@ black = "^24.4.2"
 python-dotenv = "^1.0.1"
 anthropic = "^0.34.0"
 pymilvus = "^2.4.6"
-langchain-text-splitters = "^0.2.4"
 
 # These dependencies should only be needed for fine tuning
 # use poetry install --with ft
+langchain-pinecone = "0.2.2"
+langchain-community = "^0.3.15"
+langchain-openai = "^0.3.1"
+datasets = "^3.2.0"
 [tool.poetry.group.ft]
 optional = true
 
