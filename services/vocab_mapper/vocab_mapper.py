@@ -140,20 +140,37 @@ def main(data):
     from datasets import load_dataset
     
     logger.info(f"Input data: {data}")
+
     # Format Google Sheets data
     input_data, column_indices, original_values = format_google_sheets_input(data)
     logger.info(f"Formatted input data: {input_data}")
 
-    # Get API key
-    if 'anthropic_key' in data:
-        ANTHROPIC_API_KEY = data['anthropic_key']
+    # Production: use data object keys -> system env
+    if 'anthropicApiKey' in data:
+        ANTHROPIC_API_KEY = data.get('anthropicApiKey') or os.environ.get('ANTHROPIC_API_KEY')
+        OPENAI_API_KEY = data.get('openaiApiKey') or os.environ.get('OPENAI_API_KEY')
+        PINECONE_API_KEY = data.get('pineconeApiKey') or os.environ.get('PINECONE_API_KEY')
+
+    # Development: use .env file
     else:
         load_dotenv(override=True)
-        ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-        if ANTHROPIC_API_KEY is None:
-            msg = "No API key found in data or environment variables"
-            logger.error(msg)
-            raise ValueError(msg)
+        ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
+        OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+        PINECONE_API_KEY = os.getenv('PINECONE_API_KEY')
+
+    # Check for missing keys
+    missing_keys = []
+    if not ANTHROPIC_API_KEY:
+        missing_keys.append("ANTHROPIC_API_KEY")
+    if not OPENAI_API_KEY:
+        missing_keys.append("OPENAI_API_KEY") 
+    if not PINECONE_API_KEY:
+        missing_keys.append("PINECONE_API_KEY")
+
+    if missing_keys:
+        msg = f"Missing API keys: {', '.join(missing_keys)}"
+        logger.error(msg)
+        raise ValueError(msg)
     
     # Initialize mapper
     loinc_df = load_dataset("awacke1/LOINC-Clinical-Terminology")
