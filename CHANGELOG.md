@@ -1,5 +1,12 @@
 # apollo
 
+## 0.7.2
+
+### Patch Changes
+
+- ob_chat: Fix depenencies
+- vocab_mapper: Fix production key loading
+
 ## 0.7.1
 
 ### Patch Changes
