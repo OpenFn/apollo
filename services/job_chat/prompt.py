@@ -142,6 +142,12 @@ def generate_system_message(context_dict):
 
     if context.has("log"):
         message.append(f"<log>The user's last log output was :\n\n```{context.log}```</log>")
+    
+    if context.has("collections"):
+        message.append({
+            "type": "text",
+            "text": "For working with collections, refer to the official documentation here: https://docs.openfn.org/adaptors/packages/collections-docs."
+        })
 
     return list(map(lambda text: text if isinstance(text, dict) else {"type": "text", "text": text}, message))
 
