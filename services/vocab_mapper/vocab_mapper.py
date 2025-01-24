@@ -6,7 +6,7 @@ import logging
 from vocab_mapper.prompts import *
 from vocab_mapper.tools import process_inputs
 from vocab_mapper.dataset_tools import format_google_sheets_input, format_google_sheets_output
-from util import create_logger
+from util import create_logger, ApolloError
 
 logger = create_logger("vocab_mapper")
 logging.getLogger('pinecone_plugin_interface.logging').setLevel(logging.WARNING)
@@ -145,18 +145,10 @@ def main(data):
     input_data, column_indices, original_values = format_google_sheets_input(data)
     logger.info(f"Formatted input data: {input_data}")
 
-    # Production: use data object keys -> system env
-    if 'anthropicApiKey' in data:
-        ANTHROPIC_API_KEY = data.get('anthropicApiKey') or os.environ.get('ANTHROPIC_API_KEY')
-        OPENAI_API_KEY = data.get('openaiApiKey') or os.environ.get('OPENAI_API_KEY')
-        PINECONE_API_KEY = data.get('pineconeApiKey') or os.environ.get('PINECONE_API_KEY')
-
-    # Development: use .env file
-    else:
-        load_dotenv(override=True)
-        ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
-        OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-        PINECONE_API_KEY = os.getenv('PINECONE_API_KEY')
+    load_dotenv(override=True)
+    ANTHROPIC_API_KEY = data.get('anthropicApiKey') or os.environ.get('ANTHROPIC_API_KEY')
+    OPENAI_API_KEY = data.get('openaiApiKey') or os.environ.get('OPENAI_API_KEY')
+    PINECONE_API_KEY = data.get('pineconeApiKey') or os.environ.get('PINECONE_API_KEY')
 
     # Check for missing keys
     missing_keys = []
@@ -170,7 +162,7 @@ def main(data):
     if missing_keys:
         msg = f"Missing API keys: {', '.join(missing_keys)}"
         logger.error(msg)
-        raise ValueError(msg)
+        raise ApolloError(500, f"Missing API keys: {', '.join(missing_keys)}", type="BAD_REQUEST")
     
     # Initialize mapper
     loinc_df = load_dataset("awacke1/LOINC-Clinical-Terminology")
