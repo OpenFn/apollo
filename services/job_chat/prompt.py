@@ -27,6 +27,8 @@ Job code does not use import statements or async/await.
 
 Job code must only contain function calls at the top level.
 
+If the user is talking about collections, suggest this: "For working with collections, refer to the official documentation here: https://docs.openfn.org/adaptors/packages/collections-docs."
+
 Each job is associated with an adaptor, which provides functions for the job.
 All jobs have the fn() and each() function, which are very important.
 
@@ -142,12 +144,6 @@ def generate_system_message(context_dict):
 
     if context.has("log"):
         message.append(f"<log>The user's last log output was :\n\n```{context.log}```</log>")
-    
-    if context.has("collections"):
-        message.append({
-            "type": "text",
-            "text": "For working with collections, refer to the official documentation here: https://docs.openfn.org/adaptors/packages/collections-docs."
-        })
 
     return list(map(lambda text: text if isinstance(text, dict) else {"type": "text", "text": text}, message))
 
