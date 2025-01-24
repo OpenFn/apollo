@@ -167,7 +167,7 @@ def main(data):
     # Initialize mapper
     loinc_df = load_dataset("awacke1/LOINC-Clinical-Terminology")
     loinc_df = pd.DataFrame(loinc_df['train'])
-    vectorstore = loinc_store.connect_loinc()
+    vectorstore = loinc_store.connect_loinc(api_key=PINECONE_API_KEY)
     mapper = VocabMapper(
         anthropic_api_key=ANTHROPIC_API_KEY,
         vectorstore=vectorstore,

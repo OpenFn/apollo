@@ -2,7 +2,7 @@ import os
 from dotenv import load_dotenv
 from embeddings.embeddings import VectorStore
 
-def connect_loinc():
+def connect_loinc(api_key):
     """Initialise the vector store for LOINC embeddings."""
 
     load_dotenv()
@@ -11,7 +11,8 @@ def connect_loinc():
         collection_name="loinc-mappings-v2",
         index_name="apollo-mappings",
         vectorstore_type="pinecone",
-        embedding_type="openai"
+        embedding_type="openai",
+        api_key=api_key
     )
 
     return store

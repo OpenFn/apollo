@@ -39,7 +39,7 @@ class VectorStore:
     }
 
     def __init__(self, collection_name='LangChainCollection', vectorstore_type='zilliz', 
-                 embedding_type='openai', connection_args=None, index_name=None):
+                 embedding_type='openai', connection_args=None, index_name=None, api_key=None):
         self.collection_name = collection_name
         self.vectorstore_type = vectorstore_type.lower()
         self.embedding_type = embedding_type.lower()
@@ -48,11 +48,11 @@ class VectorStore:
         self.embedding_function = self._get_embedding_class()
         self.store_kwargs_mappings = {
             'zilliz': {'collection_name': self.collection_name,'connection_args':self.connection_args, 'drop_old': True, 'auto_id':True},
-            'pinecone': {'namespace': self.collection_name, 'index_name': self.index_name},
+            'pinecone': {'namespace': self.collection_name, 'index_name': self.index_name, 'api_key': api_key},
         }
         self.search_init_kwargs_mappings = {
             'zilliz': {'embedding_function': self.embedding_function, 'collection_name': self.collection_name, 'connection_args':self.connection_args},
-            'pinecone': {'embedding': self.embedding_function, 'namespace': self.collection_name, 'index_name': self.index_name},
+            'pinecone': {'embedding': self.embedding_function, 'namespace': self.collection_name, 'index_name': self.index_name, 'api_key': api_key},
         }
         self.VectorStoreClass = self._get_vectorstore_class()
         self.store_kwargs = self._get_vectorstore_kwargs()
