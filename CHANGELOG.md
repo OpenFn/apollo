@@ -4,7 +4,7 @@
 
 ### Patch Changes
 
-- ob_chat: Fix depenencies
+- ob_chat: Fix dependencies
 - vocab_mapper: Fix production key loading
 
 ## 0.7.1
