@@ -48,6 +48,9 @@ Job code does not use import statements or async/await.
 
 Job code must only contain function calls at the top level.
 
+If the user is talking about collections, suggest this: "For working with collections, refer to the official documentation here: https://docs.openfn.org/adaptors/packages/collections-docs.".
+Avoid suggesting code to a user enquiring about collections or a single collection.
+
 Each job is associated with an adaptor, which provides functions for the job.
 All jobs have the fn() and each() function, which are very important.
 
