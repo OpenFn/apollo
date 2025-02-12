@@ -1,5 +1,17 @@
 # apollo
 
+## 0.8.0
+
+### Minor Changes
+
+- a03bbea: vocab mapper: Add batching
+
+### Patch Changes
+
+- 1d824ba: job_chat: Update the AI Assistant prompt to be more concise, secure,
+  and context-aware
+- 960dffb: job_chat: add basic prompt support for collections
+
 ## 0.7.2
 
 ### Patch Changes
