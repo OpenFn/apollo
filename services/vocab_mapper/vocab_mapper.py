@@ -1,9 +1,10 @@
 import json
-import anthropic
-import pandas as pd
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict
+
+import anthropic
+import pandas as pd
 
 from vocab_mapper.prompts import *
 from vocab_mapper.dataset_tools import format_google_sheets_input, format_google_sheets_output
@@ -61,7 +62,7 @@ class VocabMapper:
                 for prompt in user_prompts
             ]
             return [future.result() for future in futures]
-
+   
     def _get_expanded_terms(self, inputs: List[Dict[str, str]]) -> List[str]:
         """Process a batch of inputs for term expansion."""
         user_prompts = [
@@ -73,23 +74,45 @@ class VocabMapper:
             for input_data in inputs
         ]
         return self._call_llm_batch(EXPANSION_SYSTEM_PROMPT, user_prompts)
-    
+
     def _search_database(self, expanded_terms: str) -> list:
         """Search the database for expanded terms."""
-        # Vector search
-        vector_results = []
-        for guess in expanded_terms.split("\n"):
-            results = self.vectorstore.search(guess, search_kwargs={"k": 10})
-            vector_results.extend(results)
-        
-        # Keyword search
-        keyword_results = []
-        for guess in expanded_terms.split("\n"):
+
+        def process_term(guess):
+            results = []
+            # Vector search
+            vector_results = self.vectorstore.search(guess, search_kwargs={"k": 10})
+            results.extend(vector_results)
+
+            return results
+
+        # Process all terms from a single input's expanded_terms in parallel
+        terms = expanded_terms.split("\n")
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            results = list(executor.map(process_term, terms))
+
+        return [item for sublist in results for item in sublist]
+    
+    def _search_database_batch(self, expanded_terms_list: List[str]) -> List[list]:
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [
+                executor.submit(self._search_database, expanded_terms)
+                for expanded_terms in expanded_terms_list
+            ]
+            return [future.result() for future in futures]
+
+    def _keyword_search(self, expanded_terms: str) -> list:
+        """Search the dataset with a keyword-based search."""
+
+        def process_term(guess):
+            results = []
+            
+            # Keyword search
             matches = self.dataset[
-                self.dataset["LONG_COMMON_NAME"].str.lower().str.contains(guess.lower())
+                self.dataset["LONG_COMMON_NAME_LOWER"].str.contains(guess.lower())
             ].LONG_COMMON_NAME.to_list()[:100]
-                
-            keyword_results.extend([{
+            
+            results.extend([{
                 "text": json.dumps({
                     "LONG_COMMON_NAME": s,
                     "LOINC_NUM": self.loinc_num_dict.get(s)
@@ -97,16 +120,14 @@ class VocabMapper:
                 "metadata": {},
                 "score": None
             } for s in matches])
-        
-        return keyword_results + vector_results
+            return results
 
-    def _search_database_batch(self, expanded_terms_list: List[str]) -> List[list]:
-        with ThreadPoolExecutor(max_workers=self.max_concurrent_calls) as executor:
-            futures = [
-                executor.submit(self._search_database, expanded_terms)
-                for expanded_terms in expanded_terms_list
-            ]
-            return [future.result() for future in futures]
+        # Process all terms from a single input's expanded_terms in parallel
+        terms = expanded_terms.split("\n")
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            results = list(executor.map(process_term, terms))
+
+        return [item for sublist in results for item in sublist]
 
     def _get_shortlist(self, inputs: List[Dict], expanded_terms_list: List[str], 
                           search_results_list: List[list]) -> List[str]:
@@ -123,7 +144,7 @@ class VocabMapper:
             in zip(inputs, expanded_terms_list, search_results_list)
         ]
         return self._call_llm_batch(SHORTLIST_SYSTEM_PROMPT, user_prompts)
-
+    
     def _get_final_selection(self, inputs: List[Dict], expanded_terms_list: List[str],
                                 search_results_list: List[list]) -> List[str]:
         """Process a batch of inputs for final selection."""
@@ -143,21 +164,28 @@ class VocabMapper:
     def _map_terms_batch(self, inputs: List[Dict]) -> List[Dict]:
         """Map a batch of input terms using the target dataset."""
         # Step 1: Get expanded terms for the batch
+        logger.info(f"Generating search terms based on inputs")
         expanded_terms_list = self._get_expanded_terms(inputs)
-        
+
         # Step 2: Search database for all expanded terms
-        search_results_list = self._search_database_batch(expanded_terms_list)
-        
+        logger.info(f"Searching vector database")
+        database_results_list = self._search_database_batch(expanded_terms_list)
+        logger.info(f"Searching by keywords")
+        keyword_results_list = [self._keyword_search(expanded_terms) for expanded_terms in expanded_terms_list]
+        search_results_list = [vec + key for vec, key in zip(keyword_results_list, database_results_list)]
+
         # Step 3: Get shortlists of best terms for the batch
+        logger.info(f"Generating a shortlist of best target terms")
         shortlist_list = self._get_shortlist(
             inputs, expanded_terms_list, search_results_list
         )
-        
+
         # Step 4: Select the best terms for the batch
+        logger.info(f"Generating the best target term")
         final_selection_list = self._get_final_selection(
             inputs, expanded_terms_list, search_results_list
         )
-        
+
         # Return all results
         return [
             {
@@ -168,9 +196,20 @@ class VocabMapper:
             for expanded_terms, shortlist, final_selection 
             in zip(expanded_terms_list, shortlist_list, final_selection_list)
         ]
+    
+    def _preprocess_dataset(self):
+        """Preprocess dataset to keep only necessary columns and add lowercased names for search."""
+        # Keep only needed columns
+        self.dataset = self.dataset[['LONG_COMMON_NAME', 'LOINC_NUM']]
+        # Add lowercase column
+        self.dataset['LONG_COMMON_NAME_LOWER'] = self.dataset.LONG_COMMON_NAME.str.lower()
 
     def map_terms(self, input_data):
         """Process a list of inputs in batches."""
+        logger.info(f"Preprocessing dataset")
+        self._preprocess_dataset()
+
+        logger.info(f"Starting mapping")
         results = []
         for batch in self._batch_iterator(input_data, self.batch_size):
             batch_results = self._map_terms_batch(batch)
@@ -181,6 +220,7 @@ class VocabMapper:
                 }
                 for input_row, mapping in zip(batch, batch_results)
             ])
+        logger.info(f"Finished mapping")
         return results
 
 
@@ -216,17 +256,25 @@ def main(data):
         logger.error(msg)
         raise ApolloError(500, f"Missing API keys: {', '.join(missing_keys)}", type="BAD_REQUEST")
     
-    # Initialize mapper
-    loinc_df = load_dataset("awacke1/LOINC-Clinical-Terminology")
-    loinc_df = pd.DataFrame(loinc_df['train'])
+    # Get dataset
+    logger.info(f"Getting the dataset")
+    os.makedirs("tmp", exist_ok=True)
+
+    if os.path.exists("tmp/loinc_dataset.csv"):
+        loinc_df = pd.read_csv("tmp/loinc_dataset.csv")
+    else:
+        loinc_df = pd.DataFrame(load_dataset("awacke1/LOINC-Clinical-Terminology")['train'])
+        loinc_df.to_csv("tmp/loinc_dataset.csv", index=False)
+
     vectorstore = loinc_store.connect_loinc()
 
+    # Initialize mapper
     mapper = VocabMapper(
         anthropic_api_key=ANTHROPIC_API_KEY,
         vectorstore=vectorstore,
         dataset=loinc_df,
-        batch_size=30,
-        max_concurrent_calls=25
+        batch_size=25,
+        max_concurrent_calls=2
     )
 
     # Process the inputs
