@@ -8,8 +8,7 @@ from pinecone import Pinecone, ServerlessSpec
 from langchain_pinecone import PineconeVectorStore
 from langchain_openai import OpenAIEmbeddings
 from util import create_logger, ApolloError
-# from embed_docsite.utils import split_docs, read_md_files, read_paths_config, fetch_adaptor_data, process_adaptor_data, logger
-# from embed_docsite.docsite_fetcher import DocsiteFetcher
+from embed_docsite.docsite_processor import DocsiteProcessor
 
 logger = create_logger("DocsiteIndexer")
 
@@ -93,13 +92,14 @@ def main(data):
         logger.error(msg)
         raise ApolloError(500, f"Missing API keys: {', '.join(missing_keys)}", type="BAD_REQUEST")
 
+    # Get docsite as preprocessed LangChain docs
+    docsite_processor = DocsiteProcessor()
+    documents = docsite_processor.get_preprocessed_docs()
+    
     # Initialize indexer
     current_date = datetime.now().strftime("%Y%m%d")
     index_name = f"docsite-{current_date}"
     docsite_indexer = DocsiteIndexer(index_name=index_name)
-    
-    # Example documents
-    documents = ... # TODO
     
     # Create index if it does not exist & insert documents
     docsite_indexer.insert_documents(documents)
