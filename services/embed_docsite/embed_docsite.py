@@ -94,17 +94,18 @@ def main(data):
 
     # Get docsite as preprocessed LangChain docs
     docsite_processor = DocsiteProcessor()
-    documents = docsite_processor.get_preprocessed_docs()
-    
-    # Initialize indexer
-    current_date = datetime.now().strftime("%Y%m%d")
-    index_name = f"docsite-{current_date}"
-    docsite_indexer = DocsiteIndexer(index_name=index_name)
-    
-    # Create index if it does not exist & insert documents
-    docsite_indexer.insert_documents(documents)
+    documents, metadata_dict = docsite_processor.get_preprocessed_docs() #TODO get Langchain docs
+    print(len(documents))
 
-    logger.info(f"Embedded and uploaded docs to Pinecone index {index_name}")
+    # # Initialize indexer
+    # current_date = datetime.now().strftime("%Y%m%d")
+    # index_name = f"docsite-{current_date}"
+    # docsite_indexer = DocsiteIndexer(index_name=index_name)
+    
+    # # Create index if it does not exist & insert documents
+    # docsite_indexer.insert_documents(documents)
+
+    # logger.info(f"Embedded and uploaded docs to Pinecone index {index_name}")
 
     # # Test -- use other service
     # input_query = data.get("query", "")
