@@ -1,6 +1,7 @@
 import json
 import os
 import logging
+import re
 import requests
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 
@@ -15,7 +16,7 @@ class DocsiteProcessor:
         self.data_url = data_url
         self.metadata_dict = None
 
-    def fetch_data(self):
+    def fetch_data_from_url(self):
         """Fetches adaptor data from the adaptor docs url."""
         try:
             response = requests.get(self.data_url)
@@ -43,14 +44,56 @@ class DocsiteProcessor:
                 print(f"Error deleting the file {output_file}: {e}")
                 return
 
-        # Convert content to dictionaries
-        json_data = [{"adaptor_name": name, "doc_chunk": chunk} for chunk, name in chunks]
-
         # Write to a JSON file
         with open(output_file, 'w') as f:
-            json.dump(json_data, f, indent=2)
+            json.dump(chunks, f, indent=2)
 
         logger.info(f"Content written to {output_file}")
+
+    def clean_html(self, text):
+        """Remove HTML tags while preserving essential formatting."""
+        text = re.sub(r'<\/?p>', '\n', text)  # Convert <p> to newlines
+        text = re.sub(r'<\/?code>', '`', text)  # Convert <code> to backticks
+        text = re.sub(r'<\/?strong>', '**', text)  # Convert <strong> to bold
+        text = re.sub(r'<[^>]+>', '', text)  # Remove other HTML tags
+
+        return text.strip()
+
+    def split_by_headers(self, text):
+        """Split text into chunks based on Markdown headers (# and ##)."""
+        sections = re.split(r'(^#+\s.*)', text, flags=re.MULTILINE)  # Split by headers
+        chunks = []
+        current_chunk = ""
+
+        for section in sections:
+            if section.strip().startswith("#"):  # New section starts
+                if current_chunk:
+                    chunks.append(current_chunk.strip())  # Save previous chunk
+                current_chunk = section.strip()  # Start new chunk
+            else:
+                current_chunk += "\n" + section.strip()  # Append content to current section
+
+        if current_chunk:
+            chunks.append(current_chunk.strip())  # Save last chunk
+
+        return chunks
+
+    def accumulate_chunks(self, chunks, target_length=1000):
+        """Merge smaller chunks to get as close to target_length as possible."""
+        accumulated = []
+        current_chunk = ""
+        
+        for chunk in chunks:
+            if len(current_chunk) + len(chunk) <= target_length or len(current_chunk) < target_length * 0.5:
+                current_chunk += "\n\n" + chunk if current_chunk else chunk  # Append with spacing
+            else:
+                accumulated.append(current_chunk.strip())  # Store the completed chunk
+                current_chunk = chunk  # Start a new chunk
+        
+        if current_chunk:
+            accumulated.append(current_chunk.strip())  # Add any remaining text
+
+        return accumulated
 
     def chunk_adaptor_docs(self, json_data, chunk_size=1000, min_chunk_size=100):
         """
@@ -59,49 +102,43 @@ class DocsiteProcessor:
         :param json_data: JSON containing adaptor data dictionaries and lists
         :return: List of tuples (chunk, adaptor name) and a dictionary with the original data {adaptor_name: data_dict}
         """
-        chunks = []
+        output = []
         metadata_dict = dict()
         
         for item in json_data:
             if isinstance(item, dict) and "docs" in item and "name" in item:
-                docs = item["docs"].strip().split("\n")
+                
+                docs = item["docs"]#.strip().split("\n")
                 name = item["name"]
-                chunk = ""
 
-                # Save all fields for optional metadata addition
+                # Decode JSON string
+                try:
+                    docs = json.loads(docs)
+                except json.JSONDecodeError:
+                    pass
+                
+                docs = self.clean_html(docs)
+
+                # Save all fields for adding to metadata later
+                item["docs"] = docs # replace docs with cleaned text
                 metadata_dict[name] = item
 
-                for line in docs:
-                    if len(chunk) + len(line) + 1 > chunk_size:  
-                        if len(chunk) >= min_chunk_size:
-                            chunks.append((chunk.strip(), name))  
-                        else:  
-                            if chunks:  # Merge with the last chunk if possible – review if dealing with new data with sparse newlines
-                                if chunks[-1][1] == name:
-                                    last_chunk, last_name = chunks.pop()
-                                    chunks.append((last_chunk + "\n" + chunk.strip(), last_name))
-                        
-                        chunk = ""
+                # Chunk
+                header_splits = self.split_by_headers(docs)
+                chunks = self.accumulate_chunks(header_splits)
 
-                    chunk += line + "\n"
-
-                if chunk.strip():  # If there's remaining content
-                    if len(chunk) >= min_chunk_size:
-                        chunks.append((chunk.strip(), name))
-                    elif chunks:  
-                        last_chunk, last_name = chunks.pop()
-                        chunks.append((last_chunk + "\n" + chunk.strip(), last_name))
+                for chunk in chunks:
+                    output.append({"name": name, "doc_chunk": chunk})
         
-        self.metadata_dict = metadata_dict
-        self.write_chunks_to_file(chunks=chunks)
+        # self.metadata_dict = metadata_dict
+        self.write_chunks_to_file(output)
 
-        return chunks, metadata_dict
-        
+        return output, metadata_dict      
 
     def get_preprocessed_docs(self):
         """Fetch and process adaptor data"""
         # Step 1: Fetch adaptor data
-        adaptor_data = self.fetch_data()
+        adaptor_data = self.fetch_data_from_url()
         # Step 2: Process adaptor data
         chunks, metadata_dict = self.chunk_adaptor_docs(adaptor_data)
 
