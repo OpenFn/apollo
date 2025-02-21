@@ -60,23 +60,9 @@ class DocsiteProcessor:
         return text.strip()
 
     def split_by_headers(self, text):
-        """Split text into chunks based on Markdown headers (# and ##)."""
-        sections = re.split(r'(^#+\s.*)', text, flags=re.MULTILINE)  # Split by headers
-        chunks = []
-        current_chunk = ""
-
-        for section in sections:
-            if section.strip().startswith("#"):  # New section starts
-                if current_chunk:
-                    chunks.append(current_chunk.strip())  # Save previous chunk
-                current_chunk = section.strip()  # Start new chunk
-            else:
-                current_chunk += "\n" + section.strip()  # Append content to current section
-
-        if current_chunk:
-            chunks.append(current_chunk.strip())  # Save last chunk
-
-        return chunks
+        """Split text into chunks based on Markdown headers (# and ##) and code blocks."""
+        sections = re.split(r'(^#+\s.*$|^```(?:.*\n[\s\S]*?^```))', text, flags=re.MULTILINE)
+        return [chunk.strip() for chunk in sections if chunk.strip()]
 
     def accumulate_chunks(self, chunks, target_length=1000):
         """Merge smaller chunks to get as close to target_length as possible."""
