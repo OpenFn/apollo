@@ -3,31 +3,24 @@ import os
 import logging
 import re
 import requests
-from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
+from embed_docsite.github_utils import get_docs
+from util import create_logger, ApolloError
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("DocsiteProcessor")
+logger = create_logger("DocsiteProcessor")
 
 class DocsiteProcessor:
-    def __init__(self, output_dir="./tmp/split_sections",
-                 data_url="https://raw.githubusercontent.com/OpenFn/adaptors/docs/docs/docs.json"):
+    """
+    Processes documentation sites by cleaning, splitting, and chunking text.
+
+    :param docs_type: Type of documentation being processed ("adaptor_functions", "general_docs", "adaptor_docs")
+    :param output_dir: Directory to store processed chunks (default: "./tmp/split_sections").
+    """
+    def __init__(self, docs_type, output_dir="./tmp/split_sections"):
         self.output_dir = output_dir
-        self.data_url = data_url
+        self.docs_type = docs_type
         self.metadata_dict = None
 
-    def fetch_data_from_url(self):
-        """Fetches adaptor data from the adaptor docs url."""
-        try:
-            response = requests.get(self.data_url)
-            response.raise_for_status()
-            return response.json()
-        
-        except requests.RequestException as e:
-            logger.error(f"Failed to fetch data: {e}")
-            raise
-
-    def write_chunks_to_file(self, chunks, file_name="adaptor_docs_chunks.json"):
+    def write_chunks_to_file(self, chunks, file_name):
         """
         Writes a list of documentation chunks to a JSON file in the specified directory.
 
@@ -39,10 +32,9 @@ class DocsiteProcessor:
         if os.path.exists(output_file):
             try:
                 os.remove(output_file)
-                print(f"Existing output file '{output_file}' has been deleted.")
+                logger.info(f"Existing output file '{output_file}' has been deleted.")
             except OSError as e:
-                print(f"Error deleting the file {output_file}: {e}")
-                return
+                logger.error(f"Error deleting the file {output_file}: {e}")
 
         # Write to a JSON file
         with open(output_file, 'w') as f:
@@ -61,7 +53,8 @@ class DocsiteProcessor:
 
     def split_by_headers(self, text):
         """Split text into chunks based on Markdown headers (# and ##) and code blocks."""
-        sections = re.split(r'(^#+\s.*$|^```(?:.*\n[\s\S]*?^```))', text, flags=re.MULTILINE)
+        sections = re.split(r'(?=^#+\s.*$|^```(?:.*\n[\s\S]*?^```))', text, flags=re.MULTILINE)
+
         return [chunk.strip() for chunk in sections if chunk.strip()]
 
     def accumulate_chunks(self, chunks, target_length=1000):
@@ -94,7 +87,7 @@ class DocsiteProcessor:
         for item in json_data:
             if isinstance(item, dict) and "docs" in item and "name" in item:
                 
-                docs = item["docs"]#.strip().split("\n")
+                docs = item["docs"]
                 name = item["name"]
 
                 # Decode JSON string
@@ -114,21 +107,21 @@ class DocsiteProcessor:
                 chunks = self.accumulate_chunks(header_splits)
 
                 for chunk in chunks:
-                    output.append({"name": name, "doc_chunk": chunk})
+                    output.append({"name": name, "docs_type": self.docs_type, "doc_chunk": chunk})
         
         # self.metadata_dict = metadata_dict
-        self.write_chunks_to_file(output)
+        self.write_chunks_to_file(chunks=output, file_name=f"{self.docs_type}_chunks.json")
 
         return output, metadata_dict      
 
     def get_preprocessed_docs(self):
         """Fetch and process adaptor data"""
-        # Step 1: Fetch adaptor data
-        adaptor_data = self.fetch_data_from_url()
-        # Step 2: Process adaptor data
-        chunks, metadata_dict = self.chunk_adaptor_docs(adaptor_data)
+        # Step 1: Download docs
+        docs = get_docs(docs_type=self.docs_type)
 
-        #TODO get as langchain docs with metadata fields
-        logger.info("Pipeline execution complete.")
+        # Step 2: Process adaptor data
+        chunks, metadata_dict = self.chunk_adaptor_docs(docs)
+
+        logger.info(f"{self.docs_type} docs preprocessed and chunked")
 
         return chunks, metadata_dict
