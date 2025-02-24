@@ -3,8 +3,11 @@ import os
 import logging
 import re
 import requests
+import nltk
 from embed_docsite.github_utils import get_docs
 from util import create_logger, ApolloError
+
+# nltk.download('punkt_tab')
 
 logger = create_logger("DocsiteProcessor")
 
@@ -57,20 +60,70 @@ class DocsiteProcessor:
 
         return [chunk.strip() for chunk in sections if chunk.strip()]
 
-    def accumulate_chunks(self, chunks, target_length=1000):
+    def split_oversized_chunks(self, chunks, target_length=1000):
+        result = []
+        
+        for chunk in chunks:
+            if len(chunk) <= target_length:
+                # Chunk is fine, keep it as is
+                result.append(chunk)
+            else:
+                # Chunk is too big, split by newlines
+                lines = chunk.split('\n')
+                current_chunk = ""
+                
+                for line in lines:
+                    # If adding this line would exceed target size and we already have content
+                    if len(current_chunk) + len(line) + 1 > target_length and current_chunk:
+                        result.append(current_chunk)
+                        current_chunk = line
+                    else:
+                        # Add a newline if the chunk isn't empty
+                        if current_chunk:
+                            current_chunk += '\n'
+                        current_chunk += line
+                
+                # Don't forget the last chunk
+                if current_chunk:
+                    result.append(current_chunk)
+        
+        return result
+
+    def accumulate_chunks(self, splits, target_length=1000, overlap=1, min_length=700):
         """Merge smaller chunks to get as close to target_length as possible."""
         accumulated = []
         current_chunk = ""
+        last_overlap_length = 0
         
-        for chunk in chunks:
-            if len(current_chunk) + len(chunk) <= target_length or len(current_chunk) < target_length * 0.5:
-                current_chunk += "\n\n" + chunk if current_chunk else chunk  # Append with spacing
+        for split in splits:
+            if len(current_chunk) + len(split) <= target_length:
+                current_chunk += split
             else:
-                accumulated.append(current_chunk.strip())  # Store the completed chunk
-                current_chunk = chunk  # Start a new chunk
+                if len(current_chunk) >= min_length:
+                    accumulated.append(current_chunk)  # Store the completed chunk
+
+                    # add overlap
+                    if self.docs_type == "adaptor_functions":
+                        overlap_sections = " ".join(current_chunk.split("\n")[-overlap:])
+                    else:
+                        overlap_sections = " ".join(nltk.sent_tokenize(current_chunk)[-overlap:]) # Split by sentences (doesn't split code)
+                    current_chunk = overlap_sections + split  # Start a new chunk
+                    last_overlap_length = len(overlap_sections)
+                else:
+                    # Current chunk is too small, add the next split even though it exceeds target_length
+                    current_chunk += split
         
         if current_chunk:
-            accumulated.append(current_chunk.strip())  # Add any remaining text
+            if len(current_chunk) >= min_length or len(accumulated)==0:
+                accumulated.append(current_chunk)
+            else:
+                current_chunk = current_chunk[last_overlap_length:] # Avoid duplication inside one chunk
+                filler_char = min_length - len(current_chunk)
+                if len(accumulated[-1]) > filler_char:
+                    filler_overlap = accumulated[-1][-filler_char:]
+                    accumulated.append(filler_overlap + current_chunk)
+                else:
+                    accumulated[-1] = accumulated[-1] + current_chunk
 
         return accumulated
 
@@ -102,9 +155,10 @@ class DocsiteProcessor:
                 item["docs"] = docs # replace docs with cleaned text
                 metadata_dict[name] = item
 
-                # Chunk
-                header_splits = self.split_by_headers(docs)
-                chunks = self.accumulate_chunks(header_splits)
+                # Split by headers, and where needed, sentences
+                splits = self.split_by_headers(docs)
+                splits = self.split_oversized_chunks(splits)
+                chunks = self.accumulate_chunks(splits)
 
                 for chunk in chunks:
                     output.append({"name": name, "docs_type": self.docs_type, "doc_chunk": chunk})

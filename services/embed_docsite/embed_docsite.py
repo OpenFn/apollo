@@ -10,7 +10,9 @@ from embed_docsite.docsite_indexer import DocsiteIndexer
 from search_docsite.search_docsite import DocsiteSearch
 
 DOCS_TO_UPLOAD = ["adaptor_functions", "adaptor_docs", "general_docs"] # TODO Set docs to upload & index_name in data instead
-INDEX_NAME = f"docsite-{datetime.now().strftime("%Y%m%d")}"
+INDEX_NAME = f"docsite-{datetime.now().strftime('%Y%m%d')}"
+
+
 
 logger = create_logger("embed_docsite")
 
@@ -31,9 +33,9 @@ def main(data):
         missing_keys.append("PINECONE_API_KEY")
 
     if missing_keys:
-        msg = f"Missing API keys: {", ".join(missing_keys)}"
+        msg = f'Missing API keys: {", ".join(missing_keys)}'
         logger.error(msg)
-        raise ApolloError(500, f"Missing API keys: {", ".join(missing_keys)}", type="BAD_REQUEST")
+        raise ApolloError(500, f'Missing API keys: {", ".join(missing_keys)}', type="BAD_REQUEST")
 
     # Initialize indexer
     docsite_indexer = DocsiteIndexer(index_name=INDEX_NAME)
@@ -45,10 +47,10 @@ def main(data):
         documents, metadata_dict = docsite_processor.get_preprocessed_docs()
         print(len(documents))
 
-        # Upload with metadata
-        docsite_indexer.insert_documents(documents, metadata_dict)
+    #     # Upload with metadata
+    #     docsite_indexer.insert_documents(documents, metadata_dict)
     
-    logger.info(f"Uploaded docs to Pinecone index {INDEX_NAME}")
+    # logger.info(f"Uploaded docs to Pinecone index {INDEX_NAME}")
 
     # # Test -- use other service
     # search_engine = DocsiteSearch()
