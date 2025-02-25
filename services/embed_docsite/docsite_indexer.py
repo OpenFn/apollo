@@ -5,23 +5,24 @@ import json
 import pandas as pd
 from pinecone import Pinecone, ServerlessSpec
 from langchain_pinecone import PineconeVectorStore
+# from langchain_pinecone import Pinecone
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.document_loaders import DataFrameLoader
 from util import create_logger, ApolloError
-from embed_docsite.docsite_processor import DocsiteProcessor
 
 logger = create_logger("DocsiteIndexer")
 
 class DocsiteIndexer:
     """
-    Initialise vectorstore and add new index or documents.
+    Initialise vectorstore and insert new documents. Create a new index if needed.
     """
-    def __init__(self, index_name, collection_name="docsite", dimension = 1536):
+    def __init__(self, collection_name, index_name="docsite", embeddings=OpenAIEmbeddings(), dimension=1536):
         self.collection_name = collection_name
         self.index_name = index_name
+        self.embeddings = embeddings
         self.dimension = dimension
         self.pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY"))
-        self.vectorstore = PineconeVectorStore
+        self.vectorstore = PineconeVectorStore(index=index_name, namespace=collection_name, embedding=embeddings)
 
     def index_exists(self):
         """Check if the index exists in Pinecone."""
@@ -42,11 +43,11 @@ class DocsiteIndexer:
         while not self.pc.describe_index(self.index_name).status["ready"]:
             time.sleep(1)
             
-    def delete_index(self):
-        """Deletes the entire index and all its contents.
-        This operation cannot be undone and removes both the index structure
+    def delete_collection(self):
+        """Deletes the entire collection (namespace) and all its contents.
+        This operation cannot be undone and removes both the collection structure
         and all vectors/documents within it."""
-        self.pc.delete_index(self.index_name)
+        self.pc.delete(self.collection_name)
 
     def preprocess_metadata(self, inputs, page_content_column="text", add_chunk_as_metadata=True, metadata_cols=None, metadata_dict=None):
         """
@@ -75,7 +76,7 @@ class DocsiteIndexer:
                 
         return df
 
-    def insert_documents(self, inputs, metadata_dict, embeddings=OpenAIEmbeddings):
+    def insert_documents(self, inputs, metadata_dict):
         """
         Create the index if it does not exist and inster the inputs.
         
@@ -85,16 +86,20 @@ class DocsiteIndexer:
         :return: vectorstore initialized with the inputs
         """
 
-        df = self.preprocess_metadata(inputs, metadata_dict)
+        df = self.preprocess_metadata(inputs=inputs, metadata_dict=metadata_dict)
+        logger.info(f"Input metadata preprocessed")
         loader = DataFrameLoader(df, page_content_column="text")
         docs = loader.load()
+        logger.info(f"Inputs processed into LangChain docs")
 
         if not self.index_exists():
             self.create_index()
+            logger.info(f"New index created")
 
+        logger.info(f"Uploading documents to index...")
         return self.vectorstore.from_documents(
             documents=docs,
-            embedding=embeddings,
+            embedding=self.embeddings,
             namespace=self.collection_name,
             index_name=self.index_name
         )

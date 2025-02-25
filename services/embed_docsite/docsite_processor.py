@@ -65,7 +65,6 @@ class DocsiteProcessor:
         
         for chunk in chunks:
             if len(chunk) <= target_length:
-                # Chunk is fine, keep it as is
                 result.append(chunk)
             else:
                 # Chunk is too big, split by newlines
@@ -83,7 +82,7 @@ class DocsiteProcessor:
                             current_chunk += '\n'
                         current_chunk += line
                 
-                # Don't forget the last chunk
+                # Add the last chunk
                 if current_chunk:
                     result.append(current_chunk)
         
