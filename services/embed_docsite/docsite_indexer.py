@@ -5,7 +5,6 @@ import json
 import pandas as pd
 from pinecone import Pinecone, ServerlessSpec
 from langchain_pinecone import PineconeVectorStore
-# from langchain_pinecone import Pinecone
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.document_loaders import DataFrameLoader
 from util import create_logger, ApolloError
@@ -22,7 +21,8 @@ class DocsiteIndexer:
         self.embeddings = embeddings
         self.dimension = dimension
         self.pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY"))
-        self.vectorstore = PineconeVectorStore(index=index_name, namespace=collection_name, embedding=embeddings)
+        self.vectorstore = PineconeVectorStore(index_name=index_name, namespace=collection_name, embedding=embeddings)
+        # self.vectorstore = PineconeVectorStore()
 
     def index_exists(self):
         """Check if the index exists in Pinecone."""
@@ -97,9 +97,12 @@ class DocsiteIndexer:
             logger.info(f"New index created")
 
         logger.info(f"Uploading documents to index...")
-        return self.vectorstore.from_documents(
+
+        self.vectorstore.add_documents(
             documents=docs,
-            embedding=self.embeddings,
-            namespace=self.collection_name,
-            index_name=self.index_name
         )
+
+
+
+
+    

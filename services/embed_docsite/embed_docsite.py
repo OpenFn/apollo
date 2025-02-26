@@ -7,15 +7,21 @@ import pandas as pd
 from util import create_logger, ApolloError
 from embed_docsite.docsite_processor import DocsiteProcessor
 from embed_docsite.docsite_indexer import DocsiteIndexer
-from search_docsite.search_docsite import DocsiteSearch
-
-DOCS_TO_UPLOAD = ["adaptor_functions", "adaptor_docs", "general_docs"] # TODO Set docs to upload & index_name in data instead
-COLLECTION_NAME = f"docsite-{datetime.now().strftime('%Y%m%d')}"
 
 logger = create_logger("embed_docsite")
 
 def main(data):
     logger.info("Starting...")
+
+    required_fields = ["docs_to_upload", "collection_name"]
+    missing = [field for field in required_fields if field not in data]
+    
+    if missing:
+        logger.error(f"Missing required fields in data: {', '.join(missing)}")
+        return
+    
+    DOCS_TO_UPLOAD = data["docs_to_upload"]
+    COLLECTION_NAME = data["collection_name"]
 
     # Set API keys
     load_dotenv(override=True)
@@ -49,19 +55,7 @@ def main(data):
         documents = documents[:5] #TODO remove
         docsite_indexer.insert_documents(documents, metadata_dict)
     
-    # logger.info(f"Uploaded docs to Pinecone index {INDEX_NAME}")
-
-    # # Test -- use other service
-    # search_engine = DocsiteSearch()
-    # input_query = data.get("query", "")
-    # logger.info(f"Test: Searching for similar texts to {input_query}")
-    # results = search_engine.search(input_query, search_type="similarity_score_threshold", search_kwargs={"score_threshold": 0.88})
-    # logger.info(f"Search result: {results}")
-
-    # return {
-    #         "input_text": input_query,
-    #         "similar_text": results[0]
-    #     }
+    logger.info(f"Uploaded docs to Pinecone index {COLLECTION_NAME}")
 
 if __name__ == "__main__":
     main()
