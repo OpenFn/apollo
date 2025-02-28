@@ -171,7 +171,7 @@ class DocsiteProcessor:
         """Fetch and process adaptor data"""
         # Step 1: Download docs
         docs = get_docs(docs_type=self.docs_type)
-
+        
         # Step 2: Process adaptor data
         chunks, metadata_dict = self.chunk_adaptor_docs(docs)
 

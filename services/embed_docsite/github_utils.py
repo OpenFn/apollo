@@ -19,7 +19,8 @@ def download_main_docs(github_info):
 
         except requests.RequestException as e:
             logger.info(f"Failed to fetch content for {file_info['name']}: {e}")
-    
+    logger.info(f"Downloaded and processed {len(output)} files from GitHub")
+    logger.info(f'{output[0]}')
     return output
 
 def get_github_urls(repo, path="", owner="OpenFn", file_type=".md"):
@@ -41,19 +42,25 @@ def get_github_urls(repo, path="", owner="OpenFn", file_type=".md"):
         # Handle single file response
         if not isinstance(contents, list):
             contents = [contents]
-            
+
+        msg = contents[0].get("message") 
+        if msg and msg.startswith("API rate limit exceeded"):
+                logger.error("GitHub API limit exceeded")
+                return
+        
         for item in contents:
-            if item["type"] == "file" and item["name"].endswith(file_type):
+            if item.get("type") == "file" and item.get("name").endswith(file_type):
                 files.append({
                     "name": item["name"],
                     "path": item["path"],
                     "download_url": item["download_url"]
                 })
-            elif item["type"] == "dir":
+            elif item.get("type") == "dir":
                 fetch_contents(item["path"])
     
     fetch_contents(path)
-
+    logger.info(f'Fetched {len(files)} URLs from GitHub for https://api.github.com/repos/{owner}/{repo}/contents/{path}')
+    
     return files
 
 def get_adaptor_function_docs(data_url="https://raw.githubusercontent.com/OpenFn/adaptors/docs/docs/docs.json"):

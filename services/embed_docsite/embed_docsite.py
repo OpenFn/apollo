@@ -49,13 +49,9 @@ def main(data):
         # Download and process
         docsite_processor = DocsiteProcessor(docs_type=docs_type)
         documents, metadata_dict = docsite_processor.get_preprocessed_docs()
-        print(len(documents))
 
         # Upload with metadata
-        documents = documents[:5] #TODO remove
-        docsite_indexer.insert_documents(documents, metadata_dict)
-    
-    logger.info(f"Uploaded docs to Pinecone index {COLLECTION_NAME}")
+        idx = docsite_indexer.insert_documents(documents, metadata_dict)
 
 if __name__ == "__main__":
     main()
