@@ -49,7 +49,7 @@ class DocsiteIndexer:
         and all vectors/documents within it."""
         self.index.delete(delete_all=True, namespace=self.collection_name)
 
-    def preprocess_metadata(self, inputs, page_content_column="text", add_chunk_as_metadata=True, metadata_cols=None, metadata_dict=None):
+    def preprocess_metadata(self, inputs, page_content_column="text", add_chunk_as_metadata=False, metadata_cols=None, metadata_dict=None):
         """
         Create a DataFrame for indexing from input documents and metadata.
         
@@ -64,6 +64,8 @@ class DocsiteIndexer:
         
         # Rename some columns for metadata upload
         df = df.rename(columns={"doc_chunk": page_content_column, "name": "doc_title"})
+
+        df["doc_title"] = df["doc_title"].str.replace(".md$", "", regex=True)
 
         # Optionally add chunk to metadata for keyword searching
         if add_chunk_as_metadata:
