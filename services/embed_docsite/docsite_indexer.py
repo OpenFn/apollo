@@ -13,7 +13,12 @@ logger = create_logger("DocsiteIndexer")
 
 class DocsiteIndexer:
     """
-    Initialise vectorstore and insert new documents. Create a new index if needed.
+    Initialize vectorstore and insert new documents. Create a new index if needed.
+
+    :param collection_name: Vectorstore collection name (namespace) to store documents
+    :param index_name: Vectostore index name (default: docsite)
+    :param embeddings: LangChain embedding type (default: OpenAIEmbeddings())
+    :param dimension: Embedding dimension (default: 1536 for OpenAI Embeddings)
     """
     def __init__(self, collection_name, index_name="docsite", embeddings=OpenAIEmbeddings(), dimension=1536):
         self.collection_name = collection_name
@@ -54,8 +59,10 @@ class DocsiteIndexer:
         Create a DataFrame for indexing from input documents and metadata.
         
         :param inputs: Dictionary containing name, docs_type, and doc_chunk
-        :param metadata_dict: Dictionary mapping names to metadata dictionaries
-        :param metadata_cols: Optional list of metadata columns to include
+        :param page_content_column: Name of the field which will be embedded (default: text)
+        :param add_chunk_as_metadata: Copy the text to embed as a separate metadata field (default: False)
+        :param metadata_cols: Optional list of metadata columns to include (default: None)
+        :param metadata_dict: Dictionary mapping names to metadata dictionaries (default: None)
         :return: pandas.DataFrame with text and metadata columns
         """
         
@@ -80,12 +87,11 @@ class DocsiteIndexer:
 
     def insert_documents(self, inputs, metadata_dict):
         """
-        Create the index if it does not exist and inster the inputs.
+        Create the index if it does not exist and insert the input documents.
         
-        :param embeddings: inputs
+        :param inputs: Dictionary containing name, docs_type, and doc_chunk 
         :param metadata_dict: Metadata dict with document titles as keys (from DocsiteProcessor)
-        :param embeddings: Embedding type
-        :return: initialized indices
+        :return: Initialized indices
         """
         # Get vector count before insertion for verification
         try:

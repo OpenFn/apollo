@@ -7,7 +7,7 @@ import nltk
 from embed_docsite.github_utils import get_docs
 from util import create_logger, ApolloError
 
-# nltk.download('punkt_tab')
+nltk.download('punkt_tab')
 
 logger = create_logger("DocsiteProcessor")
 
@@ -23,7 +23,7 @@ class DocsiteProcessor:
         self.docs_type = docs_type
         self.metadata_dict = None
 
-    def write_chunks_to_file(self, chunks, file_name):
+    def _write_chunks_to_file(self, chunks, file_name):
         """
         Writes a list of documentation chunks to a JSON file in the specified directory.
 
@@ -45,7 +45,7 @@ class DocsiteProcessor:
 
         logger.info(f"Content written to {output_file}")
 
-    def clean_html(self, text):
+    def _clean_html(self, text):
         """Remove HTML tags while preserving essential formatting."""
         text = re.sub(r'<\/?p>', '\n', text)  # Convert <p> to newlines
         text = re.sub(r'<\/?code>', '`', text)  # Convert <code> to backticks
@@ -54,13 +54,14 @@ class DocsiteProcessor:
 
         return text.strip()
 
-    def split_by_headers(self, text):
+    def _split_by_headers(self, text):
         """Split text into chunks based on Markdown headers (# and ##) and code blocks."""
         sections = re.split(r'(?=^#+\s.*$|^```(?:.*\n[\s\S]*?^```))', text, flags=re.MULTILINE)
 
         return [chunk.strip() for chunk in sections if chunk.strip()]
 
-    def split_oversized_chunks(self, chunks, target_length=1000):
+    def _split_oversized_chunks(self, chunks, target_length):
+        """Check if chunks are over the target lengths, and split them further if needed."""
         result = []
         
         for chunk in chunks:
@@ -88,8 +89,9 @@ class DocsiteProcessor:
         
         return result
 
-    def accumulate_chunks(self, splits, target_length=1000, overlap=1, min_length=700):
+    def _accumulate_chunks(self, splits, target_length, overlap, min_length):
         """Merge smaller chunks to get as close to target_length as possible."""
+
         accumulated = []
         current_chunk = ""
         last_overlap_length = 0
@@ -126,13 +128,18 @@ class DocsiteProcessor:
 
         return accumulated
 
-    def chunk_adaptor_docs(self, json_data, chunk_size=1000, min_chunk_size=100):
+    def _chunk_adaptor_docs(self, json_data, target_length=1000, overlap=1, min_length=700):
         """
-        Extract docs from adaptor data, and chunk according to a target chunk size and a minimum chunk size.
+        Extract and clean docs from adaptor data, and chunk according to a target and minimum chunk sizes.
 
-        :param json_data: JSON containing adaptor data dictionaries and lists
-        :return: List of tuples (chunk, adaptor name) and a dictionary with the original data {adaptor_name: data_dict}
+        :param json_data: JSON containing adaptor data dictionaries with the keys "docs" (text) and "name" (text title) 
+        :param target_length: Target chunk size in characters (default: 1000)
+        :param overlap: Target number of sentences to overlap between chunks (default: 1)
+        :param min_length: Minimum chunk size in characters (default: 700)
+
+        :return: List of chunk dictionaries {name, docs_type, doc_chunk} and a dictionary mapping adaptor_name to original data dictionary
         """
+
         output = []
         metadata_dict = dict()
         
@@ -148,32 +155,32 @@ class DocsiteProcessor:
                 except json.JSONDecodeError:
                     pass
                 
-                docs = self.clean_html(docs)
+                docs = self._clean_html(docs)
 
                 # Save all fields for adding to metadata later
                 item["docs"] = docs # replace docs with cleaned text
                 metadata_dict[name] = item
 
                 # Split by headers, and where needed, sentences
-                splits = self.split_by_headers(docs)
-                splits = self.split_oversized_chunks(splits)
-                chunks = self.accumulate_chunks(splits)
+                splits = self._split_by_headers(docs)
+                splits = self._split_oversized_chunks(chunks=splits, target_length=target_length)
+                chunks = self._accumulate_chunks(splits=splits, target_length=target_length, overlap=overlap, min_length=min_length)
 
                 for chunk in chunks:
                     output.append({"name": name, "docs_type": self.docs_type, "doc_chunk": chunk})
         
         # self.metadata_dict = metadata_dict
-        self.write_chunks_to_file(chunks=output, file_name=f"{self.docs_type}_chunks.json")
+        self._write_chunks_to_file(chunks=output, file_name=f"{self.docs_type}_chunks.json")
 
         return output, metadata_dict      
 
     def get_preprocessed_docs(self):
-        """Fetch and process adaptor data"""
+        """Fetch and process adaptor data."""
         # Step 1: Download docs
         docs = get_docs(docs_type=self.docs_type)
-        
+
         # Step 2: Process adaptor data
-        chunks, metadata_dict = self.chunk_adaptor_docs(docs)
+        chunks, metadata_dict = self._chunk_adaptor_docs(docs)
 
         logger.info(f"{self.docs_type} docs preprocessed and chunked")
 
