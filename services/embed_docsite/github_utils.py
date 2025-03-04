@@ -45,7 +45,8 @@ def get_github_urls(repo, path="", owner="OpenFn", file_type=".md"):
 
         msg = contents[0].get("message") 
         if msg and msg.startswith("API rate limit exceeded"):
-                logger.error("GitHub API limit exceeded")
+                logger.error("GitHub API limit exceeded. Check limits here: \
+                             https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28")
                 return
         
         for item in contents:
