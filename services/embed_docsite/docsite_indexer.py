@@ -26,6 +26,10 @@ class DocsiteIndexer:
         self.embeddings = embeddings
         self.dimension = dimension
         self.pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY"))
+
+        if not self.index_exists():
+            self.create_index()
+
         self.index = self.pc.Index(self.index_name)
         self.vectorstore = PineconeVectorStore(index_name=index_name, namespace=collection_name, embedding=embeddings)
 
@@ -93,6 +97,7 @@ class DocsiteIndexer:
         :param metadata_dict: Metadata dict with document titles as keys (from DocsiteProcessor)
         :return: Initialized indices
         """
+
         # Get vector count before insertion for verification
         try:
             stats = self.index.describe_index_stats()
