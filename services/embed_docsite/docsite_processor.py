@@ -18,32 +18,66 @@ class DocsiteProcessor:
     :param docs_type: Type of documentation being processed ("adaptor_functions", "general_docs", "adaptor_docs")
     :param output_dir: Directory to store processed chunks (default: "./tmp/split_sections").
     """
-    def __init__(self, docs_type, output_dir="./tmp/split_sections"):
+    def __init__(self, docs_type, docs_to_ignore=["job-examples.md", "release-notes.md"], output_dir="./tmp/split_sections"):
         self.output_dir = output_dir
         self.docs_type = docs_type
+        self.docs_to_ignore = docs_to_ignore
         self.metadata_dict = None
 
-    def _write_chunks_to_file(self, chunks, file_name):
+    def get_preprocessed_docs(self):
         """
-        Writes a list of documentation chunks to a JSON file in the specified directory.
-
-        :param file_name: Name of the file to write to
-        :param chunks: List of tuples (chunk, name) to write to the file
+        Fetch, clean and chunk adaptor data.
+        
+        :return: List of chunk dictionaries {name, docs_type, doc_chunk}, and a dictionary mapping 
+        adaptor_name to original data dictionary
         """
-        os.makedirs(self.output_dir, exist_ok=True)
-        output_file = os.path.join(self.output_dir, file_name)
-        if os.path.exists(output_file):
-            try:
-                os.remove(output_file)
-                logger.info(f"Existing output file '{output_file}' has been deleted.")
-            except OSError as e:
-                logger.error(f"Error deleting the file {output_file}: {e}")
+        # Step 1: Download docs
+        docs = get_docs(docs_type=self.docs_type)
 
-        # Write to a JSON file
-        with open(output_file, 'w') as f:
-            json.dump(chunks, f, indent=2)
+        # Step 2: Process adaptor data
+        chunks, metadata_dict = self._chunk_adaptor_docs(docs)
 
-        logger.info(f"Content written to {output_file}")
+        logger.info(f"{self.docs_type} docs preprocessed and chunked")
+
+        return chunks, metadata_dict
+
+    def _chunk_adaptor_docs(self, json_data, target_length=1000, overlap=1, min_length=700):
+        """Extract and clean docs from adaptor data, and chunk according to a target and minimum chunk sizes."""
+        output = []
+        metadata_dict = dict()
+        
+        for item in json_data:
+            if isinstance(item, dict) and "docs" in item and "name" in item:
+                if item["name"] in self.docs_to_ignore:
+                    continue
+                
+                docs = item["docs"]
+                name = item["name"]
+
+                # Decode JSON string
+                try:
+                    docs = json.loads(docs)
+                except json.JSONDecodeError:
+                    pass
+                
+                docs = self._clean_html(docs)
+
+                # Save all fields for adding to metadata later
+                item["docs"] = docs # replace docs with cleaned text
+                metadata_dict[name] = item
+
+                # Split by headers, and where needed, sentences
+                splits = self._split_by_headers(docs)
+                splits = self._split_oversized_chunks(chunks=splits, target_length=target_length)
+                chunks = self._accumulate_chunks(splits=splits, target_length=target_length, overlap=overlap, min_length=min_length)
+
+                for chunk in chunks:
+                    output.append({"name": name, "docs_type": self.docs_type, "doc_chunk": chunk})
+        
+        # self.metadata_dict = metadata_dict
+        self._write_chunks_to_file(chunks=output, file_name=f"{self.docs_type}_chunks.json")
+
+        return output, metadata_dict      
 
     def _clean_html(self, text):
         """Remove HTML tags while preserving essential formatting."""
@@ -91,7 +125,6 @@ class DocsiteProcessor:
 
     def _accumulate_chunks(self, splits, target_length, overlap, min_length):
         """Merge smaller chunks to get as close to target_length as possible."""
-
         accumulated = []
         current_chunk = ""
         last_overlap_length = 0
@@ -128,60 +161,19 @@ class DocsiteProcessor:
 
         return accumulated
 
-    def _chunk_adaptor_docs(self, json_data, target_length=1000, overlap=1, min_length=700):
-        """
-        Extract and clean docs from adaptor data, and chunk according to a target and minimum chunk sizes.
+    def _write_chunks_to_file(self, chunks, file_name):
+        """Writes a list of documentation chunks to a JSON file in the specified directory."""
+        os.makedirs(self.output_dir, exist_ok=True)
+        output_file = os.path.join(self.output_dir, file_name)
+        if os.path.exists(output_file):
+            try:
+                os.remove(output_file)
+                logger.info(f"Existing output file '{output_file}' has been deleted.")
+            except OSError as e:
+                logger.error(f"Error deleting the file {output_file}: {e}")
 
-        :param json_data: JSON containing adaptor data dictionaries with the keys "docs" (text) and "name" (text title) 
-        :param target_length: Target chunk size in characters (default: 1000)
-        :param overlap: Target number of sentences to overlap between chunks (default: 1)
-        :param min_length: Minimum chunk size in characters (default: 700)
+        # Write to a JSON file
+        with open(output_file, 'w') as f:
+            json.dump(chunks, f, indent=2)
 
-        :return: List of chunk dictionaries {name, docs_type, doc_chunk} and a dictionary mapping adaptor_name to original data dictionary
-        """
-
-        output = []
-        metadata_dict = dict()
-        
-        for item in json_data:
-            if isinstance(item, dict) and "docs" in item and "name" in item:
-                
-                docs = item["docs"]
-                name = item["name"]
-
-                # Decode JSON string
-                try:
-                    docs = json.loads(docs)
-                except json.JSONDecodeError:
-                    pass
-                
-                docs = self._clean_html(docs)
-
-                # Save all fields for adding to metadata later
-                item["docs"] = docs # replace docs with cleaned text
-                metadata_dict[name] = item
-
-                # Split by headers, and where needed, sentences
-                splits = self._split_by_headers(docs)
-                splits = self._split_oversized_chunks(chunks=splits, target_length=target_length)
-                chunks = self._accumulate_chunks(splits=splits, target_length=target_length, overlap=overlap, min_length=min_length)
-
-                for chunk in chunks:
-                    output.append({"name": name, "docs_type": self.docs_type, "doc_chunk": chunk})
-        
-        # self.metadata_dict = metadata_dict
-        self._write_chunks_to_file(chunks=output, file_name=f"{self.docs_type}_chunks.json")
-
-        return output, metadata_dict      
-
-    def get_preprocessed_docs(self):
-        """Fetch and process adaptor data."""
-        # Step 1: Download docs
-        docs = get_docs(docs_type=self.docs_type)
-
-        # Step 2: Process adaptor data
-        chunks, metadata_dict = self._chunk_adaptor_docs(docs)
-
-        logger.info(f"{self.docs_type} docs preprocessed and chunked")
-
-        return chunks, metadata_dict
+        logger.info(f"Content written to {output_file}")
