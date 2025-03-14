@@ -26,6 +26,7 @@ def main(data):
 
     # Get selection of doc types to upload, or default to all
     docs_to_upload = data.get("docs_to_upload", ["adaptor_docs", "general_docs", "adaptor_functions"])
+    docs_to_ignore = data.get("docs_to_ignore", ["job-examples.md", "release-notes.md"])
 
     # Get other fields
     other_params = {}
@@ -67,7 +68,7 @@ def main(data):
     # Add docs
     for docs_type in docs_to_upload:
         # Download and process
-        docsite_processor = DocsiteProcessor(docs_type=docs_type)
+        docsite_processor = DocsiteProcessor(docs_type=docs_type, docs_to_ignore=docs_to_ignore)
         documents, metadata_dict = docsite_processor.get_preprocessed_docs()
 
         # Upload with metadata
