@@ -35,7 +35,7 @@ The input payload is a JSON object. A simple example with default values:
 }
 ```
 
-And with
+An example with all parameters:
 
 ```js
 {
