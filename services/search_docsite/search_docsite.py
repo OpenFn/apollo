@@ -45,24 +45,40 @@ class DocsiteSearch:
             # If multiple conditions, combine them with $and
             return {"$and": conditions}
     
-    def _semantic_search(self, query, top_k, filters=None):
+    def _semantic_search(self, query, top_k=None, threshold=None, filters=None):
         """Search the vectorstore using semantic search."""
-        results = []
-        retrieved_docs =  self.vectorstore.similarity_search(
+        if top_k is None and threshold is None:
+            top_k = self.default_top_k
+        
+        # Always set a reasonable maximum to avoid potential performance issues
+        max_k = top_k or 100  # Limit to 100 if using threshold-only
+        
+        # Get scored results - we need scores for threshold filtering
+        scored_docs = self.vectorstore.similarity_search_with_score(
             query=query,
-            k=top_k,
+            k=max_k,
             filter=filters
         )
-        logger.info(f"Similar documents retreived: {len(retrieved_docs)}")
-        retrieved_texts = [t.page_content for t in retrieved_docs]
-        metadata_dicts = [t.metadata for t in retrieved_docs]
-
-        for text, metadata in zip(retrieved_texts, metadata_dicts):
-            results.append(SearchResult(text, metadata))
-
+        
+        logger.info(f"Similar documents retrieved: {len(scored_docs)}")
+        
+        results = []
+        for doc, score in scored_docs:
+            # If threshold is set, only include documents with score >= threshold
+            # Note: Pinecone scores are cosine similarity (higher is better)
+            if threshold is not None and score < threshold:
+                continue
+                
+            # If we've reached top_k docs and no threshold is set, stop
+            if top_k is not None and len(results) >= top_k and threshold is None:
+                break
+                
+            results.append(SearchResult(doc.page_content, doc.metadata, score))
+            
+        logger.info(f"Filtered to {len(results)} results")
         return results
     
-    def search(self, query, top_k=None, strategy='semantic', doc_title=None, docs_type=None):
+    def search(self, query, top_k=None, threshold=None, strategy='semantic', doc_title=None, docs_type=None):
         """
         Search database with optional filters.
 
@@ -73,13 +89,11 @@ class DocsiteSearch:
         :param docs_type: Filter by document type
         :return: List of SearchResult objects
         """
-        top_k = top_k or self.default_top_k
-
         filters = self._build_filter(doc_title=doc_title, docs_type=docs_type)
         logger.info("Metadata filters built")
 
         if strategy == 'semantic':
-            return self._semantic_search(query=query, filters=filters, top_k=top_k)
+            return self._semantic_search(query=query, top_k=top_k, threshold=threshold, filters=filters)
 
 
 def main(data):
@@ -97,7 +111,7 @@ def main(data):
     search_params = {"query": data["query"]}
 
     # Add optional parameters
-    optional_search_params = ["docs_type", "doc_title", "top_k", "strategy"]
+    optional_search_params = ["docs_type", "doc_title", "top_k", "threshold", "strategy"]
     optional_index_params = ["index_name", "default_top_k", "embeddings"]
 
     for key in optional_search_params:
