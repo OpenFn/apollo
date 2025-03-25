@@ -116,7 +116,7 @@ def main(data):
 
     for key in optional_index_params:
         if key in data:
-            optional_index_params[key] = data[key]
+            index_params[key] = data[key]
 
     # Set API keys
     load_dotenv(override=True)
