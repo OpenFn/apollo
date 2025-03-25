@@ -4,7 +4,6 @@ from langchain_pinecone import PineconeVectorStore
 from langchain_openai import OpenAIEmbeddings
 from util import create_logger, ApolloError
 from embeddings.embeddings import SearchResult
-
 logger = create_logger("DocsiteSearch")
 
 class DocsiteSearch:
@@ -12,7 +11,7 @@ class DocsiteSearch:
     Initialize the docsite vectorstore and search it with optional metadata filters.
     
     :param collection_name: Vectorstore collection name (namespace) to store documents
-    :param index_name: Vectostore index name (default: docsite)
+    :param index_name: Vectorstore index name (default: docsite)
     :param default_top_k: Default number of results to return (default: 5)
     :param embeddings: LangChain embedding type (default: OpenAIEmbeddings())
     """
@@ -21,6 +20,53 @@ class DocsiteSearch:
         self.index_client = index_name
         self.default_top_k = default_top_k
         self.vectorstore = PineconeVectorStore(index_name=index_name, namespace=collection_name, embedding=embeddings)
+    
+    def search(self, query, top_k=None, threshold=None, strategy='semantic', doc_title=None, docs_type=None):
+        """
+        Search database with optional filters.
+
+        :param query: Search query string
+        :param top_k: Number of results to return
+        :param threshold: Score threshold for semantic search
+        :param strategy: Search strategy (default: 'semantic')
+        :param doc_title: Filter by document title
+        :param docs_type: Filter by document type
+        :return: List of SearchResult objects
+        """
+        filters = self._build_filter(doc_title=doc_title, docs_type=docs_type)
+        logger.info("Metadata filters built")
+
+        if strategy == 'semantic':
+            return self._semantic_search(query=query, top_k=top_k, threshold=threshold, filters=filters)
+
+    def _semantic_search(self, query, top_k=None, threshold=None, filters=None):
+        """Search the vectorstore using semantic search."""
+        if top_k is None and threshold is None:
+            top_k = self.default_top_k
+        
+        max_k = top_k or 50
+        
+        scored_docs = self.vectorstore.similarity_search_with_score(
+            query=query,
+            k=max_k,
+            filter=filters
+        )
+        
+        logger.info(f"Similar documents retrieved: {len(scored_docs)}")
+        
+        results = []
+        for doc, score in scored_docs:
+            if threshold is not None and score < threshold:
+                continue
+                
+            # If we've reached top_k docs and no threshold is set, stop
+            if top_k is not None and len(results) >= top_k and threshold is None:
+                break
+                
+            results.append(SearchResult(doc.page_content, doc.metadata, score))
+            
+        logger.info(f"Filtered to {len(results)} results")
+        return results
     
     def _build_filter(self, **kwargs):
             """Build filter conditions to search the vectorstore."""
@@ -44,56 +90,6 @@ class DocsiteSearch:
             
             # If multiple conditions, combine them with $and
             return {"$and": conditions}
-    
-    def _semantic_search(self, query, top_k=None, threshold=None, filters=None):
-        """Search the vectorstore using semantic search."""
-        if top_k is None and threshold is None:
-            top_k = self.default_top_k
-        
-        # Always set a reasonable maximum to avoid potential performance issues
-        max_k = top_k or 100  # Limit to 100 if using threshold-only
-        
-        # Get scored results - we need scores for threshold filtering
-        scored_docs = self.vectorstore.similarity_search_with_score(
-            query=query,
-            k=max_k,
-            filter=filters
-        )
-        
-        logger.info(f"Similar documents retrieved: {len(scored_docs)}")
-        
-        results = []
-        for doc, score in scored_docs:
-            # If threshold is set, only include documents with score >= threshold
-            # Note: Pinecone scores are cosine similarity (higher is better)
-            if threshold is not None and score < threshold:
-                continue
-                
-            # If we've reached top_k docs and no threshold is set, stop
-            if top_k is not None and len(results) >= top_k and threshold is None:
-                break
-                
-            results.append(SearchResult(doc.page_content, doc.metadata, score))
-            
-        logger.info(f"Filtered to {len(results)} results")
-        return results
-    
-    def search(self, query, top_k=None, threshold=None, strategy='semantic', doc_title=None, docs_type=None):
-        """
-        Search database with optional filters.
-
-        :param query: Search query string
-        :param top_k: Number of results to return
-        :param strategy: Search strategy (default: 'semantic')
-        :param doc_title: Filter by document title
-        :param docs_type: Filter by document type
-        :return: List of SearchResult objects
-        """
-        filters = self._build_filter(doc_title=doc_title, docs_type=docs_type)
-        logger.info("Metadata filters built")
-
-        if strategy == 'semantic':
-            return self._semantic_search(query=query, top_k=top_k, threshold=threshold, filters=filters)
 
 
 def main(data):
@@ -140,7 +136,7 @@ def main(data):
         logger.error(msg)
         raise ApolloError(500, f"Missing API keys: {', '.join(missing_keys)}", type="BAD_REQUEST")
 
-    # Initialise search engine
+    # Initialize search engine
     docsite_search = DocsiteSearch(**index_params)
     logger.info("Docsite database initialised")
     results = docsite_search.search(**search_params)
