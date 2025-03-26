@@ -187,6 +187,13 @@ def generate_system_message(context_dict):
 def build_prompt(content, history, context):
     system_message = generate_system_message(context)
 
+    # Retrieve relevant docs based on the user's first message
+    retrieved_knowledge = retrieve_knowledge(content, adaptor=context.get("adaptor")) # user_code=context.expression
+
+    # Incorporate the retrieved text into the system message
+    if retrieved_knowledge:
+        system_message.append({"type": "text", "text": f"<retrieved_knowledge>{retrieved_knowledge}</retrieved_knowledge>"})
+
     prompt = []
     prompt.extend(history)
     prompt.append({"role": "user", "content": content})
