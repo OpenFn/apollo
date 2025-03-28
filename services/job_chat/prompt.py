@@ -145,12 +145,15 @@ class Context:
         return hasattr(self, key) and getattr(self, key) is not None
 
 
-def generate_system_message(context_dict):
+def generate_system_message(context_dict, search_results):
     context = context_dict if isinstance(context_dict, Context) else Context(**context_dict)
 
     message = [system_role]
     message.append(f"<job_writing_guide>{job_writing_summary}</job_writing_guide>")
     message.append({"type": "text", "text": ".", "cache_control": {"type": "ephemeral"}})
+
+    if search_results:
+        message.append({"type": "text", "text": f"<retrieved_documentation>{search_results}</retrieved_documentation>"})
 
     if context.has("adaptor"):
         adaptor_string = (
@@ -186,7 +189,6 @@ def generate_system_message(context_dict):
 
 
 def build_prompt(content, history, context, is_new_conversation):
-    system_message = generate_system_message(context)
     retrieved_knowledge = None
 
     # Retrieve relevant docs based on the user's first message at the start of a conversation
@@ -195,10 +197,8 @@ def build_prompt(content, history, context, is_new_conversation):
             retrieved_knowledge = retrieve_knowledge(content, adaptor=context.get("adaptor"))
         except Exception as e:
             logger.error(f"Error retrieving knowledge: {str(e)}")
-
-    # Incorporate the retrieved text into the system message
-    if retrieved_knowledge:
-        system_message.append({"type": "text", "text": f"<retrieved_knowledge>{retrieved_knowledge["search_results"]}</retrieved_knowledge>"})
+    
+    system_message = generate_system_message(context, retrieved_knowledge.get("search_results") if retrieved_knowledge is not None else None)
 
     prompt = []
     prompt.extend(history)
