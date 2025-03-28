@@ -52,6 +52,7 @@ class ChatResponse:
     content: str
     history: List[Dict[str, str]]
     usage: Dict[str, Any]
+    rag: Dict[str, Any]
 
 
 class AnthropicClient:
@@ -69,8 +70,9 @@ class AnthropicClient:
         Generate a response using the Claude API with improved error handling and response processing.
         """
         history = history.copy() if history else []
+        is_new_conversation = len(history) == 0
 
-        system_message, prompt = build_prompt(content, history, context)
+        system_message, prompt, retrieved_knowledge = build_prompt(content, history, context, is_new_conversation=is_new_conversation)
 
         message = self.client.beta.prompt_caching.messages.create(
             max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
@@ -100,6 +102,7 @@ class AnthropicClient:
             content=response,
             history=updated_history,
             usage=message.usage.model_dump() if hasattr(message, "usage") else {},
+            rag=retrieved_knowledge
         )
 
 

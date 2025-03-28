@@ -1,4 +1,5 @@
 from util import create_logger, apollo
+from .retrieve_docs import retrieve_knowledge
 
 logger = create_logger("job_chat.prompt")
 
@@ -184,18 +185,23 @@ def generate_system_message(context_dict):
     return list(map(lambda text: text if isinstance(text, dict) else {"type": "text", "text": text}, message))
 
 
-def build_prompt(content, history, context):
+def build_prompt(content, history, context, is_new_conversation):
     system_message = generate_system_message(context)
+    retrieved_knowledge = None
 
-    # Retrieve relevant docs based on the user's first message
-    retrieved_knowledge = retrieve_knowledge(content, adaptor=context.get("adaptor")) # user_code=context.expression
+    # Retrieve relevant docs based on the user's first message at the start of a conversation
+    if is_new_conversation:
+        try:
+            retrieved_knowledge = retrieve_knowledge(content, adaptor=context.get("adaptor"))
+        except Exception as e:
+            logger.error(f"Error retrieving knowledge: {str(e)}")
 
     # Incorporate the retrieved text into the system message
     if retrieved_knowledge:
-        system_message.append({"type": "text", "text": f"<retrieved_knowledge>{retrieved_knowledge}</retrieved_knowledge>"})
+        system_message.append({"type": "text", "text": f"<retrieved_knowledge>{retrieved_knowledge["search_results"]}</retrieved_knowledge>"})
 
     prompt = []
     prompt.extend(history)
     prompt.append({"role": "user", "content": content})
 
-    return (system_message, prompt)
+    return (system_message, prompt, retrieved_knowledge)

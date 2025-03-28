@@ -26,7 +26,12 @@ def retrieve_knowledge(user_question, adaptor=None):
             threshold=config["threshold"]
         )
     
-    results = {"search_results": search_results, "search_queries": search_queries}
+    results = {
+        "search_results": search_results, 
+        "search_queries": search_queries,
+        "config_version": config.get("config_version"),
+        "prompts_version": config.get("prompts_version")
+    }
     
     return results
 
