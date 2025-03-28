@@ -1,10 +1,12 @@
 import os
 from dotenv import load_dotenv
+from pinecone import Pinecone
 from langchain_pinecone import PineconeVectorStore
 from langchain_openai import OpenAIEmbeddings
 from util import create_logger, ApolloError
 from embeddings.embeddings import SearchResult
 logger = create_logger("DocsiteSearch")
+
 
 class DocsiteSearch:
     """
@@ -15,10 +17,15 @@ class DocsiteSearch:
     :param default_top_k: Default number of results to return (default: 5)
     :param embeddings: LangChain embedding type (default: OpenAIEmbeddings())
     """
-    def __init__(self, collection_name, index_name="docsite", default_top_k=5, embeddings=OpenAIEmbeddings()):
-        self.collection_name = collection_name
+    def __init__(self, collection_name=None, index_name="docsite", default_top_k=5, embeddings=OpenAIEmbeddings()):
         self.index_client = index_name
         self.default_top_k = default_top_k
+
+        if collection_name is None:
+            logger.info("Collection name not provided; retrieving the most recent collection name.")
+            collection_name = self._get_most_recent_namespace()
+
+        self.collection_name = collection_name
         self.vectorstore = PineconeVectorStore(index_name=index_name, namespace=collection_name, embedding=embeddings)
     
     def search(self, query, top_k=None, threshold=None, strategy='semantic', doc_title=None, docs_type=None):
@@ -90,12 +97,33 @@ class DocsiteSearch:
             
             # If multiple conditions, combine them with $and
             return {"$and": conditions}
+    
+    def _get_most_recent_namespace(self):
+            """Retrieve the most recent docsite upload by collection name from Pinecone."""
+            
+            pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY"))
+            index = pc.Index("docsite")
+            index_stats = index.describe_index_stats()
+            namespaces = index_stats.get('namespaces', {}).keys()
+
+            valid_namespaces = sorted(
+                (ns for ns in namespaces if ns.startswith("docsite-") and ns[8:].isdigit() and len(ns) == 16),
+                reverse=True
+            )
+
+            if not valid_namespaces:
+                raise ApolloError(404, "No valid namespaces found in the index.", type="NOT_FOUND")
+
+            most_recent_namespace = valid_namespaces[0]
+            logger.info(f"Most recent docsite collection name found: {most_recent_namespace}")
+
+            return most_recent_namespace
 
 
 def main(data):
     logger.info("Starting...")
 
-    required_fields = ["query", "collection_name"]
+    required_fields = ["query"]
 
     missing = [field for field in required_fields if field not in data]
     
@@ -103,12 +131,12 @@ def main(data):
         logger.error(f"Missing required fields in data: {', '.join(missing)}")
         return
 
-    index_params = {"collection_name": data["collection_name"]}
+    index_params = {}
     search_params = {"query": data["query"]}
 
     # Add optional parameters
     optional_search_params = ["docs_type", "doc_title", "top_k", "threshold", "strategy"]
-    optional_index_params = ["index_name", "default_top_k", "embeddings"]
+    optional_index_params = ["collection_name", "index_name", "default_top_k", "embeddings"]
 
     for key in optional_search_params:
         if key in data:
