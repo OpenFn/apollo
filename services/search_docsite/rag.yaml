@@ -1,6 +1,6 @@
 config_version: 1.0
-llm_search_decision: "claude-3-5-sonnet-20241022"
-llm_retrieval: "claude-3-5-sonnet-20241022"
+llm_search_decision: "claude-3-7-sonnet-20250219"
+llm_retrieval: "claude-3-7-sonnet-20250219"
 threshold: 0.79
 top_k: 5
 temperature: 0

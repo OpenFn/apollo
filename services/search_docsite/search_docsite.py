@@ -15,7 +15,7 @@ class DocsiteSearch:
     :param default_top_k: Default number of results to return (default: 5)
     :param embeddings: LangChain embedding type (default: OpenAIEmbeddings())
     """
-    def __init__(self, collection_name, index_name="docsite", default_top_k=5, embeddings=OpenAIEmbeddings()):
+    def __init__(self, collection_name="docsite-20250225", index_name="docsite", default_top_k=5, embeddings=OpenAIEmbeddings()):
         self.collection_name = collection_name
         self.index_client = index_name
         self.default_top_k = default_top_k

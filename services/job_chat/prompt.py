@@ -189,12 +189,18 @@ def generate_system_message(context_dict, search_results):
 
 
 def build_prompt(content, history, context, is_new_conversation):
-    retrieved_knowledge = None
+    retrieved_knowledge = {
+        "search_results": [],
+        "search_results_sections": [],
+        "search_queries": [],
+        "config_version": "",
+        "prompts_version": ""
+    }
 
     # Retrieve relevant docs based on the user's first message at the start of a conversation
     if is_new_conversation:
         try:
-            retrieved_knowledge = retrieve_knowledge(content, adaptor=context.get("adaptor"))
+            retrieved_knowledge = retrieve_knowledge(content, adaptor=context.get("adaptor", ""))
         except Exception as e:
             logger.error(f"Error retrieving knowledge: {str(e)}")
     

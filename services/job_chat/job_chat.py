@@ -42,7 +42,7 @@ class Payload:
 
 @dataclass
 class ChatConfig:
-    model: str = "claude-3-5-sonnet-20240620"
+    model: str = "claude-3-7-sonnet-20250219"
     max_tokens: int = 1024
     api_key: Optional[str] = None
 

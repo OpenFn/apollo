@@ -6,18 +6,34 @@ from rag_config_loader import ConfigLoader
 
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-docsite_search = DocsiteSearch()
 
 config_loader = ConfigLoader(config_path="rag.yaml", prompts_path="rag_prompts.yaml")
 config = config_loader.config
 
 def retrieve_knowledge(user_question, adaptor=None):
-    """Use LLM calls and semantic search to retrieve documentation sections if needed."""
+    """
+    Retrieve relevant documentation sections based on user's question.
+    
+    Uses LLM to determine if documentation search is needed, then generates
+    search queries and retrieves matching documentation sections.
+    
+    :param user_question: The question or message from the user
+    :param adaptor: Optional adaptor added as context to the question
+    :return: Dictionary containing:
+        :search_results: List of search result objects
+        :search_results_sections: List of document titles from search results
+        :search_queries: List of generated search queries
+        :config_version: Version of the configuration used
+        :prompts_version: Version of the prompts used
+    """
+
     user_context = format_context(adaptor)
     docs_decision = needs_docs(user_question, user_context)
 
     search_results = []
+    search_results_sections = []
     search_queries = []
+
     if docs_decision.lower().startswith("true"):
         search_queries = generate_queries(user_question, user_context="")
         search_results = search_docs(
@@ -25,9 +41,12 @@ def retrieve_knowledge(user_question, adaptor=None):
             top_k=config["top_k"], 
             threshold=config["threshold"]
         )
+        search_results = list(set(search_results))
+        search_results_sections = list(set(result.metadata["doc_title"] for result in search_results))
     
     results = {
-        "search_results": search_results, 
+        "search_results": search_results,
+        "search_results_sections": search_results_sections,
         "search_queries": search_queries,
         "config_version": config.get("config_version"),
         "prompts_version": config.get("prompts_version")
@@ -73,6 +92,7 @@ def generate_queries(user_question, user_context=""):
 
 def search_docs(search_queries, top_k, threshold):
     """Search the docsite vector store using search queries."""
+    docsite_search = DocsiteSearch()
     search_results = []
     for q in search_queries:
         query_search_result = docsite_search.search(
