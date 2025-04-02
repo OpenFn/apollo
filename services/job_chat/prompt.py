@@ -188,7 +188,7 @@ def generate_system_message(context_dict, search_results):
     return list(map(lambda text: text if isinstance(text, dict) else {"type": "text", "text": text}, message))
 
 
-def build_prompt(content, history, context, is_new_conversation):
+def build_prompt(content, history, context):
     retrieved_knowledge = {
         "search_results": [],
         "search_results_sections": [],
@@ -197,12 +197,19 @@ def build_prompt(content, history, context, is_new_conversation):
         "prompts_version": ""
     }
 
-    # Retrieve relevant docs based on the user's first message at the start of a conversation
-    if is_new_conversation:
-        try:
-            retrieved_knowledge = retrieve_knowledge(content, adaptor=context.get("adaptor", ""))
-        except Exception as e:
-            logger.error(f"Error retrieving knowledge: {str(e)}")
+    # # Check if we need to retrieve relevant docs based on the user's first message, at the start of a conversation
+    # if is_new_conversation:
+    #     try:
+    #         retrieved_knowledge = retrieve_knowledge(content, adaptor=context.get("adaptor", ""))
+    #     except Exception as e:
+    #         logger.error(f"Error retrieving knowledge: {str(e)}")
+
+    # Check if we need to retrieve relevant docs based on the full conversation, every conversation turn
+    try:
+        retrieved_knowledge = retrieve_knowledge(content, history, adaptor=context.get("adaptor", ""))
+    except Exception as e:
+        logger.error(f"Error retrieving knowledge: {str(e)}")
+
     
     system_message = generate_system_message(context, retrieved_knowledge.get("search_results") if retrieved_knowledge is not None else None)
 
