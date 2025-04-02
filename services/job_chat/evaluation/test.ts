@@ -1,15 +1,13 @@
 import { loadQuestions } from "./load-questions";
 
 const questions = await loadQuestions();
-console.log(questions);
-process.exit(0);
+
+console.log(`Asking ${questions.length} questions...`);
 const results = [];
 
 for (const q of questions) {
-  console.log(q);
-
   const payload = {
-    content: q.question,
+    content: q.question ?? q.message,
     history: [],
     context: {
       adaptor: q.adaptor,
@@ -18,6 +16,8 @@ for (const q of questions) {
     },
     api_key: process.env.ANTHROPIC_API_KEY,
   };
+  console.log("Q:", payload.content);
+  console.log();
   const response = await fetch({
     url: "http://localhost:3000/services/job_chat",
     method: "POST",
@@ -28,16 +28,26 @@ for (const q of questions) {
   });
   const result = await response.json();
 
-  results.push({
-    q: q.question,
-    a: result.response,
-  });
+  if (!result.response) {
+    console.error("Error in response!!");
+    console.error(result);
+  } else {
+    console.log(result.response);
+    results.push({
+      q: q.question,
+      a: result.response,
+    });
+    console.log();
+    console.log();
+  }
 }
 
 const output = [];
 for (const { q, a } of results) {
-  output.push(`> ${q}
+  output.push(`> **${q}
 
 ${a}`);
 }
+
+console.log(`Writing  ${output.length} answers to output.md`);
 Bun.write("output.md", output.join("\n---\n"));
