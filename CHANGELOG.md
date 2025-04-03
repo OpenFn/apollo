@@ -1,12 +1,18 @@
 # apollo
 
+## 0.9.1
+
+### Patch Changes
+
+- job_chat: update Claude to 3.7
+
 ## 0.9.0
 
 ### Minor Changes
 
 - c0e391c: Add new docsite rag
-- 14c149d: Add a `/status` endpoint which returns the status of server-managed API
-  keys
+- 14c149d: Add a `/status` endpoint which returns the status of server-managed
+  API keys
 
 ## 0.8.0
 
