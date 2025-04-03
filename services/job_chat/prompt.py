@@ -153,7 +153,8 @@ def generate_system_message(context_dict, search_results):
     message.append({"type": "text", "text": ".", "cache_control": {"type": "ephemeral"}})
 
     if search_results:
-        message.append({"type": "text", "text": f"<retrieved_documentation>{search_results}</retrieved_documentation>"})
+        search_results = format_search_results(search_results)
+        message.append({"type": "text", "text": f"<retrieved_documentation>Search results for the user query, which may or may not be relevant:\n\n{search_results}</retrieved_documentation>"})
 
     if context.has("adaptor"):
         adaptor_string = (
@@ -187,6 +188,11 @@ def generate_system_message(context_dict, search_results):
 
     return list(map(lambda text: text if isinstance(text, dict) else {"type": "text", "text": text}, message))
 
+def format_search_results(search_results):
+    return '\n'.join([
+        f'search result: "{result.text}", source: "{result.metadata.get("doc_title", "")} {result.metadata.get("docs_type", "")}"'
+        for result in search_results
+    ])
 
 def build_prompt(content, history, context):
     retrieved_knowledge = {
@@ -206,12 +212,12 @@ def build_prompt(content, history, context):
 
     # Check if we need to retrieve relevant docs based on the full conversation, every conversation turn
     try:
-        retrieved_knowledge = retrieve_knowledge(content, history, adaptor=context.get("adaptor", ""))
+        retrieved_knowledge = retrieve_knowledge(content=content, history=history, code=context.get("expression", ""), adaptor=context.get("adaptor", ""))
     except Exception as e:
         logger.error(f"Error retrieving knowledge: {str(e)}")
 
     
-    system_message = generate_system_message(context, retrieved_knowledge.get("search_results") if retrieved_knowledge is not None else None)
+    system_message = generate_system_message(context_dict=context, search_results=retrieved_knowledge.get("search_results") if retrieved_knowledge is not None else None)
 
     prompt = []
     prompt.extend(history)

@@ -9,7 +9,7 @@ prompts:
     Answer nothing but True or False.
 
   needs_docs_user_prompt: |
-    {history}{user_context}The user question is as follows: "{user_question}"
+    {user_context}The user question is as follows: "{user_question}"
 
   search_docs_system_prompt: |
     You are an assistant for a solutions engineer helping a user write a job for our platform.
@@ -33,4 +33,4 @@ prompts:
     Return NOTHING but this JSON array.
 
   search_docs_user_prompt: |
-    {history}{user_context}The user question is as follows: "{user_question}"
+    {user_context}The user question is as follows: "{user_question}"

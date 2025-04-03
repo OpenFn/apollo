@@ -10,14 +10,14 @@ client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 config_loader = ConfigLoader(config_path="rag.yaml", prompts_path="rag_prompts.yaml")
 config = config_loader.config
 
-def retrieve_knowledge(user_question, history, adaptor=None):
+def retrieve_knowledge(content, history, code="", adaptor=""):
     """
     Retrieve relevant documentation sections based on user's question.
     
     Uses LLM to determine if documentation search is needed, then generates
     search queries and retrieves matching documentation sections.
     
-    :param user_question: The question or message from the user
+    :param content: The question or message from the user
     :param adaptor: Optional adaptor added as context to the question
     :return: Dictionary containing:
         :search_results: List of search result objects
@@ -27,16 +27,15 @@ def retrieve_knowledge(user_question, history, adaptor=None):
         :prompts_version: Version of the prompts used
     """
 
-    user_context = format_context(adaptor)
-    history = format_history(history)
-    docs_decision = needs_docs(user_question, history, user_context)
+    user_context = format_context(adaptor, code, history)
+    docs_decision = needs_docs(content, user_context)
 
     search_results = []
     search_results_sections = []
     search_queries = []
 
     if docs_decision.lower().startswith("true"):
-        search_queries = generate_queries(user_question, history, user_context="")
+        search_queries = generate_queries(content, user_context)
         search_results = search_docs(
             search_queries, 
             top_k=config["top_k"], 
@@ -55,13 +54,12 @@ def retrieve_knowledge(user_question, history, adaptor=None):
     
     return results
 
-def needs_docs(user_question, history, user_context=""):
+def needs_docs(content, user_context=""):
     """Use LLM to decide whether the question requires consulting documentation."""
     formatted_user_prompt = config_loader.get_prompt(
         "needs_docs_user_prompt",
-        history=history,
         user_context=user_context, 
-        user_question=user_question
+        user_question=content
     )
     
     response_text = call_llm(
@@ -73,13 +71,12 @@ def needs_docs(user_question, history, user_context=""):
     
     return response_text
 
-def generate_queries(user_question, history, user_context=""):
+def generate_queries(content, user_context=""):
     """Generate document search queries based on the user question."""
     formatted_user_prompt = config_loader.get_prompt(
         "search_docs_user_prompt",
-        history=history,
         user_context=user_context, 
-        user_question=user_question
+        user_question=content
     )
     
     text = call_llm(
@@ -108,13 +105,20 @@ def search_docs(search_queries, top_k, threshold):
     
     return search_results
 
-def format_context(adaptor):
+def format_context(adaptor, code, history):
     """Optionally add more context about the user's job for the LLM."""
-    return f"For context, the user is using the {adaptor} adaptor. " if adaptor else ""
-
-def format_history(history):
-    """Summarise the conversation history for the LLM."""
-    return f"For context, here is the conversation history: {history}.\n " if history else ""
+    formatted_text = ""
+    
+    if adaptor:
+        formatted_text += f"For context, the user is using the {adaptor} adaptor. "
+    
+    if code:
+        formatted_text += f"Here is the user's code:\n\n {code}\n\n "
+    
+    if history:
+        formatted_text += f"Here is the conversation history: {history}.\n "
+    
+    return formatted_text
 
 def call_llm(model, temperature, system_prompt, user_prompt):
     """Helper method to make LLM calls."""
