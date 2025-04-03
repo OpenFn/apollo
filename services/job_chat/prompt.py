@@ -154,7 +154,8 @@ def generate_system_message(context_dict, search_results):
 
     if search_results:
         search_results = format_search_results(search_results)
-        message.append({"type": "text", "text": f"<retrieved_documentation>Search results for the user query, which may or may not be relevant:\n\n{search_results}</retrieved_documentation>"})
+        message.append(f"<retrieved_documentation>Search results for the user query, which may or may not be relevant:\n\n{search_results}</retrieved_documentation>")
+        message.append({"type": "text", "text": ".", "cache_control": {"type": "ephemeral"}})
 
     if context.has("adaptor"):
         adaptor_string = (
