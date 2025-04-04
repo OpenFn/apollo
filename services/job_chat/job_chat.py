@@ -72,7 +72,7 @@ class AnthropicClient:
 
         system_message, prompt = build_prompt(content, history, context)
 
-        message = self.client.beta.prompt_caching.messages.create(
+        message = self.client.messages.create(
             max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
         )
 
