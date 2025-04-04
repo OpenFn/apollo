@@ -33,7 +33,7 @@ def retrieve_knowledge(content, history, code="", adaptor=""):
     search_results = []
     search_results_sections = []
     search_queries = []
-    generate_queries_usage = None
+    generate_queries_usage = {}
 
     if docs_decision.lower().startswith("true"):
         search_queries, generate_queries_usage = generate_queries(content, user_context)
@@ -147,4 +147,4 @@ def call_llm(model, temperature, system_prompt, user_prompt):
             }
         ]
     )
-    return (message.content[0].text, message.usage)
+    return (message.content[0].text, message.usage.model_dump())

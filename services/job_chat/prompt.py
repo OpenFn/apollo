@@ -201,7 +201,11 @@ def build_prompt(content, history, context, previous_system_prompt=None):
         "search_results_sections": [],
         "search_queries": [],
         "config_version": "",
-        "prompts_version": ""
+        "prompts_version": "",
+        "usage": {
+            "needs_docs": {},
+            "generate_queries": {}
+        }
     }
     
     if previous_system_prompt:

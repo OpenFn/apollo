@@ -51,6 +51,7 @@ class ChatConfig:
 class ChatResponse:
     content: str
     history: List[Dict[str, str]]
+    system_message: str
     usage: Dict[str, Any]
     rag: Dict[str, Any]
 
@@ -97,12 +98,31 @@ class AnthropicClient:
             {"role": "assistant", "content": response},
         ]
 
+        usage = self.sum_usage(
+            message.usage.model_dump() if hasattr(message, "usage") else {},
+            *[usage_data for usage_key, usage_data in retrieved_knowledge.get("usage", {}).items()]
+        )
+
         return ChatResponse(
             content=response,
             history=updated_history,
-            usage=message.usage.model_dump() if hasattr(message, "usage") else {},
+            system_message=system_message,
+            usage=usage,
             rag=retrieved_knowledge
         )
+
+    def sum_usage(self, *usage_objects):
+        """Sum multiple Usage object token counts and return a count dictionary."""
+        result = {}
+        
+        for usage in usage_objects:
+            for field in ["cache_creation_input_tokens", "cache_read_input_tokens", "input_tokens", "output_tokens"]:
+                value = usage.get(field)
+                if value is not None:
+                    result[field] = result.get(field, 0) + value
+        
+        return result
+
 
 
 def main(data_dict: dict) -> dict:
@@ -117,7 +137,7 @@ def main(data_dict: dict) -> dict:
 
         result = client.generate(content=data.content, history=data_dict.get("history", []), context=data.context, previous_system_prompt=data_dict.get("previous_system_prompt"))
 
-        return {"response": result.content, "history": result.history, "usage": result.usage, "rag": result.rag}
+        return {"response": result.content, "history": result.history, "system_message": result.system_message, "usage": result.usage, "rag": result.rag}
 
     except ValueError as e:
         raise ApolloError(400, str(e), type="BAD_REQUEST")
