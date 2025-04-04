@@ -28,14 +28,15 @@ def retrieve_knowledge(content, history, code="", adaptor=""):
     """
 
     user_context = format_context(adaptor, code, history)
-    docs_decision = needs_docs(content, user_context)
+    docs_decision, needs_docs_usage = needs_docs(content, user_context)
 
     search_results = []
     search_results_sections = []
     search_queries = []
+    generate_queries_usage = None
 
     if docs_decision.lower().startswith("true"):
-        search_queries = generate_queries(content, user_context)
+        search_queries, generate_queries_usage = generate_queries(content, user_context)
         search_results = search_docs(
             search_queries, 
             top_k=config["top_k"], 
@@ -49,7 +50,11 @@ def retrieve_knowledge(content, history, code="", adaptor=""):
         "search_results_sections": search_results_sections,
         "search_queries": search_queries,
         "config_version": config.get("config_version"),
-        "prompts_version": config.get("prompts_version")
+        "prompts_version": config.get("prompts_version"),
+        "usage": {
+            "needs_docs": needs_docs_usage,
+            "generate_queries": generate_queries_usage
+        }
     }
     
     return results
@@ -62,14 +67,14 @@ def needs_docs(content, user_context=""):
         user_question=content
     )
     
-    response_text = call_llm(
+    response_text, usage = call_llm(
         model=config["llm_search_decision"],
         temperature=config["temperature"],
         system_prompt=config_loader.prompts["prompts"]["needs_docs_system_prompt"],
         user_prompt=formatted_user_prompt
     )
     
-    return response_text
+    return (response_text, usage)
 
 def generate_queries(content, user_context=""):
     """Generate document search queries based on the user question."""
@@ -79,7 +84,7 @@ def generate_queries(content, user_context=""):
         user_question=content
     )
     
-    text = call_llm(
+    text, usage = call_llm(
         model=config["llm_retrieval"],
         temperature=config["temperature"],
         system_prompt=config_loader.prompts["prompts"]["search_docs_system_prompt"],
@@ -87,8 +92,11 @@ def generate_queries(content, user_context=""):
     )
     
     answer_parsed = json.loads(text)
+
+    if len(answer_parsed) >= 4:
+        answer_parsed = answer_parsed[:4]
     
-    return answer_parsed
+    return (answer_parsed, usage)
 
 def search_docs(search_queries, top_k, threshold):
     """Search the docsite vector store using search queries."""
@@ -139,4 +147,4 @@ def call_llm(model, temperature, system_prompt, user_prompt):
             }
         ]
     )
-    return message.content[0].text
+    return (message.content[0].text, message.usage)

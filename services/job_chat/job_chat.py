@@ -70,11 +70,10 @@ class AnthropicClient:
         Generate a response using the Claude API with improved error handling and response processing.
         """
         history = history.copy() if history else []
-        # is_new_conversation = len(history) == 0
 
-        system_message, prompt, retrieved_knowledge = build_prompt(content, history, context) # is_new_conversation=is_new_conversation
+        system_message, prompt, retrieved_knowledge = build_prompt(content, history, context)
 
-        message = self.client.beta.prompt_caching.messages.create(
+        message = self.client.messages.create(
             max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
         )
 
@@ -118,7 +117,7 @@ def main(data_dict: dict) -> dict:
 
         result = client.generate(content=data.content, history=data_dict.get("history", []), context=data.context)
 
-        return {"response": result.content, "history": result.history, "usage": result.usage}
+        return {"response": result.content, "history": result.history, "usage": result.usage, "rag": result.rag}
 
     except ValueError as e:
         raise ApolloError(400, str(e), type="BAD_REQUEST")

@@ -204,14 +204,6 @@ def build_prompt(content, history, context):
         "prompts_version": ""
     }
 
-    # # Check if we need to retrieve relevant docs based on the user's first message, at the start of a conversation
-    # if is_new_conversation:
-    #     try:
-    #         retrieved_knowledge = retrieve_knowledge(content, adaptor=context.get("adaptor", ""))
-    #     except Exception as e:
-    #         logger.error(f"Error retrieving knowledge: {str(e)}")
-
-    # Check if we need to retrieve relevant docs based on the full conversation, every conversation turn
     try:
         retrieved_knowledge = retrieve_knowledge(content=content, history=history, code=context.get("expression", ""), adaptor=context.get("adaptor", ""))
     except Exception as e:

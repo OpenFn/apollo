@@ -19,6 +19,8 @@ prompts:
     Your answer should detail the searches that should be done on the documentation.
     Stick to one search query only per topic. If the user question requires information across
     distinct topics (e.g. two different adaptors; CLI and API instructions), then list additional queries.
+    The search query will be used for semantic search where it is best to include a few words of context,
+    e.g. not just "http", but rather, "http adaptor error messages".
 
     A search consists of a query string, and an optional filter for doc_type. 
     This can be either adaptor_docs or general_docs.
