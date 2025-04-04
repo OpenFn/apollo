@@ -1,5 +1,11 @@
 # apollo
 
+## 0.9.2
+
+### Patch Changes
+
+- aef476d: Update claude model from 3.5 to 3.7
+
 ## 0.9.1
 
 ### Patch Changes
