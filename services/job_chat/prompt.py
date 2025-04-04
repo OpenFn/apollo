@@ -195,7 +195,7 @@ def format_search_results(search_results):
         for result in search_results
     ])
 
-def build_prompt(content, history, context):
+def build_prompt(content, history, context, previous_system_prompt=None):
     retrieved_knowledge = {
         "search_results": [],
         "search_results_sections": [],
@@ -203,17 +203,26 @@ def build_prompt(content, history, context):
         "config_version": "",
         "prompts_version": ""
     }
-
-    try:
-        retrieved_knowledge = retrieve_knowledge(content=content, history=history, code=context.get("expression", ""), adaptor=context.get("adaptor", ""))
-    except Exception as e:
-        logger.error(f"Error retrieving knowledge: {str(e)}")
-
     
-    system_message = generate_system_message(context_dict=context, search_results=retrieved_knowledge.get("search_results") if retrieved_knowledge is not None else None)
+    if previous_system_prompt:
+      system_message = previous_system_prompt
+    else:
+      try:
+          retrieved_knowledge = retrieve_knowledge(
+              content=content, 
+              history=history, 
+              code=context.get("expression", ""), 
+              adaptor=context.get("adaptor", "")
+          )
+      except Exception as e:
+          logger.error(f"Error retrieving knowledge: {str(e)}")
+
+      system_message = generate_system_message(
+          context_dict=context, 
+          search_results=retrieved_knowledge.get("search_results") if retrieved_knowledge is not None else None)
 
     prompt = []
     prompt.extend(history)
     prompt.append({"role": "user", "content": content})
-
+      
     return (system_message, prompt, retrieved_knowledge)

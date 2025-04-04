@@ -64,14 +64,14 @@ class AnthropicClient:
         self.client = Anthropic(api_key=self.api_key)
 
     def generate(
-        self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[str] = None
+        self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[str] = None, previous_system_prompt: Optional[str] = None
     ) -> ChatResponse:
         """
         Generate a response using the Claude API with improved error handling and response processing.
         """
         history = history.copy() if history else []
 
-        system_message, prompt, retrieved_knowledge = build_prompt(content, history, context)
+        system_message, prompt, retrieved_knowledge = build_prompt(content, history, context, previous_system_prompt)
 
         message = self.client.messages.create(
             max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
@@ -115,7 +115,7 @@ def main(data_dict: dict) -> dict:
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
 
-        result = client.generate(content=data.content, history=data_dict.get("history", []), context=data.context)
+        result = client.generate(content=data.content, history=data_dict.get("history", []), context=data.context, previous_system_prompt=data_dict.get("previous_system_prompt"))
 
         return {"response": result.content, "history": result.history, "usage": result.usage, "rag": result.rag}
 
