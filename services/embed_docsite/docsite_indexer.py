@@ -97,6 +97,30 @@ class DocsiteIndexer:
         """
         self.index.delete(delete_all=True, namespace=self.collection_name)
 
+    def delete_old_collections(self, max_collections=3):
+            """Retrieve the oldest docsite uploads by collection name from Pinecone and delete them."""
+            
+            logger.info(f"Fetching outdated docsite collections")
+            pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY"))
+            index = pc.Index("docsite")
+            index_stats = index.describe_index_stats()
+            namespaces = index_stats.get('namespaces', {}).keys()
+            valid_namespaces = sorted(
+                (ns for ns in namespaces if ns.startswith("docsite-") and ns[8:].isdigit() and len(ns) == 16),
+                reverse=False
+            )
+            if len(valid_namespaces) > max_collections:
+                logger.info(f"Deleting outdated docsite collections")
+                for old_collection in valid_namespaces[:max_collections]:
+                    self.index.delete(delete_all=True, namespace=old_collection)
+                    logger.info(f"Deleted collection {old_collection}")
+
+            if not valid_namespaces:
+                logger.info(f"No valid namespaces found in the index when deleting old collections.")
+
+            most_recent_uploads = valid_namespaces[max_collections:]
+            logger.info(f"Most recent docsite collections remaining in index: {most_recent_uploads}")
+
     def create_index(self):
         """Creates a new Pinecone index if it does not exist."""
         

@@ -14,15 +14,7 @@ def main(data):
     logger.info("Starting...")
 
     # Parse payload
-    # Get required fields
-    required_fields = ["collection_name"]
-    missing = [field for field in required_fields if field not in data]
-    
-    if missing:
-        logger.error(f"Missing required fields in data: {', '.join(missing)}")
-        return
-    
-    collection_name = data["collection_name"]
+    collection_name = data.get("collection_name") or f"docsite-{datetime.now().strftime('%Y%m%d%H%M')}"
 
     # Get selection of doc types to upload, or default to all
     docs_to_upload = data.get("docs_to_upload", ["adaptor_docs", "general_docs", "adaptor_functions"])
