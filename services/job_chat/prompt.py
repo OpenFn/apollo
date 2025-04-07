@@ -191,7 +191,7 @@ def generate_system_message(context_dict, search_results):
 
 def format_search_results(search_results):
     return '\n'.join([
-        f'search result: "{result.text}", source: "{result.metadata.get("doc_title", "")} {result.metadata.get("docs_type", "")}"'
+        f'search result: "{result.get("text")}", source: "{result.get("metadata", {}).get("doc_title", "")} {result.get("medatada", {}).get("docs_type", "")}"'
         for result in search_results
     ])
 

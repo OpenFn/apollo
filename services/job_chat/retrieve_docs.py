@@ -1,13 +1,15 @@
 import os
 import json
 import anthropic
-from search_docsite import DocsiteSearch
-from rag_config_loader import ConfigLoader
+from search_docsite.search_docsite import DocsiteSearch
+from .rag_config_loader import ConfigLoader
+# from search_docsite import DocsiteSearch
+# from rag_config_loader import ConfigLoader
 
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-config_loader = ConfigLoader(config_path="rag.yaml", prompts_path="rag_prompts.yaml")
+config_loader = ConfigLoader(config_path="job_chat/rag.yaml", prompts_path="job_chat/rag_prompts.yaml")
 config = config_loader.config
 
 def retrieve_knowledge(content, history, code="", adaptor=""):
@@ -46,7 +48,7 @@ def retrieve_knowledge(content, history, code="", adaptor=""):
         search_results_sections = list(set(result.metadata["doc_title"] for result in search_results))
     
     results = {
-        "search_results": search_results,
+        "search_results": [s.to_json() for s in search_results],
         "search_results_sections": search_results_sections,
         "search_queries": search_queries,
         "config_version": config.get("config_version"),
