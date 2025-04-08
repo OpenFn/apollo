@@ -104,7 +104,7 @@ def generate_queries(content, user_context=""):
 
 def search_docs(search_queries, top_k, threshold):
     """Search the docsite vector store using search queries."""
-    docsite_search = DocsiteSearch(collection_name="docsite-20250225") #TODO remove
+    docsite_search = DocsiteSearch()
     search_results = []
     for q in search_queries:
         query_search_result = docsite_search.search(
