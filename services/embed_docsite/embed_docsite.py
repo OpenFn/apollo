@@ -1,6 +1,4 @@
 import os
-import time
-from datetime import datetime
 import json
 from dotenv import load_dotenv
 import pandas as pd
@@ -13,28 +11,17 @@ logger = create_logger("embed_docsite")
 def main(data):
     logger.info("Starting...")
 
-    # Parse payload
-    # Get required fields
-    required_fields = ["collection_name"]
-    missing = [field for field in required_fields if field not in data]
-    
-    if missing:
-        logger.error(f"Missing required fields in data: {', '.join(missing)}")
-        return
-    
-    collection_name = data["collection_name"]
-
     # Get selection of doc types to upload, or default to all
     docs_to_upload = data.get("docs_to_upload", ["adaptor_docs", "general_docs", "adaptor_functions"])
     docs_to_ignore = data.get("docs_to_ignore", ["job-examples.md", "release-notes.md"])
 
     # Get other fields
-    other_params = {}
-    other_param_options = ["index_name"]
+    index_params = {}
+    index_param_options = ["collection_name", "index_name", "max_total_collections"]
 
-    for key in other_param_options:
+    for key in index_param_options:
         if key in data:
-            other_params[key] = data[key]
+            index_params[key] = data[key]
 
     # Set API keys
     load_dotenv(override=True)
@@ -63,7 +50,7 @@ def main(data):
         raise ApolloError(500, f'Missing API keys: {", ".join(missing_keys)}. Add to payload or environment.', type="BAD_REQUEST")
 
     # Initialize indexer
-    docsite_indexer = DocsiteIndexer(collection_name=collection_name, **other_params)
+    docsite_indexer = DocsiteIndexer(**(index_params or {}))
 
     # Add docs
     for docs_type in docs_to_upload:
