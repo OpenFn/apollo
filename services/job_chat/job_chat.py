@@ -51,7 +51,6 @@ class ChatConfig:
 class ChatResponse:
     content: str
     history: List[Dict[str, str]]
-    system_message: str
     usage: Dict[str, Any]
     rag: Dict[str, Any]
 
@@ -65,14 +64,14 @@ class AnthropicClient:
         self.client = Anthropic(api_key=self.api_key)
 
     def generate(
-        self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[str] = None, previous_system_prompt: Optional[str] = None
+        self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[str] = None, rag: Optional[str] = None
     ) -> ChatResponse:
         """
         Generate a response using the Claude API with improved error handling and response processing.
         """
         history = history.copy() if history else []
 
-        system_message, prompt, retrieved_knowledge = build_prompt(content, history, context, previous_system_prompt)
+        system_message, prompt, retrieved_knowledge = build_prompt(content, history, context, rag)
 
         message = self.client.messages.create(
             max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
@@ -106,7 +105,6 @@ class AnthropicClient:
         return ChatResponse(
             content=response,
             history=updated_history,
-            system_message=system_message,
             usage=usage,
             rag=retrieved_knowledge
         )
@@ -135,9 +133,9 @@ def main(data_dict: dict) -> dict:
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
 
-        result = client.generate(content=data.content, history=data_dict.get("history", []), context=data.context, previous_system_prompt=data_dict.get("previous_system_prompt"))
+        result = client.generate(content=data.content, history=data_dict.get("history", []), context=data.context, rag=data_dict.get("meta", {}).get("rag"))
 
-        return {"response": result.content, "history": result.history, "system_message": result.system_message, "usage": result.usage, "rag": result.rag}
+        return {"response": result.content, "history": result.history, "usage": result.usage, "meta": {"rag": result.rag}}
 
     except ValueError as e:
         raise ApolloError(400, str(e), type="BAD_REQUEST")

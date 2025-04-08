@@ -195,7 +195,7 @@ def format_search_results(search_results):
         for result in search_results
     ])
 
-def build_prompt(content, history, context, previous_system_prompt=None):
+def build_prompt(content, history, context, rag=None):
     retrieved_knowledge = {
         "search_results": [],
         "search_results_sections": [],
@@ -208,8 +208,8 @@ def build_prompt(content, history, context, previous_system_prompt=None):
         }
     }
     
-    if previous_system_prompt:
-      system_message = previous_system_prompt
+    if rag:
+      retrieved_knowledge = rag
     else:
       try:
           retrieved_knowledge = retrieve_knowledge(
@@ -221,9 +221,9 @@ def build_prompt(content, history, context, previous_system_prompt=None):
       except Exception as e:
           logger.error(f"Error retrieving knowledge: {str(e)}")
 
-      system_message = generate_system_message(
-          context_dict=context, 
-          search_results=retrieved_knowledge.get("search_results") if retrieved_knowledge is not None else None)
+    system_message = generate_system_message(
+        context_dict=context, 
+        search_results=retrieved_knowledge.get("search_results") if retrieved_knowledge is not None else None)
 
     prompt = []
     prompt.extend(history)
