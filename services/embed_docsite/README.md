@@ -27,21 +27,14 @@ The service uses the DocsiteProcessor to download the documentation and chunk it
 The chunked texts can be viewed in `tmp/split_sections`.
 
 ## Payload Reference
-The input payload is a JSON object. A simple example with default values:
-
-```js
-{
-    "collection_name": "Docsite-20250225", // Name of the collection in the vector database.
-}
-```
-
-An example with all parameters:
+The input payload is a JSON object. All parameters are optional:
 
 ```js
 {
     "docs_to_upload": ["adaptor_docs", "general_docs", "adaptor_functions"], // Select from 3 types of documentation to upload
-    "collection_name": "Docsite-20250225", // Name of the collection in the vector database
-    "index_name": "Docsite", // Name of the index in the vector database (an index contains collections)
-    "docs_to_ignore": ["job-examples.md", "release-notes.md"],
+    "collection_name": "docsite-20250225", // Name of the collection in the vector database (defaults to the current date)
+    "index_name": "docsite", // Name of the index in the vector database (an index contains collections; defaults to docsite)
+    "docs_to_ignore": ["job-examples.md", "release-notes.md"], // Titles of documents that should not be indexed
+    "max_total_collections" : 3 // The max number of collections to keep in the vector database. This will delete older collections by date.
 }
 ```
