@@ -69,7 +69,6 @@ class AnthropicClient:
         Generate a response using the Claude API with improved error handling and response processing.
         """
         history = history.copy() if history else []
-
         system_message, prompt = build_prompt(content, history, context)
 
         message = self.client.messages.create(
@@ -112,7 +111,6 @@ def main(data_dict: dict) -> dict:
 
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
-
         result = client.generate(content=data.content, history=data_dict.get("history", []), context=data.context)
 
         return {"response": result.content, "history": result.history, "usage": result.usage}
