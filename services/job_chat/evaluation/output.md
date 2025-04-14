@@ -36,12 +36,11 @@ For example:
 When you use it with `get()` like in your code, it's a way to dynamically use
 values from your state to construct the URL.
 
-# How do I download all items from a collection from a particular day? Like 29th
+# How do I download all items from a collection from a particular day? Like 29th march 2024? See my input for an example of what my keys look like
 
-march 2024? See my input for an example of what my keys look like Based on your
-input, each item has a key with a format like "YYYYMMDD-ID". To get all items
-from a specific day, you can use the `query` function with the `where` parameter
-to filter by date.
+Based on your input, each item has a key with a format like "YYYYMMDD-ID". To
+get all items from a specific day, you can use the `query` function with the
+`where` parameter to filter by date.
 
 Here's how you can download all items from March 29, 2024:
 
