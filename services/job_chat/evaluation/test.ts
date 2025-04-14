@@ -58,7 +58,7 @@ for (const q of questions) {
 
 const output = [];
 for (const { q, a } of results) {
-  output.push(`> **${q}
+  output.push(`# ${q}
 ${a}`);
 }
 
