@@ -1,0 +1,332 @@
+[
+  {
+    "question": "what is state",
+    "fullResult": {
+      "response": "In OpenFn, `state` is a JavaScript object that contains your data and passes through each operation in your job. It typically has:\n\n1. `state.data` - Contains your current working data\n2. `state.references` - Stores historical information about past operations\n\nEach operation in your job takes the state, does something with it, and returns the modified state to the next operation. When you use `fn()`, you're directly manipulating this state object.\n\nFor example:\n\n```js\nfn(state => {\n  console.log(state.data); // Print current data\n  // Make changes to state\n  return { ...state, data: { ...state.data, newValue: 'hello' } };\n})\n```",
+      "history": [
+        {
+          "role": "user",
+          "content": "what is state"
+        },
+        {
+          "role": "assistant",
+          "content": "In OpenFn, `state` is a JavaScript object that contains your data and passes through each operation in your job. It typically has:\n\n1. `state.data` - Contains your current working data\n2. `state.references` - Stores historical information about past operations\n\nEach operation in your job takes the state, does something with it, and returns the modified state to the next operation. When you use `fn()`, you're directly manipulating this state object.\n\nFor example:\n\n```js\nfn(state => {\n  console.log(state.data); // Print current data\n  // Make changes to state\n  return { ...state, data: { ...state.data, newValue: 'hello' } };\n})\n```"
+        }
+      ],
+      "usage": {
+        "input_tokens": 44,
+        "output_tokens": 165,
+        "cache_creation_input_tokens": 11316,
+        "cache_read_input_tokens": 0
+      }
+    }
+  },
+  {
+    "question": "what does $ mean",
+    "fullResult": {
+      "response": "In OpenFn job code, `$` is a shorthand syntax that refers to the current state object. It lets you access data from state without writing a full `state => state.something` function.\n\nFor example:\n- `$.data` is equivalent to `state.data`\n- `$.configuration.token` is equivalent to `state.configuration.token`\n\nWhen you use it with `get()` like in your code, it's a way to dynamically use values from your state to construct the URL.",
+      "history": [
+        {
+          "role": "user",
+          "content": "what does $ mean"
+        },
+        {
+          "role": "assistant",
+          "content": "In OpenFn job code, `$` is a shorthand syntax that refers to the current state object. It lets you access data from state without writing a full `state => state.something` function.\n\nFor example:\n- `$.data` is equivalent to `state.data`\n- `$.configuration.token` is equivalent to `state.configuration.token`\n\nWhen you use it with `get()` like in your code, it's a way to dynamically use values from your state to construct the URL."
+        }
+      ],
+      "usage": {
+        "input_tokens": 46,
+        "output_tokens": 114,
+        "cache_creation_input_tokens": 13503,
+        "cache_read_input_tokens": 1323
+      }
+    }
+  },
+  {
+    "question": "How do I download all items from a collection from a particular day? Like 29th\nmarch 2024? See my input for an example of what my keys look like",
+    "fullResult": {
+      "response": "Based on your input, each item has a key with a format like \"YYYYMMDD-ID\". To get all items from a specific day, you can use the `query` function with the `where` parameter to filter by date.\n\nHere's how you can download all items from March 29, 2024:\n\n```js\nquery('yourCollectionName', {\n  where: {\n    key: {\n      $regex: '^20240329-'\n    }\n  }\n});\n```\n\nThis will fetch all documents where the key starts with \"20240329-\", which corresponds to all items from March 29, 2024.\n\nIf you want to see more details or options for working with collections, check the documentation at: https://docs.openfn.org/adaptors/packages/collections-docs",
+      "history": [
+        {
+          "role": "user",
+          "content": "How do I download all items from a collection from a particular day? Like 29th\nmarch 2024? See my input for an example of what my keys look like"
+        },
+        {
+          "role": "assistant",
+          "content": "Based on your input, each item has a key with a format like \"YYYYMMDD-ID\". To get all items from a specific day, you can use the `query` function with the `where` parameter to filter by date.\n\nHere's how you can download all items from March 29, 2024:\n\n```js\nquery('yourCollectionName', {\n  where: {\n    key: {\n      $regex: '^20240329-'\n    }\n  }\n});\n```\n\nThis will fetch all documents where the key starts with \"20240329-\", which corresponds to all items from March 29, 2024.\n\nIf you want to see more details or options for working with collections, check the documentation at: https://docs.openfn.org/adaptors/packages/collections-docs"
+        }
+      ],
+      "usage": {
+        "input_tokens": 147,
+        "output_tokens": 185,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 14826
+      }
+    }
+  },
+  {
+    "question": "can you fill out this code for me?",
+    "fullResult": {
+      "response": "Here's a more complete version of your code for creating a FHIR patient and bundle:\n\n```js\nfn(state => {\n  const input = state.data; // take the input from state.data\n  \n  // Create a FHIR patient resource\n  state.patient = {\n    resourceType: \"Patient\",\n    identifier: [\n      {\n        system: \"https://fhir.kemkes.go.id/id/nik\",\n        value: \"1234567890123456\" // Replace with actual NIK\n      }\n    ],\n    active: true,\n    name: [\n      {\n        use: \"official\",\n        family: \"Smith\", // Replace with actual family name\n        given: [\"John\"] // Replace with actual given names\n      }\n    ],\n    gender: \"male\", // Replace with actual gender: male | female | other | unknown\n    birthDate: \"1990-01-01\" // Replace with actual birth date in YYYY-MM-DD format\n  };\n  \n  return state;\n});\n\nfn(state => {\n  // Create a new FHIR bundle containing the patient\n  state.bundle = {\n    resourceType: \"Bundle\",\n    type: \"transaction\",\n    entry: [\n      {\n        resource: state.patient,\n        request: {\n          method: \"POST\",\n          url: \"Patient\"\n        }\n      }\n    ]\n  };\n  \n  return state;\n});\n\n// To send the bundle to SatuSehat, you would use:\n// post('', state.bundle);\n```\n\nThis code:\n1. Creates a basic FHIR patient with required fields\n2. Builds a transaction bundle containing that patient\n3. Includes a commented line showing how to post the bundle\n\nYou'll need to replace the placeholder values with actual patient data from your input.",
+      "history": [
+        {
+          "role": "user",
+          "content": "can you fill out this code for me?"
+        },
+        {
+          "role": "assistant",
+          "content": "Here's a more complete version of your code for creating a FHIR patient and bundle:\n\n```js\nfn(state => {\n  const input = state.data; // take the input from state.data\n  \n  // Create a FHIR patient resource\n  state.patient = {\n    resourceType: \"Patient\",\n    identifier: [\n      {\n        system: \"https://fhir.kemkes.go.id/id/nik\",\n        value: \"1234567890123456\" // Replace with actual NIK\n      }\n    ],\n    active: true,\n    name: [\n      {\n        use: \"official\",\n        family: \"Smith\", // Replace with actual family name\n        given: [\"John\"] // Replace with actual given names\n      }\n    ],\n    gender: \"male\", // Replace with actual gender: male | female | other | unknown\n    birthDate: \"1990-01-01\" // Replace with actual birth date in YYYY-MM-DD format\n  };\n  \n  return state;\n});\n\nfn(state => {\n  // Create a new FHIR bundle containing the patient\n  state.bundle = {\n    resourceType: \"Bundle\",\n    type: \"transaction\",\n    entry: [\n      {\n        resource: state.patient,\n        request: {\n          method: \"POST\",\n          url: \"Patient\"\n        }\n      }\n    ]\n  };\n  \n  return state;\n});\n\n// To send the bundle to SatuSehat, you would use:\n// post('', state.bundle);\n```\n\nThis code:\n1. Creates a basic FHIR patient with required fields\n2. Builds a transaction bundle containing that patient\n3. Includes a commented line showing how to post the bundle\n\nYou'll need to replace the placeholder values with actual patient data from your input."
+        }
+      ],
+      "usage": {
+        "input_tokens": 104,
+        "output_tokens": 430,
+        "cache_creation_input_tokens": 9463,
+        "cache_read_input_tokens": 1323
+      }
+    }
+  },
+  {
+    "question": "What is wrong with this code? I get an error like \"Cannot read properties of\nundefined (reading 'name')\"",
+    "fullResult": {
+      "response": "Your code has a syntax error and possibly a data issue:\n\n1. You're missing a semicolon after `console.log(state.patient.name)`\n2. It seems `state.data.patients[0]` might not exist or doesn't have a `name` property\n\nTry this corrected version:\n\n```js\nfn(state => { \n  // Check if patients array exists and has items\n  if (state.data.patients && state.data.patients.length > 0) {\n    state.patient = state.data.patients[0];\n  } else {\n    state.patient = { name: 'No patient found' };\n  }\n  return state; \n});\n\nfn(state => { \n  console.log(state.patient.name);\n  return state; \n});\n```\n\nThis adds error checking to prevent the undefined error.",
+      "history": [
+        {
+          "role": "user",
+          "content": "What is wrong with this code? I get an error like \"Cannot read properties of\nundefined (reading 'name')\""
+        },
+        {
+          "role": "assistant",
+          "content": "Your code has a syntax error and possibly a data issue:\n\n1. You're missing a semicolon after `console.log(state.patient.name)`\n2. It seems `state.data.patients[0]` might not exist or doesn't have a `name` property\n\nTry this corrected version:\n\n```js\nfn(state => { \n  // Check if patients array exists and has items\n  if (state.data.patients && state.data.patients.length > 0) {\n    state.patient = state.data.patients[0];\n  } else {\n    state.patient = { name: 'No patient found' };\n  }\n  return state; \n});\n\nfn(state => { \n  console.log(state.patient.name);\n  return state; \n});\n```\n\nThis adds error checking to prevent the undefined error."
+        }
+      ],
+      "usage": {
+        "input_tokens": 100,
+        "output_tokens": 200,
+        "cache_creation_input_tokens": 7080,
+        "cache_read_input_tokens": 1323
+      }
+    }
+  },
+  {
+    "question": "What is wrong with this code? I get an error like \"fn is not defined\"",
+    "fullResult": {
+      "response": "The error \"fn is not defined\" occurs because the code is just using `console.log(state.data)` directly at the top level without wrapping it in a function.\n\nIn OpenFn jobs, all top-level code must be operations (function calls). Try this instead:\n\n```js\nfn(state => {\n  console.log(state.data);\n  return state;\n});\n```\n\nThis wraps your console.log in the `fn()` operation, which executes your custom function in the job context.",
+      "history": [
+        {
+          "role": "user",
+          "content": "What is wrong with this code? I get an error like \"fn is not defined\""
+        },
+        {
+          "role": "assistant",
+          "content": "The error \"fn is not defined\" occurs because the code is just using `console.log(state.data)` directly at the top level without wrapping it in a function.\n\nIn OpenFn jobs, all top-level code must be operations (function calls). Try this instead:\n\n```js\nfn(state => {\n  console.log(state.data);\n  return state;\n});\n```\n\nThis wraps your console.log in the `fn()` operation, which executes your custom function in the job context."
+        }
+      ],
+      "usage": {
+        "input_tokens": 61,
+        "output_tokens": 119,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 8403
+      }
+    }
+  },
+  {
+    "question": "Why does the http result not get written to my state?",
+    "fullResult": {
+      "response": "The HTTP result is not being written to your state because you're not storing the return value from the HTTP call.\n\nTry this instead:\n\n```js\nfn(state => {\n  return http.get('https://jsonplaceholder.typicode.com/todos/1')\n    .then(response => {\n      return { ...state, data: response.body };\n    });\n});\n```\n\nThis way, the HTTP response is assigned to `state.data` and returned.",
+      "history": [
+        {
+          "role": "user",
+          "content": "Why does the http result not get written to my state?"
+        },
+        {
+          "role": "assistant",
+          "content": "The HTTP result is not being written to your state because you're not storing the return value from the HTTP call.\n\nTry this instead:\n\n```js\nfn(state => {\n  return http.get('https://jsonplaceholder.typicode.com/todos/1')\n    .then(response => {\n      return { ...state, data: response.body };\n    });\n});\n```\n\nThis way, the HTTP response is assigned to `state.data` and returned."
+        }
+      ],
+      "usage": {
+        "input_tokens": 77,
+        "output_tokens": 109,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 8403
+      }
+    }
+  },
+  {
+    "question": "would you please write a job for me that creates new datavaluesets under the\n\"Approved School CHP\" organization unit",
+    "fullResult": {
+      "response": "I can help you write a job that creates new dataValueSets under the \"Approved School CHP\" organization unit. I'll need some more details to properly customize this for you:\n\n1. Do you know the organization unit ID (not just the name)?\n2. Which dataSet are you using?\n3. What period are you targeting?\n4. What data values do you want to include?\n\nHere's a basic template to get you started:\n\n```javascript\ncreate('dataValueSets', {\n  dataSet: 'YOUR_DATASET_ID', // Replace with your dataSet ID\n  period: '202401', // Replace with your desired period (YYYYMM format)\n  orgUnit: 'YOUR_ORG_UNIT_ID', // Replace with \"Approved School CHP\" org unit ID\n  dataValues: [\n    // Add your data values here, for example:\n    dv('DATA_ELEMENT_ID_1', '10'),\n    dv('DATA_ELEMENT_ID_2', '20'),\n    // Add more as needed\n  ]\n});\n```\n\nOnce you provide the specific IDs and values, I can tailor this job more precisely to your needs.",
+      "history": [
+        {
+          "role": "user",
+          "content": "would you please write a job for me that creates new datavaluesets under the\n\"Approved School CHP\" organization unit"
+        },
+        {
+          "role": "assistant",
+          "content": "I can help you write a job that creates new dataValueSets under the \"Approved School CHP\" organization unit. I'll need some more details to properly customize this for you:\n\n1. Do you know the organization unit ID (not just the name)?\n2. Which dataSet are you using?\n3. What period are you targeting?\n4. What data values do you want to include?\n\nHere's a basic template to get you started:\n\n```javascript\ncreate('dataValueSets', {\n  dataSet: 'YOUR_DATASET_ID', // Replace with your dataSet ID\n  period: '202401', // Replace with your desired period (YYYYMM format)\n  orgUnit: 'YOUR_ORG_UNIT_ID', // Replace with \"Approved School CHP\" org unit ID\n  dataValues: [\n    // Add your data values here, for example:\n    dv('DATA_ELEMENT_ID_1', '10'),\n    dv('DATA_ELEMENT_ID_2', '20'),\n    // Add more as needed\n  ]\n});\n```\n\nOnce you provide the specific IDs and values, I can tailor this job more precisely to your needs."
+        }
+      ],
+      "usage": {
+        "input_tokens": 68,
+        "output_tokens": 275,
+        "cache_creation_input_tokens": 15578,
+        "cache_read_input_tokens": 1323
+      }
+    }
+  },
+  {
+    "question": "What do I do now?",
+    "fullResult": {
+      "response": "You have a basic job with just a single function `fn(s => s)`, which simply returns the state without modifying it.\n\nTo build a useful workflow:\n\n1. Decide what system you want to interact with and select the appropriate adaptor\n2. Define what you want your job to do (fetch data, transform it, send it somewhere)\n3. Write the job code in the editor\n\nSince you're currently using the language-common adaptor, you can:\n- Transform data using `fn()`\n- Use `each()` to iterate through data\n- Process data with standard JavaScript functions\n\nIf you need to connect to external systems, you'll want to add steps with specific adaptors like http, salesforce, dhis2, etc.\n\nWhat kind of workflow are you trying to build?",
+      "history": [
+        {
+          "role": "user",
+          "content": "What do I do now?"
+        },
+        {
+          "role": "assistant",
+          "content": "You have a basic job with just a single function `fn(s => s)`, which simply returns the state without modifying it.\n\nTo build a useful workflow:\n\n1. Decide what system you want to interact with and select the appropriate adaptor\n2. Define what you want your job to do (fetch data, transform it, send it somewhere)\n3. Write the job code in the editor\n\nSince you're currently using the language-common adaptor, you can:\n- Transform data using `fn()`\n- Use `each()` to iterate through data\n- Process data with standard JavaScript functions\n\nIf you need to connect to external systems, you'll want to add steps with specific adaptors like http, salesforce, dhis2, etc.\n\nWhat kind of workflow are you trying to build?"
+        }
+      ],
+      "usage": {
+        "input_tokens": 47,
+        "output_tokens": 175,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 8403
+      }
+    }
+  },
+  {
+    "question": "Can you write a cron code that will trigger at 1am India time?",
+    "fullResult": {
+      "response": "A cron expression that will trigger at 1:00 AM India time (UTC+5:30) would be:\n\n```\n30 19 * * *\n```\n\nThis converts 1:00 AM IST to UTC time (which is 19:30 UTC the previous day).\n\nIf you need to include seconds in the cron expression (6-part cron):\n\n```\n0 30 19 * * *\n```",
+      "history": [
+        {
+          "role": "user",
+          "content": "Can you write a cron code that will trigger at 1am India time?"
+        },
+        {
+          "role": "assistant",
+          "content": "A cron expression that will trigger at 1:00 AM India time (UTC+5:30) would be:\n\n```\n30 19 * * *\n```\n\nThis converts 1:00 AM IST to UTC time (which is 19:30 UTC the previous day).\n\nIf you need to include seconds in the cron expression (6-part cron):\n\n```\n0 30 19 * * *\n```"
+        }
+      ],
+      "usage": {
+        "input_tokens": 58,
+        "output_tokens": 101,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 8403
+      }
+    }
+  },
+  {
+    "question": "Who can see these messages?",
+    "fullResult": {
+      "response": "These chat sessions are saved to each job, so any user who can see the workflow can see this chat. The chat panel is embedded in the web-based IDE where users build workflows.",
+      "history": [
+        {
+          "role": "user",
+          "content": "Who can see these messages?"
+        },
+        {
+          "role": "assistant",
+          "content": "These chat sessions are saved to each job, so any user who can see the workflow can see this chat. The chat panel is embedded in the web-based IDE where users build workflows."
+        }
+      ],
+      "usage": {
+        "input_tokens": 47,
+        "output_tokens": 41,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 8403
+      }
+    }
+  },
+  {
+    "question": "What is fhir and how do I use it?",
+    "fullResult": {
+      "response": "FHIR (Fast Healthcare Interoperability Resources) is a standard for healthcare data exchange developed by HL7. It's designed to facilitate interoperability between different healthcare systems.\n\nTo use FHIR with OpenFn, you would typically:\n\n1. Use the `@openfn/language-fhir` adaptor to interact with FHIR-compliant systems\n2. Create jobs that perform operations like querying patients, creating observations, or updating resources\n\nA basic FHIR job might look like:\n\n```js\nget('Patient', {\n  query: { identifier: 'ABC123' }\n});\n\nfn(state => {\n  // Process the returned patient data\n  console.log(state.data);\n  return state;\n});\n\n// Create a new observation\ncreate('Observation', {\n  status: 'final',\n  code: {\n    coding: [{\n      system: 'http://loinc.org',\n      code: '8867-4',\n      display: 'Heart rate'\n    }]\n  },\n  subject: {\n    reference: `Patient/${state.data.id}`\n  },\n  valueQuantity: {\n    value: 80,\n    unit: 'beats/minute'\n  }\n});\n```\n\nFor more details, check the [FHIR adaptor documentation](https://docs.openfn.org/adaptors/packages/fhir-docs).",
+      "history": [
+        {
+          "role": "user",
+          "content": "What is fhir and how do I use it?"
+        },
+        {
+          "role": "assistant",
+          "content": "FHIR (Fast Healthcare Interoperability Resources) is a standard for healthcare data exchange developed by HL7. It's designed to facilitate interoperability between different healthcare systems.\n\nTo use FHIR with OpenFn, you would typically:\n\n1. Use the `@openfn/language-fhir` adaptor to interact with FHIR-compliant systems\n2. Create jobs that perform operations like querying patients, creating observations, or updating resources\n\nA basic FHIR job might look like:\n\n```js\nget('Patient', {\n  query: { identifier: 'ABC123' }\n});\n\nfn(state => {\n  // Process the returned patient data\n  console.log(state.data);\n  return state;\n});\n\n// Create a new observation\ncreate('Observation', {\n  status: 'final',\n  code: {\n    coding: [{\n      system: 'http://loinc.org',\n      code: '8867-4',\n      display: 'Heart rate'\n    }]\n  },\n  subject: {\n    reference: `Patient/${state.data.id}`\n  },\n  valueQuantity: {\n    value: 80,\n    unit: 'beats/minute'\n  }\n});\n```\n\nFor more details, check the [FHIR adaptor documentation](https://docs.openfn.org/adaptors/packages/fhir-docs)."
+        }
+      ],
+      "usage": {
+        "input_tokens": 53,
+        "output_tokens": 334,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 8403
+      }
+    }
+  },
+  {
+    "question": "How can I generate a UUID for my data?",
+    "fullResult": {
+      "response": "You can generate a UUID using JavaScript's built-in crypto module. Here's how:\n\n```javascript\nfn(state => {\n  // Generate a random UUID (v4)\n  const uuid = ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>\n    (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)\n  );\n  \n  console.log('Generated UUID:', uuid);\n  \n  return { ...state, uuid };\n})\n```\n\nThis will add the generated UUID to your state object. You can then use it in subsequent operations.",
+      "history": [
+        {
+          "role": "user",
+          "content": "How can I generate a UUID for my data?"
+        },
+        {
+          "role": "assistant",
+          "content": "You can generate a UUID using JavaScript's built-in crypto module. Here's how:\n\n```javascript\nfn(state => {\n  // Generate a random UUID (v4)\n  const uuid = ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>\n    (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)\n  );\n  \n  console.log('Generated UUID:', uuid);\n  \n  return { ...state, uuid };\n})\n```\n\nThis will add the generated UUID to your state object. You can then use it in subsequent operations."
+        }
+      ],
+      "usage": {
+        "input_tokens": 51,
+        "output_tokens": 165,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 8403
+      }
+    }
+  },
+  {
+    "question": "I want to download data from a file on sharepoint and upload leads into\nsalesforce. Can you give me an idea how that would work?",
+    "fullResult": {
+      "response": "For your workflow integrating SharePoint and Salesforce, you would need a multi-step process:\n\n1. First step: Use the `@openfn/language-http` adaptor to download the file from SharePoint\n   - Authenticate with SharePoint using OAuth2 or other authentication\n   - Make a GET request to download your file\n\n2. Second step: Parse the data using Common adaptor\n   - If it's a CSV file, use `parseCsv()` \n   - If it's another format, use appropriate parsing functions\n\n3. Third step: Transform the data into Salesforce format\n   - Use `fn()` to map fields from your file to Salesforce Lead object format\n\n4. Fourth step: Upload to Salesforce using the current adaptor\n   - Use `create('Lead', data)` for new leads or\n   - Use `upsert('Lead', 'ExternalId__c', data)` if you need to create or update\n\nHere's a simplified example of what the workflow might look like:\n\n```js\n// Step 1: Download the file from SharePoint\nget('https://your-sharepoint-url/path/to/file.csv', \n  http.options().oauth(state.configuration.access_token)\n);\n\n// Step 2: Parse the CSV data\nparseCsv(state.data.body);\n\n// Step 3: Transform data for Salesforce\nfn(state => {\n  const transformedLeads = state.data.map(row => ({\n    FirstName: row.first_name,\n    LastName: row.last_name,\n    Email: row.email,\n    Company: row.company,\n    // Add other fields as needed\n  }));\n  \n  return { ...state, leads: transformedLeads };\n});\n\n// Step 4: Upload to Salesforce\ncreate('Lead', state => state.leads);\n```\n\nWould you like me to provide more details on any specific part of this process?",
+      "history": [
+        {
+          "role": "user",
+          "content": "I want to download data from a file on sharepoint and upload leads into\nsalesforce. Can you give me an idea how that would work?"
+        },
+        {
+          "role": "assistant",
+          "content": "For your workflow integrating SharePoint and Salesforce, you would need a multi-step process:\n\n1. First step: Use the `@openfn/language-http` adaptor to download the file from SharePoint\n   - Authenticate with SharePoint using OAuth2 or other authentication\n   - Make a GET request to download your file\n\n2. Second step: Parse the data using Common adaptor\n   - If it's a CSV file, use `parseCsv()` \n   - If it's another format, use appropriate parsing functions\n\n3. Third step: Transform the data into Salesforce format\n   - Use `fn()` to map fields from your file to Salesforce Lead object format\n\n4. Fourth step: Upload to Salesforce using the current adaptor\n   - Use `create('Lead', data)` for new leads or\n   - Use `upsert('Lead', 'ExternalId__c', data)` if you need to create or update\n\nHere's a simplified example of what the workflow might look like:\n\n```js\n// Step 1: Download the file from SharePoint\nget('https://your-sharepoint-url/path/to/file.csv', \n  http.options().oauth(state.configuration.access_token)\n);\n\n// Step 2: Parse the CSV data\nparseCsv(state.data.body);\n\n// Step 3: Transform data for Salesforce\nfn(state => {\n  const transformedLeads = state.data.map(row => ({\n    FirstName: row.first_name,\n    LastName: row.last_name,\n    Email: row.email,\n    Company: row.company,\n    // Add other fields as needed\n  }));\n  \n  return { ...state, leads: transformedLeads };\n});\n\n// Step 4: Upload to Salesforce\ncreate('Lead', state => state.leads);\n```\n\nWould you like me to provide more details on any specific part of this process?"
+        }
+      ],
+      "usage": {
+        "input_tokens": 71,
+        "output_tokens": 452,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 14826
+      }
+    }
+  },
+  {
+    "question": "I want to search for all patients with the name on state.name, and for each one,\nupdate their location to the value on state.newLocation",
+    "fullResult": {
+      "response": "You'll need to use `searchPatient` to find patients matching the name, then `each` through the results to update each patient's location. Here's how to do it:\n\n```js\nsearchPatient({ q: state => state.name });\n\neach(\n  '$.data.results[*]',\n  update(\n    'patient',\n    state => state.data.uuid,\n    state => ({\n      person: {\n        addresses: [\n          {\n            location: state.newLocation\n          }\n        ]\n      }\n    })\n  )\n);\n```\n\nThis code first searches for patients matching the name in `state.name`, then for each patient found, updates their location with the value from `state.newLocation`.",
+      "history": [
+        {
+          "role": "user",
+          "content": "I want to search for all patients with the name on state.name, and for each one,\nupdate their location to the value on state.newLocation"
+        },
+        {
+          "role": "assistant",
+          "content": "You'll need to use `searchPatient` to find patients matching the name, then `each` through the results to update each patient's location. Here's how to do it:\n\n```js\nsearchPatient({ q: state => state.name });\n\neach(\n  '$.data.results[*]',\n  update(\n    'patient',\n    state => state.data.uuid,\n    state => ({\n      person: {\n        addresses: [\n          {\n            location: state.newLocation\n          }\n        ]\n      }\n    })\n  )\n);\n```\n\nThis code first searches for patients matching the name in `state.name`, then for each patient found, updates their location with the value from `state.newLocation`."
+        }
+      ],
+      "usage": {
+        "input_tokens": 76,
+        "output_tokens": 170,
+        "cache_creation_input_tokens": 12839,
+        "cache_read_input_tokens": 1323
+      }
+    }
+  }
+]
