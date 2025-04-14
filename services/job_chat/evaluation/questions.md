@@ -83,18 +83,12 @@ can you fill out this code for me?
 
 ## code
 
-fn(state => {
-  const input = state.data;
-// take the input from state.data and create a fhir patient
-state.patient = {}
-return state;
-});
+fn(state => { const input = state.data; // take the input from state.data and
+create a fhir patient state.patient = {} return state; });
 
-fn(state => {
-  // create a new fhir bundle
+fn(state => { // create a new fhir bundle
 
-  // add the patient to it
-})
+// add the patient to it })
 
 ---
 
@@ -139,10 +133,7 @@ Why does the http result not get written to my state?
 
 ## code
 
-fn(s => {
-  http.get('https://jsonplaceholder.typicode.com/todos/1')
-  return s;
-})
+fn(s => { http.get('https://jsonplaceholder.typicode.com/todos/1') return s; })
 
 ---
 
@@ -244,12 +235,40 @@ salesforce. Can you give me an idea how that would work?
 
 fn(s => s)
 
+---
+
+## question
+
+How do I bulk upload patients into salesforce?
+
+## adaptor
+
+@openfn/language-salesforce@6.0.0
+
+## code
+
+fn(s => s)
 
 --
 
 ## question
 
-I want to search for all patients with the name on state.name, and for each one, update their location to the value on state.newLocation
+How do I use the bulk API v2?
+
+## adaptor
+
+@openfn/language-salesforce@6.0.0
+
+## code
+
+fn(s => s)
+
+--
+
+## question
+
+I want to search for all patients with the name on state.name, and for each one,
+update their location to the value on state.newLocation
 
 ## adaptor
 
@@ -257,7 +276,4 @@ I want to search for all patients with the name on state.name, and for each one,
 
 ## code
 
-fn(state => {
-  return state
-});
-
+fn(state => { return state });

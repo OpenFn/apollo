@@ -5,10 +5,12 @@ const questions = await loadQuestions();
 // const allQuestions = await loadQuestions();
 // const questions = allQuestions.slice(0, 2);
 
-
 console.log(`Asking ${questions.length} questions...`);
 const results = [];
 const fullResults = [];
+console.log();
+console.log(questions.map((q) => q.question).join("\n"));
+console.log();
 
 for (const q of questions) {
   const payload = {
@@ -38,17 +40,17 @@ for (const q of questions) {
     console.error(result);
   } else {
     console.log(result.response);
-    
+
     results.push({
       q: q.question,
       a: result.response,
     });
-    
+
     fullResults.push({
       question: q.question ?? q.message,
-      fullResult: result 
+      fullResult: result,
     });
-    
+
     console.log();
     console.log();
   }
