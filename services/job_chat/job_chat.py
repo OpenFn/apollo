@@ -28,6 +28,7 @@ class Payload:
     content: str
     context: Optional[str] = None
     api_key: Optional[str] = None
+    meta: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
@@ -37,7 +38,7 @@ class Payload:
         if "content" not in data:
             raise ValueError("'content' is required")
 
-        return cls(content=data["content"], context=data.get("context"), api_key=data.get("api_key"))
+        return cls(content=data["content"], context=data.get("context"), api_key=data.get("api_key"), meta=data.get("meta"))
 
 
 @dataclass
