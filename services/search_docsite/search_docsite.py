@@ -116,7 +116,6 @@ class DocsiteSearch:
 
             most_recent_namespace = valid_namespaces[0]
             logger.info(f"Most recent docsite collection name found: {most_recent_namespace}")
-
             return most_recent_namespace
 
 
