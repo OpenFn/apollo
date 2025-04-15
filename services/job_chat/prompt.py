@@ -210,7 +210,7 @@ def build_prompt(content, history, context, rag=None):
     }
     
     if rag:
-      retrieved_knowledge = rag
+        retrieved_knowledge = rag
     else:
       try:
           retrieved_knowledge = retrieve_knowledge(
