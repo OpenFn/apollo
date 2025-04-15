@@ -28,6 +28,7 @@ class Payload:
     content: str
     context: Optional[str] = None
     api_key: Optional[str] = None
+    meta: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
@@ -37,7 +38,7 @@ class Payload:
         if "content" not in data:
             raise ValueError("'content' is required")
 
-        return cls(content=data["content"], context=data.get("context"), api_key=data.get("api_key"))
+        return cls(content=data["content"], context=data.get("context"), api_key=data.get("api_key"), meta=data.get("meta"))
 
 
 @dataclass
@@ -52,6 +53,7 @@ class ChatResponse:
     content: str
     history: List[Dict[str, str]]
     usage: Dict[str, Any]
+    rag: Dict[str, Any]
 
 
 class AnthropicClient:
@@ -63,13 +65,14 @@ class AnthropicClient:
         self.client = Anthropic(api_key=self.api_key)
 
     def generate(
-        self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[str] = None
+        self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[str] = None, rag: Optional[str] = None
     ) -> ChatResponse:
         """
         Generate a response using the Claude API with improved error handling and response processing.
         """
         history = history.copy() if history else []
-        system_message, prompt = build_prompt(content, history, context)
+
+        system_message, prompt, retrieved_knowledge = build_prompt(content, history, context, rag)
 
         message = self.client.messages.create(
             max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
@@ -95,11 +98,30 @@ class AnthropicClient:
             {"role": "assistant", "content": response},
         ]
 
+        usage = self.sum_usage(
+            message.usage.model_dump() if hasattr(message, "usage") else {},
+            *[usage_data for usage_key, usage_data in retrieved_knowledge.get("usage", {}).items()]
+        )
+
         return ChatResponse(
             content=response,
             history=updated_history,
-            usage=message.usage.model_dump() if hasattr(message, "usage") else {},
+            usage=usage,
+            rag=retrieved_knowledge
         )
+
+    def sum_usage(self, *usage_objects):
+        """Sum multiple Usage object token counts and return a count dictionary."""
+        result = {}
+        
+        for usage in usage_objects:
+            for field in ["cache_creation_input_tokens", "cache_read_input_tokens", "input_tokens", "output_tokens"]:
+                value = usage.get(field)
+                if value is not None:
+                    result[field] = result.get(field, 0) + value
+        
+        return result
+
 
 
 def main(data_dict: dict) -> dict:
@@ -111,9 +133,10 @@ def main(data_dict: dict) -> dict:
 
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
-        result = client.generate(content=data.content, history=data_dict.get("history", []), context=data.context)
 
-        return {"response": result.content, "history": result.history, "usage": result.usage}
+        result = client.generate(content=data.content, history=data_dict.get("history", []), context=data.context, rag=data_dict.get("meta", {}).get("rag"))
+
+        return {"response": result.content, "history": result.history, "usage": result.usage, "meta": {"rag": result.rag}}
 
     except ValueError as e:
         raise ApolloError(400, str(e), type="BAD_REQUEST")
