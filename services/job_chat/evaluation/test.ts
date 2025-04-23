@@ -1,6 +1,10 @@
 import { loadQuestions } from "./load-questions";
 
-const questions = await loadQuestions();
+// Pass a number as the final argument to only ask the first n questions
+// Ie, bun start 1
+const limit = process.argv[2] ? parseInt(process.argv[2]) : Infinity;
+
+const questions = (await loadQuestions()).slice(0, limit);
 
 // const allQuestions = await loadQuestions();
 // const questions = allQuestions.slice(0, 2);
@@ -9,7 +13,7 @@ console.log(`Asking ${questions.length} questions...`);
 const results = [];
 const fullResults = [];
 console.log();
-console.log(questions.map((q) => q.question).join("\n"));
+console.log(questions.map((q) => q.question?.replace(/\n/g, " ")).join("\n"));
 console.log();
 
 for (const q of questions) {
@@ -57,13 +61,19 @@ for (const q of questions) {
 }
 
 const output = [];
-for (const { q, a } of results) {
-  output.push(`# ${q}
-${a}`);
+for (const { question: q, fullResult: r } of fullResults) {
+  if (output.length) {
+    output.push("---");
+  }
+  output.push(`# ${q?.replace(/\n/g, " ")}
+${r.response}
+
+### RAG
+${r.meta.rag.search_results_sections.join(",") ?? "none"}`);
 }
 
 console.log(`Writing ${output.length} answers to output.md`);
-Bun.write("output.md", output.join("\n---\n"));
+Bun.write("output.md", output.join("\n"));
 
 console.log(`Writing full JSON results to output.json`);
 Bun.write("output.json", JSON.stringify(fullResults, null, 2));

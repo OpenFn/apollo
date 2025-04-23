@@ -1,4 +1,5 @@
 from util import create_logger, apollo
+from .retrieve_docs import retrieve_knowledge
 
 logger = create_logger("job_chat.prompt")
 
@@ -144,12 +145,17 @@ class Context:
         return hasattr(self, key) and getattr(self, key) is not None
 
 
-def generate_system_message(context_dict):
+def generate_system_message(context_dict, search_results):
     context = context_dict if isinstance(context_dict, Context) else Context(**context_dict)
 
     message = [system_role]
     message.append(f"<job_writing_guide>{job_writing_summary}</job_writing_guide>")
     message.append({"type": "text", "text": ".", "cache_control": {"type": "ephemeral"}})
+
+    if search_results:
+        search_results = format_search_results(search_results)
+        message.append(f"<retrieved_documentation>Search results for the user query, which may or may not be relevant:\n\n{search_results}</retrieved_documentation>")
+        message.append({"type": "text", "text": ".", "cache_control": {"type": "ephemeral"}})
 
     if context.has("adaptor"):
         adaptor_string = (
@@ -184,11 +190,44 @@ def generate_system_message(context_dict):
 
     return list(map(lambda text: text if isinstance(text, dict) else {"type": "text", "text": text}, message))
 
+def format_search_results(search_results):
+    return '\n'.join([
+        f'search result: "{result.get("text")}", source: "{result.get("metadata", {}).get("doc_title", "")} {result.get("medatada", {}).get("docs_type", "")}"'
+        for result in search_results
+    ])
 
-def build_prompt(content, history, context):
-    system_message = generate_system_message(context)
+def build_prompt(content, history, context, rag=None):
+    retrieved_knowledge = {
+        "search_results": [],
+        "search_results_sections": [],
+        "search_queries": [],
+        "config_version": "",
+        "prompts_version": "",
+        "usage": {
+            "needs_docs": {},
+            "generate_queries": {}
+        }
+    }
+    
+    if rag:
+        retrieved_knowledge = rag
+    else:
+      try:
+          retrieved_knowledge = retrieve_knowledge(
+              content=content, 
+              history=history, 
+              code=context.get("expression", ""), 
+              adaptor=context.get("adaptor", "")
+          )
+      except Exception as e:
+          logger.error(f"Error retrieving knowledge: {str(e)}")
+
+    system_message = generate_system_message(
+        context_dict=context, 
+        search_results=retrieved_knowledge.get("search_results") if retrieved_knowledge is not None else None)
+
     prompt = []
     prompt.extend(history)
     prompt.append({"role": "user", "content": content})
-
-    return (system_message, prompt)
+      
+    return (system_message, prompt, retrieved_knowledge)

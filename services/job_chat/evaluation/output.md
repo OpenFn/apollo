@@ -1,432 +1,414 @@
 # what is state
+State is a special object that flows through your OpenFn workflow. It contains:
 
-In OpenFn, `state` is a JavaScript object that contains your data and passes
-through each operation in your job. It typically has:
+- `data`: The main JSON data you're working with
+- `references`: History of all previous operations
 
-1. `state.data` - Contains your current working data
-2. `state.references` - Stores historical information about past operations
+Think of state as a container that gets passed from one operation to the next. Each operation can read from state and modify it before passing it along.
 
-Each operation in your job takes the state, does something with it, and returns
-the modified state to the next operation. When you use `fn()`, you're directly
-manipulating this state object.
+In your workflow, `fn(s => s)` is simply taking the current state and returning it unchanged.
 
-For example:
+When you perform operations like `create()` or `query()`, they modify state by adding data or references, which can then be used by later operations in your workflow.
 
-```js
-fn((state) => {
-  console.log(state.data); // Print current data
-  // Make changes to state
-  return { ...state, data: { ...state.data, newValue: "hello" } };
-});
-```
-
+### RAG
+javascript,job-writing-guide
 ---
-
 # what does $ mean
+In OpenFn jobs, `$` is a shorthand for accessing the state object. It's often called the "lazy state operator" because it provides a simpler way to reference values in the state.
 
-In OpenFn job code, `$` is a shorthand syntax that refers to the current state
-object. It lets you access data from state without writing a full
-`state => state.something` function.
+Instead of writing:
+```js
+get(state => state.data.url)
+```
 
-For example:
+You can use the shorter syntax:
+```js
+get($.data.url)
+```
 
-- `$.data` is equivalent to `state.data`
-- `$.configuration.token` is equivalent to `state.configuration.token`
+The `$` symbol ensures the value is resolved at the correct time during execution. You can use it to read from state in various contexts like within objects, string templates, or when mapping data structures.
 
-When you use it with `get()` like in your code, it's a way to dynamically use
-values from your state to construct the URL.
-
+### RAG
+cli-walkthrough,troubleshooting,job-writing-guide
+---
 # How do I download all items from a collection from a particular day? Like 29th march 2024? See my input for an example of what my keys look like
-
-Based on your input, each item has a key with a format like "YYYYMMDD-ID". To
-get all items from a specific day, you can use the `query` function with the
-`where` parameter to filter by date.
-
-Here's how you can download all items from March 29, 2024:
+You can use the `collections.get()` function with a key pattern to filter by date. For your data with keys in the format `YYYYMMDD-ID`, you could do:
 
 ```js
-query("yourCollectionName", {
-  where: {
-    key: {
-      $regex: "^20240329-",
-    },
-  },
+collections.get('my-collection', '20240329*').then(state => {
+  // Now state.data contains all items with keys starting with 20240329
+  console.log(state.data);
+  return state;
 });
 ```
 
-This will fetch all documents where the key starts with "20240329-", which
-corresponds to all items from March 29, 2024.
+This pattern will match any key that starts with "20240329" (March 29th, 2024). You can also use the `createdAfter` and `createdBefore` options if you need to filter by when the items were created rather than their key patterns.
 
-If you want to see more details or options for working with collections, check
-the documentation at: https://docs.openfn.org/adaptors/packages/collections-docs
-
+### RAG
+collections,job-writing-guide,surveycto,salesforce
+---
 # can you fill out this code for me?
-
-Here's a more complete version of your code for creating a FHIR patient and
-bundle:
+I'll fill out this code to create a FHIR patient resource and add it to a bundle. Here's the complete code:
 
 ```js
-fn((state) => {
+fn(state => { 
   const input = state.data; // take the input from state.data
-
-  // Create a FHIR patient resource
+  
+  // Create a FHIR patient
   state.patient = {
     resourceType: "Patient",
-    identifier: [
-      {
-        system: "https://fhir.kemkes.go.id/id/nik",
-        value: "1234567890123456", // Replace with actual NIK
-      },
-    ],
+    id: "example-patient",
+    identifier: [{
+      system: "http://sys-ids.kemkes.go.id/patient/example",
+      value: "patient-001"
+    }],
     active: true,
-    name: [
-      {
-        use: "official",
-        family: "Smith", // Replace with actual family name
-        given: ["John"], // Replace with actual given names
-      },
-    ],
-    gender: "male", // Replace with actual gender: male | female | other | unknown
-    birthDate: "1990-01-01", // Replace with actual birth date in YYYY-MM-DD format
+    name: [{
+      use: "official",
+      family: "Example",
+      given: ["Patient"]
+    }],
+    gender: "male",
+    birthDate: "1990-01-01"
   };
-
+  
   return state;
 });
 
-fn((state) => {
-  // Create a new FHIR bundle containing the patient
+fn(state => {
+  // Create a new FHIR bundle
   state.bundle = {
     resourceType: "Bundle",
     type: "transaction",
-    entry: [
-      {
-        resource: state.patient,
-        request: {
-          method: "POST",
-          url: "Patient",
-        },
-      },
-    ],
+    entry: [{
+      resource: state.patient,
+      request: {
+        method: "PUT",
+        url: `Patient/${state.patient.id}`
+      }
+    }]
   };
-
+  
   return state;
 });
 
-// To send the bundle to SatuSehat, you would use:
-// post('', state.bundle);
+// Add to bundle and upload (optional final step)
+addToBundle(state => state.patient);
+uploadBundle();
 ```
 
-This code:
+This code will:
+1. Create a FHIR patient resource with sample data
+2. Create a FHIR bundle with that patient as an entry
+3. Use the built-in FHIR adaptor functions to add the patient to the bundle and upload it
 
-1. Creates a basic FHIR patient with required fields
-2. Builds a transaction bundle containing that patient
-3. Includes a commented line showing how to post the bundle
+You can modify the patient details based on your actual requirements.
 
-You'll need to replace the placeholder values with actual patient data from your
-input.
-
-# What is wrong with this code? I get an error like "Cannot read properties of
-
-undefined (reading 'name')" Your code has a syntax error and possibly a data
-issue:
-
-1. You're missing a semicolon after `console.log(state.patient.name)`
-2. It seems `state.data.patients[0]` might not exist or doesn't have a `name`
-   property
-
-Try this corrected version:
+### RAG
+fhir-4,satusehat
+---
+# What is wrong with this code? I get an error like "Cannot read properties of undefined (reading 'name')"
+Your code has a syntax error. You're missing a semicolon after the console.log statement. Here's the corrected version:
 
 ```js
-fn((state) => {
-  // Check if patients array exists and has items
-  if (state.data.patients && state.data.patients.length > 0) {
+fn(state => { 
+  state.patient = state.data.patients[0]; 
+  return state;
+});
+
+fn(state => { 
+  console.log(state.patient.name); 
+  return state; 
+})
+```
+
+Additionally, the error suggests `state.patient.name` doesn't exist. This could happen if:
+1. `state.data.patients` is empty or undefined
+2. `state.data.patients[0]` exists but doesn't have a `name` property
+
+You should add error handling:
+
+```js
+fn(state => {
+  if (state.data && state.data.patients && state.data.patients.length > 0) {
     state.patient = state.data.patients[0];
   } else {
-    state.patient = { name: "No patient found" };
+    console.log("No patients data found");
+    state.patient = {}; // provide a default
   }
   return state;
 });
 
-fn((state) => {
-  console.log(state.patient.name);
+fn(state => {
+  if (state.patient && state.patient.name) {
+    console.log(state.patient.name);
+  } else {
+    console.log("Patient name not found");
+  }
   return state;
-});
+})
 ```
 
-This adds error checking to prevent the undefined error.
-
+### RAG
+javascript,claude,cli-walkthrough,library-intro,ocl,job-writing-guide,common,dhis2
+---
 # What is wrong with this code? I get an error like "fn is not defined"
+The problem is that you're using `console.log(state.data)` directly without wrapping it in an `fn()` function.
 
-The error "fn is not defined" occurs because the code is just using
-`console.log(state.data)` directly at the top level without wrapping it in a
-function.
-
-In OpenFn jobs, all top-level code must be operations (function calls). Try this
-instead:
+In OpenFn jobs, you need to use the `fn()` operation to execute JavaScript code. Here's the correct way to write this:
 
 ```js
-fn((state) => {
+fn(state => {
   console.log(state.data);
   return state;
 });
 ```
 
-This wraps your console.log in the `fn()` operation, which executes your custom
-function in the job context.
+The `fn()` function takes a callback that receives the current state and must return the state (potentially modified).
 
+### RAG
+common,dhis2,ocl,claude,javascript,library-intro,troubleshooting,cli-walkthrough
+---
 # Why does the http result not get written to my state?
-
-The HTTP result is not being written to your state because you're not storing
-the return value from the HTTP call.
+In your current code, you're making the HTTP request but not storing the response in your state. The `http.get` function returns an operation that, when executed, fetches data and writes it to state.data - but when used inside an `fn()` block, you need to explicitly handle the response.
 
 Try this instead:
 
 ```js
-fn((state) => {
-  return http
-    .get("https://jsonplaceholder.typicode.com/todos/1")
-    .then((response) => {
-      return { ...state, data: response.body };
-    });
+http.get('https://jsonplaceholder.typicode.com/todos/1');
+
+// Now state.data contains the response
+fn(state => {
+  console.log(state.data); // To see the data
+  return state;
 });
 ```
 
-This way, the HTTP response is assigned to `state.data` and returned.
+This code makes the HTTP request first, then uses an `fn()` block to work with the response that's now in state.data.
 
-# would you please write a job for me that creates new datavaluesets under the
+### RAG
+satusehat,job-writing-guide,dhis2,intuit,state,library-intro,openmrs,postgresql,kobotoolbox,common,cli-walkthrough
+---
+# would you please write a job for me that creates new datavaluesets under the "Approved School CHP" organization unit
+I'll help you create a job that creates a new data value set under the "Approved School CHP" organization unit.
 
-"Approved School CHP" organization unit I can help you write a job that creates
-new dataValueSets under the "Approved School CHP" organization unit. I'll need
-some more details to properly customize this for you:
-
-1. Do you know the organization unit ID (not just the name)?
-2. Which dataSet are you using?
-3. What period are you targeting?
-4. What data values do you want to include?
-
-Here's a basic template to get you started:
+First, let me create a job that will create a data value set. You'll need to modify a few specific values to match your DHIS2 instance:
 
 ```javascript
-create("dataValueSets", {
-  dataSet: "YOUR_DATASET_ID", // Replace with your dataSet ID
-  period: "202401", // Replace with your desired period (YYYYMM format)
-  orgUnit: "YOUR_ORG_UNIT_ID", // Replace with "Approved School CHP" org unit ID
+// Create a data value set for Approved School CHP
+create('dataValueSets', {
+  dataSet: 'REPLACE_WITH_DATASET_ID',  // Replace with your actual dataSet ID
+  period: '202405',  // May 2024 - adjust as needed
+  orgUnit: 'REPLACE_WITH_ORGUNIT_ID',  // Replace with Approved School CHP ID
+  completeDate: '2024-05-15',  // Date the data collection was completed
   dataValues: [
-    // Add your data values here, for example:
-    dv("DATA_ELEMENT_ID_1", "10"),
-    dv("DATA_ELEMENT_ID_2", "20"),
-    // Add more as needed
-  ],
+    {
+      dataElement: 'REPLACE_WITH_DATA_ELEMENT_ID_1',  // Replace with actual data element ID
+      categoryOptionCombo: 'REPLACE_WITH_CATEGORY_OPTION_COMBO_ID',  // Replace if needed
+      value: '10',  // Replace with your actual value
+    },
+    {
+      dataElement: 'REPLACE_WITH_DATA_ELEMENT_ID_2',  // Replace with actual data element ID
+      categoryOptionCombo: 'REPLACE_WITH_CATEGORY_OPTION_COMBO_ID',  // Replace if needed
+      value: '25',  // Replace with your actual value
+    }
+    // Add more data values as needed
+  ]
 });
 ```
 
-Once you provide the specific IDs and values, I can tailor this job more
-precisely to your needs.
+You'll need to replace the placeholder values with actual IDs from your DHIS2 instance:
+1. Replace `REPLACE_WITH_DATASET_ID` with your dataset ID
+2. Replace `REPLACE_WITH_ORGUNIT_ID` with the ID for "Approved School CHP"
+3. Replace `REPLACE_WITH_DATA_ELEMENT_ID_1` with your data element IDs
+4. Replace `REPLACE_WITH_CATEGORY_OPTION_COMBO_ID` if you need specific category option combos
 
+If you don't know these IDs, you can use the `get` operation first to find them, then use the IDs in your create operation.
+
+### RAG
+kobo-to-dhis2,dhis2
+---
 # What do I do now?
+Right now, you have a very simple job with just the `fn()` function that returns the state unchanged. 
 
-You have a basic job with just a single function `fn(s => s)`, which simply
-returns the state without modifying it.
+You can:
 
-To build a useful workflow:
+1. Add more operations to your job to perform transformations or actions on your data
+2. Run this job to see what your current state looks like
 
-1. Decide what system you want to interact with and select the appropriate
-   adaptor
-2. Define what you want your job to do (fetch data, transform it, send it
-   somewhere)
-3. Write the job code in the editor
+Since you're using the `common` adaptor, you can use functions like:
+- `fn()` to write custom JavaScript
+- `each()` to iterate through data
+- `dataValue()` to extract data by path
 
-Since you're currently using the language-common adaptor, you can:
+What are you trying to accomplish with this workflow? If you share your goal, I can help you build appropriate job code.
 
-- Transform data using `fn()`
-- Use `each()` to iterate through data
-- Process data with standard JavaScript functions
-
-If you need to connect to external systems, you'll want to add steps with
-specific adaptors like http, salesforce, dhis2, etc.
-
-What kind of workflow are you trying to build?
-
+### RAG
+library-intro,dhis2,claude,cli-walkthrough,ocl,common,build-compliant-apps
+---
 # Can you write a cron code that will trigger at 1am India time?
-
-A cron expression that will trigger at 1:00 AM India time (UTC+5:30) would be:
-
-```
-30 19 * * *
-```
-
-This converts 1:00 AM IST to UTC time (which is 19:30 UTC the previous day).
-
-If you need to include seconds in the cron expression (6-part cron):
+For a job to trigger at 1am India time (UTC+5:30), you need to use a cron expression with the UTC offset applied:
 
 ```
-0 30 19 * * *
+0 0 19 * * *
 ```
+
+This means:
+- 0 seconds
+- 0 minutes
+- 19 hours UTC (which is 1am in India, UTC+5:30)
+- Every day of the month
+- Every month
+- Every day of the week
+
+When setting this up in the OpenFn platform, you would enter this cron expression in the trigger configuration for your job.
+
+### RAG
 
 ---
-
 # Who can see these messages?
+Messages in this chat are saved to the job, so any user who has access to view this workflow can see our conversation. The chat history is specific to each job in your workflow.
 
-These chat sessions are saved to each job, so any user who can see the workflow
-can see this chat. The chat panel is embedded in the web-based IDE where users
-build workflows.
+### RAG
 
+---
 # What is fhir and how do I use it?
+FHIR (Fast Healthcare Interoperability Resources) is a standard for exchanging healthcare information electronically. It's designed to facilitate interoperability between different healthcare systems.
 
-FHIR (Fast Healthcare Interoperability Resources) is a standard for healthcare
-data exchange developed by HL7. It's designed to facilitate interoperability
-between different healthcare systems.
+To use FHIR with OpenFn, you'll need one of our FHIR adaptors:
 
-To use FHIR with OpenFn, you would typically:
+1. **Generic FHIR adaptor** (`@openfn/language-fhir`) - Basic adaptor for any FHIR server
+2. **Version-specific adaptors** like `@openfn/language-fhir-r4` - Tailored for specific FHIR versions
+3. **Implementation Guide-specific adaptors** - Custom adaptors for specific implementations (e.g., Ethiopia FHIR Implementation Guide)
 
-1. Use the `@openfn/language-fhir` adaptor to interact with FHIR-compliant
-   systems
-2. Create jobs that perform operations like querying patients, creating
-   observations, or updating resources
+You can interact with FHIR servers using REST API operations to:
+- Fetch resources with GET requests
+- Create/update resources with POST/PUT requests
+- Query for specific data
 
-A basic FHIR job might look like:
+You'll need to select the appropriate adaptor when creating your job and configure credentials to connect to your FHIR server.
+
+For more information, check out our documentation at: https://docs.openfn.org/adaptors/fhir
+
+### RAG
+fhir-ndr-et,fhir,fhir-fr,fhir-4
+---
+# How can I generate a UUID for my data?
+To generate a UUID in your job, use the `util.uuid()` function:
 
 ```js
-get("Patient", {
-  query: { identifier: "ABC123" },
+fn(state => {
+  const id = util.uuid();
+  console.log(id); // This will show the UUID in your logs
+  return { ...state, data: { ...state.data, id } };
 });
+```
 
-fn((state) => {
-  // Process the returned patient data
-  console.log(state.data);
+This will create a UUID and add it to your state.data object under the "id" property. You can change the property name to match your needs.
+
+### RAG
+common,ocl,claude,dhis2,library-intro,portability-versions,http,cli-walkthrough
+---
+# I want to download data from a file on sharepoint and upload leads into salesforce. Can you give me an idea how that would work?
+To download data from SharePoint and upload it to Salesforce as leads, you'd need a multi-step workflow:
+
+1. First step: Use the MSgraph adaptor to authenticate and download your file from SharePoint
+2. Second step: Transform the data into Salesforce format 
+3. Third step: Upload the transformed data to Salesforce using the salesforce adaptor
+
+Here's a simplified example:
+
+**Step 1: Download from SharePoint using MSgraph adaptor**
+```js
+get('/me/drive/items/{fileId}/content');
+```
+
+**Step 2: Transform data (assuming the file contains CSV data)**
+```js
+fn(state => {
+  // Parse CSV if needed
+  const leads = state.data.map(record => ({
+    LastName: record.lastName,
+    Company: record.company,
+    Email: record.email,
+    Phone: record.phone
+    // Map other fields as needed
+  }));
+  
+  return { ...state, leads };
+});
+```
+
+**Step 3: Upload to Salesforce**
+```js
+bulk(
+  "Lead", 
+  "insert", 
+  state => state.leads,
+  { failOnError: true }
+);
+```
+
+For the SharePoint part, you'll need to set up OAuth authorization as mentioned in the documentation. For file formats, you might need additional parsing depending on whether it's CSV, Excel, or another format.
+
+Is there a specific part of this process you'd like more details on?
+
+### RAG
+dynamics,openmrs,salesforce,openspp,msgraph,googlesheets,odoo,sftp,mssql
+---
+# I want to search for all patients with the name on state.name, and for each one, update their location to the value on state.newLocation
+I'll help you search for patients by name and update their locations. Here's how:
+
+```js
+fn(state => {
+  console.log("Searching for patients with name:", state.name);
   return state;
 });
 
-// Create a new observation
-create("Observation", {
-  status: "final",
-  code: {
-    coding: [
-      {
-        system: "http://loinc.org",
-        code: "8867-4",
-        display: "Heart rate",
-      },
-    ],
-  },
-  subject: {
-    reference: `Patient/${state.data.id}`,
-  },
-  valueQuantity: {
-    value: 80,
-    unit: "beats/minute",
-  },
-});
-```
-
-For more details, check the
-[FHIR adaptor documentation](https://docs.openfn.org/adaptors/packages/fhir-docs).
-
-# How can I generate a UUID for my data?
-
-You can generate a UUID using JavaScript's built-in crypto module. Here's how:
-
-```javascript
-fn((state) => {
-  // Generate a random UUID (v4)
-  const uuid = ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, (c) =>
-    (
-      c ^
-      (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))
-    ).toString(16)
-  );
-
-  console.log("Generated UUID:", uuid);
-
-  return { ...state, uuid };
-});
-```
-
-This will add the generated UUID to your state object. You can then use it in
-subsequent operations.
-
-# I want to download data from a file on sharepoint and upload leads into
-
-salesforce. Can you give me an idea how that would work? For your workflow
-integrating SharePoint and Salesforce, you would need a multi-step process:
-
-1. First step: Use the `@openfn/language-http` adaptor to download the file from
-   SharePoint
-
-   - Authenticate with SharePoint using OAuth2 or other authentication
-   - Make a GET request to download your file
-
-2. Second step: Parse the data using Common adaptor
-
-   - If it's a CSV file, use `parseCsv()`
-   - If it's another format, use appropriate parsing functions
-
-3. Third step: Transform the data into Salesforce format
-
-   - Use `fn()` to map fields from your file to Salesforce Lead object format
-
-4. Fourth step: Upload to Salesforce using the current adaptor
-   - Use `create('Lead', data)` for new leads or
-   - Use `upsert('Lead', 'ExternalId__c', data)` if you need to create or update
-
-Here's a simplified example of what the workflow might look like:
-
-```js
-// Step 1: Download the file from SharePoint
-get(
-  "https://your-sharepoint-url/path/to/file.csv",
-  http.options().oauth(state.configuration.access_token)
-);
-
-// Step 2: Parse the CSV data
-parseCsv(state.data.body);
-
-// Step 3: Transform data for Salesforce
-fn((state) => {
-  const transformedLeads = state.data.map((row) => ({
-    FirstName: row.first_name,
-    LastName: row.last_name,
-    Email: row.email,
-    Company: row.company,
-    // Add other fields as needed
-  }));
-
-  return { ...state, leads: transformedLeads };
+searchPatient({ q: state => state.name }, state => {
+  console.log(`Found ${state.data.results.length} patients matching the search`);
+  return state;
 });
 
-// Step 4: Upload to Salesforce
-create("Lead", (state) => state.leads);
-```
-
-Would you like me to provide more details on any specific part of this process?
-
-# I want to search for all patients with the name on state.name, and for each one,
-
-update their location to the value on state.newLocation You'll need to use
-`searchPatient` to find patients matching the name, then `each` through the
-results to update each patient's location. Here's how to do it:
-
-```js
-searchPatient({ q: (state) => state.name });
+fn(state => {
+  // Save the search results for later use
+  const patients = state.data.results;
+  return { ...state, patients };
+});
 
 each(
-  "$.data.results[*]",
-  update(
-    "patient",
-    (state) => state.data.uuid,
-    (state) => ({
-      person: {
-        addresses: [
-          {
-            location: state.newLocation,
-          },
-        ],
-      },
-    })
-  )
+  "patients[*]",
+  fn(state => {
+    console.log(`Updating location for patient: ${state.data.display}`);
+    
+    // Perform the update for this patient
+    return update(
+      "patient", 
+      state.data.uuid, 
+      {
+        person: {
+          addresses: [
+            {
+              // Update location information
+              // You may need to adjust these address fields based on your OpenMRS configuration
+              address1: state.newLocation,
+              // Include other required fields for your OpenMRS instance
+            }
+          ]
+        }
+      }
+    )(state);
+  })
 );
 ```
 
-This code first searches for patients matching the name in `state.name`, then
-for each patient found, updates their location with the value from
-`state.newLocation`.
+This job will:
+1. Search for patients using the name from state.name
+2. Log how many matching patients were found
+3. Save the patients to state for processing
+4. Iterate through each patient and update their location with state.newLocation
+
+You may need to adjust the address fields in the update operation depending on your OpenMRS configuration and how locations are stored in your system.
+
+### RAG
+api-discovery,openlmis,godata,openmrs,commcare-to-db,activity-history,openimis

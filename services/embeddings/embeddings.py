@@ -15,6 +15,15 @@ class SearchResult:
     text: str
     metadata: dict
     score: float = None
+
+    def __hash__(self):
+        """Two results are the same if the text field is the same."""
+        return hash(self.text)
+    
+    def __eq__(self, other):
+        if not isinstance(other, SearchResult):
+            return False
+        return self.text == other.text
     
     def to_json(self):
         return {k: v for k, v in asdict(self).items()}
