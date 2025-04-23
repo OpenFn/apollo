@@ -1,5 +1,11 @@
 # apollo
 
+## 0.10.0
+
+### Minor Changes
+
+- 6f88248: Integrate docsite rag for the AI assistant
+
 ## 0.9.2
 
 ### Patch Changes
