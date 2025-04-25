@@ -1,158 +1,169 @@
-# services/gen_project/gen_project.py
-import spacy
-import json
-import yaml
 import os
-import sys
-import subprocess
+from typing import List, Optional, Dict, Any
+from dataclasses import dataclass
+from anthropic import (
+    Anthropic,
+    APIConnectionError,
+    BadRequestError,
+    AuthenticationError,
+    PermissionDeniedError,
+    NotFoundError,
+    UnprocessableEntityError,
+    RateLimitError,
+    InternalServerError,
+)
+from util import ApolloError, create_logger
+from .gen_project_prompt import build_prompt
 
-# Get the absolute path to the current script
-current_dir = os.path.dirname(os.path.abspath(__file__))
+logger = create_logger("job_chat")
 
-# Path to the model wheel file
-model_wheel_path = os.path.join(current_dir, "models/en_core_web_sm-3.7.1-py3-none-any.whl")
+@dataclass
+class Payload:
+    """
+    Data class for validating and storing input parameters.
+    Required fields will raise TypeError if not provided.
+    """
 
-# Install the model from the wheel file if not already installed
-try:
-    spacy.load("en_core_web_sm")
-except OSError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", model_wheel_path])
-    nlp = spacy.load("en_core_web_sm")
-else:
-    nlp = spacy.load("en_core_web_sm")
+    content: str
+    context: Optional[str] = None
+    api_key: Optional[str] = None
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "Payload":
+        """
+        Create a Payload instance from a dictionary, validating required fields.
+        """
+        if "content" not in data:
+            raise ValueError("'content' is required")
+
+        return cls(content=data["content"], context=data.get("context"), api_key=data.get("api_key"))
 
 
-# Adaptors dictionary
-adaptors = {
-    "primero": "@openfn/language-primero@latest",
-    "telerivet": "@openfn/language-telerivet@latest",
-    "dhis2": "@openfn/language-dhis2@latest",
-    "http": "@openfn/language-http@latest",
-    "asana": "@openfn/language-asana@latest",
-    "azure-storage": "@openfn/language-azure-storage@latest",
-    "beyonic": "@openfn/language-beyonic@latest",
-    "bigquery": "@openfn/language-bigquery@latest",
-    "cartodb": "@openfn/language-cartodb@latest",
-    "commcare": "@openfn/language-commcare@latest",
-    "common": "@openfn/language-common@latest",
-    "dynamics": "@openfn/language-dynamics@latest",
-    "facebook": "@openfn/language-facebook@latest",
-    "fhir": "@openfn/language-fhir@latest",
-    "godata": "@openfn/language-godata@latest",
-    "googlehealthcare": "@openfn/language-googlehealthcare@latest",
-    "googlesheets": "@openfn/language-googlesheets@latest",
-    "hive": "@openfn/language-hive@latest",
-    "khanacademy": "@openfn/language-khanacademy@latest",
-    "kobotoolbox": "@openfn/language-kobotoolbox@latest",
-    "magpi": "@openfn/language-magpi@latest",
-    "mailchimp": "@openfn/language-mailchimp@latest",
-    "mailgun": "@openfn/language-mailgun@latest",
-    "maximo": "@openfn/language-maximo@latest",
-    "medicmobile": "@openfn/language-medicmobile@latest",
-    "mogli": "@openfn/language-mogli@latest",
-    "mongodb": "@openfn/language-mongodb@latest",
-    "msgraph": "@openfn/language-msgraph@latest",
-    "mssql": "@openfn/language-mssql@latest",
-    "mysql": "@openfn/language-mysql@latest",
-    "nexmo": "@openfn/language-nexmo@latest",
-    "ocl": "@openfn/language-ocl@latest",
-    "openfn": "@openfn/language-openfn@latest",
-    "openhim": "@openfn/language-openhim@latest",
-    "openimis": "@openfn/language-openimis@latest",
-    "openmrs": "@openfn/language-openmrs@latest",
-    "openspp": "@openfn/language-openspp@latest",
-    "postgresql": "@openfn/language-postgresql@latest",
-    "progress": "@openfn/language-progress@latest",
-    "rapidpro": "@openfn/language-rapidpro@latest",
-    "resourcemap": "@openfn/language-resourcemap@latest",
-    "salesforce": "@openfn/language-salesforce@latest",
-    "satusehat": "@openfn/language-satusehat@latest",
-    "sftp": "@openfn/language-sftp@latest",
-    "smpp": "@openfn/language-smpp@latest",
-    "surveycto": "@openfn/language-surveycto@latest",
-    "template": "@openfn/language-template@latest",
-    "twilio": "@openfn/language-twilio@latest",
-    "vtiger": "@openfn/language-vtiger@latest",
-    "zoho": "@openfn/language-zoho@latest"
-}
+@dataclass
+class ChatConfig:
+    model: str = "claude-3-7-sonnet-20250219"
+    max_tokens: int = 1024
+    api_key: Optional[str] = None
 
-def generate_job_name(step):
-    return "-".join(word.capitalize() for word in step.split() if word.lower() not in ["with", "from", "to", "using", "a", "an", "the", "and", "of"])
 
-def extract_adaptor(step):
-    doc = nlp(step)
-    detected_adaptor = None
-    for ent in doc.ents:
-        if ent.label_ == "ADAPTER":
-            for key in adaptors.keys():
-                if key in ent.text.lower():
-                    detected_adaptor = adaptors[key]
-                    break
-    if not detected_adaptor:
-        for key in adaptors.keys():
-            if key in step.lower():
-                detected_adaptor = adaptors[key]
-                break
-    return detected_adaptor if detected_adaptor else "@openfn/language-common@latest"
+@dataclass
+class ChatResponse:
+    content: str
+    history: List[Dict[str, str]]
+    usage: Dict[str, Any]
 
-def parse_workflow_steps(steps):
-    workflow = {
-        "workflow-1": {
-            "name": "Generated Workflow",
-            "jobs": {},
-            "triggers": {"webhook": {"type": "webhook", "enabled": True}},
-            "edges": [],
-        }
-    }
+class AnthropicClient:
+    def __init__(self, config: Optional[ChatConfig] = None):
+        self.config = config or ChatConfig()
+        self.api_key = self.config.api_key or os.getenv("ANTHROPIC_API_KEY")
+        if not self.api_key:
+            raise ValueError("API key must be provided")
+        self.client = Anthropic(api_key=self.api_key)
 
-    workflow["name"] = "open-project"
-    workflow["description"] = "Auto-generated workflow based on provided steps."
+    def generate(
+        self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[str] = None
+    ) -> ChatResponse:
+        """
+        Generate a response using the Claude API with improved error handling and response processing.
+        """
+        history = history.copy() if history else []
 
-    previous_job = None
+        system_message, prompt, retrieved_knowledge = build_prompt(content, history, context)
 
-    for step in steps:
-        step = step.strip()
-        job_name = generate_job_name(step)
-        adaptor = extract_adaptor(step)
+        message = self.client.messages.create(
+            max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
+        )
 
-        workflow["workflow-1"]["jobs"][job_name] = {
-            "name": step,
-            "adaptor": adaptor,
-            "body": "| // Add operations here",
-        }
+        if hasattr(message, "usage"):
+            if message.usage.cache_creation_input_tokens:
+                logger.info(f"Cache write: {message.usage.cache_creation_input_tokens} tokens")
+            if message.usage.cache_read_input_tokens:
+                logger.info(f"Cache read: {message.usage.cache_read_input_tokens} tokens")
 
-        if previous_job:
-            workflow["workflow-1"]["edges"].append({
-                "source_job": previous_job,
-                "target_job": job_name,
-                "condition_type": "on_job_success",
-                "enabled": True
-            })
-        previous_job = job_name
+        response_parts = []
+        for content_block in message.content:
+            if content_block.type == "text":
+                response_parts.append(content_block.text)
+            else:
+                logger.warning(f"Unhandled content type: {content_block.type}")
 
-    if previous_job:
-        first_job = list(workflow["workflow-1"]["jobs"].keys())[0]
-        workflow["workflow-1"]["edges"].insert(0, {
-            "source_trigger": "webhook",
-            "target_job": first_job,
-            "condition_type": "always",
-            "enabled": True
-        })
+        response = "\n\n".join(response_parts)
 
-    return workflow
+        updated_history = history + [
+            {"role": "user", "content": content},
+            {"role": "assistant", "content": response},
+        ]
 
-def main(data):
-    steps = data.get('steps', [])
-    output_format = data.get('format', 'yaml')
+        usage = self.sum_usage(
+            message.usage.model_dump() if hasattr(message, "usage") else {},
+            *[usage_data for usage_key, usage_data in retrieved_knowledge.get("usage", {}).items()]
+        )
 
-    workflow = parse_workflow_steps(steps)
+        return ChatResponse(
+            content=response,
+            history=updated_history,
+            usage=usage
+        )
 
-    if output_format == 'json':
-        workflow_output = json.dumps(workflow, indent=2)
-        output_filename = "workflow.json"
-    else:
-        workflow_output = yaml.dump(workflow, sort_keys=False)
-        output_filename = "project.yaml"
+    def split_yaml(self, response):
+        ...
+        return text, yaml
 
-    # Return with the file name as a string representation of a list
-    return {"files": {str([output_filename]): workflow_output}}
+
+    def sum_usage(self, *usage_objects):
+        """Sum multiple Usage object token counts and return a count dictionary."""
+        result = {}
+        
+        for usage in usage_objects:
+            for field in ["cache_creation_input_tokens", "cache_read_input_tokens", "input_tokens", "output_tokens"]:
+                value = usage.get(field)
+                if value is not None:
+                    result[field] = result.get(field, 0) + value
+        
+        return result
+
+
+
+def main(data_dict: dict) -> dict:
+    """
+    Main entry point with improved error handling and input validation.
+    """
+    try:
+        data = Payload.from_dict(data_dict)
+
+        config = ChatConfig(api_key=data.api_key) if data.api_key else None
+        client = AnthropicClient(config)
+
+        result = client.generate(content=data.content, history=data_dict.get("history", []), context=data.context)
+
+        return {"response": result.content, "history": result.history, "usage": result.usage}
+
+    except ValueError as e:
+        raise ApolloError(400, str(e), type="BAD_REQUEST")
+
+    except APIConnectionError as e:
+        raise ApolloError(
+            503,
+            "Unable to reach the Anthropic AI Service",
+            type="CONNECTION_ERROR",
+            details={"cause": str(e.__cause__)},
+        )
+    except AuthenticationError as e:
+        raise ApolloError(401, "Authentication failed", type="AUTH_ERROR")
+    except RateLimitError as e:
+        raise ApolloError(
+            429, "Rate limit exceeded, please try again later", type="RATE_LIMIT", details={"retry_after": 60}
+        )
+    except BadRequestError as e:
+        raise ApolloError(400, str(e), type="BAD_REQUEST")
+    except PermissionDeniedError as e:
+        raise ApolloError(403, "Not authorized to perform this action", type="FORBIDDEN")
+    except NotFoundError as e:
+        raise ApolloError(404, "Resource not found", type="NOT_FOUND")
+    except UnprocessableEntityError as e:
+        raise ApolloError(422, str(e), type="INVALID_REQUEST")
+    except InternalServerError as e:
+        raise ApolloError(500, "The Anthropic AI Service encountered an error", type="PROVIDER_ERROR")
+    except Exception as e:
+        logger.error(f"Unexpected error during chat generation: {str(e)}")
+        raise ApolloError(500, str(e))
