@@ -12,7 +12,7 @@ python = "3.11.*"
 spacy = "^3.7.4"
 en-core-web-sm = { path = "models/en_core_web_sm-3.7.1-py3-none-any.whl" }
 openai = "^1.23.3"
-transformers = "^4.40.1"
+transformers = "^4.50.0"
 black = "^24.4.2"
 python-dotenv = "^1.0.1"
 anthropic = "0.35.0"
