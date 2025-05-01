@@ -26,6 +26,7 @@ class Payload:
     """
 
     content: str
+    existing_yaml: Optional[str] = None
     api_key: Optional[str] = None
 
     @classmethod
@@ -36,7 +37,7 @@ class Payload:
         if "content" not in data:
             raise ValueError("'content' is required")
 
-        return cls(content=data["content"], api_key=data.get("api_key"))
+        return cls(content=data["content"], existing_yaml=data.get("existing_yaml"), api_key=data.get("api_key"))
 
 
 @dataclass
@@ -61,13 +62,13 @@ class AnthropicClient:
         self.client = Anthropic(api_key=self.api_key)
 
     def generate(
-        self, content: str, history: Optional[List[Dict[str, str]]] = None) -> ChatResponse:
+        self, content: str, existing_yaml: str = None, history: Optional[List[Dict[str, str]]] = None) -> ChatResponse:
         """
         Generate a response using the Claude API with improved error handling and response processing.
         """
         history = history.copy() if history else []
 
-        system_message, prompt = build_prompt(content, history)
+        system_message, prompt = build_prompt(content=content, existing_yaml=existing_yaml, history=history)
 
         message = self.client.messages.create(
             max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
@@ -130,7 +131,7 @@ def main(data_dict: dict) -> dict:
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
 
-        result = client.generate(content=data.content, history=data_dict.get("history", []))
+        result = client.generate(content=data.content, existing_yaml=data.existing_yaml, history=data_dict.get("history", []))
 
         return {"response": result.content, "response_yaml": result.content_yaml, "history": result.history, "usage": result.usage}
 

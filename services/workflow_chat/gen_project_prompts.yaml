@@ -225,3 +225,4 @@ prompts:
     B)
     In a few sentences (max. as many sentences as there are jobs in the workflow), explain your reasoning and, if relevant, aspects of the workflow that should be reviewed (e.g. to consider alternative approaches).
     After a blank line, provide the output as a proper YAML file that follows the structure above.
+    {existing_yaml}
