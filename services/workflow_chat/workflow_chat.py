@@ -1,3 +1,4 @@
+import json
 import os
 from typing import List, Optional, Dict, Any
 import yaml
@@ -16,7 +17,7 @@ from anthropic import (
 from util import ApolloError, create_logger
 from .gen_project_prompt import build_prompt
 
-logger = create_logger("job_chat")
+logger = create_logger("workflow_chat")
 
 @dataclass
 class Payload:
@@ -106,18 +107,23 @@ class AnthropicClient:
     def split_format_yaml(self, response):
         """Split text and YAML in response and format the YAML."""
         try:
-            if "```" in response:
-                parts = response.split("```")
-                output_text = parts[0].strip()
-                output_yaml = parts[1].strip()
-                # Decode the escaped newlines into actual newlines
-                output_yaml = output_yaml.encode().decode('unicode_escape')
+            # Try to parse the response as JSON
+            response_data = json.loads(response)
+            
+            # Extract text and yaml from the JSON
+            output_text = response_data.get("text", "").strip()
+            output_yaml = response_data.get("yaml", "")
+            
+            if output_yaml:
+                # Decode the escaped newlines into actual newlines if needed
+                output_yaml = output_yaml.encode().decode("unicode_escape")
+                # Parse YAML string into Python object
                 output_yaml = yaml.safe_load(output_yaml)
-                # Convert back to YAML string
+                # Convert back to YAML string with preserved order
                 output_yaml = yaml.dump(output_yaml, sort_keys=False)
-                return output_text, output_yaml
-        except:
-            pass
+            return output_text, output_yaml
+        except Exception as e:
+            logger.error(f"Error during JSON parsing: {str(e)}")
         
         return response.strip(), None
 

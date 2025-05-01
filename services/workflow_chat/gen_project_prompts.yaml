@@ -21,7 +21,7 @@ prompts:
 
     ## OpenFn Project.yaml Structure
 
-    A valid project.yaml must be enclosed in ``` and follow this structure:
+    A valid project.yaml must follow this structure:
     ```
     name: open-project
     jobs:
@@ -160,69 +160,31 @@ prompts:
     3. For branching workflows, create conditional edges as appropriate
     4. Edges should be enabled by default
 
-    ## Example Conversion
+    ## Example Conversation
 
-    For the input:
+    User's conversation turn:
     "Fetch visits from commare once a day. For each visitor with an IHS number, create a FHIR Encounter in Satusehat. Otherwise, lookup the number in satusehat and then create an encounter"
 
     The output should be:
-    Your reasoning (max ~4 sentences).
-
-    ```
-    name: Daily CommCare to Satusehat Encounter Sync
-    jobs:
-      Fetch-visits-from-CommCare:
-        name: Fetch visits from CommCare
-        adaptor: "@openfn/language-commcare@latest"
-        body: "| // Add operations here"
-      Create-FHIR-Encounter-for-visitors-with-IHS-number:
-        name: Create FHIR Encounter for visitors with IHS number
-        adaptor: "@openfn/language-satusehat@latest"
-        body: "| // Add operations here"
-      Lookup-IHS-number-in-Satusehat:
-        name: Lookup IHS number in Satusehat
-        adaptor: "@openfn/language-satusehat@latest"
-        body: "| // Add operations here"
-      Create-FHIR-Encounter-after-IHS-lookup:
-        name: Create FHIR Encounter after IHS lookup
-        adaptor: "@openfn/language-satusehat@latest"
-        body: "| // Add operations here"
-    triggers:
-      cron:
-        type: cron
-        cron_expression: 0 0 * * *
-        enabled: false
-    edges:
-      cron->Fetch-visits-from-CommCare:
-        source_trigger: cron
-        target_job: Fetch-visits-from-CommCare
-        condition_type: always
-        enabled: true
-      Fetch-visits-from-CommCare->Create-FHIR-Encounter-for-visitors-with-IHS-number:
-        source_job: Fetch-visits-from-CommCare
-        target_job: Create-FHIR-Encounter-for-visitors-with-IHS-number
-        condition_type: on_job_success
-        enabled: true
-      Fetch-visits-from-CommCare->Lookup-IHS-number-in-Satusehat:
-        source_job: Fetch-visits-from-CommCare
-        target_job: Lookup-IHS-number-in-Satusehat
-        condition_type: on_job_success
-        enabled: true
-      Lookup-IHS-number-in-Satusehat->Create-FHIR-Encounter-after-IHS-lookup:
-        source_job: Lookup-IHS-number-in-Satusehat
-        target_job: Create-FHIR-Encounter-after-IHS-lookup
-        condition_type: on_job_success
-        enabled: true
-    ```
+    {
+      "text": "Your reasoning (max ~4 sentences).",
+      "yaml": "name: Daily CommCare to Satusehat Encounter Sync\njobs:\n  Fetch-visits-from-CommCare:\n    name: Fetch visits from CommCare\n    adaptor: \"@openfn/language-commcare@latest\"\n    body: \"| // Add operations here\"\n  Create-FHIR-Encounter-for-visitors-with-IHS-number:\n    name: Create FHIR Encounter for visitors with IHS number\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"| // Add operations here\"\n  Lookup-IHS-number-in-Satusehat:\n    name: Lookup IHS number in Satusehat\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"| // Add operations here\"\n  Create-FHIR-Encounter-after-IHS-lookup:\n    name: Create FHIR Encounter after IHS lookup\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"| // Add operations here\"\ntriggers:\n  cron:\n    type: cron\n    cron_expression: 0 0 * * *\n    enabled: false\nedges:\n  cron->Fetch-visits-from-CommCare:\n    source_trigger: cron\n    target_job: Fetch-visits-from-CommCare\n    condition_type: always\n    enabled: true\n  Fetch-visits-from-CommCare->Create-FHIR-Encounter-for-visitors-with-IHS-number:\n    source_job: Fetch-visits-from-CommCare\n    target_job: Create-FHIR-Encounter-for-visitors-with-IHS-number\n    condition_type: on_job_success\n    enabled: true\n  Fetch-visits-from-CommCare->Lookup-IHS-number-in-Satusehat:\n    source_job: Fetch-visits-from-CommCare\n    target_job: Lookup-IHS-number-in-Satusehat\n    condition_type: on_job_success\n    enabled: true\n  Lookup-IHS-number-in-Satusehat->Create-FHIR-Encounter-after-IHS-lookup:\n    source_job: Lookup-IHS-number-in-Satusehat\n    target_job: Create-FHIR-Encounter-after-IHS-lookup\n    condition_type: on_job_success\n    enabled: true"
+    }
 
     ## Output Format
 
-    A) 
-    A conversational turn responding to the user (2-4 sentences).
+    You must respond in JSON format with two fields: "text" and "yaml". 
+    "text" for all explanation, and "yaml" for the YAML block.
 
-    or
+    You can either
+    A) answer with JUST a conversational turn responding to the user (2-4 sentences) in the "text" key and leave the "yaml" key as null,
 
-    B)
-    In a few sentences (max. as many sentences as there are jobs in the workflow), explain your reasoning and, if relevant, aspects of the workflow that should be reviewed (e.g. to consider alternative approaches).
-    After a blank line, provide the output as a proper YAML file that follows the structure above.
-    {existing_yaml}
+    or 
+
+    B) answer with BOTH the "text" key and the "yaml" key.
+    In this case, you should provide a few sentences in the "text" key (max. as many sentences as there are jobs in the workflow) to explain your reasoning. 
+    If relevant, you can note aspects of the workflow that should be reviewed (e.g. to consider alternative approaches).
+    In the "yaml" key, provide a proper YAML file that follows the structure above.
+
+
+    The user's latest message and prior conversation are provided below. Generate your response accordingly.

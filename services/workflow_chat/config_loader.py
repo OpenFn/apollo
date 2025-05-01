@@ -9,7 +9,7 @@ class ConfigLoader:
         with open(path, "r") as file:
             return yaml.safe_load(file)
 
-    def get_prompt(self, name, **kwargs):
+    def get_prompt(self, name):
         """Fetches a named prompt and formats it with provided arguments."""
         prompt_template = self.prompts["prompts"].get(name)
-        return prompt_template.format(**kwargs)
+        return prompt_template
