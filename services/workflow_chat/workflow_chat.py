@@ -1,5 +1,6 @@
 import os
 from typing import List, Optional, Dict, Any
+import yaml
 from dataclasses import dataclass
 from anthropic import (
     Anthropic,
@@ -25,7 +26,6 @@ class Payload:
     """
 
     content: str
-    context: Optional[str] = None
     api_key: Optional[str] = None
 
     @classmethod
@@ -36,7 +36,7 @@ class Payload:
         if "content" not in data:
             raise ValueError("'content' is required")
 
-        return cls(content=data["content"], context=data.get("context"), api_key=data.get("api_key"))
+        return cls(content=data["content"], api_key=data.get("api_key"))
 
 
 @dataclass
@@ -45,10 +45,10 @@ class ChatConfig:
     max_tokens: int = 1024
     api_key: Optional[str] = None
 
-
 @dataclass
 class ChatResponse:
     content: str
+    content_yaml: str
     history: List[Dict[str, str]]
     usage: Dict[str, Any]
 
@@ -61,14 +61,13 @@ class AnthropicClient:
         self.client = Anthropic(api_key=self.api_key)
 
     def generate(
-        self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[str] = None
-    ) -> ChatResponse:
+        self, content: str, history: Optional[List[Dict[str, str]]] = None) -> ChatResponse:
         """
         Generate a response using the Claude API with improved error handling and response processing.
         """
         history = history.copy() if history else []
 
-        system_message, prompt, retrieved_knowledge = build_prompt(content, history, context)
+        system_message, prompt = build_prompt(content, history)
 
         message = self.client.messages.create(
             max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
@@ -88,41 +87,38 @@ class AnthropicClient:
                 logger.warning(f"Unhandled content type: {content_block.type}")
 
         response = "\n\n".join(response_parts)
+        response_text, response_yaml = self.split_format_yaml(response)
+
 
         updated_history = history + [
             {"role": "user", "content": content},
             {"role": "assistant", "content": response},
         ]
 
-        usage = self.sum_usage(
-            message.usage.model_dump() if hasattr(message, "usage") else {},
-            *[usage_data for usage_key, usage_data in retrieved_knowledge.get("usage", {}).items()]
-        )
-
         return ChatResponse(
-            content=response,
+            content=response_text,
+            content_yaml=response_yaml,
             history=updated_history,
-            usage=usage
+            usage=message.usage.model_dump() if hasattr(message, "usage") else {},
         )
 
-    def split_yaml(self, response):
-        ...
-        return text, yaml
-
-
-    def sum_usage(self, *usage_objects):
-        """Sum multiple Usage object token counts and return a count dictionary."""
-        result = {}
+    def split_format_yaml(self, response):
+        """Split text and YAML in response and format the YAML."""
+        try:
+            if "```" in response:
+                parts = response.split("```")
+                output_text = parts[0].strip()
+                output_yaml = parts[1].strip()
+                # Decode the escaped newlines into actual newlines
+                output_yaml = output_yaml.encode().decode('unicode_escape')
+                output_yaml = yaml.safe_load(output_yaml)
+                # Convert back to YAML string
+                output_yaml = yaml.dump(output_yaml, sort_keys=False)
+                return output_text, output_yaml
+        except:
+            pass
         
-        for usage in usage_objects:
-            for field in ["cache_creation_input_tokens", "cache_read_input_tokens", "input_tokens", "output_tokens"]:
-                value = usage.get(field)
-                if value is not None:
-                    result[field] = result.get(field, 0) + value
-        
-        return result
-
-
+        return response.strip(), None
 
 def main(data_dict: dict) -> dict:
     """
@@ -134,9 +130,9 @@ def main(data_dict: dict) -> dict:
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
 
-        result = client.generate(content=data.content, history=data_dict.get("history", []), context=data.context)
+        result = client.generate(content=data.content, history=data_dict.get("history", []))
 
-        return {"response": result.content, "history": result.history, "usage": result.usage}
+        return {"response": result.content, "response_yaml": result.content_yaml, "history": result.history, "usage": result.usage}
 
     except ValueError as e:
         raise ApolloError(400, str(e), type="BAD_REQUEST")
