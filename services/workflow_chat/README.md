@@ -26,6 +26,7 @@ Simple input:
   "existing_yaml": "",
   "history": []
 }
+```
 
 Second conversation turn example:
 
