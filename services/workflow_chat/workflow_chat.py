@@ -26,8 +26,10 @@ class Payload:
     Required fields will raise TypeError if not provided.
     """
 
-    content: str
+    content: Optional[str] = None
+    errors: Optional[str] = None
     existing_yaml: Optional[str] = None
+    history: Optional[List[Dict[str, str]]] = None
     api_key: Optional[str] = None
 
     @classmethod
@@ -35,10 +37,14 @@ class Payload:
         """
         Create a Payload instance from a dictionary, validating required fields.
         """
-        if "content" not in data:
-            raise ValueError("'content' is required")
 
-        return cls(content=data["content"], existing_yaml=data.get("existing_yaml"), api_key=data.get("api_key"))
+        return cls(
+        content=data.get("content"),
+        errors=data.get("errors"),
+        existing_yaml=data.get("existing_yaml"),
+        history=data.get("history", []),
+        api_key=data.get("api_key")
+    )
 
 
 @dataclass
@@ -63,46 +69,57 @@ class AnthropicClient:
         self.client = Anthropic(api_key=self.api_key)
 
     def generate(
-        self, content: str, existing_yaml: str = None, history: Optional[List[Dict[str, str]]] = None) -> ChatResponse:
-        """
-        Generate a response using the Claude API with improved error handling and response processing.
-        """
+        self, content: str = None, existing_yaml: str = None, errors: Optional[str] = None, history: Optional[List[Dict[str, str]]] = None) -> ChatResponse:
+        """Generate a response using the Claude API. Retry up to 2 times if YAML/JSON parsing fails."""
         history = history.copy() if history else []
+        system_message, prompt = build_prompt(content=content, existing_yaml=existing_yaml, errors=errors, history=history)
 
-        system_message, prompt = build_prompt(content=content, existing_yaml=existing_yaml, history=history)
+        accumulated_usage = {
+            'cache_creation_input_tokens': 0,
+            'cache_read_input_tokens': 0,
+            'input_tokens': 0,
+            'output_tokens': 0
+        }
 
-        message = self.client.messages.create(
-            max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
-        )
+        max_retries = 1
+        for attempt in range(max_retries + 1):  
+            message = self.client.messages.create(
+                max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
+            )
 
-        if hasattr(message, "usage"):
-            if message.usage.cache_creation_input_tokens:
-                logger.info(f"Cache write: {message.usage.cache_creation_input_tokens} tokens")
-            if message.usage.cache_read_input_tokens:
-                logger.info(f"Cache read: {message.usage.cache_read_input_tokens} tokens")
+            # Track usage from this attempt
+            if hasattr(message, "usage"):
+                usage = message.usage.model_dump()
+                for key in accumulated_usage:
+                    if key in usage:
+                        accumulated_usage[key] += usage[key]
 
-        response_parts = []
-        for content_block in message.content:
-            if content_block.type == "text":
-                response_parts.append(content_block.text)
-            else:
-                logger.warning(f"Unhandled content type: {content_block.type}")
+            response_parts = []
+            for content_block in message.content:
+                if content_block.type == "text":
+                    response_parts.append(content_block.text)
+                else:
+                    logger.warning(f"Unhandled content type: {content_block.type}")
 
-        response = "\n\n".join(response_parts)
-        response_text, response_yaml = self.split_format_yaml(response)
-
-
-        updated_history = history + [
-            {"role": "user", "content": content},
-            {"role": "assistant", "content": response},
-        ]
-
-        return ChatResponse(
-            content=response_text,
-            content_yaml=response_yaml,
-            history=updated_history,
-            usage=message.usage.model_dump() if hasattr(message, "usage") else {},
-        )
+            response = "\n\n".join(response_parts)
+            response_text, response_yaml = self.split_format_yaml(response)
+            
+            # If YAML parsing succeeded or we're on the last attempt, return the result
+            if response_yaml is not None or attempt == max_retries:
+                updated_history = history + [
+                    {"role": "user", "content": content},
+                    {"role": "assistant", "content": response},
+                ]
+                
+                return ChatResponse(
+                    content=response_text,
+                    content_yaml=response_yaml,
+                    history=updated_history,
+                    usage=accumulated_usage,
+                )
+            
+            # Otherwise, log and retry
+            logger.warning(f"YAML parsing failed, retrying generation (attempt {attempt+1}/{max_retries})")
 
     def split_format_yaml(self, response):
         """Split text and YAML in response and format the YAML."""
@@ -137,7 +154,7 @@ def main(data_dict: dict) -> dict:
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
 
-        result = client.generate(content=data.content, existing_yaml=data.existing_yaml, history=data_dict.get("history", []))
+        result = client.generate(content=data.content, existing_yaml=data.existing_yaml, errors=data.errors, history=data.history)
 
         return {"response": result.content, "response_yaml": result.content_yaml, "history": result.history, "usage": result.usage}
 
