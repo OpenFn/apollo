@@ -16,6 +16,7 @@ from anthropic import (
 )
 from util import ApolloError, create_logger
 from .gen_project_prompt import build_prompt
+from .available_adaptors import available_adaptors
 
 logger = create_logger("workflow_chat")
 
@@ -136,13 +137,27 @@ class AnthropicClient:
                 output_yaml = output_yaml.encode().decode("unicode_escape")
                 # Parse YAML string into Python object
                 output_yaml = yaml.safe_load(output_yaml)
+                # Log if using invalid adaptors
+                self.validate_adaptors(output_yaml)
                 # Convert back to YAML string with preserved order
                 output_yaml = yaml.dump(output_yaml, sort_keys=False)
             return output_text, output_yaml
         except Exception as e:
             logger.error(f"Error during JSON parsing: {str(e)}")
         
-        return response.strip(), None
+        return output_text, output_yaml
+    
+    def validate_adaptors(self, yaml_data):
+        """Validate that all adaptors in the YAML are on the approved list."""
+        valid_adaptors = list(available_adaptors.keys())
+        
+        if yaml_data and 'jobs' in yaml_data:
+            jobs = yaml_data['jobs']
+            for job_key, job_data in jobs.items():
+                if 'adaptor' in job_data:
+                    adaptor = job_data['adaptor']
+                    if adaptor not in valid_adaptors:
+                        logger.warning(f"Invalid adaptor found in job '{job_key}': {adaptor}")
 
 def main(data_dict: dict) -> dict:
     """

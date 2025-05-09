@@ -1,5 +1,6 @@
 import os
 from .config_loader import ConfigLoader
+from .available_adaptors import available_adaptors
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
 config_path = os.path.join(base_dir, "gen_project_config.yaml")
@@ -8,6 +9,10 @@ prompts_path = os.path.join(base_dir, "gen_project_prompts.yaml")
 config_loader = ConfigLoader(config_path=config_path, prompts_path=prompts_path)
 config = config_loader.config
 
+adaptors_string = ""
+for key, value in available_adaptors.items():
+    adaptors_string += f"{key}: {value}\n"
+
 def chat_prompt(content, existing_yaml, history):
     if not existing_yaml:
         existing_yaml = ""
@@ -15,6 +20,7 @@ def chat_prompt(content, existing_yaml, history):
         existing_yaml = "\nFor context, the user is currently editing this YAML:\n" + existing_yaml
     
     system_message = config_loader.get_prompt("get_info_gen_yaml_system_prompt")
+    system_message = system_message.format(adaptors = adaptors_string)
     system_message += existing_yaml
 
     prompt = []
@@ -33,6 +39,7 @@ def error_prompt(content, existing_yaml, errors, history):
         content = ""
     
     system_message = config_loader.get_prompt("fix_yaml_error_system_prompt")
+    system_message = system_message.format(adaptors = adaptors_string)
     system_message += existing_yaml
     content += "\nThis is the error message:\n" + errors
     
