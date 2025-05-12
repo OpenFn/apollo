@@ -1,5 +1,11 @@
 # apollo
 
+## 0.11.0
+
+### Minor Changes
+
+- bae48d3: Add workflow_chat service
+
 ## 0.10.0
 
 ### Minor Changes
