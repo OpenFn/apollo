@@ -196,7 +196,7 @@ def format_search_results(search_results):
         for result in search_results
     ])
 
-def build_prompt(content, history, context, rag=None):
+def build_prompt(content, history, context, rag=None, api_key=None):
     retrieved_knowledge = {
         "search_results": [],
         "search_results_sections": [],
@@ -217,7 +217,8 @@ def build_prompt(content, history, context, rag=None):
               content=content, 
               history=history, 
               code=context.get("expression", ""), 
-              adaptor=context.get("adaptor", "")
+              adaptor=context.get("adaptor", ""),
+              api_key=api_key
           )
       except Exception as e:
           logger.error(f"Error retrieving knowledge: {str(e)}")

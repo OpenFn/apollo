@@ -72,7 +72,13 @@ class AnthropicClient:
         """
         history = history.copy() if history else []
 
-        system_message, prompt, retrieved_knowledge = build_prompt(content, history, context, rag)
+        system_message, prompt, retrieved_knowledge = build_prompt(
+            content=content, 
+            history=history, 
+            context=context, 
+            rag=rag, 
+            api_key=self.api_key
+            )
 
         message = self.client.messages.create(
             max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
