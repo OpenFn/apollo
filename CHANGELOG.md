@@ -1,5 +1,11 @@
 # apollo
 
+## 0.11.1
+
+### Patch Changes
+
+- Ensure the user's API key is used for rag search
+
 ## 0.11.0
 
 ### Minor Changes
