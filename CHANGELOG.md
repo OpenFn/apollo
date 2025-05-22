@@ -1,5 +1,11 @@
 # apollo
 
+## 0.11.1
+
+### Patch Changes
+
+- workflow_chat: update adaptor list
+
 ## 0.11.0
 
 ### Minor Changes
