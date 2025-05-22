@@ -1,10 +1,16 @@
 # apollo
 
-## 0.11.1
+## 0.11.2
 
 ### Patch Changes
 
 - workflow_chat: update adaptor list
+
+## 0.11.1
+
+### Patch Changes
+
+- Ensure the user's API key is used for rag search
 
 ## 0.11.0
 
