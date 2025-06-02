@@ -20,6 +20,7 @@ from .available_adaptors import available_adaptors
 
 logger = create_logger("workflow_chat")
 
+
 @dataclass
 class Payload:
     """
@@ -40,12 +41,12 @@ class Payload:
         """
 
         return cls(
-        content=data.get("content"),
-        errors=data.get("errors"),
-        existing_yaml=data.get("existing_yaml"),
-        history=data.get("history", []),
-        api_key=data.get("api_key")
-    )
+            content=data.get("content"),
+            errors=data.get("errors"),
+            existing_yaml=data.get("existing_yaml"),
+            history=data.get("history", []),
+            api_key=data.get("api_key"),
+        )
 
 
 @dataclass
@@ -54,12 +55,14 @@ class ChatConfig:
     max_tokens: int = 1024
     api_key: Optional[str] = None
 
+
 @dataclass
 class ChatResponse:
     content: str
     content_yaml: str
     history: List[Dict[str, str]]
     usage: Dict[str, Any]
+
 
 class AnthropicClient:
     def __init__(self, config: Optional[ChatConfig] = None):
@@ -70,20 +73,27 @@ class AnthropicClient:
         self.client = Anthropic(api_key=self.api_key)
 
     def generate(
-        self, content: str = None, existing_yaml: str = None, errors: Optional[str] = None, history: Optional[List[Dict[str, str]]] = None) -> ChatResponse:
+        self,
+        content: str = None,
+        existing_yaml: str = None,
+        errors: Optional[str] = None,
+        history: Optional[List[Dict[str, str]]] = None,
+    ) -> ChatResponse:
         """Generate a response using the Claude API. Retry up to 2 times if YAML/JSON parsing fails."""
         history = history.copy() if history else []
-        system_message, prompt = build_prompt(content=content, existing_yaml=existing_yaml, errors=errors, history=history)
+        system_message, prompt = build_prompt(
+            content=content, existing_yaml=existing_yaml, errors=errors, history=history
+        )
 
         accumulated_usage = {
-            'cache_creation_input_tokens': 0,
-            'cache_read_input_tokens': 0,
-            'input_tokens': 0,
-            'output_tokens': 0
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
         }
 
         max_retries = 1
-        for attempt in range(max_retries + 1):  
+        for attempt in range(max_retries + 1):
             message = self.client.messages.create(
                 max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
             )
@@ -104,34 +114,36 @@ class AnthropicClient:
 
             response = "\n\n".join(response_parts)
             response_text, response_yaml = self.split_format_yaml(response)
-            
+
             # If YAML parsing succeeded or we're on the last attempt, return the result
             if response_yaml is not None or attempt == max_retries:
                 updated_history = history + [
                     {"role": "user", "content": content},
                     {"role": "assistant", "content": response},
                 ]
-                
+
                 return ChatResponse(
                     content=response_text,
                     content_yaml=response_yaml,
                     history=updated_history,
                     usage=accumulated_usage,
                 )
-            
+
             # Otherwise, log and retry
             logger.warning(f"YAML parsing failed, retrying generation (attempt {attempt+1}/{max_retries})")
 
     def split_format_yaml(self, response):
         """Split text and YAML in response and format the YAML."""
+        output_text, output_yaml = "", None
+
         try:
             # Try to parse the response as JSON
             response_data = json.loads(response)
-            
+
             # Extract text and yaml from the JSON
             output_text = response_data.get("text", "").strip()
             output_yaml = response_data.get("yaml", "")
-            
+
             if output_yaml:
                 # Decode the escaped newlines into actual newlines if needed
                 output_yaml = output_yaml.encode().decode("unicode_escape")
@@ -141,23 +153,23 @@ class AnthropicClient:
                 self.validate_adaptors(output_yaml)
                 # Convert back to YAML string with preserved order
                 output_yaml = yaml.dump(output_yaml, sort_keys=False)
-            return output_text, output_yaml
         except Exception as e:
             logger.error(f"Error during JSON parsing: {str(e)}")
-        
+
         return output_text, output_yaml
-    
+
     def validate_adaptors(self, yaml_data):
         """Validate that all adaptors in the YAML are on the approved list."""
         valid_adaptors = list(available_adaptors.keys())
-        
-        if yaml_data and 'jobs' in yaml_data:
-            jobs = yaml_data['jobs']
+
+        if yaml_data and "jobs" in yaml_data:
+            jobs = yaml_data["jobs"]
             for job_key, job_data in jobs.items():
-                if 'adaptor' in job_data:
-                    adaptor = job_data['adaptor']
+                if "adaptor" in job_data:
+                    adaptor = job_data["adaptor"]
                     if adaptor not in valid_adaptors:
                         logger.warning(f"Invalid adaptor found in job '{job_key}': {adaptor}")
+
 
 def main(data_dict: dict) -> dict:
     """
@@ -169,9 +181,16 @@ def main(data_dict: dict) -> dict:
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
 
-        result = client.generate(content=data.content, existing_yaml=data.existing_yaml, errors=data.errors, history=data.history)
+        result = client.generate(
+            content=data.content, existing_yaml=data.existing_yaml, errors=data.errors, history=data.history
+        )
 
-        return {"response": result.content, "response_yaml": result.content_yaml, "history": result.history, "usage": result.usage}
+        return {
+            "response": result.content,
+            "response_yaml": result.content_yaml,
+            "history": result.history,
+            "usage": result.usage,
+        }
 
     except ValueError as e:
         raise ApolloError(400, str(e), type="BAD_REQUEST")
