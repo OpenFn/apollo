@@ -124,7 +124,7 @@ class AnthropicClient:
 
                 return ChatResponse(
                     content=response_text,
-                    content_yaml=response_yaml,
+                    content_yaml=response_yaml or None,
                     history=updated_history,
                     usage=accumulated_usage,
                 )
