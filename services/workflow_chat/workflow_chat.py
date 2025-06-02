@@ -124,7 +124,7 @@ class AnthropicClient:
 
                 return ChatResponse(
                     content=response_text,
-                    content_yaml=response_yaml,
+                    content_yaml=response_yaml or None,
                     history=updated_history,
                     usage=accumulated_usage,
                 )
@@ -144,15 +144,19 @@ class AnthropicClient:
             output_text = response_data.get("text", "").strip()
             output_yaml = response_data.get("yaml", "")
 
-            if output_yaml:
+            if output_yaml and output_yaml.strip():
                 # Decode the escaped newlines into actual newlines if needed
                 output_yaml = output_yaml.encode().decode("unicode_escape")
                 # Parse YAML string into Python object
                 output_yaml = yaml.safe_load(output_yaml)
                 # Log if using invalid adaptors
                 self.validate_adaptors(output_yaml)
+                # Replace body keys
+                self.override_body_keys(output_yaml)
                 # Convert back to YAML string with preserved order
                 output_yaml = yaml.dump(output_yaml, sort_keys=False)
+            else:
+                output_yaml = ""  # Set for empty YAML
         except Exception as e:
             logger.error(f"Error during JSON parsing: {str(e)}")
 
@@ -170,6 +174,15 @@ class AnthropicClient:
                     if adaptor not in valid_adaptors:
                         logger.warning(f"Invalid adaptor found in job '{job_key}': {adaptor}")
 
+    def override_body_keys(self, yaml_data):
+        """Set all body keys in jobs are set to the correct default value."""
+        expected_body = "// Add operations here"
+
+        if yaml_data and "jobs" in yaml_data:
+            jobs = yaml_data["jobs"]
+            for job_key, job_data in jobs.items():
+                if "body" in job_data:
+                    job_data["body"] = expected_body
 
 def main(data_dict: dict) -> dict:
     """
