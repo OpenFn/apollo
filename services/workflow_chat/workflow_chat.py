@@ -144,7 +144,7 @@ class AnthropicClient:
             output_text = response_data.get("text", "").strip()
             output_yaml = response_data.get("yaml", "")
 
-            if output_yaml:
+            if output_yaml and output_yaml.strip():
                 # Decode the escaped newlines into actual newlines if needed
                 output_yaml = output_yaml.encode().decode("unicode_escape")
                 # Parse YAML string into Python object
@@ -155,6 +155,8 @@ class AnthropicClient:
                 self.override_body_keys(output_yaml)
                 # Convert back to YAML string with preserved order
                 output_yaml = yaml.dump(output_yaml, sort_keys=False)
+            else:
+                output_yaml = ""  # Set for empty YAML
         except Exception as e:
             logger.error(f"Error during JSON parsing: {str(e)}")
 
