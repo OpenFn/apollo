@@ -151,6 +151,8 @@ class AnthropicClient:
                 output_yaml = yaml.safe_load(output_yaml)
                 # Log if using invalid adaptors
                 self.validate_adaptors(output_yaml)
+                # Replace body keys
+                self.override_body_keys(output_yaml)
                 # Convert back to YAML string with preserved order
                 output_yaml = yaml.dump(output_yaml, sort_keys=False)
         except Exception as e:
@@ -170,6 +172,15 @@ class AnthropicClient:
                     if adaptor not in valid_adaptors:
                         logger.warning(f"Invalid adaptor found in job '{job_key}': {adaptor}")
 
+    def override_body_keys(self, yaml_data):
+        """Set all body keys in jobs are set to the correct default value."""
+        expected_body = "// Add operations here"
+
+        if yaml_data and "jobs" in yaml_data:
+            jobs = yaml_data["jobs"]
+            for job_key, job_data in jobs.items():
+                if "body" in job_data:
+                    job_data["body"] = expected_body
 
 def main(data_dict: dict) -> dict:
     """
