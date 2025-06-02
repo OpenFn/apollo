@@ -28,11 +28,11 @@ prompts:
       job-one:
         name: First Job
         adaptor: "@openfn/language-common@latest"
-        body: "| // Add operations here"
+        body: "// Add operations here"
       job-two:
         name: Second Job
         adaptor: "@openfn/language-http@latest"
-        body: "| // Add operations here"
+        body: "// Add operations here"
     triggers:
       # Choose one trigger type and remove the other
       cron:  # For scheduled jobs
@@ -90,7 +90,7 @@ prompts:
     The output should be:
     {{
       "text": "Your reasoning (max ~4 sentences).",
-      "yaml": "name: Daily CommCare to Satusehat Encounter Sync\njobs:\n  Fetch-visits-from-CommCare:\n    name: Fetch visits from CommCare\n    adaptor: \"@openfn/language-commcare@latest\"\n    body: \"| // Add operations here\"\n  Create-FHIR-Encounter-for-visitors-with-IHS-number:\n    name: Create FHIR Encounter for visitors with IHS number\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"| // Add operations here\"\n  Lookup-IHS-number-in-Satusehat:\n    name: Lookup IHS number in Satusehat\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"| // Add operations here\"\n  Create-FHIR-Encounter-after-IHS-lookup:\n    name: Create FHIR Encounter after IHS lookup\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"| // Add operations here\"\ntriggers:\n  cron:\n    type: cron\n    cron_expression: 0 0 * * *\n    enabled: false\nedges:\n  cron->Fetch-visits-from-CommCare:\n    source_trigger: cron\n    target_job: Fetch-visits-from-CommCare\n    condition_type: always\n    enabled: true\n  Fetch-visits-from-CommCare->Create-FHIR-Encounter-for-visitors-with-IHS-number:\n    source_job: Fetch-visits-from-CommCare\n    target_job: Create-FHIR-Encounter-for-visitors-with-IHS-number\n    condition_type: on_job_success\n    enabled: true\n  Fetch-visits-from-CommCare->Lookup-IHS-number-in-Satusehat:\n    source_job: Fetch-visits-from-CommCare\n    target_job: Lookup-IHS-number-in-Satusehat\n    condition_type: on_job_success\n    enabled: true\n  Lookup-IHS-number-in-Satusehat->Create-FHIR-Encounter-after-IHS-lookup:\n    source_job: Lookup-IHS-number-in-Satusehat\n    target_job: Create-FHIR-Encounter-after-IHS-lookup\n    condition_type: on_job_success\n    enabled: true"
+      "yaml": "name: Daily CommCare to Satusehat Encounter Sync\njobs:\n  Fetch-visits-from-CommCare:\n    name: Fetch visits from CommCare\n    adaptor: \"@openfn/language-commcare@latest\"\n    body: \"// Add operations here\"\n  Create-FHIR-Encounter-for-visitors-with-IHS-number:\n    name: Create FHIR Encounter for visitors with IHS number\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\n  Lookup-IHS-number-in-Satusehat:\n    name: Lookup IHS number in Satusehat\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\n  Create-FHIR-Encounter-after-IHS-lookup:\n    name: Create FHIR Encounter after IHS lookup\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\ntriggers:\n  cron:\n    type: cron\n    cron_expression: 0 0 * * *\n    enabled: false\nedges:\n  cron->Fetch-visits-from-CommCare:\n    source_trigger: cron\n    target_job: Fetch-visits-from-CommCare\n    condition_type: always\n    enabled: true\n  Fetch-visits-from-CommCare->Create-FHIR-Encounter-for-visitors-with-IHS-number:\n    source_job: Fetch-visits-from-CommCare\n    target_job: Create-FHIR-Encounter-for-visitors-with-IHS-number\n    condition_type: on_job_success\n    enabled: true\n  Fetch-visits-from-CommCare->Lookup-IHS-number-in-Satusehat:\n    source_job: Fetch-visits-from-CommCare\n    target_job: Lookup-IHS-number-in-Satusehat\n    condition_type: on_job_success\n    enabled: true\n  Lookup-IHS-number-in-Satusehat->Create-FHIR-Encounter-after-IHS-lookup:\n    source_job: Lookup-IHS-number-in-Satusehat\n    target_job: Create-FHIR-Encounter-after-IHS-lookup\n    condition_type: on_job_success\n    enabled: true"
     }}
 
     ## Output Format
@@ -128,11 +128,11 @@ prompts:
       job-one:
         name: First Job
         adaptor: "@openfn/language-common@latest"
-        body: "| // Add operations here"
+        body: "// Add operations here"
       job-two:
         name: Second Job
         adaptor: "@openfn/language-http@latest"
-        body: "| // Add operations here"
+        body: "// Add operations here"
     triggers:
       # Choose one trigger type and remove the other
       cron:  # For scheduled jobs
@@ -190,7 +190,7 @@ prompts:
     The output should be:
     {{
       "text": "Your reasoning (max ~4 sentences).",
-      "yaml": "name: Daily CommCare to Satusehat Encounter Sync\njobs:\n  Fetch-visits-from-CommCare:\n    name: Fetch visits from CommCare\n    adaptor: \"@openfn/language-commcare@latest\"\n    body: \"| // Add operations here\"\n  Create-FHIR-Encounter-for-visitors-with-IHS-number:\n    name: Create FHIR Encounter for visitors with IHS number\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"| // Add operations here\"\n  Lookup-IHS-number-in-Satusehat:\n    name: Lookup IHS number in Satusehat\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"| // Add operations here\"\n  Create-FHIR-Encounter-after-IHS-lookup:\n    name: Create FHIR Encounter after IHS lookup\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"| // Add operations here\"\ntriggers:\n  cron:\n    type: cron\n    cron_expression: 0 0 * * *\n    enabled: false\nedges:\n  cron->Fetch-visits-from-CommCare:\n    source_trigger: cron\n    target_job: Fetch-visits-from-CommCare\n    condition_type: always\n    enabled: true\n  Fetch-visits-from-CommCare->Create-FHIR-Encounter-for-visitors-with-IHS-number:\n    source_job: Fetch-visits-from-CommCare\n    target_job: Create-FHIR-Encounter-for-visitors-with-IHS-number\n    condition_type: on_job_success\n    enabled: true\n  Fetch-visits-from-CommCare->Lookup-IHS-number-in-Satusehat:\n    source_job: Fetch-visits-from-CommCare\n    target_job: Lookup-IHS-number-in-Satusehat\n    condition_type: on_job_success\n    enabled: true\n  Lookup-IHS-number-in-Satusehat->Create-FHIR-Encounter-after-IHS-lookup:\n    source_job: Lookup-IHS-number-in-Satusehat\n    target_job: Create-FHIR-Encounter-after-IHS-lookup\n    condition_type: on_job_success\n    enabled: true"
+      "yaml": "name: Daily CommCare to Satusehat Encounter Sync\njobs:\n  Fetch-visits-from-CommCare:\n    name: Fetch visits from CommCare\n    adaptor: \"@openfn/language-commcare@latest\"\n    body: \"// Add operations here\"\n  Create-FHIR-Encounter-for-visitors-with-IHS-number:\n    name: Create FHIR Encounter for visitors with IHS number\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\n  Lookup-IHS-number-in-Satusehat:\n    name: Lookup IHS number in Satusehat\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\n  Create-FHIR-Encounter-after-IHS-lookup:\n    name: Create FHIR Encounter after IHS lookup\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\ntriggers:\n  cron:\n    type: cron\n    cron_expression: 0 0 * * *\n    enabled: false\nedges:\n  cron->Fetch-visits-from-CommCare:\n    source_trigger: cron\n    target_job: Fetch-visits-from-CommCare\n    condition_type: always\n    enabled: true\n  Fetch-visits-from-CommCare->Create-FHIR-Encounter-for-visitors-with-IHS-number:\n    source_job: Fetch-visits-from-CommCare\n    target_job: Create-FHIR-Encounter-for-visitors-with-IHS-number\n    condition_type: on_job_success\n    enabled: true\n  Fetch-visits-from-CommCare->Lookup-IHS-number-in-Satusehat:\n    source_job: Fetch-visits-from-CommCare\n    target_job: Lookup-IHS-number-in-Satusehat\n    condition_type: on_job_success\n    enabled: true\n  Lookup-IHS-number-in-Satusehat->Create-FHIR-Encounter-after-IHS-lookup:\n    source_job: Lookup-IHS-number-in-Satusehat\n    target_job: Create-FHIR-Encounter-after-IHS-lookup\n    condition_type: on_job_success\n    enabled: true"
     }}
 
     ## Output Format
