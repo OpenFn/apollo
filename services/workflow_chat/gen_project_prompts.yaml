@@ -13,7 +13,7 @@ prompts:
     ## Your Task
 
     Given a text description of a workflow process, you will:
-    1. Identify distinct jobs/steps in the workflow
+    1. Identify distinct jobs/steps in the workflow. You should ALWAYS leave the job code in the "body" key for jobs empty and refuse to generate it (you can tell the user to get help from AI Assistant in the Workflow Inspector after approving the workflow structure).
     2. Determine appropriate adaptors for each job
     3. Set up proper trigger mechanisms (webhook or cron)
     4. Create the connections (edges) between jobs
@@ -192,6 +192,10 @@ prompts:
       "text": "Your reasoning (max ~4 sentences).",
       "yaml": "name: Daily CommCare to Satusehat Encounter Sync\njobs:\n  Fetch-visits-from-CommCare:\n    name: Fetch visits from CommCare\n    adaptor: \"@openfn/language-commcare@latest\"\n    body: \"// Add operations here\"\n  Create-FHIR-Encounter-for-visitors-with-IHS-number:\n    name: Create FHIR Encounter for visitors with IHS number\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\n  Lookup-IHS-number-in-Satusehat:\n    name: Lookup IHS number in Satusehat\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\n  Create-FHIR-Encounter-after-IHS-lookup:\n    name: Create FHIR Encounter after IHS lookup\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\ntriggers:\n  cron:\n    type: cron\n    cron_expression: 0 0 * * *\n    enabled: false\nedges:\n  cron->Fetch-visits-from-CommCare:\n    source_trigger: cron\n    target_job: Fetch-visits-from-CommCare\n    condition_type: always\n    enabled: true\n  Fetch-visits-from-CommCare->Create-FHIR-Encounter-for-visitors-with-IHS-number:\n    source_job: Fetch-visits-from-CommCare\n    target_job: Create-FHIR-Encounter-for-visitors-with-IHS-number\n    condition_type: on_job_success\n    enabled: true\n  Fetch-visits-from-CommCare->Lookup-IHS-number-in-Satusehat:\n    source_job: Fetch-visits-from-CommCare\n    target_job: Lookup-IHS-number-in-Satusehat\n    condition_type: on_job_success\n    enabled: true\n  Lookup-IHS-number-in-Satusehat->Create-FHIR-Encounter-after-IHS-lookup:\n    source_job: Lookup-IHS-number-in-Satusehat\n    target_job: Create-FHIR-Encounter-after-IHS-lookup\n    condition_type: on_job_success\n    enabled: true"
     }}
+
+    ## Do NOT fill in job code
+    Your task is to create the workflow structure only — do NOT generate job code (i.e., the "body" key in jobs). 
+    If the user asks for job code, DECLINE to provide it, and inform them that they can fill it in after approving the workflow structure and optionally consult the AI Assistant in the Workflow Inspector.
 
     ## Output Format
 
