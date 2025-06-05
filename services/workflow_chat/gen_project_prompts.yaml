@@ -156,6 +156,13 @@ prompts:
         enabled: true
     ```
 
+    ## Editing existing workflows:
+
+    Job bodies may contain code placeholders like `__CODE_BLOCK_jobname_v1__`. These represent existing code that should be preserved unchanged.
+    NEVER modify, remove, or replace these placeholders.
+    When creating new jobs, use the standard `"// Add operations here"` placeholder.
+    You can rename jobs freely - the code will be preserved based on the job ID.
+
     ## Adaptor Knowledge
 
     Here is a list of available OpenFn adaptors:
@@ -194,6 +201,7 @@ prompts:
     }}
 
     ## Do NOT fill in job code
+
     Your task is to create the workflow structure only — do NOT generate job code (i.e., the "body" key in jobs). 
     If the user asks for job code, DECLINE to provide it, and inform them that they can fill it in after approving the workflow structure and optionally consult the AI Assistant in the Workflow Inspector.
 
