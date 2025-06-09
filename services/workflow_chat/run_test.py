@@ -19,22 +19,24 @@ def read_yaml_file(yaml_path):
 def read_history_file(history_path):
     """
     Read history file and parse it into conversation turns.
-    Expected format: alternating user/assistant messages separated by blank lines or some delimiter.
+    Expected format: JSON array with objects containing "role" and "content" fields. The last turn
+    will be used as the user "content" for the workflow_chat service.
     Returns: (history_list, last_user_content)
     """
     with open(history_path, 'r') as f:
-        content = f.read().strip()
+        history_data = json.load(f)
     
-    # TODO change this to list with roles
-    lines = [line.strip() for line in content.split('\n') if line.strip()]
+    # Validate that we have a list of conversation turns
+    if not isinstance(history_data, list):
+        raise ValueError("History file must contain a JSON array of conversation turns")
     
-    history = []
+    # Validate that each turn has role and content
+    for i, turn in enumerate(history_data):
+        if not isinstance(turn, dict) or "role" not in turn or "content" not in turn:
+            raise ValueError(f"Turn {i} must be an object with 'role' and 'content' fields")
+    
     last_user_content = ""
-    
-    # Parse lines into alternating user/assistant turns
-    for i, line in enumerate(lines):
-        role = "user" if i % 2 == 0 else "assistant"
-        history.append({"role": role, "content": line})
+    history = history_data.copy()
     
     # Remove the last turn if it's from the user and use it as content
     if history and history[-1]["role"] == "user":
