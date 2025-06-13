@@ -171,11 +171,6 @@ class AnthropicClient:
 
                 # Convert back to YAML string with preserved order
                 output_yaml = yaml.dump(output_yaml, sort_keys=False)
-
-                if preserved_codes:
-                    output_yaml_string = self.restore_job_codes(output_yaml_string, preserved_codes)
-                
-                output_yaml = output_yaml_string
             else:
                 output_yaml = ""
                 
@@ -198,7 +193,7 @@ class AnthropicClient:
 
     def process_job_bodies(self, yaml_data, preserved_codes=None):
         """
-        Set default code placeholder for body keys in new jobs.
+        Restore preserved code for existing jobs and set default placeholder for new jobs.
         """
         if not preserved_codes:
             preserved_codes = {}
@@ -211,14 +206,18 @@ class AnthropicClient:
                 if "body" in job_data:
                     body_content = job_data["body"]
                     
-                    # If it's already a code placeholder, leave it unchanged #TODO could this rename by accident
+                    # If it's already a code placeholder, leave it unchanged
                     if isinstance(body_content, str) and body_content.startswith("__CODE_BLOCK_"):
                         continue
                     
-                    # Handle new jobs created by model #TODO could this replace by accident
-                    elif job_id not in preserved_codes:
+                    # If this job exists in preserved codes, restore the original code
+                    elif job_id in preserved_codes:
+                        job_data["body"] = preserved_codes[job_id]["code"]
+                    
+                    # Handle new jobs created by model - set default placeholder
+                    else:
                         job_data["body"] = expected_default
-    
+
     def extract_job_codes(self, yaml_data):
         """
         Extract actual code from job bodies and create placeholder mapping.
@@ -254,15 +253,6 @@ class AnthropicClient:
                     job_data["body"] = code_mapping[job_id]["placeholder"]
         
         return yaml.dump(yaml_data, sort_keys=False)
-
-    def restore_job_codes(self, yaml_string, code_mapping):
-        """Find and replace placeholders with original code in model output."""
-        for job_id, code_data in code_mapping.items():
-            placeholder = code_data["placeholder"]
-            original_code = code_data["code"]
-            yaml_string = yaml_string.replace(placeholder, original_code)
-        
-        return yaml_string
 
 def main(data_dict: dict) -> dict:
     """

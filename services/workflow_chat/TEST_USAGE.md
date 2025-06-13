@@ -8,7 +8,7 @@ From the `services/` directory, run:
 
 ```bash
 conda activate openfn
-python workflow_chat/run_test.py --existing_yaml test_inputs/existing_yaml_a.yaml --history test_inputs/history_a.json
+python workflow_chat/run_test.py --existing_yaml workflow_chat/test_inputs/existing_yaml_a.yaml --history workflow_chat/test_inputs/history_a.json
 ```
 
 ## Input Format
