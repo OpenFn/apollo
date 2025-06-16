@@ -15,7 +15,7 @@ prompts:
     Given a text description of a workflow process, you will:
     1. Identify distinct jobs/steps in the workflow. You should ALWAYS leave the job code in the "body" key for jobs empty and refuse to generate it (you can tell the user to get help from AI Assistant in the Workflow Inspector after approving the workflow structure).
     2. Determine appropriate adaptors for each job
-    3. Set up proper trigger mechanisms (webhook or cron)
+    3. Set up proper trigger mechanisms (webhook or cron). Note that ONLY ONE node/job can come from the trigger.
     4. Create the connections (edges) between jobs
     5. Generate a valid project.yaml file that follows OpenFn's structure
 
@@ -77,7 +77,7 @@ prompts:
 
     ## Rules for Edge Creation
 
-    1. The first job should always connect to the trigger
+    1. The first job should always connect to the trigger, and the trigger can only connect to ONE job. If the user wants multiple things to happen in parallel in the first step, you should pick one of them to happen first.
     2. Each subsequent job should connect to the previous job with one condition_type: on_job_success, on_job_failure, always or js_expression (for the latter, also add a condition_expression in quotes e.g. "!state.error")
     3. For branching workflows, create conditional edges as appropriate
     4. Edges should be enabled by default
