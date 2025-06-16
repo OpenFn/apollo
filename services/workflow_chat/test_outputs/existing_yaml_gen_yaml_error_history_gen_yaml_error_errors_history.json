@@ -9,10 +9,10 @@
   },
   {
     "role": "user",
-    "content": "Can you also fill in the job code for all the steps"
+    "content": null
   },
   {
     "role": "assistant",
-    "content": "{\"text\": \"While I can provide code suggestions, I'm designed to leave the job 'body' fields empty for jobs in workflow creation. I recommend you use the AI Assistant in the Workflow Inspector after approving this workflow structure, which can help you write the specific code for each job based on your exact requirements for processing fridge data and storing it in Redis.\", \"yaml\": null}"
+    "content": "{\"text\":\"I made an error in the adaptor name for the first job. The correct name is '@openfn/language-common@latest' (not language-commons). I've fixed this error in the YAML to ensure it uses the proper adaptor name.\",\"yaml\":\"name: fridge-statistics-processing\\njobs:\\n  parse-and-aggregate-fridge-data:\\n    name: Parse and Aggregate Fridge Data\\n    adaptor: \\\"@openfn/language-common@latest\\\"\\n    body: \\\"// Add operations here\\\"\\n  upload-to-redis:\\n    name: Upload to Redis Collection\\n    adaptor: \\\"@openfn/language-redis@latest\\\"\\n    body: \\\"// Add operations here\\\"\\ntriggers:\\n  webhook:\\n    type: webhook\\n    enabled: false\\nedges:\\n  webhook->parse-and-aggregate-fridge-data:\\n    source_trigger: webhook\\n    target_job: parse-and-aggregate-fridge-data\\n    condition_type: always\\n    enabled: true\\n  parse-and-aggregate-fridge-data->upload-to-redis:\\n    source_job: parse-and-aggregate-fridge-data\\n    target_job: upload-to-redis\\n    condition_type: on_job_success\\n    enabled: true\"}"
   }
 ]

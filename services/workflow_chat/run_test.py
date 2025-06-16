@@ -16,21 +16,19 @@ def read_yaml_file(yaml_path):
     return content
 
 
-def read_history_file(history_path):
+def read_history_file(history_path, expect_user_message=True):
     """
     Read history file and parse it into conversation turns.
-    Expected format: JSON array with objects containing "role" and "content" fields. The last turn
-    will be used as the user "content" for the workflow_chat service.
+    Expected format: JSON array with objects containing "role" and "content" fields. 
+    If expect_user_message is True, the last turn will be used as the user "content" for the workflow_chat service.
     Returns: (history_list, last_user_content)
     """
     with open(history_path, 'r') as f:
         history_data = json.load(f)
     
-    # Validate that we have a list of conversation turns
     if not isinstance(history_data, list):
         raise ValueError("History file must contain a JSON array of conversation turns")
     
-    # Validate that each turn has role and content
     for i, turn in enumerate(history_data):
         if not isinstance(turn, dict) or "role" not in turn or "content" not in turn:
             raise ValueError(f"Turn {i} must be an object with 'role' and 'content' fields")
@@ -38,28 +36,33 @@ def read_history_file(history_path):
     last_user_content = ""
     history = history_data.copy()
     
-    # Remove the last turn if it's from the user and use it as content
-    if history and history[-1]["role"] == "user":
+    # Only remove the last turn if it's from the user and we expect a user message
+    if expect_user_message and history and history[-1]["role"] == "user":
         last_user_content = history[-1]["content"]
         history = history[:-1]
     
     return history, last_user_content
 
 
-def create_service_input(existing_yaml_path, history_path):
+def create_service_input(existing_yaml_path, history_path, errors=None):
     """Create the input JSON for the workflow_chat service."""
-    # Read and format the existing YAML
     existing_yaml = read_yaml_file(existing_yaml_path)
     
-    # Read and parse the history
-    history, content = read_history_file(history_path)
+    expect_user_message = errors is None
+    
+    history, content = read_history_file(history_path, expect_user_message)
     
     # Create the service input
     service_input = {
-        "content": content,
         "existing_yaml": existing_yaml,
         "history": history
     }
+    
+    if content:
+        service_input["content"] = content
+    
+    if errors:
+        service_input["errors"] = errors
     
     return service_input
 
@@ -73,17 +76,14 @@ def ensure_output_directory():
 
 def call_workflow_chat_service(service_input):
     """Call the workflow_chat service using entry.py."""
-    # Create a temporary input file
     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_input:
         json.dump(service_input, temp_input, indent=2)
         temp_input_path = temp_input.name
     
-    # Create a temporary output file
     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_output:
         temp_output_path = temp_output.name
     
     try:
-        # Call entry.py with the workflow_chat service
         cmd = [
             sys.executable, 
             "entry.py", 
@@ -97,14 +97,12 @@ def call_workflow_chat_service(service_input):
         if result.returncode != 0:
             raise Exception(f"Service call failed: {result.stderr}")
         
-        # Read the response from the output file
         with open(temp_output_path, 'r') as f:
             response = json.load(f)
         
         return response
         
     finally:
-        # Clean up temporary files
         try:
             os.unlink(temp_input_path)
             os.unlink(temp_output_path)
@@ -124,7 +122,6 @@ def write_output_files(response, base_filename, output_dir):
                 f.write(value)
             print(f"  Wrote {key} to {yaml_file}")
         else:
-            # Write as JSON
             output_file = output_dir / f"{base_filename}_{key}.json"
             with open(output_file, 'w') as f:
                 json.dump(value, f, indent=2)
@@ -135,10 +132,10 @@ def main():
     parser = argparse.ArgumentParser(description="Test workflow_chat service with YAML and history files")
     parser.add_argument("--existing_yaml", required=True, help="Path to existing YAML file")
     parser.add_argument("--history", required=True, help="Path to history text file")
+    parser.add_argument("--errors", help="Error message to pass to workflow_chat service")
     
     args = parser.parse_args()
     
-    # Validate input files exist
     if not os.path.exists(args.existing_yaml):
         print(f"Error: YAML file not found: {args.existing_yaml}")
         sys.exit(1)
@@ -148,23 +145,21 @@ def main():
         sys.exit(1)
     
     try:
-        # Create service input
         print("Reading input files...")
-        service_input = create_service_input(args.existing_yaml, args.history)
+        service_input = create_service_input(args.existing_yaml, args.history, args.errors)
         
-        # Call the workflow_chat service via entry.py
         print("Calling workflow_chat service...")
         response = call_workflow_chat_service(service_input)
         
-        # Ensure output directory exists
         output_dir = ensure_output_directory()
         
-        # Generate base filename from input files
         yaml_name = Path(args.existing_yaml).stem
         history_name = Path(args.history).stem
         base_filename = f"{yaml_name}_{history_name}"
         
-        # Write output files
+        if args.errors:
+            base_filename += "_errors"
+        
         print(f"Writing output files with base name: {base_filename}")
         write_output_files(response, base_filename, output_dir)
         
