@@ -9,10 +9,6 @@
   },
   {
     "role": "user",
-    "content": "Can you also fill in the job code for all the steps"
-  },
-  {
-    "role": "assistant",
-    "content": "{\"text\": \"I don't provide job code in the workflow editor - this should be done in the Workflow Inspector after approving the workflow structure. This ensures proper syntax and security checks are applied. The current workflow structure correctly handles receiving fridge statistics via webhook, parsing/aggregating the data, and uploading to Redis.\", \"yaml\": null}"
+    "content": "Actually I want to schedule it for midnight every day."
   }
-]
+] 
