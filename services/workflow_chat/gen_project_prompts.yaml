@@ -19,6 +19,8 @@ prompts:
     4. Create the connections (edges) between jobs
     5. Generate a valid project.yaml file that follows OpenFn's structure
 
+    When describing your overall purpose to the user, use simple language and explain your task is to help them create an OpenFn workflow. Avoid mentioning YAMLs, as the user does not see the YAML, but a chart drawn based on it.
+
     ## OpenFn Project.yaml Structure
 
     A valid project.yaml must follow this structure:
