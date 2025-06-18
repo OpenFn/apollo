@@ -1,5 +1,7 @@
 import json
 import os
+import re
+import unicodedata
 from typing import List, Optional, Dict, Any
 import yaml
 from dataclasses import dataclass
@@ -132,6 +134,24 @@ class AnthropicClient:
             # Otherwise, log and retry
             logger.warning(f"YAML parsing failed, retrying generation (attempt {attempt+1}/{max_retries})")
 
+    def sanitize_job_names(self, yaml_data):
+        """Sanitize job names by removing special characters and normalizing diacritics."""
+        if yaml_data and "jobs" in yaml_data:
+            jobs = yaml_data["jobs"]
+            for job_key, job_data in jobs.items():
+                if "name" in job_data:
+                    original_name = str(job_data["name"])
+                    # Normalize unicode characters (removes diacritics)
+                    normalized = unicodedata.normalize('NFKD', original_name)
+                    ascii_name = normalized.encode('ascii', 'ignore').decode('ascii')
+                    # Keep only alphanumeric, spaces, hyphens, and underscores
+                    sanitized_name = re.sub(r'[^a-zA-Z0-9\s\-_]', '', ascii_name)
+                    
+                    job_data["name"] = sanitized_name
+                    
+                    if original_name != sanitized_name:
+                        logger.info(f"Sanitized job name: '{original_name}' -> '{sanitized_name}'")
+
     def split_format_yaml(self, response):
         """Split text and YAML in response and format the YAML."""
         output_text, output_yaml = "", None
@@ -146,11 +166,13 @@ class AnthropicClient:
 
             if output_yaml and output_yaml.strip():
                 # Decode the escaped newlines into actual newlines if needed
-                output_yaml = output_yaml.encode().decode("unicode_escape")
+                # output_yaml = output_yaml.encode().decode("unicode_escape")
                 # Parse YAML string into Python object
                 output_yaml = yaml.safe_load(output_yaml)
                 # Log if using invalid adaptors
                 self.validate_adaptors(output_yaml)
+                # Sanitize job names
+                self.sanitize_job_names(output_yaml)
                 # Replace body keys
                 self.override_body_keys(output_yaml)
                 # Convert back to YAML string with preserved order
