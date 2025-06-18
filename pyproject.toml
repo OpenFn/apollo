@@ -30,7 +30,7 @@ nltk = "^3.9.1"
 optional = true
 
 [tool.poetry.group.ft.dependencies]
-torch = "^2.6.0"
+torch = "^2.7.1"
 
 [tool.poetry.group.dev]
 optional = false
