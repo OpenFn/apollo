@@ -1,5 +1,11 @@
 # apollo
 
+## 0.11.4
+
+### Patch Changes
+
+- bdc0daf: improve prompt for workflow generation
+
 ## 0.11.3
 
 ### Patch Changes
