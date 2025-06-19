@@ -165,8 +165,6 @@ class AnthropicClient:
             output_yaml = response_data.get("yaml", "")
 
             if output_yaml and output_yaml.strip():
-                # Decode the escaped newlines into actual newlines if needed
-                # output_yaml = output_yaml.encode().decode("unicode_escape")
                 # Parse YAML string into Python object
                 output_yaml = yaml.safe_load(output_yaml)
                 # Log if using invalid adaptors
