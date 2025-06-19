@@ -151,9 +151,6 @@ class AnthropicClient:
             # Otherwise, log and retry
             logger.warning(f"YAML parsing failed, retrying generation (attempt {attempt+1}/{max_retries})")
 
-<<<<<<< HEAD
-    def split_format_yaml(self, response, preserved_codes=None):
-=======
     def sanitize_job_names(self, yaml_data):
         """Sanitize job names by removing special characters and normalizing diacritics."""
         if yaml_data and "jobs" in yaml_data:
@@ -172,8 +169,7 @@ class AnthropicClient:
                     if original_name != sanitized_name:
                         logger.info(f"Sanitized job name: '{original_name}' -> '{sanitized_name}'")
 
-    def split_format_yaml(self, response):
->>>>>>> main
+    def split_format_yaml(self, response, preserved_codes=None):
         """Split text and YAML in response and format the YAML."""
         output_text, output_yaml = "", None
 
@@ -186,24 +182,13 @@ class AnthropicClient:
             output_yaml = response_data.get("yaml", "")
 
             if output_yaml and output_yaml.strip():
-<<<<<<< HEAD
-                # Decode the escaped newlines into actual newlines if needed
-                output_yaml = output_yaml.encode().decode("unicode_escape")
-=======
                 # Parse YAML string into Python object
->>>>>>> main
                 output_yaml = yaml.safe_load(output_yaml)
 
                 self.validate_adaptors(output_yaml)
-<<<<<<< HEAD
-                self.process_job_bodies(output_yaml, preserved_codes)
-
-=======
-                # Sanitize job names
                 self.sanitize_job_names(output_yaml)
-                # Replace body keys
-                self.override_body_keys(output_yaml)
->>>>>>> main
+                self.process_job_bodies(output_yaml, preserved_codes)
+                
                 # Convert back to YAML string with preserved order
                 output_yaml = yaml.dump(output_yaml, sort_keys=False)
             else:
