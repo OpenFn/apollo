@@ -188,7 +188,6 @@ class AnthropicClient:
                 self.validate_adaptors(output_yaml)
                 self.sanitize_job_names(output_yaml)
                 self.process_job_bodies(output_yaml, preserved_codes)
-                
                 # Convert back to YAML string with preserved order
                 output_yaml = yaml.dump(output_yaml, sort_keys=False)
             else:
@@ -224,16 +223,9 @@ class AnthropicClient:
             jobs = yaml_data["jobs"]
             for job_id, job_data in jobs.items():
                 if "body" in job_data:
-                    body_content = job_data["body"]
-                    
-                    # If it's already a code placeholder, leave it unchanged
-                    if isinstance(body_content, str) and body_content.startswith("__CODE_BLOCK_"):
-                        continue
-                    
                     # If this job exists in preserved codes, restore the original code
-                    elif job_id in preserved_codes:
+                    if job_id in preserved_codes:
                         job_data["body"] = preserved_codes[job_id]["code"]
-                    
                     # Handle new jobs created by model - set default placeholder
                     else:
                         job_data["body"] = expected_default
