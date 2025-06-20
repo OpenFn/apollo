@@ -58,7 +58,8 @@ def create_service_input(existing_yaml_path, history_path, errors=None):
         "history": history
     }
     
-    if content:
+    # Only add content if it's not None and not empty
+    if content and content.strip():
         service_input["content"] = content
     
     if errors:
