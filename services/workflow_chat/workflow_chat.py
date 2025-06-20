@@ -54,7 +54,7 @@ class Payload:
 @dataclass
 class ChatConfig:
     model: str = "claude-3-7-sonnet-20250219"
-    max_tokens: int = 1024
+    max_tokens: int = 8192
     api_key: Optional[str] = None
 
 
@@ -254,7 +254,7 @@ class AnthropicClient:
 
     def generate_code_placeholder(self, job_id):
         """Generate unique, deterministic placeholder for job code."""
-        return f"__CODE_BLOCK_{job_id}_v1__"
+        return f"__CODE_BLOCK_{job_id}__"
 
     def replace_codes_with_placeholders(self, yaml_data, code_mapping):
         """Replace actual job bodies with placeholders before sending to model."""

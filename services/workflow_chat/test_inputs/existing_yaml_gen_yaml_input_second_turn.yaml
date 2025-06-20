@@ -23,4 +23,3 @@ edges:
     target_job: upload-to-redis
     condition_type: on_job_success
     enabled: true
-RetryClaude can make mistakes. Please double-check responses. 
