@@ -2,6 +2,19 @@
 
 This directory contains a standalone testing script for the workflow_chat service.
 
+## Running All Tests
+
+To run all tests at once, use the batch test runner:
+
+```bash
+conda activate openfn
+python workflow_chat/run_test_all.py
+```
+
+This will run all tests defined in `workflow_chat/tests_to_run.txt` and provide a summary of results.
+
+## Running Individual Tests
+
 ## Usage
 
 From the `services/` directory, run:
@@ -10,6 +23,17 @@ From the `services/` directory, run:
 conda activate openfn
 python workflow_chat/run_test.py --existing_yaml workflow_chat/test_inputs/existing_yaml_a.yaml --history workflow_chat/test_inputs/history_a.json
 ```
+
+### Running Tests with Error Messages
+
+To test error handling scenarios, you can pass an error message using the `--errors` flag:
+
+```bash
+conda activate openfn
+python workflow_chat/run_test.py --existing_yaml workflow_chat/test_inputs/existing_yaml_a.yaml --history workflow_chat/test_inputs/history_a.json --errors "adaptor error"
+```
+
+When the `--errors` flag is used, the script will pass the error message to the workflow_chat service instead of extracting the last user message from the history.
 
 ## Input Format
 
