@@ -1,5 +1,24 @@
 # apollo
 
+## 0.11.4
+
+### Patch Changes
+
+- bdc0daf: improve prompt for workflow generation
+
+## 0.11.3
+
+### Patch Changes
+
+- a3119a3: Override workflow generation yaml body key to be empty
+- 1159eeb: fix workflow gen variable scope
+
+## 0.11.2
+
+### Patch Changes
+
+- workflow_chat: update adaptor list
+
 ## 0.11.1
 
 ### Patch Changes

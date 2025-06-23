@@ -146,7 +146,7 @@ def call_llm(model, temperature, system_prompt, user_prompt, client):
     """Helper method to make LLM calls."""
     message = client.messages.create(
         model=model,
-        max_tokens=500,
+        max_tokens=1024,
         temperature=temperature,
         system=system_prompt,
         messages=[

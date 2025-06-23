@@ -1,0 +1,6 @@
+[
+  {
+    "role": "user",
+    "content": "Whenever fridge statistics are send to you, parse and aggregate the data and upload to a collection in redis."
+  }
+] 

@@ -1,3 +1,4 @@
+
 import os
 from .config_loader import ConfigLoader
 from .available_adaptors import available_adaptors
@@ -19,8 +20,12 @@ def chat_prompt(content, existing_yaml, history):
     else:
         existing_yaml = "\nFor context, the user is currently editing this YAML:\n" + existing_yaml
     
-    system_message = config_loader.get_prompt("get_info_gen_yaml_system_prompt")
-    system_message = system_message.format(adaptors = adaptors_string)
+    system_message = config_loader.get_prompt("main_system_prompt")
+    system_message = system_message.format(
+        adaptors=adaptors_string, 
+        mode_specific_intro=config_loader.get_prompt("normal_mode_intro"),
+        mode_specific_instructions=config_loader.get_prompt("normal_mode_instructions")
+    )
     system_message += existing_yaml
 
     prompt = []
@@ -38,8 +43,12 @@ def error_prompt(content, existing_yaml, errors, history):
     if not content:
         content = ""
     
-    system_message = config_loader.get_prompt("fix_yaml_error_system_prompt")
-    system_message = system_message.format(adaptors = adaptors_string)
+    system_message = config_loader.get_prompt("main_system_prompt")
+    system_message = system_message.format(
+        adaptors=adaptors_string,
+        mode_specific_intro=config_loader.get_prompt("error_mode_intro"), 
+        mode_specific_instructions=config_loader.get_prompt("error_mode_instructions")
+    )
     system_message += existing_yaml
     content += "\nThis is the error message:\n" + errors
     
