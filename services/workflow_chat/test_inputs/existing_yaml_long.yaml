@@ -1,0 +1,107 @@
+name: Data-Integration-and-Reporting
+jobs:
+  Retrieve-Google-Sheets-Data:
+    name: Retrieve Google Sheets Data
+    adaptor: "@openfn/language-googlesheets@latest"
+    body: // PLACEHOLDER 1
+  Retrieve-NetSuite-Data:
+    name: Retrieve NetSuite Data
+    adaptor: "@openfn/language-http@latest"
+    body: // PLACEHOLDER 2
+  Retrieve-Ferntech-Data:
+    name: Retrieve Ferntech Data
+    adaptor: "@openfn/language-http@latest"
+    body: // PLACEHOLDER 3
+  Process-Combined-Data:
+    name: Process Combined Data
+    adaptor: "@openfn/language-common@latest"
+    body: // PLACEHOLDER 4
+  Send-Email-Report:
+    name: Send Email Report
+    adaptor: "@openfn/language-gmail@latest"
+    body: // PLACEHOLDER 5a
+  write-to-sheet:
+    name: write to sheet
+    adaptor: "@openfn/language-googlesheets@3.0.13"
+    body: // PLACEHOLDER 5b
+  Summarise-with-claude:
+    name: Summarise with claude
+    adaptor: "@openfn/language-claude@1.0.7"
+    body: // PLACEHOLDER 5c
+  Email-summary:
+    name: Email summary
+    adaptor: "@openfn/language-gmail@1.3.0"
+    body: // PLACEHOLDER 6
+  Update-asana:
+    name: Update asana
+    adaptor: "@openfn/language-asana@4.1.0"
+    body: // PLACEHOLDER 7
+  format-data:
+    name: format data
+    adaptor: "@openfn/language-common@latest"
+    body: |
+      // PLACEHOLDER 8
+  email-bulk:
+    name: email bulk
+    adaptor: "@openfn/language-mailgun@0.5.13"
+    body: // PLACEHOLDER 9
+triggers:
+  webhook:
+    type: webhook
+    enabled: false
+edges:
+  webhook->Retrieve-Google-Sheets-Data:
+    source_trigger: webhook
+    target_job: Retrieve-Google-Sheets-Data
+    condition_type: always
+    enabled: true
+  Retrieve-Google-Sheets-Data->Retrieve-NetSuite-Data:
+    source_job: Retrieve-Google-Sheets-Data
+    target_job: Retrieve-NetSuite-Data
+    condition_type: on_job_success
+    enabled: true
+  Retrieve-NetSuite-Data->Retrieve-Ferntech-Data:
+    source_job: Retrieve-NetSuite-Data
+    target_job: Retrieve-Ferntech-Data
+    condition_type: on_job_success
+    enabled: true
+  Retrieve-Ferntech-Data->Process-Combined-Data:
+    source_job: Retrieve-Ferntech-Data
+    target_job: Process-Combined-Data
+    condition_type: on_job_success
+    enabled: true
+  Process-Combined-Data->Send-Email-Report:
+    source_job: Process-Combined-Data
+    target_job: Send-Email-Report
+    condition_type: on_job_success
+    enabled: true
+  Process-Combined-Data->write-to-sheet:
+    source_job: Process-Combined-Data
+    target_job: write-to-sheet
+    condition_type: on_job_success
+    enabled: true
+  Process-Combined-Data->Summarise-with-claude:
+    source_job: Process-Combined-Data
+    target_job: Summarise-with-claude
+    condition_type: on_job_success
+    enabled: true
+  Summarise-with-claude->Email-summary:
+    source_job: Summarise-with-claude
+    target_job: Email-summary
+    condition_type: on_job_success
+    enabled: true
+  Email-summary->Update-asana:
+    source_job: Email-summary
+    target_job: Update-asana
+    condition_type: on_job_success
+    enabled: true
+  Update-asana->format-data:
+    source_job: Update-asana
+    target_job: format-data
+    condition_type: on_job_success
+    enabled: true
+  format-data->email-bulk:
+    source_job: format-data
+    target_job: email-bulk
+    condition_type: on_job_success
+    enabled: true
