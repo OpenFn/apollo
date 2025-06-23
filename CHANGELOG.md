@@ -1,5 +1,15 @@
 # apollo
 
+## 0.12.0
+
+### Minor Changes
+
+- 4f5a5f2: allow ai edits of existing workflows
+
+### Patch Changes
+
+- 2776d4d: update token limit for job chat
+
 ## 0.11.4
 
 ### Patch Changes
