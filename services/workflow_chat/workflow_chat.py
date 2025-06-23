@@ -54,7 +54,7 @@ class Payload:
 @dataclass
 class ChatConfig:
     model: str = "claude-3-7-sonnet-20250219"
-    max_tokens: int = 1024
+    max_tokens: int = 8192
     api_key: Optional[str] = None
 
 
@@ -83,8 +83,25 @@ class AnthropicClient:
     ) -> ChatResponse:
         """Generate a response using the Claude API. Retry up to 2 times if YAML/JSON parsing fails."""
         history = history.copy() if history else []
+        
+        # Extract and preserve existing code if yaml exists
+        preserved_codes = {}
+        processed_existing_yaml = existing_yaml
+        
+        if existing_yaml and existing_yaml.strip():
+            try:
+                yaml_data = yaml.safe_load(existing_yaml)
+                preserved_codes = self.extract_job_codes(yaml_data)
+                if preserved_codes:
+                    processed_existing_yaml = self.replace_codes_with_placeholders(yaml_data, preserved_codes)
+            except Exception as e:
+                logger.warning(f"Could not parse existing YAML for code extraction: {e}")
+        
         system_message, prompt = build_prompt(
-            content=content, existing_yaml=existing_yaml, errors=errors, history=history
+            content=content, 
+            existing_yaml=processed_existing_yaml, 
+            errors=errors, 
+            history=history
         )
 
         accumulated_usage = {
@@ -115,7 +132,7 @@ class AnthropicClient:
                     logger.warning(f"Unhandled content type: {content_block.type}")
 
             response = "\n\n".join(response_parts)
-            response_text, response_yaml = self.split_format_yaml(response)
+            response_text, response_yaml = self.split_format_yaml(response, preserved_codes)
 
             # If YAML parsing succeeded or we're on the last attempt, return the result
             if response_yaml is not None or attempt == max_retries:
@@ -152,7 +169,7 @@ class AnthropicClient:
                     if original_name != sanitized_name:
                         logger.info(f"Sanitized job name: '{original_name}' -> '{sanitized_name}'")
 
-    def split_format_yaml(self, response):
+    def split_format_yaml(self, response, preserved_codes=None):
         """Split text and YAML in response and format the YAML."""
         output_text, output_yaml = "", None
 
@@ -167,16 +184,15 @@ class AnthropicClient:
             if output_yaml and output_yaml.strip():
                 # Parse YAML string into Python object
                 output_yaml = yaml.safe_load(output_yaml)
-                # Log if using invalid adaptors
+
                 self.validate_adaptors(output_yaml)
-                # Sanitize job names
                 self.sanitize_job_names(output_yaml)
-                # Replace body keys
-                self.override_body_keys(output_yaml)
+                self.process_job_bodies(output_yaml, preserved_codes)
                 # Convert back to YAML string with preserved order
                 output_yaml = yaml.dump(output_yaml, sort_keys=False)
             else:
-                output_yaml = ""  # Set for empty YAML
+                output_yaml = ""
+                
         except Exception as e:
             logger.error(f"Error during JSON parsing: {str(e)}")
 
@@ -194,15 +210,61 @@ class AnthropicClient:
                     if adaptor not in valid_adaptors:
                         logger.warning(f"Invalid adaptor found in job '{job_key}': {adaptor}")
 
-    def override_body_keys(self, yaml_data):
-        """Set all body keys in jobs are set to the correct default value."""
-        expected_body = "// Add operations here"
-
+    def process_job_bodies(self, yaml_data, preserved_codes=None):
+        """
+        Restore preserved code for existing jobs and set default placeholder for new jobs.
+        """
+        if not preserved_codes:
+            preserved_codes = {}
+        
+        expected_default = "// Add operations here"
+        
         if yaml_data and "jobs" in yaml_data:
             jobs = yaml_data["jobs"]
-            for job_key, job_data in jobs.items():
+            for job_id, job_data in jobs.items():
                 if "body" in job_data:
-                    job_data["body"] = expected_body
+                    # If this job exists in preserved codes, restore the original code
+                    if job_id in preserved_codes:
+                        job_data["body"] = preserved_codes[job_id]["code"]
+                    # Handle new jobs created by model - set default placeholder
+                    else:
+                        job_data["body"] = expected_default
+
+    def extract_job_codes(self, yaml_data):
+        """
+        Extract actual code from job bodies and create placeholder mapping.
+        Returns: dict mapping job_id to {code: actual_code, placeholder: unique_id}
+        """
+        code_mapping = {}
+        
+        if yaml_data and "jobs" in yaml_data:
+            jobs = yaml_data["jobs"]
+            for job_id, job_data in jobs.items():
+                if "body" in job_data:
+                    body_content = job_data["body"].strip()
+                    # Only preserve if it's actual code (not default placeholder)
+                    if body_content and body_content != "// Add operations here":
+                        placeholder = self.generate_code_placeholder(job_id)
+                        code_mapping[job_id] = {
+                            "code": body_content,
+                            "placeholder": placeholder
+                        }
+        
+        return code_mapping
+
+    def generate_code_placeholder(self, job_id):
+        """Generate unique, deterministic placeholder for job code."""
+        return f"__CODE_BLOCK_{job_id}__"
+
+    def replace_codes_with_placeholders(self, yaml_data, code_mapping):
+        """Replace actual job bodies with placeholders before sending to model."""
+        if yaml_data and "jobs" in yaml_data:
+            jobs = yaml_data["jobs"]
+            for job_id, job_data in jobs.items():
+                if job_id in code_mapping and "body" in job_data:
+                    job_data["body"] = code_mapping[job_id]["placeholder"]
+        
+        return yaml.dump(yaml_data, sort_keys=False)
 
 def main(data_dict: dict) -> dict:
     """

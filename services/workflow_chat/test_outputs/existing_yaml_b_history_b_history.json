@@ -1,0 +1,18 @@
+[
+  {
+    "role": "user",
+    "content": "I need a workflow to process customer data"
+  },
+  {
+    "role": "assistant",
+    "content": "I'll create a basic workflow with a webhook trigger and data transformation job."
+  },
+  {
+    "role": "user",
+    "content": "Can you change this to use a cron trigger that runs every hour?"
+  },
+  {
+    "role": "assistant",
+    "content": "{\"text\": \"I'll modify the workflow to use a cron trigger that runs every hour instead of the webhook trigger.\", \"yaml\": \"name: customer-data-processing\\njobs:\\n  transform-data:\\n    name: Transform Data\\n    adaptor: '@openfn/language-common@latest'\\n    body: '// Add operations here'\\ntriggers:\\n  cron:\\n    type: cron\\n    cron_expression: '0 * * * *'\\n    enabled: false\\nedges:\\n  cron->transform-data:\\n    source_trigger: cron\\n    target_job: transform-data\\n    condition_type: always\\n    enabled: true\"}"
+  }
+]
