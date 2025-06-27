@@ -1,3 +1,0 @@
-Whenever fridge statistics are send to you, parse and aggregate the data and upload to a collection in redis.
-I'll create a workflow that processes fridge statistics through a webhook trigger, then aggregates and stores the data in Redis.
-Can you also fill in the job code for all the steps 
