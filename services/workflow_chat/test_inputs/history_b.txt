@@ -1,3 +1,0 @@
-I need a workflow to process customer data
-I'll create a basic workflow with a webhook trigger and data transformation job.
-Can you change this to use a cron trigger that runs every hour? 

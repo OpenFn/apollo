@@ -126,4 +126,18 @@ def print_response_details(response, test_name):
         print("\n📄 GENERATED YAML: File not found")
     if "usage" in response:
         print("\n📊 TOKEN USAGE:")
-        print(json.dumps(response["usage"], indent=2)) 
+        print(json.dumps(response["usage"], indent=2))
+
+
+def assert_yaml_section_contains_all(orig, new, section, context=''):
+    """
+    Assert that all items in orig[section] are present and unchanged in new[section].
+    Allows new items to be added in new[section].
+    """
+    orig_section = orig.get(section, {})
+    new_section = new.get(section, {})
+    for key, value in orig_section.items():
+        assert key in new_section, f"{context}: Key '{key}' missing in '{section}'"
+        assert new_section[key] == value, (
+            f"{context}: Value for '{section}.{key}' changed.\nOriginal: {value}\nNew: {new_section[key]}"
+        ) 

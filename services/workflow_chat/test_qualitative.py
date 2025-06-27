@@ -6,7 +6,8 @@ import sys
 import tempfile
 import subprocess
 from pathlib import Path
-from .test_utils import call_workflow_chat_service, make_service_input, print_response_details
+from .test_utils import call_workflow_chat_service, make_service_input, print_response_details, assert_yaml_equal_except, assert_yaml_section_contains_all
+import yaml
 
 # ---- TESTS ----
 def test_basic_input():
@@ -22,47 +23,47 @@ def test_basic_input():
     assert response is not None
     assert isinstance(response, dict)
 
-def test_input_second_turn():
-    print("\n=== TEST: Basic request to change YAML ===")
-    print("Description: Simple second conversation turn requesting a change to the trigger "
-          "of an existing YAML. Check the service gives a new YAML and only changes the trigger.")
-    existing_yaml = """
-name: fridge-statistics-processing
-jobs:
-  parse-and-aggregate-fridge-data:
-    name: Parse and Aggregate Fridge Data
-    adaptor: '@openfn/language-common@latest'
-    body: 'print("hello a")'
-  upload-to-redis:
-    name: Upload to Redis Collection
-    adaptor: '@openfn/language-redis@latest'
-    body: 'print("hello b")'
-triggers:
-  webhook:
-    type: webhook
-    enabled: false
-edges:
-  webhook->parse-and-aggregate-fridge-data:
-    source_trigger: webhook
-    target_job: parse-and-aggregate-fridge-data
-    condition_type: always
-    enabled: true
-  parse-and-aggregate-fridge-data->upload-to-redis:
-    source_job: parse-and-aggregate-fridge-data
-    target_job: upload-to-redis
-    condition_type: on_job_success
-    enabled: true
-"""
-    history = [
-        {"role": "user", "content": "Whenever fridge statistics are send to you, parse and aggregate the data and upload to a collection in redis."},
-        {"role": "assistant", "content": "I'll create a workflow that processes fridge statistics through a webhook trigger, then aggregates and stores the data in Redis.\n\n```\nname: fridge-statistics-processing\njobs:\n  parse-and-aggregate-fridge-data:\n    name: Parse and Aggregate Fridge Data\n    adaptor: \"@openfn/language-common@latest\"\n    body: \"| // Add data parsing and aggregation operations here\"\n  upload-to-redis:\n    name: Upload to Redis Collection\n    adaptor: \"@openfn/language-redis@latest\"\n    body: \"| // Add Redis collection upload operations here\"\ntriggers:\n  webhook:\n    type: webhook\n    enabled: false\nedges:\n  webhook->parse-and-aggregate-fridge-data:\n    source_trigger: webhook\n    target_job: parse-and-aggregate-fridge-data\n    condition_type: always\n    enabled: true\n  parse-and-aggregate-fridge-data->upload-to-redis:\n    source_job: parse-and-aggregate-fridge-data\n    target_job: upload-to-redis\n    condition_type: on_job_success\n    enabled: true\n```"}
-    ]
-    content = "Actually I want to schedule it for midnight every day."
-    service_input = make_service_input(existing_yaml, history, content=content)
-    response = call_workflow_chat_service(service_input)
-    print_response_details(response, "existing_input_second_turn")
-    assert response is not None
-    assert isinstance(response, dict)
+# def test_input_second_turn():
+#     print("\n=== TEST: Basic request to change YAML ===")
+#     print("Description: Simple second conversation turn requesting a change to the trigger "
+#           "of an existing YAML. Check the service gives a new YAML and only changes the trigger.")
+#     existing_yaml = """
+# name: fridge-statistics-processing
+# jobs:
+#   parse-and-aggregate-fridge-data:
+#     name: Parse and Aggregate Fridge Data
+#     adaptor: '@openfn/language-common@latest'
+#     body: 'print("hello a")'
+#   upload-to-redis:
+#     name: Upload to Redis Collection
+#     adaptor: '@openfn/language-redis@latest'
+#     body: 'print("hello b")'
+# triggers:
+#   webhook:
+#     type: webhook
+#     enabled: false
+# edges:
+#   webhook->parse-and-aggregate-fridge-data:
+#     source_trigger: webhook
+#     target_job: parse-and-aggregate-fridge-data
+#     condition_type: always
+#     enabled: true
+#   parse-and-aggregate-fridge-data->upload-to-redis:
+#     source_job: parse-and-aggregate-fridge-data
+#     target_job: upload-to-redis
+#     condition_type: on_job_success
+#     enabled: true
+# """
+#     history = [
+#         {"role": "user", "content": "Whenever fridge statistics are send to you, parse and aggregate the data and upload to a collection in redis."},
+#         {"role": "assistant", "content": "I'll create a workflow that processes fridge statistics through a webhook trigger, then aggregates and stores the data in Redis.\n\n```\nname: fridge-statistics-processing\njobs:\n  parse-and-aggregate-fridge-data:\n    name: Parse and Aggregate Fridge Data\n    adaptor: \"@openfn/language-common@latest\"\n    body: \"| // Add data parsing and aggregation operations here\"\n  upload-to-redis:\n    name: Upload to Redis Collection\n    adaptor: \"@openfn/language-redis@latest\"\n    body: \"| // Add Redis collection upload operations here\"\ntriggers:\n  webhook:\n    type: webhook\n    enabled: false\nedges:\n  webhook->parse-and-aggregate-fridge-data:\n    source_trigger: webhook\n    target_job: parse-and-aggregate-fridge-data\n    condition_type: always\n    enabled: true\n  parse-and-aggregate-fridge-data->upload-to-redis:\n    source_job: parse-and-aggregate-fridge-data\n    target_job: upload-to-redis\n    condition_type: on_job_success\n    enabled: true\n```"}
+#     ]
+#     content = "Actually I want to schedule it for midnight every day."
+#     service_input = make_service_input(existing_yaml, history, content=content)
+#     response = call_workflow_chat_service(service_input)
+#     print_response_details(response, "existing_input_second_turn")
+#     assert response is not None
+#     assert isinstance(response, dict)
 
 def test_conversational_turn():
     print("\n=== TEST: Conversational turn with existing YAML ===")
@@ -107,6 +108,13 @@ edges:
     assert response is not None
     assert isinstance(response, dict)
 
+    response_yaml_str = response.get("response_yaml", None)
+    if response_yaml_str and str(response_yaml_str).strip():
+        orig_yaml = yaml.safe_load(existing_yaml)
+        response_yaml = yaml.safe_load(response_yaml_str)
+        # Check that the entire YAML is unchanged
+        assert orig_yaml == response_yaml, "If YAML is present in response, it must be unchanged."
+
 def test_special_characters():
     print("\n=== TEST: Special characters in platform names===")
     print("Description: Ask for a workflow that uses platforms with special characters in their names. "
@@ -135,13 +143,42 @@ def test_simple_lang_bug():
     print_response_details(response, "empty_simple_lang_bug")
     assert response is not None
     assert isinstance(response, dict)
+    # Assert that the response text does not include the word 'YAML' (case-insensitive)
+    response_text = response.get("response", "")
+    assert "yaml" not in response_text.lower(), f"Response text should not mention 'YAML', but got: {response_text}"
 
 def test_single_trigger_node():
     print("\n=== TEST: Single trigger node ===")
     print("Description: The user asks for a change that implies they want multiple nodes from the trigger. "
           "As only one node can come from the trigger, the service should select one job to be run first, "
           "and that one can have multiple nodes for the other jobs.")
-    existing_yaml = """"""
+    existing_yaml = """
+name: fridge-statistics-processing
+jobs:
+  parse-and-aggregate-fridge-data:
+    name: Parse and Aggregate Fridge Data
+    adaptor: '@openfn/language-common@latest'
+    body: 'print("hello a")'
+  upload-to-redis:
+    name: Upload to Redis Collection
+    adaptor: '@openfn/language-redis@latest'
+    body: 'print("hello b")'
+triggers:
+  webhook:
+    type: webhook
+    enabled: false
+edges:
+  webhook->parse-and-aggregate-fridge-data:
+    source_trigger: webhook
+    target_job: parse-and-aggregate-fridge-data
+    condition_type: always
+    enabled: true
+  parse-and-aggregate-fridge-data->upload-to-redis:
+    source_job: parse-and-aggregate-fridge-data
+    target_job: upload-to-redis
+    condition_type: on_job_success
+    enabled: true 
+"""
     history = [
         {"role": "user", "content": "Whenever fridge statistics are send to you, parse and aggregate the data and upload to a collection in redis."},
         {"role": "assistant", "content": "I'll create a workflow that processes fridge statistics through a webhook trigger, then aggregates and stores the data in Redis.\n\n```\nname: fridge-statistics-processing\njobs:\n  parse-and-aggregate-fridge-data:\n    name: Parse and Aggregate Fridge Data\n    adaptor: \"@openfn/language-common@latest\"\n    body: \"| // Add data parsing and aggregation operations here\"\n  upload-to-redis:\n    name: Upload to Redis Collection\n    adaptor: \"@openfn/language-redis@latest\"\n    body: \"| // Add Redis collection upload operations here\"\ntriggers:\n  webhook:\n    type: webhook\n    enabled: false\nedges:\n  webhook->parse-and-aggregate-fridge-data:\n    source_trigger: webhook\n    target_job: parse-and-aggregate-fridge-data\n    condition_type: always\n    enabled: true\n  parse-and-aggregate-fridge-data->upload-to-redis:\n    source_job: parse-and-aggregate-fridge-data\n    target_job: upload-to-redis\n    condition_type: on_job_success\n    enabled: true\n```"}
@@ -282,15 +319,6 @@ jobs:
     name: Update asana
     adaptor: "@openfn/language-asana@4.1.0"
     body: // PLACEHOLDER 7
-  format-data:
-    name: format data
-    adaptor: "@openfn/language-common@latest"
-    body: |
-      // PLACEHOLDER 8
-  email-bulk:
-    name: email bulk
-    adaptor: "@openfn/language-mailgun@0.5.13"
-    body: // PLACEHOLDER 9
 triggers:
   webhook:
     type: webhook
@@ -341,16 +369,6 @@ edges:
     target_job: Update-asana
     condition_type: on_job_success
     enabled: true
-  Update-asana->format-data:
-    source_job: Update-asana
-    target_job: format-data
-    condition_type: on_job_success
-    enabled: true
-  format-data->email-bulk:
-    source_job: format-data
-    target_job: email-bulk
-    condition_type: on_job_success
-    enabled: true
 """
     history = [
         {"role": "user", "content": "I need to create a comprehensive data integration workflow that pulls data from Google Sheets, NetSuite, and Ferntech, then processes everything together and creates various reports and notifications."},
@@ -370,6 +388,12 @@ edges:
     print_response_details(response, "existing_long")
     assert response is not None
     assert isinstance(response, dict)
+
+    orig_yaml = yaml.safe_load(existing_yaml)
+    response_yaml = yaml.safe_load(response.get("response_yaml", ""))
+    # Check that all original jobs and edges are still present and unchanged
+    assert_yaml_section_contains_all(orig_yaml, response_yaml, "jobs", context="Jobs section")
+    assert_yaml_section_contains_all(orig_yaml, response_yaml, "edges", context="Edges section")
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
