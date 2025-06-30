@@ -7,6 +7,43 @@ def client():
     """Create a client instance for testing."""
     return AnthropicClient(ChatConfig(api_key="fake-key"))
 
+def test_extract_job_codes_preserves_real_code(client):
+    """Test that actual code is extracted and preserved."""
+    
+    yaml_data = {
+        "jobs": {
+            "job1": {"body": "console.log('hello world')"},
+            "job2": {"body": "const data = fetchData();\nprocessData(data);"}
+        }
+    }
+    
+    result = client.extract_job_codes(yaml_data)
+    
+    assert len(result) == 2
+    assert result["job1"]["code"] == "console.log('hello world')"
+    assert result["job2"]["code"] == "const data = fetchData();\nprocessData(data);"
+    assert result["job1"]["placeholder"] == "__CODE_BLOCK_job1__"
+    assert result["job2"]["placeholder"] == "__CODE_BLOCK_job2__"
+
+
+def test_extract_job_codes_ignores_default_placeholder(client):
+    """Test that default placeholder is not preserved as code."""
+    
+    yaml_data = {
+        "jobs": {
+            "job1": {"body": "// Add operations here"},
+            "job2": {"body": "real code here"},
+            "job3": {"body": "   // Add operations here   "}  # with whitespace
+        }
+    }
+    
+    result = client.extract_job_codes(yaml_data)
+    
+    assert len(result) == 1
+    assert "job1" not in result
+    assert "job3" not in result
+    assert result["job2"]["code"] == "real code here"
+
 
 def test_sanitize_job_names_removes_diacritics(client):
     """Test that diacritics are properly normalized and removed."""
