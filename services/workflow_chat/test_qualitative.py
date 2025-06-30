@@ -11,7 +11,7 @@ import yaml
 
 # ---- TESTS ----
 def test_basic_input():
-    print("\n=== TEST: Basic input ===")
+    print("==================TEST==================")
     print("Description: Basic input test. Check if the service can handle a simple input "
           "without a YAML and generate a message and a YAML or ask for more information.")
     existing_yaml = """"""
@@ -19,54 +19,82 @@ def test_basic_input():
     content = "Whenever fridge statistics are send to you, parse and aggregate the data and upload to a collection in redis."
     service_input = make_service_input(existing_yaml, history, content=content)
     response = call_workflow_chat_service(service_input)
-    print_response_details(response, "empty_input")
+    print_response_details(response, "empty_input", content=content)
+
     assert response is not None
     assert isinstance(response, dict)
 
-# def test_input_second_turn():
-#     print("\n=== TEST: Basic request to change YAML ===")
-#     print("Description: Simple second conversation turn requesting a change to the trigger "
-#           "of an existing YAML. Check the service gives a new YAML and only changes the trigger.")
-#     existing_yaml = """
-# name: fridge-statistics-processing
-# jobs:
-#   parse-and-aggregate-fridge-data:
-#     name: Parse and Aggregate Fridge Data
-#     adaptor: '@openfn/language-common@latest'
-#     body: 'print("hello a")'
-#   upload-to-redis:
-#     name: Upload to Redis Collection
-#     adaptor: '@openfn/language-redis@latest'
-#     body: 'print("hello b")'
-# triggers:
-#   webhook:
-#     type: webhook
-#     enabled: false
-# edges:
-#   webhook->parse-and-aggregate-fridge-data:
-#     source_trigger: webhook
-#     target_job: parse-and-aggregate-fridge-data
-#     condition_type: always
-#     enabled: true
-#   parse-and-aggregate-fridge-data->upload-to-redis:
-#     source_job: parse-and-aggregate-fridge-data
-#     target_job: upload-to-redis
-#     condition_type: on_job_success
-#     enabled: true
-# """
-#     history = [
-#         {"role": "user", "content": "Whenever fridge statistics are send to you, parse and aggregate the data and upload to a collection in redis."},
-#         {"role": "assistant", "content": "I'll create a workflow that processes fridge statistics through a webhook trigger, then aggregates and stores the data in Redis.\n\n```\nname: fridge-statistics-processing\njobs:\n  parse-and-aggregate-fridge-data:\n    name: Parse and Aggregate Fridge Data\n    adaptor: \"@openfn/language-common@latest\"\n    body: \"| // Add data parsing and aggregation operations here\"\n  upload-to-redis:\n    name: Upload to Redis Collection\n    adaptor: \"@openfn/language-redis@latest\"\n    body: \"| // Add Redis collection upload operations here\"\ntriggers:\n  webhook:\n    type: webhook\n    enabled: false\nedges:\n  webhook->parse-and-aggregate-fridge-data:\n    source_trigger: webhook\n    target_job: parse-and-aggregate-fridge-data\n    condition_type: always\n    enabled: true\n  parse-and-aggregate-fridge-data->upload-to-redis:\n    source_job: parse-and-aggregate-fridge-data\n    target_job: upload-to-redis\n    condition_type: on_job_success\n    enabled: true\n```"}
-#     ]
-#     content = "Actually I want to schedule it for midnight every day."
-#     service_input = make_service_input(existing_yaml, history, content=content)
-#     response = call_workflow_chat_service(service_input)
-#     print_response_details(response, "existing_input_second_turn")
-#     assert response is not None
-#     assert isinstance(response, dict)
+def test_input_second_turn():
+    print("Description: Simple second conversation turn requesting a change to the YAML")
+    
+    existing_yaml = """
+name: CommCare-to-DHIS2-Patient-Integration
+jobs:
+  receive-commcare-data:
+    name: Receive CommCare Patient Data
+    adaptor: '@openfn/language-commcare@latest'
+    body: '// Add operations here'
+  validate-patient-data:
+    name: Validate Patient Data
+    adaptor: '@openfn/language-common@latest'
+    body: '// Add operations here'
+  log-validation-errors:
+    name: Log Validation Errors to Google Sheets
+    adaptor: '@openfn/language-googlesheets@latest'
+    body: '// Add operations here'
+  transform-and-upload-to-dhis2:
+    name: Transform and Upload to DHIS2
+    adaptor: '@openfn/language-dhis2@latest'
+    body: '// Add operations here'
+triggers:
+  webhook:
+    type: webhook
+    enabled: false
+edges:
+  webhook->receive-commcare-data:
+    source_trigger: webhook
+    target_job: receive-commcare-data
+    condition_type: always
+    enabled: true
+  receive-commcare-data->validate-patient-data:
+    source_job: receive-commcare-data
+    target_job: validate-patient-data
+    condition_type: on_job_success
+    enabled: true
+  validate-patient-data->log-validation-errors:
+    source_job: validate-patient-data
+    target_job: log-validation-errors
+    condition_type: on_job_failure
+    enabled: true
+  validate-patient-data->transform-and-upload-to-dhis2:
+    source_job: validate-patient-data
+    target_job: transform-and-upload-to-dhis2
+    condition_type: on_job_success
+    enabled: true
+"""
+    
+    history = [
+        {
+            "role": "user", 
+            "content": "Set up an OpenFn workflow to automatically receive new patient data from CommCare, validate the data and if there's an issue log it to a google sheet, otherwise map it to the DHIS2 data model, and load it into the DHIS2 national health information system"
+        },
+        {
+            "role": "assistant", 
+            "content": '{"text":"I\'ll create a workflow to process CommCare patient data. The flow will receive data via webhook, validate it, then either log issues to Google Sheets or transform and send valid data to DHIS2. This creates four distinct jobs with appropriate connections and error handling.","yaml":"name: CommCare-to-DHIS2-Patient-Integration\\njobs:\\n  receive-commcare-data:\\n    name: Receive CommCare Patient Data\\n    adaptor: \\"@openfn/language-commcare@latest\\"\\n    body: \\"// Add operations here\\"\\n  validate-patient-data:\\n    name: Validate Patient Data\\n    adaptor: \\"@openfn/language-common@latest\\"\\n    body: \\"// Add operations here\\"\\n  log-validation-errors:\\n    name: Log Validation Errors to Google Sheets\\n    adaptor: \\"@openfn/language-googlesheets@latest\\"\\n    body: \\"// Add operations here\\"\\n  transform-and-upload-to-dhis2:\\n    name: Transform and Upload to DHIS2\\n    adaptor: \\"@openfn/language-dhis2@latest\\"\\n    body: \\"// Add operations here\\"\\ntriggers:\\n  webhook:\\n    type: webhook\\n    enabled: false\\nedges:\\n  webhook->receive-commcare-data:\\n    source_trigger: webhook\\n    target_job: receive-commcare-data\\n    condition_type: always\\n    enabled: true\\n  receive-commcare-data->validate-patient-data:\\n    source_job: receive-commcare-data\\n    target_job: validate-patient-data\\n    condition_type: on_job_success\\n    enabled: true\\n  validate-patient-data->log-validation-errors:\\n    source_job: validate-patient-data\\n    target_job: log-validation-errors\\n    condition_type: on_job_failure\\n    enabled: true\\n  validate-patient-data->transform-and-upload-to-dhis2:\\n    source_job: validate-patient-data\\n    target_job: transform-and-upload-to-dhis2\\n    condition_type: on_job_success\\n    enabled: true"}'
+        }
+    ]
+    
+    content = "Actually, let's add data deduplication before validation to prevent duplicate patient records"
+    
+    service_input = make_service_input(existing_yaml, history, content=content)
+    response = call_workflow_chat_service(service_input)
+    print_response_details(response, "commcare_dhis2_integration", content=content)
+    
+    assert response is not None
+    assert isinstance(response, dict)
 
 def test_conversational_turn():
-    print("\n=== TEST: Conversational turn with existing YAML ===")
+    print("==================TEST==================")
     print("Description: There is an existing YAML and the user asks a question that should not "
           "lead to a change in the YAML. Check the service only outputs a message, and no YAML, "
           "or an unchanged YAML.")
@@ -104,7 +132,7 @@ edges:
     content = "Can you explain that better"
     service_input = make_service_input(existing_yaml, history, content=content)
     response = call_workflow_chat_service(service_input)
-    print_response_details(response, "existing_convo_turn")
+    print_response_details(response, "existing_convo_turn", content=content)
     assert response is not None
     assert isinstance(response, dict)
 
@@ -116,7 +144,7 @@ edges:
         assert orig_yaml == response_yaml, "If YAML is present in response, it must be unchanged."
 
 def test_special_characters():
-    print("\n=== TEST: Special characters in platform names===")
+    print("==================TEST==================")
     print("Description: Ask for a workflow that uses platforms with special characters in their names. "
           "Verify that diacritics and punctuation removed/normalised correctly (e.g. é->e) in job names "
           "in the generated YAML.")
@@ -128,27 +156,28 @@ def test_special_characters():
     content = "data about water systems and water sales"
     service_input = make_service_input(existing_yaml, history, content=content)
     response = call_workflow_chat_service(service_input)
-    print_response_details(response, "empty_water_bug")
+    print_response_details(response, "empty_water_bug", content=content)
     assert response is not None
     assert isinstance(response, dict)
 
 def test_simple_lang_bug():
-    print("\n=== TEST: Simple language ===")
+    print("==================TEST==================")
     print("Description: Check how the service describes itself. It should use simple language and not mention YAMLs.")
     existing_yaml = """"""
     history = []
     content = "are you there?"
     service_input = make_service_input(existing_yaml, history, content=content)
     response = call_workflow_chat_service(service_input)
-    print_response_details(response, "empty_simple_lang_bug")
+    print_response_details(response, "empty_simple_lang_bug", content=content)
     assert response is not None
     assert isinstance(response, dict)
     # Assert that the response text does not include the word 'YAML' (case-insensitive)
     response_text = response.get("response", "")
+
     assert "yaml" not in response_text.lower(), f"Response text should not mention 'YAML', but got: {response_text}"
 
 def test_single_trigger_node():
-    print("\n=== TEST: Single trigger node ===")
+    print("==================TEST==================")
     print("Description: The user asks for a change that implies they want multiple nodes from the trigger. "
           "As only one node can come from the trigger, the service should select one job to be run first, "
           "and that one can have multiple nodes for the other jobs.")
@@ -186,12 +215,13 @@ edges:
     content = "Actually I also want an email notification at the same time as the data is being parsed."
     service_input = make_service_input(existing_yaml, history, content=content)
     response = call_workflow_chat_service(service_input)
-    print_response_details(response, "empty_trigger_nodes")
+    print_response_details(response, "empty_trigger_nodes", content=content)
+
     assert response is not None
     assert isinstance(response, dict)
 
 def test_edit_job_code():
-    print("\n=== TEST: Ask to edit job code ===")
+    print("==================TEST==================")
     print("Description: The user asks for job code to be filled in. The service should explain why it can't. "
           "A new YAML should not be generated or it should be identical to the existing one.")
     existing_yaml = """
@@ -228,12 +258,13 @@ edges:
     content = "Can you also fill in the job code for all the steps"
     service_input = make_service_input(existing_yaml, history, content=content)
     response = call_workflow_chat_service(service_input)
-    print_response_details(response, "existing_edit_job_code")
+    print_response_details(response, "existing_edit_job_code", content=content)
+
     assert response is not None
     assert isinstance(response, dict)
 
 def test_error_field():
-    print("\n=== TEST: Error field ===")
+    print("==================TEST==================")
     print("Description: This tests that the service can handle an error field input (that replaces the content field). "
           "Check that the service comments on the error and produces a new YAML.")
     existing_yaml = """
@@ -272,12 +303,13 @@ edges:
 
     service_input = make_service_input(existing_yaml, history, errors=errors)
     response = call_workflow_chat_service(service_input)
-    print_response_details(response, "existing_error")
+    print_response_details(response, "existing_error", errors=errors)
+
     assert response is not None
     assert isinstance(response, dict)
 
 def test_long_yaml():
-    print("\n=== TEST: Long YAML===")
+    print("==================TEST==================")
     print("Description: Test that the service can handle a slighly longer YAML & conversation history. "
           "Check that the answer isn't cut off or empty, and that all the job code is retained.")
     existing_yaml = """
@@ -385,12 +417,13 @@ edges:
     content = "Perfect! One final addition - after updating Asana, I want to format the data for bulk emailing and then send out bulk emails using Mailgun."
     service_input = make_service_input(existing_yaml, history, content=content)
     response = call_workflow_chat_service(service_input)
-    print_response_details(response, "existing_long")
+    print_response_details(response, "existing_long", content=content)
     assert response is not None
     assert isinstance(response, dict)
 
     orig_yaml = yaml.safe_load(existing_yaml)
     response_yaml = yaml.safe_load(response.get("response_yaml", ""))
+
     # Check that all original jobs and edges are still present and unchanged
     assert_yaml_section_contains_all(orig_yaml, response_yaml, "jobs", context="Jobs section")
     assert_yaml_section_contains_all(orig_yaml, response_yaml, "edges", context="Edges section")

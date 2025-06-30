@@ -107,8 +107,14 @@ def make_service_input(existing_yaml, history, content=None, errors=None):
     return service_input
 
 
-def print_response_details(response, test_name):
-    """Print detailed response information like the original script."""
+def print_response_details(response, test_name, content=None, errors=None):
+    """Print detailed response information like the original script, including content or errors if provided."""
+    if content is not None:
+        print("\n💬 USER CONTENT:")
+        print(content)
+    if errors is not None:
+        print("\n❗ ERROR FIELD INPUT:")
+        print(errors)
     if "response" in response:
         print("\n📝 WORKFLOW_CHAT RESPONSE:")
         print(json.dumps(response["response"], indent=2))

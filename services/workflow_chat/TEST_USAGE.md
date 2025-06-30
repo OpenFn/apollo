@@ -13,6 +13,10 @@ This directory contains tests for the `workflow_chat` service, designed to help 
 - **Purpose:** Check that specific changes are made correctly (e.g., only the trigger changes, job code and other YAML is preserved). These tests are more focused and print less output.
 - **Intended for:** Automated checks to ensure that key behaviors are not broken by code changes.
 
+### 3. Function Tests (`test_functions.py`)
+- **Purpose:** Test individual methods and functions in isolation, focusing on specific logic like data sanitization, validation, and utility functions.
+- **Intended for:** : Automated focused testing of core logic during development.
+
 ## Running the Tests
 
 You can run all tests or individual test files using `pytest`. The `-v` flag gives verbose output, and `-s` allows print statements to show in the console.

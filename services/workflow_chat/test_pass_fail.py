@@ -7,10 +7,10 @@ import subprocess
 from pathlib import Path
 import difflib
 from typing import List
-from .test_utils import path_matches, assert_yaml_equal_except, call_workflow_chat_service, make_service_input
+from .test_utils import path_matches, assert_yaml_equal_except, call_workflow_chat_service, make_service_input, print_response_details
 
 def test_change_trigger():
-    print("\n=== TEST: Change trigger ===")
+    print("==================TEST==================")
     print("Description: This tests that the service can change the workflow trigger as requested without changing anything else in the YAML.")
     existing_yaml = """
 name: fridge-statistics-processing
@@ -46,6 +46,7 @@ edges:
     content = "Actually I want to schedule it for midnight every day."
     service_input = make_service_input(existing_yaml, history, content=content)
     response = call_workflow_chat_service(service_input)
+    print_response_details(response, "change_trigger", content=content)
     assert response is not None
     assert isinstance(response, dict)
     
