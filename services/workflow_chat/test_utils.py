@@ -3,6 +3,7 @@ import sys
 import yaml
 import tempfile
 import subprocess
+import yaml
 from pathlib import Path
 import difflib
 from typing import List
@@ -139,11 +140,29 @@ def assert_yaml_section_contains_all(orig, new, section, context=''):
     """
     Assert that all items in orig[section] are present and unchanged in new[section].
     Allows new items to be added in new[section].
+    
+    Args:
+        orig: Original YAML as string or dict
+        new: New YAML as string or dict  
+        section: Section name to compare
+        context: Context string for error messages
     """
-    orig_section = orig.get(section, {})
-    new_section = new.get(section, {})
+    # Handle both string and dict inputs
+    if isinstance(orig, str):
+        orig_data = yaml.safe_load(orig)
+    else:
+        orig_data = orig
+        
+    if isinstance(new, str):
+        new_data = yaml.safe_load(new)
+    else:
+        new_data = new
+    
+    orig_section = orig_data.get(section, {})
+    new_section = new_data.get(section, {})
+    
     for key, value in orig_section.items():
         assert key in new_section, f"{context}: Key '{key}' missing in '{section}'"
         assert new_section[key] == value, (
             f"{context}: Value for '{section}.{key}' changed.\nOriginal: {value}\nNew: {new_section[key]}"
-        ) 
+        )

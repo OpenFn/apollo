@@ -421,12 +421,8 @@ edges:
     assert response is not None
     assert isinstance(response, dict)
 
-    orig_yaml = yaml.safe_load(existing_yaml)
-    response_yaml = yaml.safe_load(response.get("response_yaml", ""))
-
-    # Check that all original jobs and edges are still present and unchanged
-    assert_yaml_section_contains_all(orig_yaml, response_yaml, "jobs", context="Jobs section")
-    assert_yaml_section_contains_all(orig_yaml, response_yaml, "edges", context="Edges section")
+    assert_yaml_section_contains_all(existing_yaml, response.get("response_yaml", ""), "jobs", context="Jobs section")
+    assert_yaml_section_contains_all(existing_yaml, response.get("response_yaml", ""), "edges", context="Edges section")
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
