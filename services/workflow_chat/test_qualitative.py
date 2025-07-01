@@ -33,19 +33,19 @@ jobs:
   receive-commcare-data:
     name: Receive CommCare Patient Data
     adaptor: '@openfn/language-commcare@latest'
-    body: '// Add operations here'
+    body: 'PLACEHOLDER 1'
   validate-patient-data:
     name: Validate Patient Data
     adaptor: '@openfn/language-common@latest'
-    body: '// Add operations here'
+    body: 'PLACEHOLDER 2'
   log-validation-errors:
     name: Log Validation Errors to Google Sheets
     adaptor: '@openfn/language-googlesheets@latest'
-    body: '// Add operations here'
+    body: 'PLACEHOLDER 3'
   transform-and-upload-to-dhis2:
     name: Transform and Upload to DHIS2
     adaptor: '@openfn/language-dhis2@latest'
-    body: '// Add operations here'
+    body: 'PLACEHOLER 4'
 triggers:
   webhook:
     type: webhook
@@ -92,6 +92,8 @@ edges:
     
     assert response is not None
     assert isinstance(response, dict)
+
+    assert_yaml_section_contains_all(existing_yaml, response.get("response_yaml", ""), "jobs", context="Jobs section")
 
 def test_conversational_turn():
     print("==================TEST==================")
