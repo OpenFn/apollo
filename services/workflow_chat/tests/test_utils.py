@@ -111,28 +111,28 @@ def make_service_input(existing_yaml, history, content=None, errors=None):
 def print_response_details(response, test_name, content=None, errors=None):
     """Print detailed response information like the original script, including content or errors if provided."""
     if content is not None:
-        print("\n💬 USER CONTENT:")
+        print("\nUSER CONTENT:")
         print(content)
     if errors is not None:
-        print("\n❗ ERROR FIELD INPUT:")
+        print("\nERROR FIELD INPUT:")
         print(errors)
     if "response" in response:
-        print("\n📝 WORKFLOW_CHAT RESPONSE:")
+        print("\nWORKFLOW_CHAT RESPONSE:")
         print(json.dumps(response["response"], indent=2))
     if "response_yaml" in response:
         yaml_data = response["response_yaml"]
         if yaml_data and isinstance(yaml_data, str) and yaml_data.strip():
-            print("\n📄 GENERATED YAML:")
+            print("\nGENERATED YAML:")
             print(yaml_data)
         elif yaml_data and yaml_data is not None:
-            print("\n📄 GENERATED YAML:")
+            print("\nGENERATED YAML:")
             print(json.dumps(yaml_data, indent=2))
         else:
-            print("\n📄 GENERATED YAML: None (workflow_chat provided only text description)")
+            print("\nGENERATED YAML: None (workflow_chat provided only text description)")
     else:
-        print("\n📄 GENERATED YAML: File not found")
+        print("\nGENERATED YAML: File not found")
     if "usage" in response:
-        print("\n📊 TOKEN USAGE:")
+        print("\nTOKEN USAGE:")
         print(json.dumps(response["usage"], indent=2))
 
 
