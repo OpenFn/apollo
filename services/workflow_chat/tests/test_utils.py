@@ -76,7 +76,7 @@ def call_workflow_chat_service(service_input):
     try:
         cmd = [
             sys.executable,
-            str(Path(__file__).parent.parent / "entry.py"),
+            str(Path(__file__).parent.parent.parent / "entry.py"),
             "workflow_chat",
             "--input", temp_input_path,
             "--output", temp_output_path

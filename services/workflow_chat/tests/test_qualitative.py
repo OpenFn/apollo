@@ -6,7 +6,7 @@ import sys
 import tempfile
 import subprocess
 from pathlib import Path
-from .test_utils import call_workflow_chat_service, make_service_input, print_response_details, assert_yaml_equal_except, assert_yaml_section_contains_all
+from .test_utils import call_workflow_chat_service, make_service_input, print_response_details, assert_yaml_section_contains_all
 import yaml
 
 # ---- TESTS ----
