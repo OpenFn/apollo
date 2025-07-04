@@ -18,7 +18,7 @@ from anthropic import (
 )
 from util import ApolloError, create_logger
 from .gen_project_prompt import build_prompt
-from .available_adaptors import available_adaptors
+from workflow_chat.available_adaptors import get_available_adaptors
 
 logger = create_logger("workflow_chat")
 
@@ -199,16 +199,25 @@ class AnthropicClient:
         return output_text, output_yaml
 
     def validate_adaptors(self, yaml_data):
-        """Validate that all adaptors in the YAML are on the approved list."""
-        valid_adaptors = list(available_adaptors.keys())
+        """Validate that all adaptors in the YAML are on the approved list (name only, ignore version)."""
 
-        if yaml_data and "jobs" in yaml_data:
-            jobs = yaml_data["jobs"]
-            for job_key, job_data in jobs.items():
-                if "adaptor" in job_data:
-                    adaptor = job_data["adaptor"]
-                    if adaptor not in valid_adaptors:
-                        logger.warning(f"Invalid adaptor found in job '{job_key}': {adaptor}")
+        try:
+            available_adaptors = get_available_adaptors()
+            valid_adaptor_names = {adaptor["name"] for adaptor in available_adaptors}
+
+            if yaml_data and "jobs" in yaml_data:
+                jobs = yaml_data["jobs"]
+                for job_key, job_data in jobs.items():
+                    if "adaptor" in job_data:
+                        adaptor = job_data["adaptor"]
+                        # Remove version if present (after last @)
+                        base = adaptor.rsplit("@", 1)[0]
+                        # Always remove '@openfn/language-' prefix
+                        short_name = base[len("@openfn/language-"):]
+                        if short_name not in valid_adaptor_names:
+                            logger.warning(f"Invalid adaptor found in job '{job_key}': {adaptor}")
+        except Exception as e:
+            logger.error(f"validate_adaptors encountered an error: {e}")
 
     def process_job_bodies(self, yaml_data, preserved_codes=None):
         """

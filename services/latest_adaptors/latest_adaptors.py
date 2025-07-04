@@ -1,6 +1,6 @@
 import requests
 
-def get_all_adaptor_descriptions():
+def get_latest_adaptors():
     # Get all adaptor names
     packages_url = "https://api.github.com/repos/OpenFn/adaptors/contents/packages"
     response = requests.get(packages_url)
@@ -27,3 +27,11 @@ def get_all_adaptor_descriptions():
             descriptions[package_name] = None
     
     return descriptions
+
+def main() -> dict:
+    adaptor_info = get_latest_adaptors()
+    print(adaptor_info)
+    return adaptor_info
+
+if __name__ == "__main__":
+    main()
