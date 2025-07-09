@@ -31,42 +31,51 @@ def test_input_second_turn():
 name: CommCare-to-DHIS2-Patient-Integration
 jobs:
   receive-commcare-data:
+    id: job-receive-id
     name: Receive CommCare Patient Data
     adaptor: '@openfn/language-commcare@latest'
     body: 'PLACEHOLDER 1'
   validate-patient-data:
+    id: job-validate-id
     name: Validate Patient Data
     adaptor: '@openfn/language-common@latest'
     body: 'PLACEHOLDER 2'
   log-validation-errors:
+    id: job-log-id
     name: Log Validation Errors to Google Sheets
     adaptor: '@openfn/language-googlesheets@latest'
     body: 'PLACEHOLDER 3'
   transform-and-upload-to-dhis2:
+    id: job-transform-id
     name: Transform and Upload to DHIS2
     adaptor: '@openfn/language-dhis2@latest'
     body: 'PLACEHOLER 4'
 triggers:
   webhook:
+    id: trigger-webhook-id
     type: webhook
     enabled: false
 edges:
   webhook->receive-commcare-data:
+    id: edge-webhook-receive-id
     source_trigger: webhook
     target_job: receive-commcare-data
     condition_type: always
     enabled: true
   receive-commcare-data->validate-patient-data:
+    id: edge-receive-validate-id
     source_job: receive-commcare-data
     target_job: validate-patient-data
     condition_type: on_job_success
     enabled: true
   validate-patient-data->log-validation-errors:
+    id: edge-validate-log-id
     source_job: validate-patient-data
     target_job: log-validation-errors
     condition_type: on_job_failure
     enabled: true
   validate-patient-data->transform-and-upload-to-dhis2:
+    id: edge-validate-transform-id
     source_job: validate-patient-data
     target_job: transform-and-upload-to-dhis2
     condition_type: on_job_success
@@ -104,24 +113,29 @@ def test_conversational_turn():
 name: fridge-statistics-processing
 jobs:
   parse-and-aggregate-fridge-data:
+    id: job-parse-id
     name: Parse and Aggregate Fridge Data
     adaptor: '@openfn/language-common@latest'
     body: '| // Add data parsing and aggregation operations here'
   upload-to-redis:
+    id: job-upload-id
     name: Upload to Redis Collection
     adaptor: '@openfn/language-redis@latest'
     body: '| // Add Redis collection upload operations here'
 triggers:
   webhook:
+    id: trigger-webhook-id
     type: webhook
     enabled: false
 edges:
   webhook->parse-and-aggregate-fridge-data:
+    id: edge-webhook-parse-id
     source_trigger: webhook
     target_job: parse-and-aggregate-fridge-data
     condition_type: always
     enabled: true
   parse-and-aggregate-fridge-data->upload-to-redis:
+    id: edge-parse-upload-id
     source_job: parse-and-aggregate-fridge-data
     target_job: upload-to-redis
     condition_type: on_job_success
@@ -187,24 +201,29 @@ def test_single_trigger_node():
 name: fridge-statistics-processing
 jobs:
   parse-and-aggregate-fridge-data:
+    id: job-parse-id
     name: Parse and Aggregate Fridge Data
     adaptor: '@openfn/language-common@latest'
     body: 'print("hello a")'
   upload-to-redis:
+    id: job-upload-id
     name: Upload to Redis Collection
     adaptor: '@openfn/language-redis@latest'
     body: 'print("hello b")'
 triggers:
   webhook:
+    id: trigger-webhook-id
     type: webhook
     enabled: false
 edges:
   webhook->parse-and-aggregate-fridge-data:
+    id: edge-webhook-parse-id
     source_trigger: webhook
     target_job: parse-and-aggregate-fridge-data
     condition_type: always
     enabled: true
   parse-and-aggregate-fridge-data->upload-to-redis:
+    id: edge-parse-upload-id
     source_job: parse-and-aggregate-fridge-data
     target_job: upload-to-redis
     condition_type: on_job_success
@@ -230,24 +249,29 @@ def test_edit_job_code():
 name: fridge-statistics-processing
 jobs:
   parse-and-aggregate-fridge-data:
+    id: job-parse-id
     name: Parse and Aggregate Fridge Data
     adaptor: '@openfn/language-common@latest'
     body: 'print("hello a")'
   upload-to-redis:
+    id: job-upload-id
     name: Upload to Redis Collection
     adaptor: '@openfn/language-redis@latest'
     body: 'print("hello a")'
 triggers:
   webhook:
+    id: trigger-webhook-id
     type: webhook
     enabled: false
 edges:
   webhook->parse-and-aggregate-fridge-data:
+    id: edge-webhook-parse-id
     source_trigger: webhook
     target_job: parse-and-aggregate-fridge-data
     condition_type: always
     enabled: true
   parse-and-aggregate-fridge-data->upload-to-redis:
+    id: edge-parse-upload-id
     source_job: parse-and-aggregate-fridge-data
     target_job: upload-to-redis
     condition_type: on_job_success
@@ -273,24 +297,29 @@ def test_error_field():
 name: fridge-statistics-processing
 jobs:
   parse-and-aggregate-fridge-data:
+    id: job-parse-id
     name: Parse and Aggregate Fridge Data
     adaptor: '@openfn/language-commons@latest'
     body: '| // Add data parsing and aggregation operations here'
   upload-to-redis:
+    id: job-upload-id
     name: Upload to Redis Collection
     adaptor: '@openfn/language-redis@latest'
     body: '| // Add Redis collection upload operations here'
 triggers:
   webhook:
+    id: trigger-webhook-id
     type: webhook
     enabled: false
 edges:
   webhook->parse-and-aggregate-fridge-data:
+    id: edge-webhook-parse-id
     source_trigger: webhook
     target_job: parse-and-aggregate-fridge-data
     condition_type: always
     enabled: true
   parse-and-aggregate-fridge-data->upload-to-redis:
+    id: edge-parse-upload-id
     source_job: parse-and-aggregate-fridge-data
     target_job: upload-to-redis
     condition_type: on_job_success
@@ -318,87 +347,106 @@ def test_long_yaml():
 name: Data-Integration-and-Reporting
 jobs:
   Retrieve-Google-Sheets-Data:
+    id: job-retrieve-gsheets
     name: Retrieve Google Sheets Data
     adaptor: "@openfn/language-googlesheets@latest"
     body: // PLACEHOLDER 1
   Retrieve-NetSuite-Data:
+    id: job-retrieve-netsuite
     name: Retrieve NetSuite Data
     adaptor: "@openfn/language-http@latest"
     body: // PLACEHOLDER 2
   Retrieve-Ferntech-Data:
+    id: job-retrieve-ferntech
     name: Retrieve Ferntech Data
     adaptor: "@openfn/language-http@latest"
     body: // PLACEHOLDER 3
   Process-Combined-Data:
+    id: job-process-combined
     name: Process Combined Data
     adaptor: "@openfn/language-common@latest"
     body: // PLACEHOLDER 4
   Send-Email-Report:
+    id: job-send-email
     name: Send Email Report
     adaptor: "@openfn/language-gmail@latest"
     body: // PLACEHOLDER 5a
   write-to-sheet:
+    id: job-write-sheet
     name: write to sheet
     adaptor: "@openfn/language-googlesheets@3.0.13"
     body: // PLACEHOLDER 5b
   Summarise-with-claude:
+    id: job-summarise-claude
     name: Summarise with claude
     adaptor: "@openfn/language-claude@1.0.7"
     body: // PLACEHOLDER 5c
   Email-summary:
+    id: job-email-summary
     name: Email summary
     adaptor: "@openfn/language-gmail@1.3.0"
     body: // PLACEHOLDER 6
   Update-asana:
+    id: job-update-asana
     name: Update asana
     adaptor: "@openfn/language-asana@4.1.0"
     body: // PLACEHOLDER 7
 triggers:
   webhook:
+    id: trigger-webhook
     type: webhook
     enabled: false
 edges:
   webhook->Retrieve-Google-Sheets-Data:
+    id: edge-webhook-gsheets
     source_trigger: webhook
     target_job: Retrieve-Google-Sheets-Data
     condition_type: always
     enabled: true
   Retrieve-Google-Sheets-Data->Retrieve-NetSuite-Data:
+    id: edge-gsheets-netsuite
     source_job: Retrieve-Google-Sheets-Data
     target_job: Retrieve-NetSuite-Data
     condition_type: on_job_success
     enabled: true
   Retrieve-NetSuite-Data->Retrieve-Ferntech-Data:
+    id: edge-netsuite-ferntech
     source_job: Retrieve-NetSuite-Data
     target_job: Retrieve-Ferntech-Data
     condition_type: on_job_success
     enabled: true
   Retrieve-Ferntech-Data->Process-Combined-Data:
+    id: edge-ferntech-combined
     source_job: Retrieve-Ferntech-Data
     target_job: Process-Combined-Data
     condition_type: on_job_success
     enabled: true
   Process-Combined-Data->Send-Email-Report:
+    id: edge-combined-email
     source_job: Process-Combined-Data
     target_job: Send-Email-Report
     condition_type: on_job_success
     enabled: true
   Process-Combined-Data->write-to-sheet:
+    id: edge-combined-sheet
     source_job: Process-Combined-Data
     target_job: write-to-sheet
     condition_type: on_job_success
     enabled: true
   Process-Combined-Data->Summarise-with-claude:
+    id: edge-combined-summarise
     source_job: Process-Combined-Data
     target_job: Summarise-with-claude
     condition_type: on_job_success
     enabled: true
   Summarise-with-claude->Email-summary:
+    id: edge-summarise-email
     source_job: Summarise-with-claude
     target_job: Email-summary
     condition_type: on_job_success
     enabled: true
   Email-summary->Update-asana:
+    id: edge-email-asana
     source_job: Email-summary
     target_job: Update-asana
     condition_type: on_job_success

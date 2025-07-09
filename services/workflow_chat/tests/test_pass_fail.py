@@ -16,24 +16,29 @@ def test_change_trigger():
 name: fridge-statistics-processing
 jobs:
   parse-and-aggregate-fridge-data:
+    id: job-parse-id
     name: Parse and Aggregate Fridge Data
     adaptor: '@openfn/language-common@latest'
     body: 'print("hello a")'
   upload-to-redis:
+    id: job-upload-id
     name: Upload to Redis Collection
     adaptor: '@openfn/language-redis@latest'
     body: 'print("hello b")'
 triggers:
   webhook:
+    id: trigger-webhook-id
     type: webhook
     enabled: false
 edges:
   webhook->parse-and-aggregate-fridge-data:
+    id: edge-webhook-parse-id
     source_trigger: webhook
     target_job: parse-and-aggregate-fridge-data
     condition_type: always
     enabled: true
   parse-and-aggregate-fridge-data->upload-to-redis:
+    id: edge-parse-upload-id
     source_job: parse-and-aggregate-fridge-data
     target_job: upload-to-redis
     condition_type: on_job_success
