@@ -86,14 +86,13 @@ class AnthropicClient:
         history = history.copy() if history else []
         
         # Extract and preserve existing components
-        preserved_codes = {}
-        preserved_ids = {}
+        preserved_values = {}
         processed_existing_yaml = existing_yaml
         
         if existing_yaml and existing_yaml.strip():
             try:
                 yaml_data = yaml.safe_load(existing_yaml)
-                preserved_codes, preserved_ids, processed_existing_yaml = self.extract_and_preserve_components(yaml_data)
+                preserved_values, processed_existing_yaml = self.extract_and_preserve_components(yaml_data)
             except Exception as e:
                 logger.warning(f"Could not parse existing YAML for component extraction: {e}")
         
@@ -132,7 +131,8 @@ class AnthropicClient:
                     logger.warning(f"Unhandled content type: {content_block.type}")
 
             response = "\n\n".join(response_parts)
-            response_text, response_yaml = self.split_format_yaml(response, preserved_codes, preserved_ids)
+            response_text, response_yaml = self.split_format_yaml(response, preserved_values)
+
 
             # If YAML parsing succeeded or we're on the last attempt, return the result
             if response_yaml is not None or attempt == max_retries:
@@ -169,7 +169,7 @@ class AnthropicClient:
                     if original_name != sanitized_name:
                         logger.info(f"Sanitized job name: '{original_name}' -> '{sanitized_name}'")
 
-    def split_format_yaml(self, response, preserved_codes=None, preserved_ids=None):
+    def split_format_yaml(self, response, preserved_values=None):
         """Split text and YAML in response and format the YAML."""
         output_text, output_yaml = "", None
 
@@ -187,7 +187,7 @@ class AnthropicClient:
 
                 self.validate_adaptors(output_yaml)
                 self.sanitize_job_names(output_yaml)
-                self.restore_components(output_yaml, preserved_codes, preserved_ids)
+                self.restore_components(output_yaml, preserved_values)
                 # Convert back to YAML string with preserved order
                 output_yaml = yaml.dump(output_yaml, sort_keys=False)
             else:
@@ -222,89 +222,99 @@ class AnthropicClient:
     def extract_and_preserve_components(self, yaml_data):
         """
         Extract both codes and IDs from all components.
-        Returns: (preserved_codes, preserved_ids, processed_yaml_string)
+        Returns: (preserved_values, processed_yaml_string)
         """
         if not yaml_data:
-            return {}, {}, None
+            return {}, None
         
-        preserved_codes = {}
-        preserved_ids = {}
+        preserved_values = {}
         
         if "jobs" in yaml_data:
             for job_key, job_data in yaml_data["jobs"].items():
+                # Preserve job body code
                 if "body" in job_data:
                     body_content = job_data["body"].strip()
                     if body_content and body_content != "// Add operations here":
-                        preserved_codes[job_key] = {
-                            "code": body_content,
-                            "placeholder": f"__CODE_BLOCK_{job_key}__"
+                        key = f"job_body_{job_key}"
+                        placeholder = f"__CODE_BLOCK_{job_key}__"
+                        preserved_values[key] = {
+                            "value": body_content,
+                            "placeholder": placeholder
                         }
-                        job_data["body"] = preserved_codes[job_key]["placeholder"]
+                        job_data["body"] = placeholder
                 
+                # Preserve job ID
                 if "id" in job_data:
-                    preserved_ids[f"job_{job_key}"] = {
-                        "id": job_data["id"],
-                        "placeholder": f"{{ID_JOB_{job_key}}}"
+                    key = f"job_id_{job_key}"
+                    placeholder = f"{{ID_JOB_{job_key}}}"
+                    preserved_values[key] = {
+                        "value": job_data["id"],
+                        "placeholder": placeholder
                     }
-                    job_data["id"] = preserved_ids[f"job_{job_key}"]["placeholder"]
+                    job_data["id"] = placeholder
         
         if "triggers" in yaml_data:
             for trigger_key, trigger_data in yaml_data["triggers"].items():
                 if "id" in trigger_data:
-                    preserved_ids["trigger"] = trigger_data["id"]
+                    preserved_values["trigger_id"] = trigger_data["id"]
                     # Remove the id key from what we send to the model, as there is only one trigger
                     del trigger_data["id"]
         
         if "edges" in yaml_data:
+            edge_counter = 1
             for edge_key, edge_data in yaml_data["edges"].items():
                 if "id" in edge_data:
-                    preserved_ids[f"edge_{edge_key}"] = {
-                        "id": edge_data["id"],
-                        "placeholder": f"{{ID_EDGE_{edge_key}}}"
+                    key = f"edge_id_{edge_counter}"
+                    placeholder = f"{{ID_EDGE_{edge_counter}}}"
+                    preserved_values[key] = {
+                        "value": edge_data["id"],
+                        "placeholder": placeholder
                     }
-                    edge_data["id"] = preserved_ids[f"edge_{edge_key}"]["placeholder"]
+                    edge_data["id"] = placeholder
+                    edge_counter += 1
         
-        return preserved_codes, preserved_ids, yaml.dump(yaml_data, sort_keys=False)
+        return preserved_values, yaml.dump(yaml_data, sort_keys=False)
 
-    def restore_components(self, yaml_data, preserved_codes=None, preserved_ids=None):
+    def restore_components(self, yaml_data, preserved_values=None):
         """
-        Restore preserved codes and IDs, generate new UUIDs for new components.
+        Restore preserved values, generate new UUIDs for new components.
         """
         if not yaml_data:
             return
         
-        preserved_codes = preserved_codes or {}
-        preserved_ids = preserved_ids or {}
+        preserved_values = preserved_values or {}
         
         if "jobs" in yaml_data:
             for job_key, job_data in yaml_data["jobs"].items():
-                if "body" in job_data:
-                    if job_key in preserved_codes:
-                        job_data["body"] = preserved_codes[job_key]["code"]
-                    else:
-                        job_data["body"] = "// Add operations here"
+                body_key = f"job_body_{job_key}"
+                if body_key in preserved_values:
+                    job_data["body"] = preserved_values[body_key]["value"]
+                elif "body" not in job_data or job_data["body"] == f"__CODE_BLOCK_{job_key}__":
+                    job_data["body"] = "// Add operations here"
                 
-                id_key = f"job_{job_key}"
-                if id_key in preserved_ids:
-                    job_data["id"] = preserved_ids[id_key]["id"]
-                elif "id" not in job_data:
+                id_key = f"job_id_{job_key}"
+                if id_key in preserved_values:
+                    job_data["id"] = preserved_values[id_key]["value"]
+                elif "id" not in job_data or job_data["id"] == f"{{ID_JOB_{job_key}}}":
                     job_data["id"] = str(uuid.uuid4())
         
         if "triggers" in yaml_data:
             for trigger_key, trigger_data in yaml_data["triggers"].items():
-                if "trigger" in preserved_ids:
-                    trigger_data["id"] = preserved_ids["trigger"]
-                else:
+                if "trigger_id" in preserved_values:
+                    trigger_data["id"] = preserved_values["trigger_id"]
+                elif "id" not in trigger_data:
                     trigger_data["id"] = str(uuid.uuid4())
 
         if "edges" in yaml_data:
+            edge_counter = 1
             for edge_key, edge_data in yaml_data["edges"].items():
-                id_key = f"edge_{edge_key}"
-                if id_key in preserved_ids:
-                    edge_data["id"] = preserved_ids[id_key]["id"]
-                elif "id" not in edge_data:
+                id_key = f"edge_id_{edge_counter}"
+                if id_key in preserved_values:
+                    edge_data["id"] = preserved_values[id_key]["value"]
+                elif "id" not in edge_data or edge_data["id"] == f"{{ID_EDGE_{edge_counter}}}":
                     edge_data["id"] = str(uuid.uuid4())
-    
+                edge_counter += 1
+        
 
 
 def main(data_dict: dict) -> dict:
