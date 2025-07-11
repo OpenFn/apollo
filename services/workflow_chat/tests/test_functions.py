@@ -20,10 +20,8 @@ def test_extract_job_codes_preserves_real_code(client):
     preserved_values, processed_yaml = client.extract_and_preserve_components(yaml_data)
     
     assert len(preserved_values) == 2
-    assert preserved_values["job_body_job1"]["value"] == "console.log('hello world')"
-    assert preserved_values["job_body_job2"]["value"] == "const data = fetchData();\nprocessData(data);"
-    assert preserved_values["job_body_job1"]["placeholder"] == "__CODE_BLOCK_job1__"
-    assert preserved_values["job_body_job2"]["placeholder"] == "__CODE_BLOCK_job2__"
+    assert preserved_values["__CODE_BLOCK_job1__"] == "console.log('hello world')"
+    assert preserved_values["__CODE_BLOCK_job2__"] == "const data = fetchData();\nprocessData(data);"
 
 
 def test_extract_job_codes_ignores_default_placeholder(client):
@@ -40,9 +38,9 @@ def test_extract_job_codes_ignores_default_placeholder(client):
     preserved_values, processed_yaml = client.extract_and_preserve_components(yaml_data)
     
     assert len(preserved_values) == 1
-    assert "job_body_job1" not in preserved_values
-    assert "job_body_job3" not in preserved_values
-    assert preserved_values["job_body_job2"]["value"] == "real code here"
+    assert "__CODE_BLOCK_job1__" not in preserved_values
+    assert "__CODE_BLOCK_job3__" not in preserved_values
+    assert preserved_values["__CODE_BLOCK_job2__"] == "real code here"
 
 
 def test_sanitize_job_names_removes_diacritics(client):

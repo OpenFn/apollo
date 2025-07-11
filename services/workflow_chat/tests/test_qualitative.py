@@ -6,7 +6,7 @@ import sys
 import tempfile
 import subprocess
 from pathlib import Path
-from .test_utils import call_workflow_chat_service, make_service_input, print_response_details, assert_yaml_section_contains_all
+from .test_utils import call_workflow_chat_service, make_service_input, print_response_details, assert_yaml_section_contains_all, assert_yaml_has_ids, assert_yaml_jobs_have_body
 import yaml
 
 # ---- TESTS ----
@@ -23,6 +23,10 @@ def test_basic_input():
 
     assert response is not None
     assert isinstance(response, dict)
+    # Check for id fields in generated YAML
+    if response.get("response_yaml"):
+        assert_yaml_has_ids(response["response_yaml"], context="test_basic_input")
+        assert_yaml_jobs_have_body(response["response_yaml"], context="test_basic_input")
 
 def test_input_second_turn():
     print("Description: Simple second conversation turn requesting a change to the YAML")
@@ -175,6 +179,10 @@ def test_special_characters():
     print_response_details(response, "empty_water_bug", content=content)
     assert response is not None
     assert isinstance(response, dict)
+    # Check for id fields in generated YAML
+    if response.get("response_yaml"):
+        assert_yaml_has_ids(response["response_yaml"], context="test_special_characters")
+        assert_yaml_jobs_have_body(response["response_yaml"], context="test_special_characters")
 
 def test_simple_lang_bug():
     print("==================TEST==================")
@@ -191,6 +199,10 @@ def test_simple_lang_bug():
     response_text = response.get("response", "")
 
     assert "yaml" not in response_text.lower(), f"Response text should not mention 'YAML', but got: {response_text}"
+    # Check for id fields in generated YAML
+    if response.get("response_yaml"):
+        assert_yaml_has_ids(response["response_yaml"], context="test_simple_lang_bug")
+        assert_yaml_jobs_have_body(response["response_yaml"], context="test_simple_lang_bug")
 
 def test_single_trigger_node():
     print("==================TEST==================")

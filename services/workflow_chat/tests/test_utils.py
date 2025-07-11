@@ -166,3 +166,52 @@ def assert_yaml_section_contains_all(orig, new, section, context=''):
         assert new_section[key] == value, (
             f"{context}: Value for '{section}.{key}' changed.\nOriginal: {value}\nNew: {new_section[key]}"
         )
+
+
+def assert_yaml_has_ids(yaml_str_or_dict, context=''):
+    """
+    Assert that every job, trigger, and edge in the YAML has a non-empty 'id' field.
+    Args:
+        yaml_str_or_dict: YAML as string or dict
+        context: Context string for error messages
+    """
+    if isinstance(yaml_str_or_dict, str):
+        data = yaml.safe_load(yaml_str_or_dict)
+    else:
+        data = yaml_str_or_dict
+
+    # Check jobs
+    jobs = data.get('jobs', {})
+    for job_key, job_data in jobs.items():
+        assert 'id' in job_data, f"{context}: Job '{job_key}' missing 'id' field."
+        assert job_data['id'] not in (None, '', []), f"{context}: Job '{job_key}' has empty 'id' field."
+
+    # Check triggers
+    triggers = data.get('triggers', {})
+    for trig_key, trig_data in triggers.items():
+        assert 'id' in trig_data, f"{context}: Trigger '{trig_key}' missing 'id' field."
+        assert trig_data['id'] not in (None, '', []), f"{context}: Trigger '{trig_key}' has empty 'id' field."
+
+    # Check edges
+    edges = data.get('edges', {})
+    for edge_key, edge_data in edges.items():
+        assert 'id' in edge_data, f"{context}: Edge '{edge_key}' missing 'id' field."
+        assert edge_data['id'] not in (None, '', []), f"{context}: Edge '{edge_key}' has empty 'id' field."
+
+
+def assert_yaml_jobs_have_body(yaml_str_or_dict, context=''):
+    """
+    Assert that every job in the YAML has a non-empty 'body' field.
+    Args:
+        yaml_str_or_dict: YAML as string or dict
+        context: Context string for error messages
+    """
+    if isinstance(yaml_str_or_dict, str):
+        data = yaml.safe_load(yaml_str_or_dict)
+    else:
+        data = yaml_str_or_dict
+
+    jobs = data.get('jobs', {})
+    for job_key, job_data in jobs.items():
+        assert 'body' in job_data, f"{context}: Job '{job_key}' missing 'body' field."
+        assert job_data['body'] not in (None, '', []), f"{context}: Job '{job_key}' has empty 'body' field."

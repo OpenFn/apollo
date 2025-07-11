@@ -73,5 +73,137 @@ edges:
         context="YAML changed outside triggers or edges section."
     )
 
+
+def test_rename_two_jobs_commcare():
+    print("==================TEST==================")
+    print("Description: This tests that the service can rename two jobs in a 4-job CommCare workflow, and only the job names change.")
+    existing_yaml = """
+name: commcare-case-sync
+jobs:
+  fetch-cases:
+    id: job-fetch-id
+    name: Fetch Cases from CommCare
+    adaptor: '@openfn/language-commcare@latest'
+    body: 'fetch_cases()'
+  filter-cases:
+    id: job-filter-id
+    name: Filter Cases
+    adaptor: '@openfn/language-common@latest'
+    body: 'filter_cases()'
+  transform-cases:
+    id: job-transform-id
+    name: Transform Case Data
+    adaptor: '@openfn/language-common@latest'
+    body: 'transform_cases()'
+  send-to-fhir:
+    id: job-fhir-id
+    name: Send to FHIR
+    adaptor: '@openfn/language-fhir@latest'
+    body: 'send_to_fhir()'
+triggers:
+  webhook:
+    id: trigger-webhook-id
+    type: webhook
+    enabled: false
+edges:
+  webhook->fetch-cases:
+    id: edge-webhook-fetch-id
+    source_trigger: webhook
+    target_job: fetch-cases
+    condition_type: always
+    enabled: true
+  fetch-cases->filter-cases:
+    id: edge-fetch-filter-id
+    source_job: fetch-cases
+    target_job: filter-cases
+    condition_type: on_job_success
+    enabled: true
+  filter-cases->transform-cases:
+    id: edge-filter-transform-id
+    source_job: filter-cases
+    target_job: transform-cases
+    condition_type: on_job_success
+    enabled: true
+  transform-cases->send-to-fhir:
+    id: edge-transform-fhir-id
+    source_job: transform-cases
+    target_job: send-to-fhir
+    condition_type: on_job_success
+    enabled: true
+"""
+    history = [
+        {"role": "user", "content": "Sync CommCare cases to FHIR. Fetch cases, filter, transform, and send to FHIR."},
+        {"role": "assistant", "content": "Here's a workflow that fetches cases from CommCare, filters and transforms them, then sends to FHIR.\n\n```\nname: commcare-case-sync\njobs:\n  fetch-cases:\n    name: Fetch Cases from CommCare\n    adaptor: '@openfn/language-commcare@latest'\n    body: '// Add operations here'\n  filter-cases:\n    name: Filter Cases\n    adaptor: '@openfn/language-common@latest'\n    body: '// Add operations here'\n  transform-cases:\n    name: Transform Case Data\n    adaptor: '@openfn/language-common@latest'\n    body: '// Add operations here'\n  send-to-fhir:\n    name: Send to FHIR\n    adaptor: '@openfn/language-fhir@latest'\n    body: '// Add operations here'\ntriggers:\n  webhook:\n    type: webhook\n    enabled: false\nedges:\n  webhook->fetch-cases:\n    source_trigger: webhook\n    target_job: fetch-cases\n    condition_type: always\n    enabled: true\n  fetch-cases->filter-cases:\n    source_job: fetch-cases\n    target_job: filter-cases\n    condition_type: on_job_success\n    enabled: true\n  filter-cases->transform-cases:\n    source_job: filter-cases\n    target_job: transform-cases\n    condition_type: on_job_success\n    enabled: true\n  transform-cases->send-to-fhir:\n    source_job: transform-cases\n    target_job: send-to-fhir\n    condition_type: on_job_success\n    enabled: true\n```"},
+        {"role": "user", "content": "Can you explain what each job does?"},
+        {"role": "assistant", "content": "Sure! 'Fetch Cases from CommCare' retrieves cases, 'Filter Cases' narrows them down, 'Transform Case Data' prepares them for FHIR, and 'Send to FHIR' uploads them to the FHIR server."}
+    ]
+    content = "Please rename 'filter-cases' to 'screen-cases' and 'send-to-fhir' to 'upload-to-fhir'."
+
+    target_yaml = """
+name: commcare-case-sync
+jobs:
+  fetch-cases:
+    id: job-fetch-id
+    name: Fetch Cases from CommCare
+    adaptor: '@openfn/language-commcare@latest'
+    body: 'fetch_cases()'
+  screen-cases:
+    id: job-filter-id
+    name: Screen Cases
+    adaptor: '@openfn/language-common@latest'
+    body: 'filter_cases()'
+  transform-cases:
+    id: job-transform-id
+    name: Transform Case Data
+    adaptor: '@openfn/language-common@latest'
+    body: 'transform_cases()'
+  upload-to-fhir:
+    id: job-fhir-id
+    name: Upload to FHIR
+    adaptor: '@openfn/language-fhir@latest'
+    body: 'send_to_fhir()'
+triggers:
+  webhook:
+    id: trigger-webhook-id
+    type: webhook
+    enabled: false
+edges:
+  webhook->fetch-cases:
+    id: edge-webhook-fetch-id
+    source_trigger: webhook
+    target_job: fetch-cases
+    condition_type: always
+    enabled: true
+  fetch-cases->screen-cases:
+    id: edge-fetch-filter-id
+    source_job: fetch-cases
+    target_job: screen-cases
+    condition_type: on_job_success
+    enabled: true
+  screen-cases->transform-cases:
+    id: edge-filter-transform-id
+    source_job: screen-cases
+    target_job: transform-cases
+    condition_type: on_job_success
+    enabled: true
+  transform-cases->upload-to-fhir:
+    id: edge-transform-fhir-id
+    source_job: transform-cases
+    target_job: upload-to-fhir
+    condition_type: on_job_success
+    enabled: true
+"""
+    service_input = make_service_input(existing_yaml, history, content=content)
+    response = call_workflow_chat_service(service_input)
+    print_response_details(response, "rename_two_jobs_commcare", content=content)
+    assert response is not None
+    assert isinstance(response, dict)
+
+    yaml_str = response.get("response_yaml")
+    assert yaml_str is not None, "No YAML returned in response_yaml"
+    parsed = yaml.safe_load(yaml_str)
+    expected = yaml.safe_load(target_yaml)
+    assert parsed == expected
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"]) 
