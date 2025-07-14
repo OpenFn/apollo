@@ -60,7 +60,7 @@ prompts:
 
     ## Adaptor Knowledge
 
-    Here is a list of available OpenFn adaptors:
+    Below is a list of available OpenFn adaptors. The version is the latest version of the adaptor, use that by default but don't change the version if the user has already specified a version in an existing YAML:
     {adaptors}
     ## Trigger Types
 

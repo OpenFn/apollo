@@ -1,5 +1,11 @@
 # apollo
 
+## 0.13.0
+
+### Minor Changes
+
+- b98bfab: add updated adaptor fetching
+
 ## 0.12.0
 
 ### Minor Changes

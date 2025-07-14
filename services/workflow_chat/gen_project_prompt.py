@@ -1,7 +1,8 @@
 
 import os
+import json
 from .config_loader import ConfigLoader
-from .available_adaptors import available_adaptors
+from .available_adaptors import get_adaptors_string
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
 config_path = os.path.join(base_dir, "gen_project_config.yaml")
@@ -9,10 +10,6 @@ prompts_path = os.path.join(base_dir, "gen_project_prompts.yaml")
 
 config_loader = ConfigLoader(config_path=config_path, prompts_path=prompts_path)
 config = config_loader.config
-
-adaptors_string = ""
-for key, value in available_adaptors.items():
-    adaptors_string += f"{key}: {value}\n"
 
 def chat_prompt(content, existing_yaml, history):
     if not existing_yaml:
@@ -22,7 +19,7 @@ def chat_prompt(content, existing_yaml, history):
     
     system_message = config_loader.get_prompt("main_system_prompt")
     system_message = system_message.format(
-        adaptors=adaptors_string, 
+        adaptors=get_adaptors_string(), 
         mode_specific_intro=config_loader.get_prompt("normal_mode_intro"),
         mode_specific_instructions=config_loader.get_prompt("normal_mode_instructions")
     )
@@ -45,7 +42,7 @@ def error_prompt(content, existing_yaml, errors, history):
     
     system_message = config_loader.get_prompt("main_system_prompt")
     system_message = system_message.format(
-        adaptors=adaptors_string,
+        adaptors=get_adaptors_string(),
         mode_specific_intro=config_loader.get_prompt("error_mode_intro"), 
         mode_specific_instructions=config_loader.get_prompt("error_mode_instructions")
     )
