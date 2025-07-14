@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import uuid
 import unicodedata
 from typing import List, Optional, Dict, Any
 import yaml
@@ -84,18 +85,16 @@ class AnthropicClient:
         """Generate a response using the Claude API. Retry up to 2 times if YAML/JSON parsing fails."""
         history = history.copy() if history else []
         
-        # Extract and preserve existing code if yaml exists
-        preserved_codes = {}
+        # Extract and preserve existing components
+        preserved_values = {}
         processed_existing_yaml = existing_yaml
         
         if existing_yaml and existing_yaml.strip():
             try:
                 yaml_data = yaml.safe_load(existing_yaml)
-                preserved_codes = self.extract_job_codes(yaml_data)
-                if preserved_codes:
-                    processed_existing_yaml = self.replace_codes_with_placeholders(yaml_data, preserved_codes)
+                preserved_values, processed_existing_yaml = self.extract_and_preserve_components(yaml_data)
             except Exception as e:
-                logger.warning(f"Could not parse existing YAML for code extraction: {e}")
+                logger.warning(f"Could not parse existing YAML for component extraction: {e}")
         
         system_message, prompt = build_prompt(
             content=content, 
@@ -132,7 +131,8 @@ class AnthropicClient:
                     logger.warning(f"Unhandled content type: {content_block.type}")
 
             response = "\n\n".join(response_parts)
-            response_text, response_yaml = self.split_format_yaml(response, preserved_codes)
+            response_text, response_yaml = self.split_format_yaml(response, preserved_values)
+
 
             # If YAML parsing succeeded or we're on the last attempt, return the result
             if response_yaml is not None or attempt == max_retries:
@@ -169,7 +169,7 @@ class AnthropicClient:
                     if original_name != sanitized_name:
                         logger.info(f"Sanitized job name: '{original_name}' -> '{sanitized_name}'")
 
-    def split_format_yaml(self, response, preserved_codes=None):
+    def split_format_yaml(self, response, preserved_values=None):
         """Split text and YAML in response and format the YAML."""
         output_text, output_yaml = "", None
 
@@ -187,7 +187,7 @@ class AnthropicClient:
 
                 self.validate_adaptors(output_yaml)
                 self.sanitize_job_names(output_yaml)
-                self.process_job_bodies(output_yaml, preserved_codes)
+                self.restore_components(output_yaml, preserved_values)
                 # Convert back to YAML string with preserved order
                 output_yaml = yaml.dump(output_yaml, sort_keys=False)
             else:
@@ -219,61 +219,100 @@ class AnthropicClient:
         except Exception as e:
             logger.error(f"validate_adaptors encountered an error: {e}")
 
-    def process_job_bodies(self, yaml_data, preserved_codes=None):
+    def extract_and_preserve_components(self, yaml_data):
         """
-        Restore preserved code for existing jobs and set default placeholder for new jobs.
+        Extract both codes and IDs from all components.
+        Returns: (preserved_values, processed_yaml_string)
         """
-        if not preserved_codes:
-            preserved_codes = {}
+        if not yaml_data:
+            return {}, None
         
-        expected_default = "// Add operations here"
+        preserved_values = {}
         
-        if yaml_data and "jobs" in yaml_data:
-            jobs = yaml_data["jobs"]
-            for job_id, job_data in jobs.items():
-                if "body" in job_data:
-                    # If this job exists in preserved codes, restore the original code
-                    if job_id in preserved_codes:
-                        job_data["body"] = preserved_codes[job_id]["code"]
-                    # Handle new jobs created by model - set default placeholder
-                    else:
-                        job_data["body"] = expected_default
-
-    def extract_job_codes(self, yaml_data):
-        """
-        Extract actual code from job bodies and create placeholder mapping.
-        Returns: dict mapping job_id to {code: actual_code, placeholder: unique_id}
-        """
-        code_mapping = {}
-        
-        if yaml_data and "jobs" in yaml_data:
-            jobs = yaml_data["jobs"]
-            for job_id, job_data in jobs.items():
+        if "jobs" in yaml_data:
+            for job_key, job_data in yaml_data["jobs"].items():
                 if "body" in job_data:
                     body_content = job_data["body"].strip()
-                    # Only preserve if it's actual code (not default placeholder)
                     if body_content and body_content != "// Add operations here":
-                        placeholder = self.generate_code_placeholder(job_id)
-                        code_mapping[job_id] = {
-                            "code": body_content,
-                            "placeholder": placeholder
-                        }
+                        placeholder = f"__CODE_BLOCK_{job_key}__"
+                        preserved_values[placeholder] = body_content
+                        job_data["body"] = placeholder
+                
+                if "id" in job_data:
+                    placeholder = f"{{ID_JOB_{job_key}}}"
+                    preserved_values[placeholder] = job_data["id"]
+                    job_data["id"] = placeholder
         
-        return code_mapping
-
-    def generate_code_placeholder(self, job_id):
-        """Generate unique, deterministic placeholder for job code."""
-        return f"__CODE_BLOCK_{job_id}__"
-
-    def replace_codes_with_placeholders(self, yaml_data, code_mapping):
-        """Replace actual job bodies with placeholders before sending to model."""
-        if yaml_data and "jobs" in yaml_data:
-            jobs = yaml_data["jobs"]
-            for job_id, job_data in jobs.items():
-                if job_id in code_mapping and "body" in job_data:
-                    job_data["body"] = code_mapping[job_id]["placeholder"]
+        if "triggers" in yaml_data:
+            for trigger_key, trigger_data in yaml_data["triggers"].items():
+                if "id" in trigger_data:
+                    # Store the trigger ID directly without placeholder
+                    preserved_values["trigger_id"] = trigger_data["id"]
+                    # Remove the id key from what we send to the model
+                    del trigger_data["id"]
         
-        return yaml.dump(yaml_data, sort_keys=False)
+        if "edges" in yaml_data:
+            for edge_key, edge_data in yaml_data["edges"].items():
+                if "id" in edge_data:
+                    placeholder = f"{{ID_EDGE_{edge_key}}}"
+                    preserved_values[placeholder] = edge_data["id"]
+                    edge_data["id"] = placeholder
+        
+        return preserved_values, yaml.dump(yaml_data, sort_keys=False)
+
+    def restore_components(self, yaml_data, preserved_values=None):
+        """
+        Restore preserved codes and IDs, generate new UUIDs for new components.
+        """
+        if not yaml_data:
+            return
+        
+        preserved_values = preserved_values or {}
+        
+        if "jobs" in yaml_data:
+            for job_key, job_data in yaml_data["jobs"].items():
+                if "body" in job_data:
+                    current_body = job_data["body"]
+                    if isinstance(current_body, str) and current_body in preserved_values:
+                        job_data["body"] = preserved_values[current_body]
+                    else:
+                        job_data["body"] = "// Add operations here"
+                else:
+                    job_data["body"] = "// Add operations here"
+                
+                if "id" in job_data:
+                    current_id = job_data["id"]
+                    
+                    if isinstance(current_id, str) and current_id in preserved_values:
+                        job_data["id"] = preserved_values[current_id]
+                    elif isinstance(current_id, str) and current_id.startswith("{") and current_id.endswith("}"):
+                        logger.warning(f"Unknown placeholder {current_id}, generating new ID")
+                        job_data["id"] = str(uuid.uuid4())
+                else:
+                    job_data["id"] = str(uuid.uuid4())
+        
+        if "triggers" in yaml_data:
+            for trigger_key, trigger_data in yaml_data["triggers"].items():
+                if "trigger_id" in preserved_values:
+                    # Directly restore the preserved trigger ID
+                    trigger_data["id"] = preserved_values["trigger_id"]
+                elif "id" not in trigger_data:
+                    # Generate new ID if no preserved ID exists
+                    trigger_data["id"] = str(uuid.uuid4())
+
+        if "edges" in yaml_data:
+            for edge_key, edge_data in yaml_data["edges"].items():
+                if "id" in edge_data:
+                    current_id = edge_data["id"]
+                    
+                    if isinstance(current_id, str) and current_id in preserved_values:
+                        edge_data["id"] = preserved_values[current_id]
+                    elif isinstance(current_id, str) and current_id.startswith("{") and current_id.endswith("}"):
+                        logger.warning(f"Unknown placeholder {current_id}, generating new ID")
+                        edge_data["id"] = str(uuid.uuid4())
+                else:
+                    edge_data["id"] = str(uuid.uuid4())
+
 
 def main(data_dict: dict) -> dict:
     """
