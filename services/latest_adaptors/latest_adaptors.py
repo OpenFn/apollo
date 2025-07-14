@@ -1,7 +1,21 @@
 import requests
+import os
+import json
+import time
 from util import create_logger
 
 logger = create_logger("latest_adaptors")
+
+ADAPTORS_CACHE_PATH = os.path.join(os.path.dirname(__file__), "adaptors_cache.json")
+CACHE_TTL_SECONDS = 3600  # 1 hour
+
+def is_cache_fresh(path, ttl_seconds):
+    """Return True if the cache file exists and is not older than ttl_seconds."""
+    if not os.path.exists(path):
+        return False
+    mtime = os.path.getmtime(path)
+    age = time.time() - mtime
+    return age < ttl_seconds
 
 def get_latest_adaptors():
     # Get all adaptor names
@@ -35,6 +49,24 @@ def get_latest_adaptors():
     logger.info('All adaptor metadata downloaded')
 
     return descriptions
+
+def get_latest_adaptors_cached():
+    """Returns a dict of latest adaptors, using a recent cache or the adaptor service."""
+    if is_cache_fresh(ADAPTORS_CACHE_PATH, CACHE_TTL_SECONDS):
+        with open(ADAPTORS_CACHE_PATH, "r") as f:
+            return json.load(f)
+    else:
+        try:
+            adaptors_info = get_latest_adaptors()
+            with open(ADAPTORS_CACHE_PATH, "w") as f:
+                json.dump(adaptors_info, f)
+            return adaptors_info
+        except Exception:
+            logger.warning(f"Get latest adaptors failed, using cache")
+            if os.path.exists(ADAPTORS_CACHE_PATH):
+                with open(ADAPTORS_CACHE_PATH, "r") as f:
+                    return json.load(f)
+            return {}
 
 def main(args) -> dict:
     adaptor_info = get_latest_adaptors()

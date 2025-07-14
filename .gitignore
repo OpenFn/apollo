@@ -72,3 +72,4 @@ tmp/
 services/inference/data/
 
 app.log
+adaptors_cache.json
