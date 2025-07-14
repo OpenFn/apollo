@@ -9,6 +9,13 @@ logger = create_logger("latest_adaptors")
 ADAPTORS_CACHE_PATH = os.path.join(os.path.dirname(__file__), "adaptors_cache.json")
 CACHE_TTL_SECONDS = 3600  # 1 hour
 
+IGNORED_ADAPTORS = [
+    "devtools",
+    "template",
+    "fhir-jembi",
+    "collections",
+]
+
 def is_cache_fresh(path, ttl_seconds):
     """Return True if the cache file exists and is not older than ttl_seconds."""
     if not os.path.exists(path):
@@ -27,13 +34,15 @@ def get_latest_adaptors():
     
     package_dirs = response.json()
     package_names = [item['name'] for item in package_dirs if item['type'] == 'dir']
+    # Filter out ignored adaptors (case-insensitive)
+    ignored = set(name.lower() for name in IGNORED_ADAPTORS)
+    package_names = [name for name in package_names if name.lower() not in ignored]
     
     # Get descriptions
     descriptions = {}
     for package_name in package_names:
         try:
             raw_url = f"https://raw.githubusercontent.com/OpenFn/adaptors/main/packages/{package_name}/package.json"
-            logger.info(f'fetching {raw_url}')
             pkg_response = requests.get(raw_url)
             pkg_response.raise_for_status()
             package_json = pkg_response.json()
