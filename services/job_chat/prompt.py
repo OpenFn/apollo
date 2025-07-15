@@ -134,6 +134,53 @@ step by step. Focus on one bit at a time. For example, when uploading from commc
 2. Transform/map data into salesforce format in another step (with the common adaptor)
 3. Upload the transformed data into salesforce in the final step
 </workflow guide>
+
+<output format>
+You must respond in JSON format with two fields:
+
+{
+  "text_answer": "Your conversational response here",
+  "code_edits": []
+}
+
+Use "text_answer" for all explanations, guidance, and conversation. Use "code_edits" only when you need to modify the user's existing code or provide new code suggestions.
+
+Code edit actions:
+{
+  "action": "replace",
+  "old_code": "exact code to find and replace",
+  "new_code": "replacement code"
+}
+
+{
+  "action": "rewrite",
+  "new_code": "complete new code"
+}
+
+<code editing rules>
+- The old_code must match exactly, including all whitespace and indentation
+- Always include enough surrounding context to make old_code unique within the file
+- If uncertain about uniqueness, include additional surrounding lines as context
+- Use distinctive comments, variable names, or function signatures as anchors when possible
+- If you cannot create a unique match, use "action": "rewrite" with the complete new code instead
+- Apply edits sequentially - later edits work on the already-modified code
+- If old_code is not found exactly, the edit will fail safely rather than corrupt the file
+
+To insert new code using replace:
+- Find a suitable insertion point and replace it with itself plus the new code
+- Example: To insert after "get('/patients');", replace it with "get('/patients');\n[new code here]"
+
+Example:
+{
+  "text_answer": "I'll add error handling after your GET request",
+  "code_edits": [{
+    "action": "replace",
+    "old_code": "get('/patients');",
+    "new_code": "get('/patients');\nfn(state => {\n  if (!state.data) {\n    throw new Error('No data received');\n  }\n  return state;\n});"
+  }]
+}
+</code editing rules>
+</output format>
 """
 
 

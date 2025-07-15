@@ -1,4 +1,5 @@
 import os
+import json
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 from anthropic import (
@@ -29,6 +30,7 @@ class Payload:
     context: Optional[str] = None
     api_key: Optional[str] = None
     meta: Optional[str] = None
+    original_code: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
@@ -38,7 +40,13 @@ class Payload:
         if "content" not in data:
             raise ValueError("'content' is required")
 
-        return cls(content=data["content"], context=data.get("context"), api_key=data.get("api_key"), meta=data.get("meta"))
+        return cls(
+            content=data["content"], 
+            context=data.get("context"), 
+            api_key=data.get("api_key"), 
+            meta=data.get("meta"),
+            original_code=data.get("original_code")
+        )
 
 
 @dataclass
@@ -54,7 +62,7 @@ class ChatResponse:
     history: List[Dict[str, str]]
     usage: Dict[str, Any]
     rag: Dict[str, Any]
-
+    suggested_code: Optional[str] = None
 
 class AnthropicClient:
     def __init__(self, config: Optional[ChatConfig] = None):
@@ -65,7 +73,7 @@ class AnthropicClient:
         self.client = Anthropic(api_key=self.api_key)
 
     def generate(
-        self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[str] = None, rag: Optional[str] = None
+        self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[str] = None, rag: Optional[str] = None, original_code: Optional[str] = None
     ) -> ChatResponse:
         """
         Generate a response using the Claude API with improved error handling and response processing.
@@ -99,9 +107,12 @@ class AnthropicClient:
 
         response = "\n\n".join(response_parts)
 
+        # Parse JSON response and apply code edits
+        text_response, suggested_code = self.parse_and_apply_edits(response, original_code)
+
         updated_history = history + [
             {"role": "user", "content": content},
-            {"role": "assistant", "content": response},
+            {"role": "assistant", "content": text_response},
         ]
 
         usage = self.sum_usage(
@@ -110,11 +121,74 @@ class AnthropicClient:
         )
 
         return ChatResponse(
-            content=response,
+            content=text_response,
             history=updated_history,
             usage=usage,
-            rag=retrieved_knowledge
+            rag=retrieved_knowledge,
+            suggested_code=suggested_code
         )
+
+    def parse_and_apply_edits(self, response: str, original_code: Optional[str] = None) -> tuple[str, Optional[str]]:
+        """Parse JSON response and apply code edits to original code."""
+        try:
+            response_data = json.loads(response)
+            text_answer = response_data.get("text_answer", "").strip()
+            code_edits = response_data.get("code_edits", [])
+            
+            if not code_edits or not original_code:
+                return text_answer, None
+            
+            suggested_code = self.apply_code_edits(original_code, code_edits)
+            return text_answer, suggested_code
+            
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse JSON response: {e}")
+            return response, None
+        except Exception as e:
+            logger.error(f"Error parsing response: {e}")
+            return response, None
+
+    def apply_code_edits(self, original_code: str, code_edits: List[Dict[str, Any]]) -> str:
+        """Apply a list of code edits to the original code."""
+        current_code = original_code
+        
+        for edit in code_edits:
+            try:
+                current_code = self.apply_single_edit(current_code, edit)
+            except Exception as e:
+                logger.warning(f"Failed to apply edit {edit}: {e}")
+                # Continue with other edits even if one fails
+        
+        return current_code
+
+    def apply_single_edit(self, code: str, edit: Dict[str, Any]) -> str:
+        """Apply a single code edit."""
+        action = edit.get("action")
+        
+        if action == "replace":
+            old_code = edit.get("old_code")
+            new_code = edit.get("new_code")
+            
+            if not old_code or new_code is None:
+                logger.error("Replace action requires old_code and new_code")
+            
+            if old_code not in code:
+                logger.error(f"old_code not found in current code")
+            
+            if code.count(old_code) > 1:
+                logger.error(f"old_code matches multiple locations")
+            
+            return code.replace(old_code, new_code)
+        
+        elif action == "rewrite":
+            new_code = edit.get("new_code")
+            if not new_code:
+                logger.error("Rewrite action requires new_code")
+            
+            return new_code
+        
+        else:
+            raise ValueError(f"Unknown action: {action}")
 
     def sum_usage(self, *usage_objects):
         """Sum multiple Usage object token counts and return a count dictionary."""
@@ -140,9 +214,25 @@ def main(data_dict: dict) -> dict:
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
 
-        result = client.generate(content=data.content, history=data_dict.get("history", []), context=data.context, rag=data_dict.get("meta", {}).get("rag"))
+        result = client.generate(
+            content=data.content, 
+            history=data_dict.get("history", []), 
+            context=data.context, 
+            rag=data_dict.get("meta", {}).get("rag"),
+            original_code=data.original_code
+        )
 
-        return {"response": result.content, "history": result.history, "usage": result.usage, "meta": {"rag": result.rag}}
+        response_dict = {
+            "response": result.content, 
+            "history": result.history, 
+            "usage": result.usage, 
+            "meta": {"rag": result.rag}
+        }
+        
+        if result.suggested_code is not None:
+            response_dict["suggested_code"] = result.suggested_code
+
+        return response_dict
 
     except ValueError as e:
         raise ApolloError(400, str(e), type="BAD_REQUEST")
