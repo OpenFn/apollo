@@ -170,13 +170,20 @@ To insert new code using replace:
 - Find a suitable insertion point and replace it with itself plus the new code
 - Example: To insert after "get('/patients');", replace it with "get('/patients');\n[new code here]"
 
+**Output valid JSON strings**  
+All string values in your JSON (including "old_code", "new_code", and "text_answer") must be valid JSON strings.  
+- Escape all newlines as \\n  
+- Escape all double quotes as \\"  
+- Do not include unescaped control characters in any string value.  
+- If you include code in a string, ensure it is a single line with \\n for line breaks.
+
 Example:
 {
   "text_answer": "I'll add error handling after your GET request",
   "code_edits": [{
     "action": "replace",
     "old_code": "get('/patients');",
-    "new_code": "get('/patients');\nfn(state => {\n  if (!state.data) {\n    throw new Error('No data received');\n  }\n  return state;\n});"
+    "new_code": "get('/patients');\\nfn(state => {\\n  if (!state.data) {\\n    throw new Error(\\\"No data received\\\");\\n  }\\n  return state;\\n});"
   }]
 }
 </code editing rules>

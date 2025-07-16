@@ -99,6 +99,8 @@ The server returns the following JSON response:
   "response": "the model response as a string",
   "history": [
     /* Updated chat history */
-  ]
+  ],
+  "usage": {/* usage stats */},
+  "meta": {"rag": /* rag info */}
 }
 ```

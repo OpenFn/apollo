@@ -27,10 +27,9 @@ class Payload:
     """
 
     content: str
-    context: Optional[str] = None
+    context: Optional[dict] = None
     api_key: Optional[str] = None
     meta: Optional[str] = None
-    original_code: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
@@ -44,8 +43,7 @@ class Payload:
             content=data["content"], 
             context=data.get("context"), 
             api_key=data.get("api_key"), 
-            meta=data.get("meta"),
-            original_code=data.get("original_code")
+            meta=data.get("meta")
         )
 
 
@@ -58,11 +56,10 @@ class ChatConfig:
 
 @dataclass
 class ChatResponse:
-    content: str
+    content: dict  # Now a dict with 'response' and 'suggested_code'
     history: List[Dict[str, str]]
     usage: Dict[str, Any]
     rag: Dict[str, Any]
-    suggested_code: Optional[str] = None
 
 class AnthropicClient:
     def __init__(self, config: Optional[ChatConfig] = None):
@@ -73,7 +70,7 @@ class AnthropicClient:
         self.client = Anthropic(api_key=self.api_key)
 
     def generate(
-        self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[str] = None, rag: Optional[str] = None, original_code: Optional[str] = None
+        self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[dict] = None, rag: Optional[str] = None
     ) -> ChatResponse:
         """
         Generate a response using the Claude API with improved error handling and response processing.
@@ -108,7 +105,10 @@ class AnthropicClient:
         response = "\n\n".join(response_parts)
 
         # Parse JSON response and apply code edits
-        text_response, suggested_code = self.parse_and_apply_edits(response, original_code)
+        job_code = None
+        if context and isinstance(context, dict):
+            job_code = context.get("expression")
+        text_response, suggested_code = self.parse_and_apply_edits(response, job_code)
 
         updated_history = history + [
             {"role": "user", "content": content},
@@ -120,12 +120,14 @@ class AnthropicClient:
             *[usage_data for usage_key, usage_data in retrieved_knowledge.get("usage", {}).items()]
         )
 
+        # New: content is a dict with 'response' and 'suggested_code'
+        content_dict = {"response": text_response, "suggested_code": suggested_code}
+
         return ChatResponse(
-            content=text_response,
+            content=content_dict,
             history=updated_history,
             usage=usage,
-            rag=retrieved_knowledge,
-            suggested_code=suggested_code
+            rag=retrieved_knowledge
         )
 
     def parse_and_apply_edits(self, response: str, original_code: Optional[str] = None) -> tuple[str, Optional[str]]:
@@ -218,8 +220,7 @@ def main(data_dict: dict) -> dict:
             content=data.content, 
             history=data_dict.get("history", []), 
             context=data.context, 
-            rag=data_dict.get("meta", {}).get("rag"),
-            original_code=data.original_code
+            rag=data_dict.get("meta", {}).get("rag")
         )
 
         response_dict = {
@@ -229,9 +230,6 @@ def main(data_dict: dict) -> dict:
             "meta": {"rag": result.rag}
         }
         
-        if result.suggested_code is not None:
-            response_dict["suggested_code"] = result.suggested_code
-
         return response_dict
 
     except ValueError as e:
