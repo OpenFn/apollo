@@ -1,0 +1,10 @@
+{
+  "content": "How do I transform my input data to only include the 'name' and 'age' fields for each record?",
+  "history": [],
+  "context": {
+    "expression": "fn(state => state.data.map(({ name, age }) => ({ name, age })))",
+    "adaptor": "@openfn/language-common@3.0.2",
+    "log": "[linker] loading module @openfn/language-common\n[linker] Loading module @openfn/language-common from /tmp/openfn/worker/repo/node_modules/@openfn/language-common_3.0.2/dist/index.cjs\nResolved adaptor @openfn/language-common to version 3.0.2\nExecuting expression (1 operations)\nStarting operation 1\nOperation 1 complete in 0ms\nExpression complete!\nTransform data completed in 121ms\nCleaning up state. Removing keys: configuration\nFinal memory usage: [step 37mb] [system 132mb]"
+  },
+  "meta": {"rag": {"search_results": [{"text": "the common adaptor is a generic adaptor"}]}}
+} 

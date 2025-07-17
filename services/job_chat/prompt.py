@@ -216,12 +216,16 @@ def generate_system_message(context_dict, search_results):
             f"<adaptor>The user is using the OpenFn {context.adaptor} adaptor. Use functions provided by its API."
         )
 
-        # TODO if this fails (and it will if adaptor is just "salesforce")
-        # Can we fail a bit more gracefully?
-        adaptor_docs = apollo("describe_adaptor", {"adaptor": context.adaptor})
-        for doc in adaptor_docs:
-            adaptor_string += f"Typescript definitions for doc {doc}"
-            adaptor_string += adaptor_docs[doc]["description"]
+        try:
+            adaptor_docs = apollo("describe_adaptor", {"adaptor": context.adaptor})
+            for doc in adaptor_docs:
+                adaptor_string += f"Typescript definitions for doc {doc}"
+                adaptor_string += adaptor_docs[doc]["description"]
+        except Exception as e:
+            logger.warning(f"Could not fetch adaptor docs for {context.adaptor}: {e}")
+            adaptor_string += (
+                f"The user is using an OpenFn Adaptor to write the job."
+            )
         adaptor_string += "</adaptor>"
 
         message.append(adaptor_string)
