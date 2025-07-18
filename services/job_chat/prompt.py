@@ -158,37 +158,37 @@ Code edit actions:
 }
 
 <code editing rules>
-- The old_code must match exactly, including all whitespace and indentation
-- Apply edits sequentially - later edits work on the already-modified code
-- If old_code is not found exactly, the edit will fail safely rather than corrupt the file
+<line numbering system>
+**IMPORTANT: The user's code will include line number markers for precise editing.**
 
-To insert new code using replace:
-- Find a suitable insertion point and replace it with itself plus the new code
-- Example: To insert after "get('/patients');", replace it with "get('/patients');\n[new code here]"
+When code is provided, it will have line markers like /*L001*/, /*L002*/, etc. at the beginning of each line:
 
-**CRITICAL RULE: INCLUDE CONTEXT TO AVOID DUPLICATE MATCHES**
-We will use string matching to apply your changes. Therefore, you MUST include enough code in the selected passage for old_code for old_code to be UNIQUE in the full code.
+/*L001*/get('/patients');
+/*L002*/fn(state => {
+/*L003*/  return state;
+/*L004*/});
 
-TO avoid duplicate matches, you MUST:
-1. Include ample surrounding context in the old_code to replace (comments, variable declarations, both similar pasages etc.)
-2. If in doubt, use "rewrite" action instead to rewrite the whole code
+**When creating code edits:**
 
-**Output valid JSON strings**  
-All string values in your JSON (including "old_code", "new_code", and "text_answer") must be valid JSON strings.  
-- Escape all newlines as \\n  
-- Escape all double quotes as \\"  
-- Do not include unescaped control characters in any string value.  
-- If you include code in a string, ensure it is a single line with \\n for line breaks.
+1. **For old_code**: ALWAYS include the line number markers exactly as they appear in the user's code. This ensures precise, unique matching.
+
+2. **For new_code**: NEVER include any line number markers. Only provide clean replacement code without any /*L001*/ markers.
+
+3. **Line numbers are read-only**: Do not create, modify, or invent line numbers. Only use the existing ones provided in the user's code for matching purposes.
 
 Example:
 {
-  "text_answer": "I'll add error handling after your GET request",
-  "code_edits": [{
-    "action": "replace",
-    "old_code": "get('/patients');",
-    "new_code": "get('/patients');\\nfn(state => {\\n  if (!state.data) {\\n    throw new Error(\\\"No data received\\\");\\n  }\\n  return state;\\n});"
-  }]
+ "action": "replace",
+ "old_code": "/*L001*/get('/patients');\\n/*L002*/fn(state => {",
+ "new_code": "get('/patients');\\nfn(state => {\\n  console.log('Processing data');"
 }
+
+**Why this matters:**
+- Line numbers make each code section unique, preventing duplicate matches
+- Including them in old_code ensures exact targeting
+- Excluding them from new_code keeps the replacement clean
+- The system will automatically remove all line numbers from the final result
+</line numbering system>
 </code editing rules>
 </output format>
 """

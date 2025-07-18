@@ -15,6 +15,7 @@ from anthropic import (
 )
 from util import ApolloError, create_logger
 from .prompt import build_prompt
+import re
 
 logger = create_logger("job_chat")
 
@@ -150,47 +151,63 @@ class AnthropicClient:
             logger.error(f"Error parsing response: {e}")
             return response, None
 
-    def apply_code_edits(self, original_code: str, code_edits: List[Dict[str, Any]]) -> str:
-        """Apply a list of code edits to the original code."""
-        current_code = original_code
-        
-        for edit in code_edits:
-            try:
-                current_code = self.apply_single_edit(current_code, edit)
-            except Exception as e:
-                logger.warning(f"Failed to apply edit {edit}: {e}")
-                # Continue with other edits even if one fails
-        
-        return current_code
+    def add_line_numbers(self, code: str) -> str:
+        """Add line numbers to code for precise string matching."""
+        if not code or not code.strip():
+            return code
+        lines = code.split('\n')
+        numbered_lines = []
+        for i, line in enumerate(lines, 1):
+            line_marker = f"/*L{i:03d}*/"
+            numbered_lines.append(f"{line_marker}{line}")
+        return '\n'.join(numbered_lines)
 
-    def apply_single_edit(self, code: str, edit: Dict[str, Any]) -> str:
-        """Apply a single code edit."""
+    def remove_line_numbers(self, code: str) -> str:
+        """Remove line number markers from code."""
+        if not code:
+            return code
+        pattern = r'\/\*L\d+\*\/'
+        return re.sub(pattern, '', code)
+
+    def apply_single_edit_with_line_numbers(self, code: str, edit: Dict[str, Any]) -> str:
+        """Apply a single code edit using line-numbered matching."""
         action = edit.get("action")
-        
         if action == "replace":
             old_code = edit.get("old_code")
             new_code = edit.get("new_code")
-            
             if not old_code or new_code is None:
-                logger.error("Replace action requires old_code and new_code")
-            
+                raise ValueError("Replace action requires old_code and new_code")
             if old_code not in code:
-                logger.error(f"old_code not found in current code")
-            
+                raise ValueError("old_code not found in current code")
             if code.count(old_code) > 1:
-                logger.error(f"old_code matches multiple locations")
-            
-            return code.replace(old_code, new_code)
-        
+                raise ValueError("old_code matches multiple locations")
+            clean_new_code = self.remove_line_numbers(new_code)
+            return code.replace(old_code, clean_new_code)
         elif action == "rewrite":
             new_code = edit.get("new_code")
             if not new_code:
-                logger.error("Rewrite action requires new_code")
-            
-            return new_code
-        
+                raise ValueError("Rewrite action requires new_code")
+            clean_new_code = self.remove_line_numbers(new_code)
+            return clean_new_code
         else:
             raise ValueError(f"Unknown action: {action}")
+
+    def apply_code_edits_with_line_numbers(self, original_code: str, code_edits: List[Dict[str, Any]]) -> str:
+        """Apply code edits using line numbering for precise matching."""
+        if not code_edits or not original_code:
+            return original_code
+        numbered_code = self.add_line_numbers(original_code)
+        current_code = numbered_code
+        for edit in code_edits:
+            try:
+                current_code = self.apply_single_edit_with_line_numbers(current_code, edit)
+            except Exception as e:
+                logger.warning(f"Failed to apply edit {edit}: {e}")
+        return self.remove_line_numbers(current_code)
+
+    def apply_code_edits(self, original_code: str, code_edits: List[Dict[str, Any]]) -> str:
+        """Apply a list of code edits to the original code using line-numbered matching for precision."""
+        return self.apply_code_edits_with_line_numbers(original_code, code_edits)
 
     def sum_usage(self, *usage_objects):
         """Sum multiple Usage object token counts and return a count dictionary."""
