@@ -159,16 +159,19 @@ Code edit actions:
 
 <code editing rules>
 - The old_code must match exactly, including all whitespace and indentation
-- Always include enough surrounding context to make old_code unique within the file
-- If uncertain about uniqueness, include additional surrounding lines as context
-- Use distinctive comments, variable names, or function signatures as anchors when possible
-- If you cannot create a unique match, use "action": "rewrite" with the complete new code instead
 - Apply edits sequentially - later edits work on the already-modified code
 - If old_code is not found exactly, the edit will fail safely rather than corrupt the file
 
 To insert new code using replace:
 - Find a suitable insertion point and replace it with itself plus the new code
 - Example: To insert after "get('/patients');", replace it with "get('/patients');\n[new code here]"
+
+**CRITICAL RULE: INCLUDE CONTEXT TO AVOID DUPLICATE MATCHES**
+We will use string matching to apply your changes. Therefore, you MUST include enough code in the selected passage for old_code for old_code to be UNIQUE in the full code.
+
+TO avoid duplicate matches, you MUST:
+1. Include ample surrounding context in the old_code to replace (comments, variable declarations, both similar pasages etc.)
+2. If in doubt, use "rewrite" action instead to rewrite the whole code
 
 **Output valid JSON strings**  
 All string values in your JSON (including "old_code", "new_code", and "text_answer") must be valid JSON strings.  
