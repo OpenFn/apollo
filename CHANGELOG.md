@@ -1,10 +1,17 @@
 # apollo
 
-## 0.13.1
+## 0.13.2
 
 ### Patch Changes
 
 - job_chat: Fix an issue where the model would ignore user logs
+
+### Patch Changes
+
+## 0.13.1
+
+### Patch Changes
+
 - 7b48834: workflow_chat: preserve UUIDs during workflow generation
 
 ## 0.13.0
