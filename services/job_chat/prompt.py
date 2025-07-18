@@ -133,6 +133,63 @@ step by step. Focus on one bit at a time. For example, when uploading from commc
 2. Transform/map data into salesforce format in another step (with the common adaptor)
 3. Upload the transformed data into salesforce in the final step
 </workflow guide>
+
+<output format>
+You must respond in JSON format with two fields:
+
+{
+  "text_answer": "Your conversational response here",
+  "code_edits": []
+}
+
+Use "text_answer" for all explanations, guidance, and conversation. Use "code_edits" only when you need to modify the user's existing code or provide new code suggestions.
+
+Code edit actions:
+{
+  "action": "replace",
+  "old_code": "exact code to find and replace",
+  "new_code": "replacement code"
+}
+
+{
+  "action": "rewrite",
+  "new_code": "complete new code"
+}
+
+<code editing rules>
+<line numbering system>
+**IMPORTANT: The user's code will include line number markers for precise editing.**
+
+When code is provided, it will have line markers like /*L001*/, /*L002*/, etc. at the beginning of each line:
+
+/*L001*/get('/patients');
+/*L002*/fn(state => {
+/*L003*/  return state;
+/*L004*/});
+
+**When creating code edits:**
+
+1. **For old_code**: ALWAYS include the line number markers exactly as they appear in the user's code. This ensures precise, unique matching.
+
+2. **For new_code**: NEVER include any line number markers. Only provide clean replacement code without any /*L001*/ markers.
+
+3. **Line numbers are read-only**: Do not create, modify, or invent line numbers. Only use the existing ones provided in the user's code for matching purposes.
+
+Example:
+{
+ "action": "replace",
+ "old_code": "/*L001*/get('/patients');\\n/*L002*/fn(state => {",
+ "new_code": "get('/patients');\\nfn(state => {\\n  console.log('Processing data');"
+}
+
+**Why this matters:**
+- Line numbers make each code section unique, preventing duplicate matches
+- Including them in old_code ensures exact targeting
+- Excluding them from new_code keeps the replacement clean
+- The system will automatically remove all line numbers from the final result
+</line numbering system>
+</code editing rules>
+</output format>
 """
 
 
@@ -161,12 +218,16 @@ def generate_system_message(context_dict, search_results):
             f"<adaptor>The user is using the OpenFn {context.adaptor} adaptor. Use functions provided by its API."
         )
 
-        # TODO if this fails (and it will if adaptor is just "salesforce")
-        # Can we fail a bit more gracefully?
-        adaptor_docs = apollo("describe_adaptor", {"adaptor": context.adaptor})
-        for doc in adaptor_docs:
-            adaptor_string += f"Typescript definitions for doc {doc}"
-            adaptor_string += adaptor_docs[doc]["description"]
+        try:
+            adaptor_docs = apollo("describe_adaptor", {"adaptor": context.adaptor})
+            for doc in adaptor_docs:
+                adaptor_string += f"Typescript definitions for doc {doc}"
+                adaptor_string += adaptor_docs[doc]["description"]
+        except Exception as e:
+            logger.warning(f"Could not fetch adaptor docs for {context.adaptor}: {e}")
+            adaptor_string += (
+                f"The user is using an OpenFn Adaptor to write the job."
+            )
         adaptor_string += "</adaptor>"
 
         message.append(adaptor_string)

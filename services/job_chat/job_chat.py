@@ -1,4 +1,5 @@
 import os
+import json
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 from anthropic import (
@@ -14,6 +15,7 @@ from anthropic import (
 )
 from util import ApolloError, create_logger
 from .prompt import build_prompt
+import re
 
 logger = create_logger("job_chat")
 
@@ -26,7 +28,7 @@ class Payload:
     """
 
     content: str
-    context: Optional[str] = None
+    context: Optional[dict] = None
     api_key: Optional[str] = None
     meta: Optional[str] = None
 
@@ -38,7 +40,12 @@ class Payload:
         if "content" not in data:
             raise ValueError("'content' is required")
 
-        return cls(content=data["content"], context=data.get("context"), api_key=data.get("api_key"), meta=data.get("meta"))
+        return cls(
+            content=data["content"], 
+            context=data.get("context"), 
+            api_key=data.get("api_key"), 
+            meta=data.get("meta")
+        )
 
 
 @dataclass
@@ -50,11 +57,10 @@ class ChatConfig:
 
 @dataclass
 class ChatResponse:
-    content: str
+    content: dict  # Now a dict with 'response' and 'suggested_code'
     history: List[Dict[str, str]]
     usage: Dict[str, Any]
     rag: Dict[str, Any]
-
 
 class AnthropicClient:
     def __init__(self, config: Optional[ChatConfig] = None):
@@ -65,7 +71,7 @@ class AnthropicClient:
         self.client = Anthropic(api_key=self.api_key)
 
     def generate(
-        self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[str] = None, rag: Optional[str] = None
+        self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[dict] = None, rag: Optional[str] = None
     ) -> ChatResponse:
         """
         Generate a response using the Claude API with improved error handling and response processing.
@@ -99,9 +105,15 @@ class AnthropicClient:
 
         response = "\n\n".join(response_parts)
 
+        # Parse JSON response and apply code edits
+        job_code = None
+        if context and isinstance(context, dict):
+            job_code = context.get("expression")
+        text_response, suggested_code = self.parse_and_apply_edits(response, job_code)
+
         updated_history = history + [
             {"role": "user", "content": content},
-            {"role": "assistant", "content": response},
+            {"role": "assistant", "content": text_response},
         ]
 
         usage = self.sum_usage(
@@ -109,12 +121,93 @@ class AnthropicClient:
             *[usage_data for usage_key, usage_data in retrieved_knowledge.get("usage", {}).items()]
         )
 
+        # New: content is a dict with 'response' and 'suggested_code'
+        content_dict = {"response": text_response, "suggested_code": suggested_code}
+
         return ChatResponse(
-            content=response,
+            content=content_dict,
             history=updated_history,
             usage=usage,
             rag=retrieved_knowledge
         )
+
+    def parse_and_apply_edits(self, response: str, original_code: Optional[str] = None) -> tuple[str, Optional[str]]:
+        """Parse JSON response and apply code edits to original code."""
+        try:
+            response_data = json.loads(response)
+            text_answer = response_data.get("text_answer", "").strip()
+            code_edits = response_data.get("code_edits", [])
+            
+            if not code_edits or not original_code:
+                return text_answer, None
+            
+            suggested_code = self.apply_code_edits(original_code, code_edits)
+            return text_answer, suggested_code
+            
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse JSON response: {e}")
+            return response, None
+        except Exception as e:
+            logger.error(f"Error parsing response: {e}")
+            return response, None
+
+    def add_line_numbers(self, code: str) -> str:
+        """Add line numbers to code for precise string matching."""
+        if not code or not code.strip():
+            return code
+        lines = code.split('\n')
+        numbered_lines = []
+        for i, line in enumerate(lines, 1):
+            line_marker = f"/*L{i:03d}*/"
+            numbered_lines.append(f"{line_marker}{line}")
+        return '\n'.join(numbered_lines)
+
+    def remove_line_numbers(self, code: str) -> str:
+        """Remove line number markers from code."""
+        if not code:
+            return code
+        pattern = r'\/\*L\d+\*\/'
+        return re.sub(pattern, '', code)
+
+    def apply_single_edit_with_line_numbers(self, code: str, edit: Dict[str, Any]) -> str:
+        """Apply a single code edit using line-numbered matching."""
+        action = edit.get("action")
+        if action == "replace":
+            old_code = edit.get("old_code")
+            new_code = edit.get("new_code")
+            if not old_code or new_code is None:
+                raise ValueError("Replace action requires old_code and new_code")
+            if old_code not in code:
+                raise ValueError("old_code not found in current code")
+            if code.count(old_code) > 1:
+                raise ValueError("old_code matches multiple locations")
+            clean_new_code = self.remove_line_numbers(new_code)
+            return code.replace(old_code, clean_new_code)
+        elif action == "rewrite":
+            new_code = edit.get("new_code")
+            if not new_code:
+                raise ValueError("Rewrite action requires new_code")
+            clean_new_code = self.remove_line_numbers(new_code)
+            return clean_new_code
+        else:
+            raise ValueError(f"Unknown action: {action}")
+
+    def apply_code_edits_with_line_numbers(self, original_code: str, code_edits: List[Dict[str, Any]]) -> str:
+        """Apply code edits using line numbering for precise matching."""
+        if not code_edits or not original_code:
+            return original_code
+        numbered_code = self.add_line_numbers(original_code)
+        current_code = numbered_code
+        for edit in code_edits:
+            try:
+                current_code = self.apply_single_edit_with_line_numbers(current_code, edit)
+            except Exception as e:
+                logger.warning(f"Failed to apply edit {edit}: {e}")
+        return self.remove_line_numbers(current_code)
+
+    def apply_code_edits(self, original_code: str, code_edits: List[Dict[str, Any]]) -> str:
+        """Apply a list of code edits to the original code using line-numbered matching for precision."""
+        return self.apply_code_edits_with_line_numbers(original_code, code_edits)
 
     def sum_usage(self, *usage_objects):
         """Sum multiple Usage object token counts and return a count dictionary."""
@@ -140,9 +233,21 @@ def main(data_dict: dict) -> dict:
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
 
-        result = client.generate(content=data.content, history=data_dict.get("history", []), context=data.context, rag=data_dict.get("meta", {}).get("rag"))
+        result = client.generate(
+            content=data.content, 
+            history=data_dict.get("history", []), 
+            context=data.context, 
+            rag=data_dict.get("meta", {}).get("rag")
+        )
 
-        return {"response": result.content, "history": result.history, "usage": result.usage, "meta": {"rag": result.rag}}
+        response_dict = {
+            "response": result.content, 
+            "history": result.history, 
+            "usage": result.usage, 
+            "meta": {"rag": result.rag}
+        }
+        
+        return response_dict
 
     except ValueError as e:
         raise ApolloError(400, str(e), type="BAD_REQUEST")
