@@ -78,6 +78,11 @@ class AnthropicClient:
         """
         history = history.copy() if history else []
 
+        # Add line numbers to code before sending to model
+        if context and context.get("expression"):
+            context = context.copy()  # Don't modify original
+            context["expression"] = self.add_line_numbers(context["expression"])
+
         system_message, prompt, retrieved_knowledge = build_prompt(
             content=content, 
             history=history, 
@@ -89,7 +94,7 @@ class AnthropicClient:
         message = self.client.messages.create(
             max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
         )
-
+        logger.warning(f"llm output: {message}")
         if hasattr(message, "usage"):
             if message.usage.cache_creation_input_tokens:
                 logger.info(f"Cache write: {message.usage.cache_creation_input_tokens} tokens")
@@ -141,7 +146,8 @@ class AnthropicClient:
             if not code_edits or not original_code:
                 return text_answer, None
             
-            suggested_code = self.apply_code_edits(original_code, code_edits)
+            # Apply edits using the line-numbered version for matching
+            suggested_code = self.apply_code_edits_with_line_numbers(original_code, code_edits)
             return text_answer, suggested_code
             
         except json.JSONDecodeError as e:
@@ -156,18 +162,23 @@ class AnthropicClient:
         if not code or not code.strip():
             return code
         lines = code.split('\n')
-        numbered_lines = []
+        numbered_code = []
+        
         for i, line in enumerate(lines, 1):
-            line_marker = f"/*L{i:03d}*/"
-            numbered_lines.append(f"{line_marker}{line}")
-        return '\n'.join(numbered_lines)
+            numbered_code.append(f"/*LINE:{i}*/")
+            numbered_code.append(line)
+        
+        return '\n'.join(numbered_code)
 
     def remove_line_numbers(self, code: str) -> str:
-        """Remove line number markers from code."""
+        """Remove line number marker lines from code."""
         if not code:
             return code
-        pattern = r'\/\*L\d+\*\/'
-        return re.sub(pattern, '', code)
+        
+        lines = code.split('\n')
+        clean_lines = [line for line in lines if not line.startswith('/*LINE:')]
+        
+        return '\n'.join(clean_lines)
 
     def apply_single_edit_with_line_numbers(self, code: str, edit: Dict[str, Any]) -> str:
         """Apply a single code edit using line-numbered matching."""

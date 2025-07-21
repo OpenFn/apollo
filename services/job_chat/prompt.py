@@ -157,37 +157,50 @@ Code edit actions:
   "new_code": "complete new code"
 }
 
+<json formatting>
+CRITICAL: All JSON must use double quotes. Example:
+✓ Correct: {"key": "value", "code": "const x = 'hello';"}  
+✗ Wrong: {'key': 'value'}
+- Use double quotes for all JSON keys and string values  
+- Do NOT use single quotes for JSON strings - always use double quotes
+- In generated code within JSON strings, use single quotes for JavaScript strings (but the JSON string itself must use double quotes)
+- Properly escape special characters like newlines with \n
+- Do not escape single quotes with backslashes in natural language text
+- For any code containing backticks, ensure they're properly escaped in JSON
+</json formatting>
+
 <code editing rules>
 <line numbering system>
-**IMPORTANT: The user's code will include line number markers for precise editing.**
+**IMPORTANT: The user's code will include line number markers on separate lines for precise editing.**
 
-When code is provided, it will have line markers like /*L001*/, /*L002*/, etc. at the beginning of each line:
+When code is provided, it will have line markers like /*L001*/, /*L002*/, etc. on their own lines:
 
-/*L001*/get('/patients');
-/*L002*/fn(state => {
-/*L003*/  return state;
-/*L004*/});
+/*L001*/
+fn(state => {
+/*L002*/
+  // Setup
+/*L003*/
+  const start = 'begin';
 
 **When creating code edits:**
 
-1. **For old_code**: ALWAYS include the line number markers exactly as they appear in the user's code. This ensures precise, unique matching.
+1. **For old_code**: ALWAYS include the line number markers exactly as they appear in the user's code.
 
-2. **For new_code**: NEVER include any line number markers. Only provide clean replacement code without any /*L001*/ markers.
+2. **For new_code**: NEVER include any line number markers. Only provide clean replacement code.
 
 3. **Line numbers are read-only**: Do not create, modify, or invent line numbers. Only use the existing ones provided in the user's code for matching purposes.
 
 Example:
 {
- "action": "replace",
- "old_code": "/*L001*/get('/patients');\\n/*L002*/fn(state => {",
- "new_code": "get('/patients');\\nfn(state => {\\n  console.log('Processing data');"
+  "text_answer": "I'll add an X-Test header to help with debugging. This will include \"X-Test\": \"true\" in the request headers alongside the existing Authorization header.",
+  "code_edits": [
+    {
+      "action": "replace",
+      "old_code": "/*LINE:18*/\n    headers: {\n/*LINE:19*/\n      Authorization: `Bearer ${state.token}`\n/*LINE:20*/\n    }",
+      "new_code": "    headers: {\n      Authorization: `Bearer ${state.token}`,\n      \"X-Test\": \"true\"\n    }"
+    }
+  ]
 }
-
-**Why this matters:**
-- Line numbers make each code section unique, preventing duplicate matches
-- Including them in old_code ensures exact targeting
-- Excluding them from new_code keeps the replacement clean
-- The system will automatically remove all line numbers from the final result
 </line numbering system>
 </code editing rules>
 </output format>
