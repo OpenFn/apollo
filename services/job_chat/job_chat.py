@@ -14,8 +14,7 @@ from anthropic import (
     InternalServerError,
 )
 from util import ApolloError, create_logger
-from .prompt import build_prompt
-import re
+from .prompt import build_prompt, build_error_correction_prompt
 
 logger = create_logger("job_chat")
 
@@ -78,11 +77,6 @@ class AnthropicClient:
         """
         history = history.copy() if history else []
 
-        # Add line numbers to code before sending to model
-        if context and context.get("expression"):
-            context = context.copy()  # Don't modify original
-            context["expression"] = self.add_line_numbers(context["expression"])
-
         system_message, prompt, retrieved_knowledge = build_prompt(
             content=content, 
             history=history, 
@@ -94,7 +88,7 @@ class AnthropicClient:
         message = self.client.messages.create(
             max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
         )
-        logger.warning(f"llm output: {message}")
+
         if hasattr(message, "usage"):
             if message.usage.cache_creation_input_tokens:
                 logger.info(f"Cache write: {message.usage.cache_creation_input_tokens} tokens")
@@ -126,7 +120,6 @@ class AnthropicClient:
             *[usage_data for usage_key, usage_data in retrieved_knowledge.get("usage", {}).items()]
         )
 
-        # New: content is a dict with 'response' and 'suggested_code'
         content_dict = {"response": text_response, "suggested_code": suggested_code}
 
         return ChatResponse(
@@ -146,8 +139,7 @@ class AnthropicClient:
             if not code_edits or not original_code:
                 return text_answer, None
             
-            # Apply edits using the line-numbered version for matching
-            suggested_code = self.apply_code_edits_with_line_numbers(original_code, code_edits)
+            suggested_code = self.apply_code_edits(original_code, code_edits)
             return text_answer, suggested_code
             
         except json.JSONDecodeError as e:
@@ -157,68 +149,88 @@ class AnthropicClient:
             logger.error(f"Error parsing response: {e}")
             return response, None
 
-    def add_line_numbers(self, code: str) -> str:
-        """Add line numbers to code for precise string matching."""
-        if not code or not code.strip():
-            return code
-        lines = code.split('\n')
-        numbered_code = []
+    def apply_code_edits(self, original_code: str, code_edits: List[Dict[str, Any]]) -> str:
+        """Apply a list of code edits to the original code."""
+        current_code = original_code
         
-        for i, line in enumerate(lines, 1):
-            numbered_code.append(f"/*LINE:{i}*/")
-            numbered_code.append(line)
+        for edit in code_edits:
+            try:
+                current_code = self.apply_single_edit(current_code, edit)
+            except Exception as e:
+                logger.warning(f"Failed to apply edit {edit}: {e}")
+                # Continue with other edits even if one fails
         
-        return '\n'.join(numbered_code)
+        return current_code
 
-    def remove_line_numbers(self, code: str) -> str:
-        """Remove line number marker lines from code."""
-        if not code:
-            return code
-        
-        lines = code.split('\n')
-        clean_lines = [line for line in lines if not line.startswith('/*LINE:')]
-        
-        return '\n'.join(clean_lines)
-
-    def apply_single_edit_with_line_numbers(self, code: str, edit: Dict[str, Any]) -> str:
-        """Apply a single code edit using line-numbered matching."""
+    def apply_single_edit(self, code: str, edit: Dict[str, Any]) -> str:
+        """Apply a single code edit."""
         action = edit.get("action")
+        
         if action == "replace":
             old_code = edit.get("old_code")
             new_code = edit.get("new_code")
+            
             if not old_code or new_code is None:
-                raise ValueError("Replace action requires old_code and new_code")
+                error_message = "Replace action requires old_code and new_code"
+                return self._try_error_correction(error_message, old_code, new_code, code, edit.get("text_explanation", ""))
+            
             if old_code not in code:
-                raise ValueError("old_code not found in current code")
+                error_message = "old_code not found in current code"
+                return self._try_error_correction(error_message, old_code, new_code, code, edit.get("text_explanation", ""))
+            
             if code.count(old_code) > 1:
-                raise ValueError("old_code matches multiple locations")
-            clean_new_code = self.remove_line_numbers(new_code)
-            return code.replace(old_code, clean_new_code)
+                error_message = "old_code matches multiple locations"
+                return self._try_error_correction(error_message, old_code, new_code, code, edit.get("text_explanation", ""))
+            
+            return code.replace(old_code, new_code)
+        
         elif action == "rewrite":
             new_code = edit.get("new_code")
             if not new_code:
-                raise ValueError("Rewrite action requires new_code")
-            clean_new_code = self.remove_line_numbers(new_code)
-            return clean_new_code
+                logger.warning(f"New code missing, returning old code")
+                return new_code
+            return new_code
+        
         else:
-            raise ValueError(f"Unknown action: {action}")
-
-    def apply_code_edits_with_line_numbers(self, original_code: str, code_edits: List[Dict[str, Any]]) -> str:
-        """Apply code edits using line numbering for precise matching."""
-        if not code_edits or not original_code:
-            return original_code
-        numbered_code = self.add_line_numbers(original_code)
-        current_code = numbered_code
-        for edit in code_edits:
-            try:
-                current_code = self.apply_single_edit_with_line_numbers(current_code, edit)
-            except Exception as e:
-                logger.warning(f"Failed to apply edit {edit}: {e}")
-        return self.remove_line_numbers(current_code)
-
-    def apply_code_edits(self, original_code: str, code_edits: List[Dict[str, Any]]) -> str:
-        """Apply a list of code edits to the original code using line-numbered matching for precision."""
-        return self.apply_code_edits_with_line_numbers(original_code, code_edits)
+            logger.warning(f"Error in applying code edits, returning old code")
+            return old_code
+        
+    def _try_error_correction(self, error_message: str, old_code: str, new_code: str, full_code: str, text_explanation: str) -> str:
+        """Try to correct the edit once, return original code if it fails."""
+        logger.info(f"Code edit error: {error_message}. Attempting correction...")
+        
+        try:
+            system_message, prompt = build_error_correction_prompt(
+                error_message=error_message,
+                old_code=old_code,
+                new_code=new_code,
+                full_code=full_code,
+                text_explanation=text_explanation
+            )
+            
+            message = self.client.messages.create(
+                max_tokens=16384,
+                messages=prompt,
+                model=self.config.model,
+                system=system_message
+            )
+            
+            response = "\n\n".join([block.text for block in message.content if block.type == "text"])
+            correction_data = json.loads(response)
+            
+            corrected_old = correction_data.get("corrected_old_code")
+            corrected_new = correction_data.get("corrected_new_code")
+            
+            if corrected_old and corrected_new is not None and corrected_old in full_code and full_code.count(corrected_old) == 1:
+                logger.info("Successfully applied corrected edit")
+                return full_code.replace(corrected_old, corrected_new)
+            
+        except Exception as e:
+            logger.warning(f"Error correction failed: {e}")
+            logger.warning(f"model response: {response}")
+        
+        logger.warning("Returning original code unchanged")
+        return full_code
 
     def sum_usage(self, *usage_objects):
         """Sum multiple Usage object token counts and return a count dictionary."""

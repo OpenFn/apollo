@@ -1,3 +1,4 @@
+import json
 from util import create_logger, apollo
 from .retrieve_docs import retrieve_knowledge
 
@@ -143,7 +144,9 @@ You must respond in JSON format with two fields:
   "code_edits": []
 }
 
-Use "text_answer" for all explanations, guidance, and conversation. Use "code_edits" only when you need to modify the user's existing code or provide new code suggestions.
+Use "text_answer" for all explanations, guidance, and conversation. 
+Use "code_edits" only when you need to modify the user's existing code or provide new code suggestions. 
+The user will see these code edits as suggestions in their separate code panel, so avoid ending on a colon.
 
 Code edit actions:
 {
@@ -157,53 +160,65 @@ Code edit actions:
   "new_code": "complete new code"
 }
 
-<json formatting>
-CRITICAL: All JSON must use double quotes. Example:
-✓ Correct: {"key": "value", "code": "const x = 'hello';"}  
-✗ Wrong: {'key': 'value'}
-- Use double quotes for all JSON keys and string values  
-- Do NOT use single quotes for JSON strings - always use double quotes
-- In generated code within JSON strings, use single quotes for JavaScript strings (but the JSON string itself must use double quotes)
-- Properly escape special characters like newlines with \n
-- Do not escape single quotes with backslashes in natural language text
-- For any code containing backticks, ensure they're properly escaped in JSON
-</json formatting>
-
 <code editing rules>
-<line numbering system>
-**IMPORTANT: The user's code will include line number markers on separate lines for precise editing.**
+- The old_code must match exactly, including all whitespace and indentation
+- Apply edits sequentially - later edits work on the already-modified code
+- If old_code is not found exactly, the edit will fail safely rather than corrupt the file
 
-When code is provided, it will have line markers like /*L001*/, /*L002*/, etc. on their own lines:
+To insert new code using replace:
+- Find a suitable insertion point and replace it with itself plus the new code
+- Example: To insert after "get('/patients');", replace it with "get('/patients');\n[new code here]"
 
-/*L001*/
-fn(state => {
-/*L002*/
-  // Setup
-/*L003*/
-  const start = 'begin';
+**CRITICAL RULE: INCLUDE CONTEXT TO AVOID DUPLICATE MATCHES**
+We will use string matching to apply your changes. Therefore, you MUST include enough code in the selected passage for old_code for old_code to be UNIQUE in the full code.
 
-**When creating code edits:**
+TO avoid duplicate matches, you MUST:
+1. Include ample surrounding context in the old_code to replace (comments, variable declarations, both similar pasages etc.)
+2. If in doubt, use "rewrite" action instead to rewrite the whole code
 
-1. **For old_code**: ALWAYS include the line number markers exactly as they appear in the user's code.
-
-2. **For new_code**: NEVER include any line number markers. Only provide clean replacement code.
-
-3. **Line numbers are read-only**: Do not create, modify, or invent line numbers. Only use the existing ones provided in the user's code for matching purposes.
+**Output valid JSON strings**  
+All string values in your JSON (including "old_code", "new_code", and "text_answer") must be valid JSON strings.  
+- Escape all newlines as \\n  
+- Escape all double quotes as \\"  
+- Do not include unescaped control characters in any string value.  
+- If you include code in a string, ensure it is a single line with \\n for line breaks.
 
 Example:
 {
-  "text_answer": "I'll add an X-Test header to help with debugging. This will include \"X-Test\": \"true\" in the request headers alongside the existing Authorization header.",
-  "code_edits": [
-    {
-      "action": "replace",
-      "old_code": "/*LINE:18*/\n    headers: {\n/*LINE:19*/\n      Authorization: `Bearer ${state.token}`\n/*LINE:20*/\n    }",
-      "new_code": "    headers: {\n      Authorization: `Bearer ${state.token}`,\n      \"X-Test\": \"true\"\n    }"
-    }
-  ]
+  "text_answer": "I'll add error handling after your GET request",
+  "code_edits": [{
+    "action": "replace",
+    "old_code": "get('/patients');",
+    "new_code": "get('/patients');\\nfn(state => {\\n  if (!state.data) {\\n    throw new Error(\\\"No data received\\\");\\n  }\\n  return state;\\n});"
+  }]
 }
-</line numbering system>
 </code editing rules>
 </output format>
+"""
+
+error_correction_system_prompt = """
+You are a code edit correction assistant. A code edit failed to apply correctly, and you need to fix it.
+
+Your task is to analyze the error and provide corrected old_code and new_code that will successfully apply.
+
+Common issues:
+1. "old_code not found" - the old_code doesn't exactly match what's in the file
+2. "old_code matches multiple locations" - the old_code appears multiple times, add more context
+3. "Replace action requires old_code and new_code" - missing required fields
+
+Guidelines:
+- For "not found" errors: Look at the full code and find the closest matching section
+- For "multiple matches" errors: Add more surrounding context to make the old_code unique
+- Preserve the intended change from the original new_code
+- Include enough context in old_code to make it unique but not too much
+- Maintain exact whitespace and formatting
+
+Output JSON format:
+{
+  "explanation": "1-sentence explanation of the correction",
+  "corrected_old_code": "corrected old code with proper context",
+  "corrected_new_code": "corrected new code"
+}
 """
 
 
@@ -306,3 +321,26 @@ def build_prompt(content, history, context, rag=None, api_key=None):
     prompt.append({"role": "user", "content": content})
       
     return (system_message, prompt, retrieved_knowledge)
+
+def build_error_correction_prompt(error_message: str, old_code: str, new_code: str, full_code: str, text_explanation: str):
+    """Build a prompt for correcting code edit errors."""
+    
+    system_message = [{"type": "text", "text": error_correction_system_prompt}]
+    
+    user_content = f"""A code edit failed with this error: "{error_message}"
+
+Original edit details:
+- old_code: {json.dumps(old_code)}
+- new_code: {json.dumps(new_code)}
+- text_explanation: {text_explanation}
+
+Full code context:
+```
+{full_code}
+```
+
+Please provide corrected old_code and new_code that will successfully apply the intended change."""
+    
+    prompt = [{"role": "user", "content": user_content}]
+    
+    return (system_message, prompt)
