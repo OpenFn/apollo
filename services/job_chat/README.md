@@ -16,10 +16,9 @@ Here is a minimal payload with a user question and no history:
 
 ```json
 {
-  "content": "how do I insert a new sobject record?",
+  "content": "how do I insert a new subject record?",
   "context": {
     "expression": "// write your job code here",
-    "adaptor": "@openfn/language-salesforce@4.6.10"
   }
 }
 ```
@@ -69,22 +68,24 @@ The input payload is a JSON object with the following structure
 
 ```json
 {
-  "api_key": "<OpenAI api key>",
-  "content": "The user's question",
+  "content": "how do I insert a new sobject record?",
   "history": [
-    /* The complete chat history, as { role, content } objects */
+    {"role": "user", "content": "How do I use Salesforce?"},
+    {"role": "assistant", "content": "Salesforce provides many operations..."}
   ],
   "context": {
-    "expression": "The user's job code",
-    "adaptor": "full specificer for the adaptor, eg @openfn/language-salesforce@4.10.0",
-    "input": {
-      /* The input state to the job */
-    },
-    "output": {
-      /** The output from the last run */
-    },
-    "log": "the log from the last run"
-  }
+    "expression": "// write your job code here",
+    "adaptor": "@openfn/language-salesforce@4.6.10",
+    "input": {"data": {"field1": "value1"}},
+    "output": {"previous": "output"},
+    "log": "execution log text"
+  },
+  "meta": {
+    "rag": {
+      "search_results": []
+    }
+  },
+  "api_key": "<Anthropic API key>"
 }
 ```
 
@@ -96,11 +97,28 @@ The server returns the following JSON response:
 
 ```json
 {
-  "response": "the model response as a string",
+  "response": {
+    "response": "To insert a new sobject record in Salesforce, you can use the create operation...",
+    "suggested_code": "create('Account', {\n  Name: 'Test Account',\n  Industry: 'Technology'\n});"
+  },
   "history": [
-    /* Updated chat history */
+    {"role": "user", "content": "How do I use Salesforce?"},
+    {"role": "assistant", "content": "Salesforce provides many operations..."},
+    {"role": "user", "content": "how do I insert a new sobject record?"},
+    {"role": "assistant", "content": "To insert a new sobject record in Salesforce, you can use the create operation..."}
   ],
-  "usage": {/* usage stats */},
-  "meta": {"rag": /* rag info */}
+  "usage": {
+    "input_tokens": 526,
+    "output_tokens": 164,
+    "cache_creation_input_tokens": 12525,
+    "cache_read_input_tokens": 0
+  },
+  "meta": {
+    "rag": {
+      "search_results": [],
+      "search_results_sections": [],
+      "search_queries": []
+    }
+  }
 }
 ```
