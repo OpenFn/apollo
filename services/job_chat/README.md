@@ -98,7 +98,7 @@ The server returns the following JSON response:
 ```json
 {
   "response": {
-    "response": "To insert a new sobject record in Salesforce, you can use the create operation...",
+    "response": "To insert a new subject record in Salesforce, you can use the create operation...",
     "suggested_code": "create('Account', {\n  Name: 'Test Account',\n  Industry: 'Technology'\n});"
   },
   "history": [

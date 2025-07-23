@@ -1,10 +1,13 @@
 import pytest
 import json
-from services.job_chat import job_chat
+from .test_utils import call_job_chat_service, make_service_input, print_response_details
 
-def test_basic_job_chat():
-    content = "I want to add a step to also update the parent record after creating the line items in this job?"
+
+def test_basic_input():
+    print("==================TEST==================")
+    print("Description: Basic input test. Check if the service can handle a simple input and generate a response.")
     history = []
+    content = "I want to add a step to also update the parent record after creating the line items in this job?"
     context = {
         "expression": '''each(
   dataPath('data[*]'),
@@ -42,16 +45,11 @@ def test_basic_job_chat():
 );'''
     }
     meta = {}
-    data_dict = {
-        "content": content,
-        "history": history,
-        "context": context,
-        "meta": meta
-    }
-
-    result = job_chat.main(data_dict)
-    assert result is not None
-    assert "response" in result
-    assert isinstance(result["response"], dict)
-    assert "response" in result["response"]
-    assert "suggested_code" in result["response"] 
+    service_input = make_service_input(history=history, content=content, context=context, meta=meta)
+    response = call_job_chat_service(service_input)
+    print_response_details(response, "basic_input", content=content)
+    assert response is not None
+    assert "response" in response
+    assert isinstance(response["response"], dict)
+    assert "response" in response["response"]
+    assert "suggested_code" in response["response"] 

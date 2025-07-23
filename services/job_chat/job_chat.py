@@ -172,15 +172,15 @@ class AnthropicClient:
             
             if not old_code or new_code is None:
                 error_message = "Replace action requires old_code and new_code"
-                return self._try_error_correction(error_message, old_code, new_code, code, edit.get("text_explanation", ""))
+                return self.try_error_correction(error_message, old_code, new_code, code, edit.get("text_explanation", ""))
             
             if old_code not in code:
                 error_message = "old_code not found in current code"
-                return self._try_error_correction(error_message, old_code, new_code, code, edit.get("text_explanation", ""))
+                return self.try_error_correction(error_message, old_code, new_code, code, edit.get("text_explanation", ""))
             
             if code.count(old_code) > 1:
                 error_message = "old_code matches multiple locations"
-                return self._try_error_correction(error_message, old_code, new_code, code, edit.get("text_explanation", ""))
+                return self.try_error_correction(error_message, old_code, new_code, code, edit.get("text_explanation", ""))
             
             return code.replace(old_code, new_code)
         
@@ -195,7 +195,7 @@ class AnthropicClient:
             logger.warning(f"Error in applying code edits, returning old code")
             return old_code
         
-    def _try_error_correction(self, error_message: str, old_code: str, new_code: str, full_code: str, text_explanation: str) -> str:
+    def try_error_correction(self, error_message: str, old_code: str, new_code: str, full_code: str, text_explanation: str) -> str:
         """Try to correct the edit once, return original code if it fails."""
         logger.info(f"Code edit error: {error_message}. Attempting correction...")
         
@@ -220,6 +220,7 @@ class AnthropicClient:
             
             corrected_old = correction_data.get("corrected_old_code")
             corrected_new = correction_data.get("corrected_new_code")
+            logger.info(f"Corrector response: {response}")
             
             if corrected_old and corrected_new is not None and corrected_old in full_code and full_code.count(corrected_old) == 1:
                 logger.info("Successfully applied corrected edit")
