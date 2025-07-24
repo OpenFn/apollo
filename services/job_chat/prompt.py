@@ -169,10 +169,8 @@ To insert new code using replace:
 - Find a suitable insertion point and replace it with itself plus the new code
 - Example: To insert after "get('/patients');", replace it with "get('/patients');\n[new code here]"
 
-**CRITICAL RULE: INCLUDE CONTEXT TO AVOID DUPLICATE MATCHES**
-We will use string matching to apply your changes. Therefore, you MUST include enough code in the selected passage for old_code for old_code to be UNIQUE in the full code.
-
-TO avoid duplicate matches, you MUST:
+**IMPORTANT: INCLUDE CONTEXT TO AVOID DUPLICATE MATCHES**
+We will use literal string replacement to apply your changes. To avoid duplicate matches, you MUST:
 1. Include ample surrounding context in the old_code to replace (comments, variable declarations, both similar pasages etc.)
 2. If in doubt, use "rewrite" action instead to rewrite the whole code
 
@@ -197,21 +195,31 @@ Example:
 """
 
 error_correction_system_prompt = """
-You are a code edit correction assistant. A code edit failed to apply correctly, and you need to fix it.
+You are a code edit correction assistant. A code edit failed because the string replacement system couldn't find a unique match.
 
-Your task is to analyze the error and provide corrected old_code and new_code that will successfully apply.
+CRITICAL: You are working with a LITERAL STRING REPLACEMENT system, not a semantic code editor.
+
+The system has tried to look for old_code in the full_original_code, and subsitute it with new_code.
+Your task is to understand the intended change from the given context and attempted replacement, to output a corrected attempt for the string replacement system.
+The correction system will look for your corrected_old_code in full_original_code and substitute it with your corrected_new_code.
+
+Context to use:
+You will be given relevant context under "Original edit details" below.
+This may inlcude an explanation of attempted changes. Note that this may describe a broader change/series of changes but you will only be shown a specific edit to fix. 
 
 Common issues:
 1. "old_code not found" - the old_code doesn't exactly match what's in the file
-2. "old_code matches multiple locations" - the old_code appears multiple times, add more context
+  --> Look at the full code and find the closest matching section
+2. "old_code matches multiple locations" - the old_code appears multiple times
+  --> Add more surrounding context to make the old_code unique for string replacement. 
+      **CRITICAL**: Take care to include the intended context in the corrected_new_code so that the substitution does not result in deletions or duplications.
 3. "Replace action requires old_code and new_code" - missing required fields
+  --> Either/both fields missing. Use the given context and full code to fill these.
 
-Guidelines:
-- For "not found" errors: Look at the full code and find the closest matching section
-- For "multiple matches" errors: Add more surrounding context to make the old_code unique
+It is important to:
 - Preserve the intended change from the original new_code
-- Include enough context in old_code to make it unique but not too much
 - Maintain exact whitespace and formatting
+- Include enough context in old_code to make it unique
 
 Output JSON format:
 {
@@ -322,7 +330,7 @@ def build_prompt(content, history, context, rag=None, api_key=None):
       
     return (system_message, prompt, retrieved_knowledge)
 
-def build_error_correction_prompt(error_message: str, old_code: str, new_code: str, full_code: str, text_explanation: str):
+def build_error_correction_prompt(content: str, error_message: str, old_code: str, new_code: str, full_code: str, text_explanation: str):
     """Build a prompt for correcting code edit errors."""
     
     system_message = [{"type": "text", "text": error_correction_system_prompt}]
@@ -330,17 +338,17 @@ def build_error_correction_prompt(error_message: str, old_code: str, new_code: s
     user_content = f"""A code edit failed with this error: "{error_message}"
 
 Original edit details:
-- old_code: {json.dumps(old_code)}
-- new_code: {json.dumps(new_code)}
-- text_explanation: {text_explanation}
-
-Full code context:
+- old_code:\n{json.dumps(old_code)}
+- attempted to replace the above with new_code:\n{json.dumps(new_code)}
+- the user's original message:\n{content}
+- explanation of (all) attempted changes:\n{text_explanation}
+- full_original_code:
 ```
 {full_code}
 ```
 
-Please provide corrected old_code and new_code that will successfully apply the intended change."""
+Please provide corrected old_code and new_code that will successfully apply the intended change with string replacement."""
     
     prompt = [{"role": "user", "content": user_content}]
-    
+    logger.info(f"prompt in full:\n{prompt}")
     return (system_message, prompt)

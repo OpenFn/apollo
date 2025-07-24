@@ -92,17 +92,13 @@ def print_response_details(response: Dict[str, Any], test_name: str, content: Op
         print("\nUSER CONTENT:")
         print(content)
         
-    if "response" in response and isinstance(response["response"], dict):
-        if "response" in response["response"]:
-            print("\nTEXT RESPONSE:")
-            print(response["response"]["response"])
+    if "response" in response:
+        print("\nTEXT RESPONSE:")
+        print(response["response"])
             
-        if "suggested_code" in response["response"]:
-            print("\nSUGGESTED CODE:")
-            print(response["response"]["suggested_code"])
-    elif "response" in response:
-        print("\nRESPONSE:")
-        print(json.dumps(response["response"], indent=2))
+    if "suggested_code" in response:
+        print("\nSUGGESTED CODE:")
+        print(response["suggested_code"])
         
     if "history" in response:
         print("\nUPDATED HISTORY LENGTH:")

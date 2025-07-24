@@ -56,7 +56,8 @@ class ChatConfig:
 
 @dataclass
 class ChatResponse:
-    content: dict  # Now a dict with 'response' and 'suggested_code'
+    response: str
+    suggested_code: Optional[str]
     history: List[Dict[str, str]]
     usage: Dict[str, Any]
     rag: Dict[str, Any]
@@ -108,7 +109,7 @@ class AnthropicClient:
         job_code = None
         if context and isinstance(context, dict):
             job_code = context.get("expression")
-        text_response, suggested_code = self.parse_and_apply_edits(response, job_code)
+        text_response, suggested_code = self.parse_and_apply_edits(response=response, content=content, original_code=job_code)
 
         updated_history = history + [
             {"role": "user", "content": content},
@@ -120,16 +121,15 @@ class AnthropicClient:
             *[usage_data for usage_key, usage_data in retrieved_knowledge.get("usage", {}).items()]
         )
 
-        content_dict = {"response": text_response, "suggested_code": suggested_code}
-
         return ChatResponse(
-            content=content_dict,
+            response=text_response,
+            suggested_code=suggested_code,
             history=updated_history,
             usage=usage,
             rag=retrieved_knowledge
         )
 
-    def parse_and_apply_edits(self, response: str, original_code: Optional[str] = None) -> tuple[str, Optional[str]]:
+    def parse_and_apply_edits(self, response: str, content: str, original_code: Optional[str] = None) -> tuple[str, Optional[str]]:
         """Parse JSON response and apply code edits to original code."""
         try:
             response_data = json.loads(response)
@@ -139,7 +139,7 @@ class AnthropicClient:
             if not code_edits or not original_code:
                 return text_answer, None
             
-            suggested_code = self.apply_code_edits(original_code, code_edits)
+            suggested_code = self.apply_code_edits(content=content, text_answer=text_answer, original_code=original_code, code_edits=code_edits)
             return text_answer, suggested_code
             
         except json.JSONDecodeError as e:
@@ -149,38 +149,39 @@ class AnthropicClient:
             logger.error(f"Error parsing response: {e}")
             return response, None
 
-    def apply_code_edits(self, original_code: str, code_edits: List[Dict[str, Any]]) -> str:
+    def apply_code_edits(self, content: str, text_answer: str, original_code: str, code_edits: List[Dict[str, Any]]) -> str:
         """Apply a list of code edits to the original code."""
         current_code = original_code
         
         for edit in code_edits:
             try:
-                current_code = self.apply_single_edit(current_code, edit)
+                current_code = self.apply_single_edit(content=content, text_answer=text_answer, code=current_code, edit=edit)
             except Exception as e:
                 logger.warning(f"Failed to apply edit {edit}: {e}")
                 # Continue with other edits even if one fails
         
         return current_code
 
-    def apply_single_edit(self, code: str, edit: Dict[str, Any]) -> str:
+    def apply_single_edit(self, content: str, text_answer: str, code: str, edit: Dict[str, Any]) -> str:
         """Apply a single code edit."""
         action = edit.get("action")
         
         if action == "replace":
             old_code = edit.get("old_code")
             new_code = edit.get("new_code")
+            logger.info(f"attempting this edit: old code: {old_code}\nnew code: {new_code}")
             
             if not old_code or new_code is None:
                 error_message = "Replace action requires old_code and new_code"
-                return self.try_error_correction(error_message, old_code, new_code, code, edit.get("text_explanation", ""))
+                return self.try_error_correction(content=content, error_message=error_message, old_code=old_code, new_code=new_code, full_code=code, text_explanation=text_answer)
             
             if old_code not in code:
                 error_message = "old_code not found in current code"
-                return self.try_error_correction(error_message, old_code, new_code, code, edit.get("text_explanation", ""))
+                return self.try_error_correction(content=content, error_message=error_message, old_code=old_code, new_code=new_code, full_code=code, text_explanation=text_answer)
             
             if code.count(old_code) > 1:
                 error_message = "old_code matches multiple locations"
-                return self.try_error_correction(error_message, old_code, new_code, code, edit.get("text_explanation", ""))
+                return self.try_error_correction(content=content, error_message=error_message, old_code=old_code, new_code=new_code, full_code=code, text_explanation=text_answer)
             
             return code.replace(old_code, new_code)
         
@@ -195,12 +196,13 @@ class AnthropicClient:
             logger.warning(f"Error in applying code edits, returning old code")
             return old_code
         
-    def try_error_correction(self, error_message: str, old_code: str, new_code: str, full_code: str, text_explanation: str) -> str:
+    def try_error_correction(self, content: str, error_message: str, old_code: str, new_code: str, full_code: str, text_explanation: str) -> str:
         """Try to correct the edit once, return original code if it fails."""
         logger.info(f"Code edit error: {error_message}. Attempting correction...")
         
         try:
             system_message, prompt = build_error_correction_prompt(
+                content=content,
                 error_message=error_message,
                 old_code=old_code,
                 new_code=new_code,
@@ -222,7 +224,9 @@ class AnthropicClient:
             corrected_new = correction_data.get("corrected_new_code")
             logger.info(f"Corrector response: {response}")
             
-            if corrected_old and corrected_new is not None and corrected_old in full_code and full_code.count(corrected_old) == 1:
+            if corrected_old and corrected_new is not None and corrected_old in full_code:
+                if full_code.count(corrected_old) > 1:
+                    logger.warning(f"Corrected old code appears {full_code.count(corrected_old)} times in the code. Applying edit to first occurrence only.")
                 logger.info("Successfully applied corrected edit")
                 return full_code.replace(corrected_old, corrected_new)
             
@@ -265,7 +269,8 @@ def main(data_dict: dict) -> dict:
         )
 
         response_dict = {
-            "response": result.content, 
+            "response": result.response,
+            "suggested_code": result.suggested_code,
             "history": result.history, 
             "usage": result.usage, 
             "meta": {"rag": result.rag}
