@@ -92,6 +92,21 @@ post('https://api.example.com/save', state => ({
   user: state.profile,
   timestamp: new Date().toISOString()
 }));'''
+
+    expected_code_alternative = '''
+post('https://api.example.com/users/profile');
+
+fn(state => {
+  const profile = state.data;
+  console.log('Retrieved profile for user:', profile.id);
+  return { ...state, profile };
+});
+
+// Save the data
+post('https://api.example.com/save', state => ({
+  user: state.profile,
+  timestamp: new Date().toISOString()
+}));'''
     
     meta = {}
     service_input = make_service_input(history=history, content=content, context=context, meta=meta)
