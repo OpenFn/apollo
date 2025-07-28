@@ -151,7 +151,7 @@ class AnthropicClient:
             logger.error(f"Error parsing response: {e}")
             return response, None, None
 
-    def apply_code_edits(self, content: str, text_answer: str, original_code: str, code_edits: List[Dict[str, Any]]) -> tuple[str, Dict[str, Any]]:
+    def apply_code_edits(self, content: str, text_answer: str, original_code: str, code_edits: List[Dict[str, Any]]) -> tuple[Optional[str], Dict[str, Any]]:
         """Apply a list of code edits to the original code."""
         current_code = original_code
         total_changes = len(code_edits)
@@ -161,7 +161,8 @@ class AnthropicClient:
         for edit in code_edits:
             try:
                 new_code, edit_applied, warning = self.apply_single_edit(content=content, text_answer=text_answer, code=current_code, edit=edit)
-                current_code = new_code
+                if new_code is not None:
+                    current_code = new_code
                 if edit_applied:
                     applied_changes += 1
                 if warning:
@@ -183,7 +184,8 @@ class AnthropicClient:
         if warnings:
             application_status["warning"] = ". ".join(warnings)
         
-        return current_code, application_status
+        final_code = current_code if applied_changes > 0 else None
+        return final_code, application_status
 
     def apply_single_edit(self, content: str, text_answer: str, code: str, edit: Dict[str, Any]) -> tuple[str, bool, Optional[str]]:
         """Apply a single code edit and return (new_code, success, warning)."""
@@ -195,34 +197,41 @@ class AnthropicClient:
             logger.info(f"attempting this edit: old code: {old_code}\nnew code: {new_code}")
             
             if not old_code or new_code is None:
-                error_message = "Replace action requires old_code and new_code"
-                corrected_code, success = self.try_error_correction(content=content, error_message=error_message, old_code=old_code, new_code=new_code, full_code=code, text_explanation=text_answer)
-                return (corrected_code, success, None if success else error_message)
+                return self.handle_replace_error(content, text_answer, code, edit, "Replace action requires old_code and new_code")
             
             if old_code not in code:
-                error_message = "old_code not found in current code"
-                corrected_code, success = self.try_error_correction(content=content, error_message=error_message, old_code=old_code, new_code=new_code, full_code=code, text_explanation=text_answer)
-                return (corrected_code, success, None if success else error_message)
+                return self.handle_replace_error(content, text_answer, code, edit, "old_code not found in current code")
             
             if code.count(old_code) > 1:
-                error_message = "old_code matches multiple locations"
-                corrected_code, success = self.try_error_correction(content=content, error_message=error_message, old_code=old_code, new_code=new_code, full_code=code, text_explanation=text_answer)
-                return (corrected_code, success, None if success else error_message)
+                return self.handle_replace_error(content, text_answer, code, edit, "old_code matches multiple locations")
             
             return code.replace(old_code, new_code), True, None
         
         elif action == "rewrite":
             new_code = edit.get("new_code")
             if not new_code:
-                logger.warning(f"New code missing, returning old code")
-                return code, False, "New code missing, returning old code"
+                warning = "Rewrite code failed, new code missing"
+                logger.warning(warning)
+                return None, False, warning
             return new_code, True, None
         
         else:
-            logger.warning(f"Error in applying code edits, returning old code")
-            return code, False, "Error in applying code edits, returning old code"
+            warning ="Error in applying code edit, invalid action"
+            logger.warning(warning)
+            return None, False, warning
         
-    def try_error_correction(self, content: str, error_message: str, old_code: str, new_code: str, full_code: str, text_explanation: str) -> tuple[str, bool]:
+    def handle_replace_error(self, content: str, text_answer: str, code: str, edit: Dict[str, Any], error_message: str) -> tuple[str, bool, str]:
+        """Helper to handle replace action errors with correction attempt."""
+        old_code = edit.get("old_code")
+        new_code = edit.get("new_code")
+        corrected_code, success, correction_warning = self.try_error_correction(
+            content=content, error_message=error_message, old_code=old_code, 
+            new_code=new_code, full_code=code, text_explanation=text_answer
+        )
+        warning = error_message + (f". {correction_warning}" if correction_warning else "")
+        return (corrected_code, success, warning)
+        
+    def try_error_correction(self, content: str, error_message: str, old_code: str, new_code: str, full_code: str, text_explanation: str) -> tuple[str, bool, Optional[str]]:
         """Try to correct the edit once, return (code, success)."""
         logger.info(f"Code edit error: {error_message}. Attempting correction...")
         
@@ -251,17 +260,21 @@ class AnthropicClient:
             logger.info(f"Corrector response: {response}")
             
             if corrected_old and corrected_new is not None and corrected_old in full_code:
+                warning = None
                 if full_code.count(corrected_old) > 1:
-                    logger.warning(f"Corrected old code appears {full_code.count(corrected_old)} times in the code. Applying edit to first occurrence only.")
+                    warning = "Corrected old code appears more than once in the code. Applying edit to first occurrence only."
+                    logger.warning(warning)
                 logger.info("Successfully applied corrected edit")
-                return full_code.replace(corrected_old, corrected_new), True
-            
+                return full_code.replace(corrected_old, corrected_new), True, warning
+    
         except Exception as e:
-            logger.warning(f"Error correction failed: {e}")
-            logger.warning(f"model response: {response}")
+            warning = f"Error correction failed: {e}"
+            logger.warning(warning)
+            return None, False, warning
         
-        logger.warning("Returning original code unchanged")
-        return full_code, False
+        warning = f"Error correction failed. Tried to apply: {correction_data.get('corrected_new_code')}"
+        logger.warning(warning)
+        return None, False, warning
 
     def sum_usage(self, *usage_objects):
         """Sum multiple Usage object token counts and return a count dictionary."""
