@@ -265,7 +265,7 @@ class AnthropicClient:
                     warning = "Corrected old code appears more than once in the code. Applying edit to first occurrence only."
                     logger.warning(warning)
                 logger.info("Successfully applied corrected edit")
-                return full_code.replace(corrected_old, corrected_new), True, warning
+                return full_code.replace(corrected_old, corrected_new, 1), True, warning
     
         except Exception as e:
             warning = f"Error correction failed: {e}"
