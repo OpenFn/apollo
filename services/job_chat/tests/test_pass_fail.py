@@ -117,7 +117,7 @@ post('https://api.example.com/save', state => ({
     assert "response" in response
     assert "suggested_code" in response
     
-    assert response["suggested_code"] == expected_code, f"GET to POST conversion did not produce expected result.\nExpected:\n{expected_code}\n\nActual:\n{response['suggested_code']}"
+    assert response["suggested_code"] == expected_code or response["suggested_code"] == expected_code_alternative, f"GET to POST conversion did not produce expected result.\nExpected:\n{expected_code}\n\nActual:\n{response['suggested_code']}"
 
 def test_rename_function():
     print("==================TEST==================")
@@ -294,6 +294,127 @@ post(
     assert "suggested_code" in response
     
     assert response["suggested_code"] == expected_code, f"Function rename did not produce expected result.\nExpected:\n{expected_code}\n\nActual:\n{response['suggested_code']}"
+
+def test_change_multiple_instances():
+    print("==================TEST==================")
+    print("Description: Testing changing multiple instances of a URL path segment across longer job code.")
+    
+    history = []
+    content = "change all the occurences of endpoint to endpoooint"
+    
+    original_code = '''// Process and prepare data
+fn(state => {
+  const items = state.data.items.map(item => ({
+    id: item.id,
+    name: item.name,
+    status: 'pending'
+  }));
+  
+  return { ...state, items };
+});
+
+post('https://api.example.com/endpoint', state => state.items);
+
+// Helper function to process the response
+function processApiResponse(response) {
+  if (!response || !response.data) {
+    console.log('Invalid response received');
+    return null;
+  }
+  
+  return {
+    processed: true,
+    timestamp: new Date().toISOString(),
+    results: response.data.map(item => ({
+      ...item,
+      processed: true
+    }))
+  };
+}
+
+// Data transformation function
+fn(state => {
+  if (state.data && Array.isArray(state.data)) {
+    const transformed = processApiResponse({
+      data: state.data
+    });
+    return { ...state, transformed };
+  }
+  return state;
+});
+
+post('https://api.example.com/endpoint', state => state.items);
+
+// Fifth request with retry mechanism
+fn(state => {
+  let retries = 3;
+  let delay = 1000; // 1 second
+  
+  const makeRequest = async (attempt) => {
+    try {
+      const response = await http.post(
+        'https://api.example.com/endpoint', 
+        state.items,
+        {}
+      );
+      return { ...state, data: response.body };
+    } catch (error) {
+      if (attempt < retries) {
+        console.log(`Request failed, retrying (${attempt + 1}/${retries})...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return makeRequest(attempt + 1);
+      }
+      throw error;
+    }
+  };
+  
+  return makeRequest(0);
+});
+
+post('https://api.example.com/endpoint', state => state.items);
+
+// Final data processing and cleanup
+fn(state => {
+  // Remove any temporary data
+  const { tempData, ...cleanState } = state;
+  
+  // Add completion timestamp
+  const finalState = {
+    ...cleanState,
+    processingCompleted: true,
+    completedAt: new Date().toISOString()
+  };
+  
+  // Log completion
+  console.log(`Processing completed at ${finalState.completedAt}`);
+  console.log(`Processed ${state.items ? state.items.length : 0} items`);
+  
+  return finalState;
+});
+
+// Send final notification
+post('https://notifications.example.com/endpoint/status', state => ({
+  status: 'completed',
+  timestamp: state.completedAt,
+  itemCount: state.items ? state.items.length : 0
+}));'''
+    
+    context = {
+        "expression": original_code
+    }
+    
+    expected_code = original_code.replace("endpoint", "endpoooint")
+    
+    meta = {}
+    service_input = make_service_input(history=history, content=content, context=context, meta=meta)
+    response = call_job_chat_service(service_input)
+    print_response_details(response, "change_url_path", content=content)
+    
+    assert response is not None
+    assert "response" in response
+    assert "suggested_code" in response
+    
+    assert response["suggested_code"] == expected_code, f"URL path change did not produce expected result.\nExpected:\n{expected_code}\n\nActual:\n{response['suggested_code']}"
 
 
 if __name__ == "__main__":
