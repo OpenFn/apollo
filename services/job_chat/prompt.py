@@ -209,11 +209,10 @@ This may inlcude an explanation of attempted changes. Note that this may describ
 
 Common issues:
 1. "old_code not found" - the old_code doesn't exactly match what's in the file
-  --> Look at full_original_code and find the closest matching section
+  --> Look at the full code and find the closest matching section
 2. "old_code matches multiple locations" - the old_code appears multiple times
-  -->  Include MUCH more context to make SURE that corrected_old_code only appears once in full_original_code.
-      To do this, count how many duplicate passages there are in full_original_code and include ALL of them in corrected_old_code. DO NOT just add the previous and following lines. Add too much rather than too little context.
-    **CRITICAL**: Take care to include the intended context in the corrected_new_code so that the substitution does not result in deletions or duplications.
+  --> Add more surrounding context to make the old_code unique for string replacement. 
+      **CRITICAL**: Take care to include the intended context in the corrected_new_code so that the substitution does not result in deletions or duplications.
 3. "Replace action requires old_code and new_code" - missing required fields
   --> Either/both fields missing. Use the given context and full code to fill these.
 
@@ -222,65 +221,11 @@ It is important to:
 - Maintain exact whitespace and formatting
 - Include enough context in old_code to make it unique
 
-Output valid JSON format:
+Output JSON format:
 {
-  "explanation": "Brief explanation of the correction",
+  "explanation": "1-sentence explanation of the correction",
   "corrected_old_code": "corrected old code with proper context",
   "corrected_new_code": "corrected new code"
-}
-
-Example:
-INPUT:
-A code edit failed with this error: "old_code matches multiple locations"
-old_code: "console.log('Processing items');\neach('$.data[]', fn(state => {\n console.log('Processing item');\n return state;\n}));"
-attempted to replace the above with new_code: "console.log('Processing items');\neach('$.data[]', fn(state => {\n try {\n console.log('Processing item');\n } catch (e) {\n console.log('Error in logging, continuing');\n }\n return state;\n}));"
-the user's original message: "I need to add error handling only to the third console.log"
-explanation of (all) attempted changes: "I'll add error handling to the third block's console.log statement by wrapping it in a try/catch."
-full_original_code:
-fn(state => {
-  const count = state.data.length;
-  return { ...state, count };
-});
-
-console.log('Processing items');
-each('$.data[*]', fn(state => {
-  console.log('Processing item');
-  return state;
-}));
-
-console.log('Processing items');
-each('$.data[*]', fn(state => {
-  console.log('Processing item');
-  return state;
-}));
-
-fn(state => {
-  const count = state.data.length;
-  return { ...state, count };
-});
-
-console.log('Processing items');
-each('$.data[*]', fn(state => {
-  console.log('Processing item');
-  return state;
-}));
-
-console.log('Processing items');
-each('$.data[*]', fn(state => {
-  console.log('Processing item');
-  return state;
-}));
-
-fn(state => {
-  state.complete = true;
-  return state;
-});
-
-OUTPUT:
-{
-  "explanation": "The old_code matches multiple locations in the full code (4 identical blocks). To avoid any possibility of multiple matches, I've included all four identical blocks in the corrected_old_code and corrected_new_code, making only the intended change to the third console.log block.",
-  "corrected_old_code": "console.log('Processing items');\neach('$.data[*]', fn(state => {\n  console.log('Processing item');\n  return state;\n}));\n\nconsole.log('Processing items');\neach('$.data[*]', fn(state => {\n  console.log('Processing item');\n  return state;\n}));\n\nfn(state => {\n  const count = state.data.length;\n  return { ...state, count };\n});\n\nconsole.log('Processing items');\neach('$.data[*]', fn(state => {\n  console.log('Processing item');\n  return state;\n}));\n\nconsole.log('Processing items');\neach('$.data[*]', fn(state => {\n  console.log('Processing item');\n  return state;\n}));",
-  "corrected_new_code": "console.log('Processing items');\neach('$.data[*]', fn(state => {\n  console.log('Processing item');\n  return state;\n}));\n\nconsole.log('Processing items');\neach('$.data[*]', fn(state => {\n  console.log('Processing item');\n  return state;\n}));\n\nfn(state => {\n  const count = state.data.length;\n  return { ...state, count };\n});\n\nconsole.log('Processing items');\neach('$.data[*]', fn(state => {\n  try {\n    console.log('Processing item');\n  } catch (e) {\n    console.log('Error in logging, continuing');\n  }\n  return state;\n}));\n\nconsole.log('Processing items');\neach('$.data[*]', fn(state => {\n  console.log('Processing item');\n  return state;\n}));"
 }
 """
 
