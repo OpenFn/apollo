@@ -15,6 +15,7 @@ from anthropic import (
 )
 from util import ApolloError, create_logger
 from .prompt import build_prompt, build_error_correction_prompt
+from .old_prompt import build_old_prompt
 
 logger = create_logger("job_chat")
 
@@ -30,6 +31,7 @@ class Payload:
     context: Optional[dict] = None
     api_key: Optional[str] = None
     meta: Optional[str] = None
+    use_new_prompt: Optional[bool] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
@@ -43,7 +45,8 @@ class Payload:
             content=data["content"], 
             context=data.get("context"), 
             api_key=data.get("api_key"), 
-            meta=data.get("meta")
+            meta=data.get("meta"),
+            use_new_prompt=data.get("use_new_prompt")
         )
 
 
@@ -72,20 +75,29 @@ class AnthropicClient:
         self.client = Anthropic(api_key=self.api_key)
 
     def generate(
-        self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[dict] = None, rag: Optional[str] = None
+        self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[dict] = None, rag: Optional[str] = None, use_new_prompt: Optional[bool] = None
     ) -> ChatResponse:
         """
         Generate a response using the Claude API with improved error handling and response processing.
         """
         history = history.copy() if history else []
 
-        system_message, prompt, retrieved_knowledge = build_prompt(
-            content=content, 
-            history=history, 
-            context=context, 
-            rag=rag, 
-            api_key=self.api_key
+        if use_new_prompt is True:
+            system_message, prompt, retrieved_knowledge = build_prompt(
+                content=content, 
+                history=history, 
+                context=context, 
+                rag=rag, 
+                api_key=self.api_key
             )
+        else:
+            system_message, prompt, retrieved_knowledge = build_old_prompt(
+                content=content, 
+                history=history, 
+                context=context, 
+                rag=rag, 
+                api_key=self.api_key
+                )
 
         message = self.client.messages.create(
             max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
@@ -106,11 +118,17 @@ class AnthropicClient:
 
         response = "\n\n".join(response_parts)
 
-        # Parse JSON response and apply code edits
-        job_code = None
-        if context and isinstance(context, dict):
-            job_code = context.get("expression")
-        text_response, suggested_code, application_status = self.parse_and_apply_edits(response=response, content=content, original_code=job_code)
+        if use_new_prompt is True:
+            # Parse JSON response and apply code edits
+            job_code = None
+            if context and isinstance(context, dict):
+                job_code = context.get("expression")
+            text_response, suggested_code, application_status = self.parse_and_apply_edits(response=response, content=content, original_code=job_code)
+        
+        else:
+            text_response = response
+            suggested_code = None
+            application_status = None
 
         updated_history = history + [
             {"role": "user", "content": content},
@@ -304,7 +322,8 @@ def main(data_dict: dict) -> dict:
             content=data.content, 
             history=data_dict.get("history", []), 
             context=data.context, 
-            rag=data_dict.get("meta", {}).get("rag")
+            rag=data_dict.get("meta", {}).get("rag"),
+            use_new_prompt=data.use_new_prompt
         )
 
         response_dict = {

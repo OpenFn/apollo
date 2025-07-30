@@ -27,7 +27,7 @@ fn(state => {
 post('https://destination.org/upload', state => state.transformed);'''
     }
     meta = {}
-    service_input = make_service_input(history=history, content=content, context=context, meta=meta)
+    service_input = make_service_input(history=history, content=content, context=context, meta=meta, use_new_prompt=True)
     response = call_job_chat_service(service_input)
     print_response_details(response, "basic_input", content=content)
     assert response is not None
@@ -85,7 +85,7 @@ post('https://destination.org/upload', state => state.transformed);''',
         }
     }
     
-    service_input = make_service_input(history=history, content=content, context=context, meta=meta)
+    service_input = make_service_input(history=history, content=content, context=context, meta=meta, use_new_prompt=True)
     response = call_job_chat_service(service_input)
     print_response_details(response, "contextualised_input", content=content)
     assert response is not None
@@ -153,7 +153,7 @@ def test_duplicate_sections():
 );'''
     }
     meta = {}
-    service_input = make_service_input(history=history, content=content, context=context, meta=meta)
+    service_input = make_service_input(history=history, content=content, context=context, meta=meta, use_new_prompt=True)
     response = call_job_chat_service(service_input)
     print_response_details(response, "odk_duplicate_sections", content=content)
     assert response is not None
@@ -164,7 +164,7 @@ def test_duplicate_sections():
 def test_duplicate_sections_additional():
     print("==================TEST==================")
     print("Description: Another test to check if the service can handle duplicate sections, this time with more duplicates."
-          "Check whether it's able to provide enough context for the match to be unique, and check it doesn't accidentally delete code.")
+          "Check whether it's able to provide enough context for the match to be unique, and check it doesn't accidentally delete")
     history = []
     content = "I need to add error handling only to the third POST request to retry once if it fails."
     context = {

@@ -43,7 +43,7 @@ fn(state => {
 post('https://destination.org/upload', state => state.processedData);'''
     
     meta = {}
-    service_input = make_service_input(history=history, content=content, context=context, meta=meta)
+    service_input = make_service_input(history=history, content=content, context=context, meta=meta, use_new_prompt=True)
     response = call_job_chat_service(service_input)
     print_response_details(response, "rename_variable", content=content)
     
@@ -109,7 +109,7 @@ post('https://api.example.com/save', state => ({
 }));'''
     
     meta = {}
-    service_input = make_service_input(history=history, content=content, context=context, meta=meta)
+    service_input = make_service_input(history=history, content=content, context=context, meta=meta, use_new_prompt=True)
     response = call_job_chat_service(service_input)
     print_response_details(response, "convert_get_to_post", content=content)
     
@@ -285,7 +285,7 @@ post(
 );'''
     
     meta = {}
-    service_input = make_service_input(history=history, content=content, context=context, meta=meta)
+    service_input = make_service_input(history=history, content=content, context=context, meta=meta, use_new_prompt=True)
     response = call_job_chat_service(service_input)
     print_response_details(response, "rename_function", content=content)
     
@@ -406,7 +406,7 @@ post('https://notifications.example.com/endpoint/status', state => ({
     expected_code = original_code.replace("endpoint", "endpoooint")
     
     meta = {}
-    service_input = make_service_input(history=history, content=content, context=context, meta=meta)
+    service_input = make_service_input(history=history, content=content, context=context, meta=meta, use_new_prompt=True)
     response = call_job_chat_service(service_input)
     print_response_details(response, "change_url_path", content=content)
     
