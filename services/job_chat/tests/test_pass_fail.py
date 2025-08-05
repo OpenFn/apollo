@@ -3,6 +3,34 @@ import json
 from .test_utils import call_job_chat_service, make_service_input, print_response_details
 
 
+def test_context_fields_access():
+    print("==================TEST==================")
+    print("Description: Testing that the LLM service can access log, input, and output fields")
+    
+    history = []
+    content = "Tell me exactly what you see you see in my input data, output data, and log output?"
+    
+    context = {
+        "expression": "// Basic job to fetch data",
+        "input": {"data": {"customer": "zebra", "status": "active"}},
+        "output": {"result": "success", "location": "paris"},
+        "log": "antarctica"
+    }
+    
+    meta = {}
+    service_input = make_service_input(history=history, content=content, context=context, meta=meta, use_new_prompt=True)
+    response = call_job_chat_service(service_input)
+    print_response_details(response, "context_fields_access", content=content)
+    
+    assert response is not None
+    assert "response" in response
+    
+    response_text = response["response"].lower()
+    assert "zebra" in response_text, f"LLM failed to access input data, 'zebra' not found in response"
+    assert "paris" in response_text, f"LLM failed to access output data, 'paris' not found in response"
+    assert "antarctica" in response_text, f"LLM failed to access log data, 'antarctica' not found in response"
+
+
 def test_rename_variable():
     print("==================TEST==================")
     print("Description: Testing variable name change in fn function")
