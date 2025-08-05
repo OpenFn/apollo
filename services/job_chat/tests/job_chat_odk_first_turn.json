@@ -1,8 +1,0 @@
-{
-  "content": "I want to add a step to also update the parent record after creating the line items in this job?",
-  "history": [],
-  "context": {
-    "expression": "each(\n  dataPath('data[*]'),\n  combine(\n    create(\n      'transaction__c',\n      fields(\n        field('Transaction_Date__c', dataValue('today')),\n        relationship(\n          'Person_Responsible__r',\n          'Staff_ID_Code__c',\n          dataValue('person_code')\n        ),\n        field('metainstanceid__c', dataValue('*meta-instance-id*'))\n      )\n    ),\n    each(\n      merge(\n        dataPath('line_items[*]'),\n        fields(\n          field('end', dataValue('time_end')),\n          field('parentId', lastReferenceValue('id'))\n        )\n      ),\n      create(\n        'line_item__c',\n        fields(\n          field('transaction__c', dataValue('parentId')),\n          field('Barcode__c', dataValue('product_barcode')),\n          field('ODK_Form_Completed__c', dataValue('end'))\n        )\n      )\n    )\n  )\n);"
-  },
-  "meta": {}
-} 

@@ -164,7 +164,7 @@ def test_duplicate_sections():
 def test_duplicate_sections_additional():
     print("==================TEST==================")
     print("Description: Another test to check if the service can handle duplicate sections, this time with more duplicates."
-          "Check whether it's able to provide enough context for the match to be unique, and check it doesn't accidentally delete")
+          "Check whether it's able to provide enough context for the match to be unique, and check it doesn't accidentally delete sections")
     history = []
     content = "I need to add error handling only to the third POST request to retry once if it fails."
     context = {

@@ -68,7 +68,7 @@ The input payload is a JSON object with the following structure
 
 ```json
 {
-  "content": "how do I insert a new sobject record?",
+  "content": "how do I insert a new subject record?",
   "history": [
     {"role": "user", "content": "How do I use Salesforce?"},
     {"role": "assistant", "content": "Salesforce provides many operations..."}
@@ -120,3 +120,29 @@ The server returns the following JSON response:
   }
 }
 ```
+
+## Backwards Compatibility
+
+For backwards compatibility, the service supports an optional `use_new_prompt` flag. This allows existing integrations to maintain their current behavior while new integrations can use the improved prompt format.
+
+```json
+{
+  "content": "how do I insert a new subject record?", 
+  "context": { 
+    "expression": "// write your job code here", 
+  }, 
+  "use_new_prompt": false 
+}
+```
+
+When `use_new_prompt` is `false` (or omitted), the service uses the original prompt format where:
+- Code suggestions are embedded directly within the `response` text as markdown code blocks
+- The `suggested_code` field will not be included in the response
+- The `application_status` field will not be included in the response
+
+When `use_new_prompt` is `true`, the service uses the new structured format where:
+- Edited job code is separated into a dedicated `suggested_code` field
+- The `response` field contains explanatory text and code blocks (e.g. example code that might not relate to the current job code)
+- When code edits are applied, an additional `application_status` field may be included with details about the code edit application
+
+This maintains compatibility with existing integrations that expect code to be embedded in the response text rather than in a separate field, as the service originally functioned.
