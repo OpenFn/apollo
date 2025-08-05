@@ -192,7 +192,7 @@ post('https://api.example.com/endpoint', state => state.items);
 post('https://api.example.com/endpoint', state => state.items);'''
     }
     meta = {}
-    service_input = make_service_input(history=history, content=content, context=context, meta=meta)
+    service_input = make_service_input(history=history, content=content, context=context, meta=meta, use_new_prompt=True)
     response = call_job_chat_service(service_input)
     print_response_details(response, "duplicate_post_sections", content=content)
     assert response is not None
