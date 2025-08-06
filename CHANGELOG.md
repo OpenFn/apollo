@@ -4,7 +4,7 @@
 
 ### Patch Changes
 
-- job_chat: Fix an issue where the model would ignore user logs
+- ed32f7f: job_chat: truncate adaptor docs to 40k characters
 
 ### Patch Changes
 
@@ -12,6 +12,7 @@
 
 ### Patch Changes
 
+- job_chat: Fix an issue where the model would ignore user logs
 - 7b48834: workflow_chat: preserve UUIDs during workflow generation
 
 ## 0.13.0
