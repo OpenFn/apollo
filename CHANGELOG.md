@@ -1,5 +1,12 @@
 # apollo
 
+## 0.13.1
+
+### Patch Changes
+
+- ed32f7f: job_chat: truncate adaptor docs to 40k characters
+- 7b48834: workflow_chat: preserve UUIDs during workflow generation
+
 ## 0.13.0
 
 ### Minor Changes
