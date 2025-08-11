@@ -167,6 +167,9 @@ def generate_system_message(context_dict, search_results):
         for doc in adaptor_docs:
             adaptor_string += f"Typescript definitions for doc {doc}"
             adaptor_string += adaptor_docs[doc]["description"]
+        if len(adaptor_string) >= 40000:
+            adaptor_string = adaptor_string[:40000]
+            adaptor_string += "(...)"
         adaptor_string += "</adaptor>"
 
         message.append(adaptor_string)
