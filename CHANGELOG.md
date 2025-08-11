@@ -1,10 +1,16 @@
 # apollo
 
-## 0.13.2
+## 0.13.3
 
 ### Patch Changes
 
 - ed32f7f: job_chat: truncate adaptor docs to 40k characters
+
+## 0.13.2
+
+### Patch Changes
+
+- ed32f7f: job_chat: Fix an issue where the model would ignore user logs
 
 ### Patch Changes
 
