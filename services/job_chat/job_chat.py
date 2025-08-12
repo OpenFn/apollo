@@ -22,17 +22,19 @@ logger = create_logger("job_chat")
 
 env = os.getenv('ENVIRONMENT', 'unknown')
 trace_rates = {
-    'development': 0.1,
-    'staging': 0.3, 
-    'production': 0.1,
+    'development': 1,
+    'staging': 0.05, 
+    'production': 0.03,
     'unknown': 0.0,
     }
+
 sentry_sdk.init(
     dsn=os.getenv('SENTRY_DSN'),
     environment=env,
     sample_rate=1.0,
     traces_sample_rate=trace_rates.get(env, 0.0),
     enable_tracing=True,
+    auto_enabling_integrations=False
 )
 
 
@@ -229,6 +231,12 @@ class AnthropicClient:
 
     def apply_single_edit(self, content: str, text_answer: str, code: str, edit: Dict[str, Any]) -> tuple[str, bool, Optional[str]]:
         """Apply a single code edit and return (new_code, success, warning)."""
+
+        sentry_sdk.set_context("code_edit_context", {
+            "llm_text_answer": text_answer,
+            "llm_edit_answe": edit,
+        })
+
         action = edit.get("action")
         
         if action == "replace":
