@@ -13,11 +13,27 @@ from anthropic import (
     RateLimitError,
     InternalServerError,
 )
+import sentry_sdk
 from util import ApolloError, create_logger
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
 
 logger = create_logger("job_chat")
+
+env = os.getenv('ENVIRONMENT', 'unknown')
+trace_rates = {
+    'development': 0.1,
+    'staging': 0.3, 
+    'production': 0.1,
+    'unknown': 0.0,
+    }
+sentry_sdk.init(
+    dsn=os.getenv('SENTRY_DSN'),
+    environment=env,
+    sample_rate=1.0,
+    traces_sample_rate=trace_rates.get(env, 0.0),
+    enable_tracing=True,
+)
 
 
 @dataclass
@@ -80,74 +96,80 @@ class AnthropicClient:
         """
         Generate a response using the Claude API with improved error handling and response processing.
         """
-        history = history.copy() if history else []
+        sentry_sdk.set_tag("prompt_type", "code_suggestions" if use_new_prompt else "no_code_suggestions")
 
-        if use_new_prompt is True:
-            system_message, prompt, retrieved_knowledge = build_prompt(
-                content=content, 
-                history=history, 
-                context=context, 
-                rag=rag, 
-                api_key=self.api_key
-            )
-        else:
-            system_message, prompt, retrieved_knowledge = build_old_prompt(
-                content=content, 
-                history=history, 
-                context=context, 
-                rag=rag, 
-                api_key=self.api_key
+        with sentry_sdk.start_transaction(name="chat_generation") as transaction:
+            history = history.copy() if history else []
+            with sentry_sdk.start_span(description="build_prompt"):
+                if use_new_prompt is True:
+                    system_message, prompt, retrieved_knowledge = build_prompt(
+                        content=content, 
+                        history=history, 
+                        context=context, 
+                        rag=rag, 
+                        api_key=self.api_key
+                    )
+                else:
+                    system_message, prompt, retrieved_knowledge = build_old_prompt(
+                        content=content, 
+                        history=history, 
+                        context=context, 
+                        rag=rag, 
+                        api_key=self.api_key
+                        )
+
+            with sentry_sdk.start_span(description="anthropic_api_call"):
+                message = self.client.messages.create(
+                    max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
                 )
 
-        message = self.client.messages.create(
-            max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
-        )
+            if hasattr(message, "usage"):
+                if message.usage.cache_creation_input_tokens:
+                    logger.info(f"Cache write: {message.usage.cache_creation_input_tokens} tokens")
+                if message.usage.cache_read_input_tokens:
+                    logger.info(f"Cache read: {message.usage.cache_read_input_tokens} tokens")
 
-        if hasattr(message, "usage"):
-            if message.usage.cache_creation_input_tokens:
-                logger.info(f"Cache write: {message.usage.cache_creation_input_tokens} tokens")
-            if message.usage.cache_read_input_tokens:
-                logger.info(f"Cache read: {message.usage.cache_read_input_tokens} tokens")
+            response_parts = []
+            for content_block in message.content:
+                if content_block.type == "text":
+                    response_parts.append(content_block.text)
+                else:
+                    logger.warning(f"Unhandled content type: {content_block.type}")
 
-        response_parts = []
-        for content_block in message.content:
-            if content_block.type == "text":
-                response_parts.append(content_block.text)
+            response = "\n\n".join(response_parts)
+
+            if use_new_prompt is True:
+                # Parse JSON response and apply code edits
+                job_code = None
+                if context and isinstance(context, dict):
+                    job_code = context.get("expression")
+                
+                with sentry_sdk.start_span(description="parse_and_apply_edits"):
+                    text_response, suggested_code, application_status = self.parse_and_apply_edits(response=response, content=content, original_code=job_code)
+            
             else:
-                logger.warning(f"Unhandled content type: {content_block.type}")
+                text_response = response
+                suggested_code = None
+                application_status = None
 
-        response = "\n\n".join(response_parts)
+            updated_history = history + [
+                {"role": "user", "content": content},
+                {"role": "assistant", "content": text_response},
+            ]
 
-        if use_new_prompt is True:
-            # Parse JSON response and apply code edits
-            job_code = None
-            if context and isinstance(context, dict):
-                job_code = context.get("expression")
-            text_response, suggested_code, application_status = self.parse_and_apply_edits(response=response, content=content, original_code=job_code)
-        
-        else:
-            text_response = response
-            suggested_code = None
-            application_status = None
+            usage = self.sum_usage(
+                message.usage.model_dump() if hasattr(message, "usage") else {},
+                *[usage_data for usage_key, usage_data in retrieved_knowledge.get("usage", {}).items()]
+            )
 
-        updated_history = history + [
-            {"role": "user", "content": content},
-            {"role": "assistant", "content": text_response},
-        ]
-
-        usage = self.sum_usage(
-            message.usage.model_dump() if hasattr(message, "usage") else {},
-            *[usage_data for usage_key, usage_data in retrieved_knowledge.get("usage", {}).items()]
-        )
-
-        return ChatResponse(
-            response=text_response,
-            suggested_code=suggested_code,
-            history=updated_history,
-            usage=usage,
-            rag=retrieved_knowledge,
-            application_status=application_status
-        )
+            return ChatResponse(
+                response=text_response,
+                suggested_code=suggested_code,
+                history=updated_history,
+                usage=usage,
+                rag=retrieved_knowledge,
+                application_status=application_status
+            )
 
     def parse_and_apply_edits(self, response: str, content: str, original_code: Optional[str] = None) -> tuple[str, Optional[str], Optional[Dict[str, Any]]]:
         """Parse JSON response and apply code edits to original code."""
@@ -215,12 +237,15 @@ class AnthropicClient:
             logger.info(f"attempting this edit: old code: {old_code}\nnew code: {new_code}")
             
             if not old_code or new_code is None:
+                sentry_sdk.capture_message("Code edit failed: missing required fields", level="warning")
                 return self.handle_replace_error(content, text_answer, code, edit, "Replace action requires old_code and new_code")
             
             if old_code not in code:
+                sentry_sdk.capture_message("Code edit failed: old_code not found", level="warning")
                 return self.handle_replace_error(content, text_answer, code, edit, "old_code not found in current code")
             
             if code.count(old_code) > 1:
+                sentry_sdk.capture_message("Code edit failed: multiple matches", level="warning")
                 return self.handle_replace_error(content, text_answer, code, edit, "old_code matches multiple locations")
             
             return code.replace(old_code, new_code), True, None
@@ -246,7 +271,12 @@ class AnthropicClient:
             content=content, error_message=error_message, old_code=old_code, 
             new_code=new_code, full_code=code, text_explanation=text_answer
         )
-        warning = error_message + (f". {correction_warning}" if correction_warning else "")
+
+        warning = "Initial error: " + error_message + (f". Correction warning: {correction_warning}" if correction_warning else "")
+
+        if not success:
+            sentry_sdk.capture_message(warning, level="error")
+
         return (corrected_code, success, warning)
         
     def try_error_correction(self, content: str, error_message: str, old_code: str, new_code: str, full_code: str, text_explanation: str) -> tuple[str, bool, Optional[str]]:
@@ -284,7 +314,7 @@ class AnthropicClient:
                     logger.warning(warning)
                 logger.info("Successfully applied corrected edit")
                 return full_code.replace(corrected_old, corrected_new, 1), True, warning
-    
+
         except Exception as e:
             warning = f"Error correction failed: {e}"
             logger.warning(warning)
@@ -313,6 +343,10 @@ def main(data_dict: dict) -> dict:
     Main entry point with improved error handling and input validation.
     """
     try:
+        sentry_sdk.set_context("request_data", {
+            k: v for k, v in data_dict.items() if k != "api_key"
+            })
+
         data = Payload.from_dict(data_dict)
 
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
@@ -340,9 +374,11 @@ def main(data_dict: dict) -> dict:
         return response_dict
 
     except ValueError as e:
+        sentry_sdk.capture_exception(e)
         raise ApolloError(400, str(e), type="BAD_REQUEST")
 
     except APIConnectionError as e:
+        sentry_sdk.capture_exception(e)
         raise ApolloError(
             503,
             "Unable to reach the Anthropic AI Service",
@@ -350,21 +386,29 @@ def main(data_dict: dict) -> dict:
             details={"cause": str(e.__cause__)},
         )
     except AuthenticationError as e:
+        sentry_sdk.capture_exception(e)
         raise ApolloError(401, "Authentication failed", type="AUTH_ERROR")
     except RateLimitError as e:
+        sentry_sdk.capture_exception(e)
         raise ApolloError(
             429, "Rate limit exceeded, please try again later", type="RATE_LIMIT", details={"retry_after": 60}
         )
     except BadRequestError as e:
+        sentry_sdk.capture_exception(e)
         raise ApolloError(400, str(e), type="BAD_REQUEST")
     except PermissionDeniedError as e:
+        sentry_sdk.capture_exception(e)
         raise ApolloError(403, "Not authorized to perform this action", type="FORBIDDEN")
     except NotFoundError as e:
+        sentry_sdk.capture_exception(e)
         raise ApolloError(404, "Resource not found", type="NOT_FOUND")
     except UnprocessableEntityError as e:
+        sentry_sdk.capture_exception(e)
         raise ApolloError(422, str(e), type="INVALID_REQUEST")
     except InternalServerError as e:
+        sentry_sdk.capture_exception(e)
         raise ApolloError(500, "The Anthropic AI Service encountered an error", type="PROVIDER_ERROR")
     except Exception as e:
+        sentry_sdk.capture_exception(e)
         logger.error(f"Unexpected error during chat generation: {str(e)}")
         raise ApolloError(500, str(e))
