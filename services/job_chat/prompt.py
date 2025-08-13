@@ -264,6 +264,10 @@ def generate_system_message(context_dict, search_results):
             adaptor_string += (
                 f"The user is using an OpenFn Adaptor to write the job."
             )
+        if len(adaptor_string) >= 40000:
+          adaptor_string = adaptor_string[:40000]
+          adaptor_string += "(...)"
+          
         adaptor_string += "</adaptor>"
 
         message.append(adaptor_string)
