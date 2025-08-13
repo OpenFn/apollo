@@ -44,7 +44,7 @@ def call_job_chat_service(service_input: Dict[str, Any]) -> Dict[str, Any]:
             pass
 
 
-def make_service_input(history=None, content=None, context=None, meta=None, api_key=None, use_new_prompt=None):
+def make_service_input(history=None, content=None, context=None, meta=None, api_key=None, suggest_code=None):
     """
     Create a properly formatted input payload for the job_chat service.
     
@@ -54,7 +54,7 @@ def make_service_input(history=None, content=None, context=None, meta=None, api_
         context: Context object containing expression, adaptor, input, output, log
         meta: Additional metadata
         api_key: Optional API key for the model
-        use_new_prompt: Boolean flag to indicate whether to use new prompt format
+        suggest_code: Boolean flag to indicate whether to use new prompt format
         
     Returns:
         A dictionary ready to be sent to the job_chat service
@@ -75,8 +75,8 @@ def make_service_input(history=None, content=None, context=None, meta=None, api_
     if api_key is not None:
         service_input["api_key"] = api_key
         
-    if use_new_prompt is not None:
-        service_input["use_new_prompt"] = use_new_prompt
+    if suggest_code is not None:
+        service_input["suggest_code"] = suggest_code
         
     return service_input
 

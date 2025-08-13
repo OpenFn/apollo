@@ -47,7 +47,7 @@ pytest test_pass_fail.py::test_rename_variable -v -s
 
 ## Key Testing Parameters
 
-- **use_new_prompt:** When set to `True`, tests the new structured response format with separate `suggested_code` field. When `False`, tests the original format with code embedded in the response text.
+- **suggest_code:** When set to `True`, tests the new structured response format with separate `suggested_code` field. When `False`, tests the original format with code embedded in the response text.
 - **context fields:** Tests verify that the service can access and utilize all context fields (expression, input, output, log, etc.)
 - **duplicate sections:** Tests ensure that the service can correctly identify and modify specific sections in code with multiple similar patterns.
 

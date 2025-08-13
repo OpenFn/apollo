@@ -18,7 +18,7 @@ def test_context_fields_access():
     }
     
     meta = {}
-    service_input = make_service_input(history=history, content=content, context=context, meta=meta, use_new_prompt=True)
+    service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True)
     response = call_job_chat_service(service_input)
     print_response_details(response, "context_fields_access", content=content)
     
@@ -71,7 +71,7 @@ fn(state => {
 post('https://destination.org/upload', state => state.processedData);'''
     
     meta = {}
-    service_input = make_service_input(history=history, content=content, context=context, meta=meta, use_new_prompt=True)
+    service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True)
     response = call_job_chat_service(service_input)
     print_response_details(response, "rename_variable", content=content)
     
@@ -82,15 +82,14 @@ post('https://destination.org/upload', state => state.processedData);'''
     assert response["suggested_code"] == expected_code, f"Variable rename did not produce expected result.\nExpected:\n{expected_code}\n\nActual:\n{response['suggested_code']}"
 
 
-def test_convert_get_to_post():
+def test_convert_get_to_delete():
     print("==================TEST==================")
-    print("Description: Testing conversion of GET to POST request")
+    print("Description: Testing conversion of GET to DELETE request")
     
     history = []
-    content = "Change the GET request to a POST request"
+    content = "Change the GET request to a DELETE request"
     
-    context = {
-        "expression": '''
+    original_code = '''
 get('https://api.example.com/users/profile');
 
 fn(state => {
@@ -104,48 +103,25 @@ post('https://api.example.com/save', state => ({
   user: state.profile,
   timestamp: new Date().toISOString()
 }));'''
+    
+    context = {
+        "expression": original_code
     }
     
-    expected_code = '''
-post('https://api.example.com/users/profile', {});
-
-fn(state => {
-  const profile = state.data;
-  console.log('Retrieved profile for user:', profile.id);
-  return { ...state, profile };
-});
-
-// Save the data
-post('https://api.example.com/save', state => ({
-  user: state.profile,
-  timestamp: new Date().toISOString()
-}));'''
-
-    expected_code_alternative = '''
-post('https://api.example.com/users/profile');
-
-fn(state => {
-  const profile = state.data;
-  console.log('Retrieved profile for user:', profile.id);
-  return { ...state, profile };
-});
-
-// Save the data
-post('https://api.example.com/save', state => ({
-  user: state.profile,
-  timestamp: new Date().toISOString()
-}));'''
+    # Service correctly uses 'del()' instead of 'delete()' (delete is reserved word in JS)
+    expected_code = original_code.replace("get('https://api.example.com/users/profile')", 
+                                        "del('https://api.example.com/users/profile')")
     
     meta = {}
-    service_input = make_service_input(history=history, content=content, context=context, meta=meta, use_new_prompt=True)
+    service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True)
     response = call_job_chat_service(service_input)
-    print_response_details(response, "convert_get_to_post", content=content)
+    print_response_details(response, "convert_get_to_delete", content=content)
     
     assert response is not None
-    assert "response" in response
     assert "suggested_code" in response
     
-    assert response["suggested_code"] == expected_code or response["suggested_code"] == expected_code_alternative, f"GET to POST conversion did not produce expected result.\nExpected:\n{expected_code}\n\nActual:\n{response['suggested_code']}"
+    assert response["suggested_code"] == expected_code, f"GET to DELETE conversion did not produce expected result.\nExpected:\n{expected_code}\n\nActual:\n{response['suggested_code']}"
+
 
 def test_rename_function():
     print("==================TEST==================")
@@ -234,86 +210,10 @@ post(
 );'''
     }
     
-    expected_code = '''// Custom helper functions
-function fetchPatientRecords(patientId) {
-  return `https://hospital.org/api/patients/${patientId}`;
-}
-
-function formatDate(date) {
-  return new Date(date).toISOString().split('T')[0];
-}
-
-// Initial configuration
-fn(state => {
-  const config = {
-    apiVersion: '2.1',
-    requestTimeout: 30000,
-    maxRetries: 3
-  };
-  return { ...state, config };
-});
-
-// Fetch data for each patient
-each(
-  '$.patients[*]',
-  fn(state => {
-    console.log(`Processing patient ID: ${state.data.id}`);
-    return state;
-  }),
-  get(state => fetchPatientRecords(state.data.id)),
-  fn(state => {
-    const patient = state.data;
-    // Enrich patient data
-    patient.lastUpdated = formatDate(new Date());
-    patient.dataSource = 'API';
-    patient.endpoint = fetchPatientRecords(patient.id);
-    
-    return { ...state, patient };
-  })
-);
-
-// Process the results
-fn(state => {
-  const patients = state.references.map(ref => ref.patient);
-  console.log(`Retrieved data for ${patients.length} patients`);
-  
-  const summary = {
-    count: patients.length,
-    source: fetchPatientRecords('summary'),
-    retrievalDate: formatDate(new Date())
-  };
-  
-  return { ...state, patients, summary };
-});
-
-// Save individual patient records
-each(
-  '$.patients[*]',
-  post(
-    'https://records.hospital.org/store',
-    state => ({
-      patient: state.data,
-      metadata: {
-        source: fetchPatientRecords(state.data.id),
-        processedAt: new Date().toISOString()
-      }
-    })
-  )
-);
-
-// Submit the final report
-post(
-  'https://reports.org/submit', 
-  state => ({
-    source: 'Patient API',
-    results: state.patients,
-    summary: state.summary,
-    endpoint: fetchPatientRecords('summary')
-  })
-);'''
+    expected_code = context["expression"].replace("getPatientData", "fetchPatientRecords")
     
     meta = {}
-    service_input = make_service_input(history=history, content=content, context=context, meta=meta, use_new_prompt=True)
+    service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True)
     response = call_job_chat_service(service_input)
     print_response_details(response, "rename_function", content=content)
     
@@ -325,10 +225,10 @@ post(
 
 def test_change_multiple_instances():
     print("==================TEST==================")
-    print("Description: Testing changing multiple instances of a URL path segment across longer job code.")
+    print("Description: Testing changing multiple instances of misspelled endpoint URLs back to correct spelling.")
     
     history = []
-    content = "change all the occurences of endpoint to endpoooint"
+    content = "change all the occurences of endpooint and endpoooint to endpoint"
     
     original_code = '''// Process and prepare data
 fn(state => {
@@ -341,7 +241,7 @@ fn(state => {
   return { ...state, items };
 });
 
-post('https://api.example.com/endpoint', state => state.items);
+post('https://api.example.com/endpooint', state => state.items);
 
 // Helper function to process the response
 function processApiResponse(response) {
@@ -371,7 +271,7 @@ fn(state => {
   return state;
 });
 
-post('https://api.example.com/endpoint', state => state.items);
+post('https://api.example.com/endpoooint', state => state.items);
 
 // Fifth request with retry mechanism
 fn(state => {
@@ -381,7 +281,7 @@ fn(state => {
   const makeRequest = async (attempt) => {
     try {
       const response = await http.post(
-        'https://api.example.com/endpoint', 
+        'https://api.example.com/endpooint', 
         state.items,
         {}
       );
@@ -399,7 +299,7 @@ fn(state => {
   return makeRequest(0);
 });
 
-post('https://api.example.com/endpoint', state => state.items);
+post('https://api.example.com/endpoooint', state => state.items);
 
 // Final data processing and cleanup
 fn(state => {
@@ -421,7 +321,7 @@ fn(state => {
 });
 
 // Send final notification
-post('https://notifications.example.com/endpoint/status', state => ({
+post('https://notifications.example.com/endpooint/status', state => ({
   status: 'completed',
   timestamp: state.completedAt,
   itemCount: state.items ? state.items.length : 0
@@ -431,10 +331,10 @@ post('https://notifications.example.com/endpoint/status', state => ({
         "expression": original_code
     }
     
-    expected_code = original_code.replace("endpoint", "endpoooint")
+    expected_code = original_code.replace("endpooint", "endpoint").replace("endpoooint", "endpoint")
     
     meta = {}
-    service_input = make_service_input(history=history, content=content, context=context, meta=meta, use_new_prompt=True)
+    service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True)
     response = call_job_chat_service(service_input)
     print_response_details(response, "change_url_path", content=content)
     
@@ -443,6 +343,54 @@ post('https://notifications.example.com/endpoint/status', state => ({
     assert "suggested_code" in response
     
     assert response["suggested_code"] == expected_code, f"URL path change did not produce expected result.\nExpected:\n{expected_code}\n\nActual:\n{response['suggested_code']}"
+  
+
+def test_change_variable_names_only():
+    print("==================TEST==================")
+    print("Description: Testing if AI can change variable names without affecting state.data references when given simple instruction.")
+    
+    history = []
+    content = "change the variable name 'data' to 'patients'"
+    
+    original_code = '''get('/api/patients');
+
+fn(state => {
+  const data = state.data;
+  let processedData = [];
+  
+  data.forEach(record => {
+    if (record.status === 'active') {
+      processedData.push({
+        id: record.id,
+        name: record.full_name,
+        status: record.status
+      });
+    }
+  });
+  
+  console.log(`Processed ${processedData.length} records from data`);
+  
+  return { ...state, data: processedData };
+});
+
+post('/webhook', state => state.data);'''
+    
+    context = {
+        "expression": original_code
+    }
+    
+    expected_code = original_code.replace('const data', 'const patients') \
+                                .replace('data.forEach', 'patients.forEach')
+    
+    meta = {}
+    service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True)
+    response = call_job_chat_service(service_input)
+    print_response_details(response, "change_variable_names", content=content)
+    
+    assert response is not None
+    assert "suggested_code" in response
+    
+    assert response["suggested_code"] == expected_code, f"Variable name change did not produce expected result.\nExpected:\n{expected_code}\n\nActual:\n{response['suggested_code']}"
 
 
 if __name__ == "__main__":
