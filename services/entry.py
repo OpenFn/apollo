@@ -1,12 +1,30 @@
 import sys
+import os
 import json
 import uuid
 import argparse
 from dotenv import load_dotenv
+import sentry_sdk
 from util import set_apollo_port, ApolloError
 
 load_dotenv()
 
+env = os.getenv('ENVIRONMENT', 'unknown')
+trace_rates = {
+    'development': 1,
+    'staging': 0.05, 
+    'production': 0.03,
+    'unknown': 0.0,
+    }
+
+sentry_sdk.init(
+    dsn=os.getenv('SENTRY_DSN'),
+    environment=env,
+    sample_rate=1.0,
+    traces_sample_rate=trace_rates.get(env, 0.0),
+    enable_tracing=True,
+    auto_enabling_integrations=False
+)
 
 def call(
     service: str, *, input_path: str | None = None, output_path: str | None = None, apollo_port: int | None = None
@@ -31,18 +49,22 @@ def call(
             with open(input_path, "r") as f:
                 data = json.load(f)
         except FileNotFoundError:
+            sentry_sdk.capture_exception(e)
             return ApolloError(code=500, message=f"Input file not found: {input_path}", type="INTERNAL_ERROR").to_dict()
         except json.JSONDecodeError:
+            sentry_sdk.capture_exception(e)
             return ApolloError(code=500, message="Invalid JSON input", type="INTERNAL_ERROR").to_dict()
 
     try:
         m = __import__(module_name, fromlist=["main"])
         result = m.main(data)
     except ModuleNotFoundError as e:
+        sentry_sdk.capture_exception(e)
         return ApolloError(code=500, message=str(e), type="INTERNAL_ERROR").to_dict()
     except ApolloError as e:
         result = e.to_dict()
     except Exception as e:
+        sentry_sdk.capture_exception(e)
         result = ApolloError(code=500, message=str(e), type="INTERNAL_ERROR").to_dict()
 
     if output_path:
@@ -64,6 +86,8 @@ def main():
     parser.add_argument("--port", "-p", type=int, help="Apollo server port number")
 
     args = parser.parse_args()
+
+    sentry_sdk.set_tag("service", args.service)
 
     if not args.output:
         id = uuid.uuid4()

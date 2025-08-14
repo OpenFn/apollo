@@ -17,6 +17,7 @@ from anthropic import (
     RateLimitError,
     InternalServerError,
 )
+import sentry_sdk
 from util import ApolloError, create_logger
 from .gen_project_prompt import build_prompt
 from workflow_chat.available_adaptors import get_available_adaptors
@@ -83,73 +84,78 @@ class AnthropicClient:
         history: Optional[List[Dict[str, str]]] = None,
     ) -> ChatResponse:
         """Generate a response using the Claude API. Retry up to 2 times if YAML/JSON parsing fails."""
-        history = history.copy() if history else []
         
-        # Extract and preserve existing components
-        preserved_values = {}
-        processed_existing_yaml = existing_yaml
-        
-        if existing_yaml and existing_yaml.strip():
-            try:
-                yaml_data = yaml.safe_load(existing_yaml)
-                preserved_values, processed_existing_yaml = self.extract_and_preserve_components(yaml_data)
-            except Exception as e:
-                logger.warning(f"Could not parse existing YAML for component extraction: {e}")
-        
-        system_message, prompt = build_prompt(
-            content=content, 
-            existing_yaml=processed_existing_yaml, 
-            errors=errors, 
-            history=history
-        )
-
-        accumulated_usage = {
-            "cache_creation_input_tokens": 0,
-            "cache_read_input_tokens": 0,
-            "input_tokens": 0,
-            "output_tokens": 0,
-        }
-
-        max_retries = 1
-        for attempt in range(max_retries + 1):
-            message = self.client.messages.create(
-                max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
-            )
-
-            # Track usage from this attempt
-            if hasattr(message, "usage"):
-                usage = message.usage.model_dump()
-                for key in accumulated_usage:
-                    if key in usage:
-                        accumulated_usage[key] += usage[key]
-
-            response_parts = []
-            for content_block in message.content:
-                if content_block.type == "text":
-                    response_parts.append(content_block.text)
-                else:
-                    logger.warning(f"Unhandled content type: {content_block.type}")
-
-            response = "\n\n".join(response_parts)
-            response_text, response_yaml = self.split_format_yaml(response, preserved_values)
-
-
-            # If YAML parsing succeeded or we're on the last attempt, return the result
-            if response_yaml is not None or attempt == max_retries:
-                updated_history = history + [
-                    {"role": "user", "content": content},
-                    {"role": "assistant", "content": response},
-                ]
-
-                return ChatResponse(
-                    content=response_text,
-                    content_yaml=response_yaml or None,
-                    history=updated_history,
-                    usage=accumulated_usage,
+        with sentry_sdk.start_transaction(name="workflow_generation") as transaction:
+            history = history.copy() if history else []
+            
+            # Extract and preserve existing components
+            preserved_values = {}
+            processed_existing_yaml = existing_yaml
+            
+            if existing_yaml and existing_yaml.strip():
+                try:
+                    yaml_data = yaml.safe_load(existing_yaml)
+                    preserved_values, processed_existing_yaml = self.extract_and_preserve_components(yaml_data)
+                except Exception as e:
+                    logger.warning(f"Could not parse existing YAML for component extraction: {e}")
+            
+            with sentry_sdk.start_span(description="build_prompt"):
+                system_message, prompt = build_prompt(
+                    content=content, 
+                    existing_yaml=processed_existing_yaml, 
+                    errors=errors, 
+                    history=history
                 )
 
-            # Otherwise, log and retry
-            logger.warning(f"YAML parsing failed, retrying generation (attempt {attempt+1}/{max_retries})")
+            accumulated_usage = {
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+            }
+
+            max_retries = 1
+            for attempt in range(max_retries + 1):
+                with sentry_sdk.start_span(description="anthropic_api_call"):
+                    message = self.client.messages.create(
+                        max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
+                    )
+
+                # Track usage from this attempt
+                if hasattr(message, "usage"):
+                    usage = message.usage.model_dump()
+                    for key in accumulated_usage:
+                        if key in usage:
+                            accumulated_usage[key] += usage[key]
+
+                response_parts = []
+                for content_block in message.content:
+                    if content_block.type == "text":
+                        response_parts.append(content_block.text)
+                    else:
+                        logger.warning(f"Unhandled content type: {content_block.type}")
+
+                response = "\n\n".join(response_parts)
+
+                with sentry_sdk.start_span(description="parse_and_format_yaml"):
+                    response_text, response_yaml = self.split_format_yaml(response, preserved_values)
+
+                # If YAML parsing succeeded or we're on the last attempt, return the result
+                if response_yaml is not None or attempt == max_retries:
+                    updated_history = history + [
+                        {"role": "user", "content": content},
+                        {"role": "assistant", "content": response},
+                    ]
+
+                    return ChatResponse(
+                        content=response_text,
+                        content_yaml=response_yaml or None,
+                        history=updated_history,
+                        usage=accumulated_usage,
+                    )
+
+                # Otherwise, log and retry
+                logger.warning(f"YAML parsing failed, retrying generation (attempt {attempt+1}/{max_retries})")
 
     def sanitize_job_names(self, yaml_data):
         """Sanitize job names by removing special characters and normalizing diacritics."""
@@ -185,9 +191,12 @@ class AnthropicClient:
                 # Parse YAML string into Python object
                 output_yaml = yaml.safe_load(output_yaml)
 
-                self.validate_adaptors(output_yaml)
-                self.sanitize_job_names(output_yaml)
-                self.restore_components(output_yaml, preserved_values)
+                with sentry_sdk.start_span(description="validate_adaptors"):
+                    self.validate_adaptors(output_yaml)
+                with sentry_sdk.start_span(description="sanitize_job_names"):
+                    self.sanitize_job_names(output_yaml)
+                with sentry_sdk.start_span(description="restore_components"):
+                    self.restore_components(output_yaml, preserved_values)
                 # Convert back to YAML string with preserved order
                 output_yaml = yaml.dump(output_yaml, sort_keys=False)
             else:
@@ -286,7 +295,9 @@ class AnthropicClient:
                     if isinstance(current_id, str) and current_id in preserved_values:
                         job_data["id"] = preserved_values[current_id]
                     elif isinstance(current_id, str) and current_id.startswith("{") and current_id.endswith("}"):
-                        logger.warning(f"Unknown placeholder {current_id}, generating new ID")
+                        msg = f"Unknown placeholder {current_id}, generating new ID"
+                        logger.warning(msg)
+                        sentry_sdk.capture_message(msg, level="warning")
                         job_data["id"] = str(uuid.uuid4())
                 else:
                     job_data["id"] = str(uuid.uuid4())
@@ -308,7 +319,9 @@ class AnthropicClient:
                     if isinstance(current_id, str) and current_id in preserved_values:
                         edge_data["id"] = preserved_values[current_id]
                     elif isinstance(current_id, str) and current_id.startswith("{") and current_id.endswith("}"):
-                        logger.warning(f"Unknown placeholder {current_id}, generating new ID")
+                        msg = f"Unknown placeholder {current_id}, generating new ID"
+                        logger.warning(msg)
+                        sentry_sdk.capture_message(msg, level="warning")
                         edge_data["id"] = str(uuid.uuid4())
                 else:
                     edge_data["id"] = str(uuid.uuid4())
@@ -319,8 +332,11 @@ def main(data_dict: dict) -> dict:
     Main entry point with improved error handling and input validation.
     """
     try:
+        sentry_sdk.set_context("request_data", {
+            k: v for k, v in data_dict.items() if k != "api_key"
+            })
+        
         data = Payload.from_dict(data_dict)
-
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
 

@@ -1,6 +1,7 @@
 import os
 import json
 import anthropic
+import sentry_sdk
 from search_docsite.search_docsite import DocsiteSearch
 from .rag_config_loader import ConfigLoader
 
@@ -37,39 +38,43 @@ def retrieve_knowledge(content, history, code="", adaptor="", api_key=None):
         :config_version: Version of the configuration used
         :prompts_version: Version of the prompts used
     """
-    client = get_client(api_key)
+    with sentry_sdk.start_span(description="retrieve_knowledge"):
+        client = get_client(api_key)
 
-    user_context = format_context(adaptor, code, history)
-    docs_decision, needs_docs_usage = needs_docs(content, client, user_context)
+        user_context = format_context(adaptor, code, history)
+        with sentry_sdk.start_span(description="needs_docs_decision"):
+            docs_decision, needs_docs_usage = needs_docs(content, client, user_context)
 
-    search_results = []
-    search_results_sections = []
-    search_queries = []
-    generate_queries_usage = {}
+        search_results = []
+        search_results_sections = []
+        search_queries = []
+        generate_queries_usage = {}
 
-    if docs_decision.lower().startswith("true"):
-        search_queries, generate_queries_usage = generate_queries(content, client, user_context)
-        search_results = search_docs(
-            search_queries, 
-            top_k=config["top_k"], 
-            threshold=config["threshold"]
-        )
-        search_results = list(set(search_results))
-        search_results_sections = list(set(result.metadata["doc_title"] for result in search_results))
-    
-    results = {
-        "search_results": [s.to_json() for s in search_results],
-        "search_results_sections": search_results_sections,
-        "search_queries": search_queries,
-        "config_version": config.get("config_version"),
-        "prompts_version": config.get("prompts_version"),
-        "usage": {
-            "needs_docs": needs_docs_usage,
-            "generate_queries": generate_queries_usage
+        if docs_decision.lower().startswith("true"):
+            with sentry_sdk.start_span(description="generate_search_queries"):
+                search_queries, generate_queries_usage = generate_queries(content, client, user_context)
+            with sentry_sdk.start_span(description="search_documentation"):
+                search_results = search_docs(
+                    search_queries, 
+                    top_k=config["top_k"], 
+                    threshold=config["threshold"]
+                )
+                search_results = list(set(search_results))
+                search_results_sections = list(set(result.metadata["doc_title"] for result in search_results))
+        
+        results = {
+            "search_results": [s.to_json() for s in search_results],
+            "search_results_sections": search_results_sections,
+            "search_queries": search_queries,
+            "config_version": config.get("config_version"),
+            "prompts_version": config.get("prompts_version"),
+            "usage": {
+                "needs_docs": needs_docs_usage,
+                "generate_queries": generate_queries_usage
+            }
         }
-    }
-    
-    return results
+        
+        return results
 
 def needs_docs(content, client, user_context=""):
     """Use LLM to decide whether the question requires consulting documentation."""
