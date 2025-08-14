@@ -20,24 +20,6 @@ from .old_prompt import build_old_prompt
 
 logger = create_logger("job_chat")
 
-env = os.getenv('ENVIRONMENT', 'unknown')
-trace_rates = {
-    'development': 1,
-    'staging': 0.05, 
-    'production': 0.03,
-    'unknown': 0.0,
-    }
-
-sentry_sdk.init(
-    dsn=os.getenv('SENTRY_DSN'),
-    environment=env,
-    sample_rate=1.0,
-    traces_sample_rate=trace_rates.get(env, 0.0),
-    enable_tracing=True,
-    auto_enabling_integrations=False
-)
-
-
 @dataclass
 class Payload:
     """
@@ -382,11 +364,9 @@ def main(data_dict: dict) -> dict:
         return response_dict
 
     except ValueError as e:
-        sentry_sdk.capture_exception(e)
         raise ApolloError(400, str(e), type="BAD_REQUEST")
 
     except APIConnectionError as e:
-        sentry_sdk.capture_exception(e)
         raise ApolloError(
             503,
             "Unable to reach the Anthropic AI Service",
@@ -394,29 +374,21 @@ def main(data_dict: dict) -> dict:
             details={"cause": str(e.__cause__)},
         )
     except AuthenticationError as e:
-        sentry_sdk.capture_exception(e)
         raise ApolloError(401, "Authentication failed", type="AUTH_ERROR")
     except RateLimitError as e:
-        sentry_sdk.capture_exception(e)
         raise ApolloError(
             429, "Rate limit exceeded, please try again later", type="RATE_LIMIT", details={"retry_after": 60}
         )
     except BadRequestError as e:
-        sentry_sdk.capture_exception(e)
         raise ApolloError(400, str(e), type="BAD_REQUEST")
     except PermissionDeniedError as e:
-        sentry_sdk.capture_exception(e)
         raise ApolloError(403, "Not authorized to perform this action", type="FORBIDDEN")
     except NotFoundError as e:
-        sentry_sdk.capture_exception(e)
         raise ApolloError(404, "Resource not found", type="NOT_FOUND")
     except UnprocessableEntityError as e:
-        sentry_sdk.capture_exception(e)
         raise ApolloError(422, str(e), type="INVALID_REQUEST")
     except InternalServerError as e:
-        sentry_sdk.capture_exception(e)
         raise ApolloError(500, "The Anthropic AI Service encountered an error", type="PROVIDER_ERROR")
     except Exception as e:
-        sentry_sdk.capture_exception(e)
         logger.error(f"Unexpected error during chat generation: {str(e)}")
         raise ApolloError(500, str(e))
