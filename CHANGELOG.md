@@ -1,5 +1,11 @@
 # apollo
 
+## 0.14.0
+
+### Minor Changes
+
+- d4ffb0a: job_chat: add suggested_code
+
 ## 0.13.3
 
 ### Patch Changes
