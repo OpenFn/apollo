@@ -18,7 +18,7 @@ Here is a minimal payload with a user question and no history:
 {
   "content": "how do I insert a new sobject record?",
   "context": {
-    "expression": "// write your job code here",
+    "expression": "// write your job code here"
   }
 }
 ```
@@ -70,14 +70,14 @@ The input payload is a JSON object with the following structure
 {
   "content": "how do I insert a new sobject record?",
   "history": [
-    {"role": "user", "content": "How do I use Salesforce?"},
-    {"role": "assistant", "content": "Salesforce provides many operations..."}
+    { "role": "user", "content": "How do I use Salesforce?" },
+    { "role": "assistant", "content": "Salesforce provides many operations..." }
   ],
   "context": {
     "expression": "// write your job code here",
     "adaptor": "@openfn/language-salesforce@4.6.10",
-    "input": {"data": {"field1": "value1"}},
-    "output": {"previous": "output"},
+    "input": { "data": { "field1": "value1" } },
+    "output": { "previous": "output" },
     "log": "execution log text"
   },
   "meta": {
@@ -98,12 +98,17 @@ The server returns the following JSON response:
 ```json
 {
   "response": "To insert a new sobject record in Salesforce, you can use the create operation...",
-  "suggested_code": "create('Account', {\n  Name: 'Test Account',\n  Industry: 'Technology'\n});",
   "history": [
-    {"role": "user", "content": "How do I use Salesforce?"},
-    {"role": "assistant", "content": "Salesforce provides many operations..."},
-    {"role": "user", "content": "how do I insert a new sobject record?"},
-    {"role": "assistant", "content": "To insert a new sobject record in Salesforce, you can use the create operation..."}
+    { "role": "user", "content": "How do I use Salesforce?" },
+    {
+      "role": "assistant",
+      "content": "Salesforce provides many operations..."
+    },
+    { "role": "user", "content": "how do I insert a new sobject record?" },
+    {
+      "role": "assistant",
+      "content": "To insert a new sobject record in Salesforce, you can use the create operation..."
+    }
   ],
   "usage": {
     "input_tokens": 526,
@@ -121,28 +126,58 @@ The server returns the following JSON response:
 }
 ```
 
-## Backwards Compatibility
+## Code Suggestions
 
-For backwards compatibility, the service supports an optional `suggest_code` flag. This allows existing integrations to maintain their current behavior while new integrations can use the improved prompt format.
+Instead of having the model reply with in-line code snippets, the service can
+return an entire new job expression in the response. This is expected to drive a
+much better user experience with the assistant.
+
+This uses a patching system internally to apply code suggestions form the model
+into the user's expression.
+
+The response includes a `suggested_code` key, as well as a `diff` key which
+provides diagnostic information about the patch.
 
 ```json
 {
-  "content": "how do I insert a new sobject record?", 
-  "context": { 
-    "expression": "// write your job code here", 
-  }, 
-  "suggest_code": false 
+  "response": "To insert a new sobject record in Salesforce, you can use the create operation...",
+  "suggested_code": "create('Account', {\n  Name: 'Test Account',\n  Industry: 'Technology'\n});",
+  "diff": {
+    "patches_applied": 1,
+    "warning": "failed to apply edit"
+  },
+  "history": [...],
+  "usage": { ... },
+  "meta": {... }
 }
 ```
 
-When `suggest_code` is `false` (or omitted), the service uses the original prompt format where:
-- Code suggestions are embedded directly within the `response` text as markdown code blocks
+To use this new approach, include `suggest_code` in the request payload:
+
+```json
+{
+  "content": "how do I insert a new sobject record?",
+  "context": {
+    "expression": "// write your job code here"
+  },
+  "suggest_code": false
+}
+```
+
+For backwards compatibility, this functionality is disabled by default.
+
+When `suggest_code` is `false` (or omitted), the service uses the original
+prompt format where:
+
+- Code suggestions are embedded directly within the `response` text as markdown
+  code blocks
 - The `suggested_code` field will not be included in the response
 - The `application_status` field will not be included in the response
 
 When `suggest_code` is `true`, the service uses the new structured format where:
-- Edited job code is separated into a dedicated `suggested_code` field
-- The `response` field contains explanatory text and code blocks (e.g. example code that might not relate to the current job code)
-- When code edits are applied, an additional `application_status` field may be included with details about the code edit application
 
-This maintains compatibility with existing integrations that expect code to be embedded in the response text rather than in a separate field, as the service originally functioned.
+- Edited job code is separated into a dedicated `suggested_code` field
+- The `response` field contains explanatory text and code blocks (e.g. example
+  code that might not relate to the current job code)
+- When code edits are applied, an additional `application_status` field may be
+  included with details about the code edit application
