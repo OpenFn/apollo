@@ -63,6 +63,7 @@ cover/
 
 # Environment variables file
 .env
+.env*
 
 # Cache files
 .cache/
