@@ -1,5 +1,11 @@
 # apollo
 
+## 0.14.1
+
+### Patch Changes
+
+- 4cb99d1: add sentry-sdk dependency (fixes an error when calling job chat)
+
 ## 0.14.0
 
 ### Minor Changes
