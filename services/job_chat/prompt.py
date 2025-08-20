@@ -1,6 +1,8 @@
 import json
 from util import create_logger, apollo
 from .retrieve_docs import retrieve_knowledge
+from describe_adaptor_py.describe_adaptor_py import describe_package
+import time
 
 logger = create_logger("job_chat.prompt")
 
@@ -255,10 +257,15 @@ def generate_system_message(context_dict, search_results):
         )
 
         try:
-            adaptor_docs = apollo("describe_adaptor", {"adaptor": context.adaptor})
+            start_time = time.time()
+            # adaptor_docs = apollo("describe_adaptor", {"adaptor": context.adaptor})
+            adaptor_docs = describe_package(context.adaptor)
             for doc in adaptor_docs:
                 adaptor_string += f"Typescript definitions for doc {doc}"
                 adaptor_string += adaptor_docs[doc]["description"]
+            end_time = time.time()
+            execution_time = end_time - start_time
+            logger.warning(f"TIMER TIME: {execution_time}")
         except Exception as e:
             logger.warning(f"Could not fetch adaptor docs for {context.adaptor}: {e}")
             adaptor_string += (
