@@ -5,55 +5,21 @@ import re
 import sentry_sdk
 import os
 import time
-from typing import Dict, List, AsyncGenerator, Optional, Any, Tuple
-from dataclasses import dataclass
+from typing import Dict, List, Optional, Any, Tuple
 from util import ApolloError, create_logger
 
 logger = create_logger("describe_adaptor_direct")
 
-# Cache configuration
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
 CACHE_TTL = 43200  # 12 hours in seconds
-
-@dataclass
-class Payload:
-    """
-    Data class for validating and storing input parameters.
-    Required fields will raise TypeError if not provided.
-    """
-    adaptor: str
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Payload":
-        """
-        Create a Payload instance from a dictionary, validating required fields.
-        """
-        if "adaptor" not in data:
-            raise ValueError("'adaptor' is required")
-
-        return cls(adaptor=data["adaptor"])
-
-
-def get_name_and_version(specifier: str) -> Dict[str, Optional[str]]:
-    """Parse package specifier like '@openfn/language-http@3.1.11'"""
-    at_index = specifier.rfind("@")
-    if at_index > 0:
-        name = specifier[:at_index]
-        version = specifier[at_index + 1:]
-    else:
-        name = specifier
-        version = None
-    
-    return {"name": name, "version": version}
 
 
 def get_cache_path(specifier: str) -> str:
     """Get the path to the cache file for the given adaptor specifier"""
-    parsed = get_name_and_version(specifier)
-    name = parsed['name'].replace('/', '_')
-    version = parsed['version'] or 'latest'
+    name, version = specifier.rsplit('@', 1) if '@' in specifier else (specifier, None)
+    name = name.replace('/', '_')
+    version = version or 'latest'
     
-    # Create cache directory if it doesn't exist
     os.makedirs(CACHE_DIR, exist_ok=True)
     
     return os.path.join(CACHE_DIR, f"{name}_{version}.json")
@@ -94,7 +60,6 @@ async def write_to_cache(specifier: str, data: Dict[str, Any]) -> None:
     cache_path = get_cache_path(specifier)
     
     try:
-        # Add metadata with timestamp
         cache_data = data.copy()
         cache_data['_meta'] = {
             'timestamp': time.time(),
@@ -159,16 +124,13 @@ async def fetch_file_listing(session: aiohttp.ClientSession, package_name: str) 
         raise Exception(error_msg)
 
 
-async def fetch_dts_listing(session: aiohttp.ClientSession, package_name: str) -> AsyncGenerator[str, None]:
-    """Generator that yields .d.ts files for a package"""
+async def get_dts_files(session: aiohttp.ClientSession, package_name: str) -> List[str]:
+    """Get list of .d.ts files for a package"""
     dts_pattern = re.compile(r'\.d\.ts$')
     
     try:
         file_names = await fetch_file_listing(session, package_name)
-        
-        for filename in file_names:
-            if dts_pattern.search(filename):
-                yield filename
+        return [filename for filename in file_names if dts_pattern.search(filename)]
         
     except Exception as e:
         logger.error(f"Error fetching .d.ts listing for {package_name}: {str(e)}")
@@ -191,9 +153,7 @@ async def describe_package_async(specifier: str, force_refresh: bool = False) ->
                     sentry_sdk.set_tag("cache_hit", "true")
                 return cached_data
         
-        parsed = get_name_and_version(specifier)
-        name = parsed['name']
-        version = parsed['version']
+        name, version = specifier.rsplit('@', 1) if '@' in specifier else (specifier, None)
         
         logger.info(f"Describing package: {name}@{version}")
         if sentry_sdk.Hub.current.client:
@@ -225,18 +185,16 @@ async def describe_package_async(specifier: str, force_refresh: bool = False) ->
                                     common_files.append(package_data['description'])
                                     logger.info(f"Using cached language-common {common_specifier}")
                         else:
-                            # Collect all .d.ts files first
-                            common_dts_files = []
-                            async for file_name in fetch_dts_listing(session, common_specifier):
-                                common_dts_files.append(f"{common_specifier}{file_name}")
+                            # Get .d.ts files and fetch them concurrently
+                            common_dts_files = await get_dts_files(session, common_specifier)
+                            common_file_paths = [f"{common_specifier}{file_name}" for file_name in common_dts_files]
                             
-                            # Fetch all files concurrently
-                            fetch_tasks = [fetch_file(session, file_path) for file_path in common_dts_files]
+                            fetch_tasks = [fetch_file(session, file_path) for file_path in common_file_paths]
                             fetched_files = await asyncio.gather(*fetch_tasks, return_exceptions=True)
                             
                             for i, result in enumerate(fetched_files):
                                 if isinstance(result, Exception):
-                                    logger.warning(f"Failed to fetch common file {common_dts_files[i]}: {str(result)}")
+                                    logger.warning(f"Failed to fetch common file {common_file_paths[i]}: {str(result)}")
                                 else:
                                     common_files.append(result)
                                     
@@ -251,21 +209,17 @@ async def describe_package_async(specifier: str, force_refresh: bool = False) ->
             package_files = []
             results[name] = package_files
             
-            # Collect all .d.ts files first
-            main_dts_files = []
-            async for file_name in fetch_dts_listing(session, specifier):
-                if not re.search(r'beta\.d\.ts$', file_name):
-                    main_dts_files.append(f"{specifier}{file_name}")
-                else:
-                    logger.info(f"Skipping beta file: {file_name}")
+            # Get .d.ts files and fetch them concurrently
+            main_dts_files = await get_dts_files(session, specifier)
+            main_file_paths = [f"{specifier}{file_name}" for file_name in main_dts_files 
+                             if not re.search(r'beta\.d\.ts$', file_name)]
             
-            # Fetch all files concurrently
-            fetch_tasks = [fetch_file(session, file_path) for file_path in main_dts_files]
+            fetch_tasks = [fetch_file(session, file_path) for file_path in main_file_paths]
             fetched_files = await asyncio.gather(*fetch_tasks, return_exceptions=True)
             
             for i, result in enumerate(fetched_files):
                 if isinstance(result, Exception):
-                    logger.warning(f"Failed to fetch file {main_dts_files[i]}: {str(result)}")
+                    logger.warning(f"Failed to fetch file {main_file_paths[i]}: {str(result)}")
                 else:
                     package_files.append(result)
             
@@ -310,9 +264,12 @@ async def main_async(data_dict: dict) -> dict:
         if sentry_sdk.Hub.current.client:
             sentry_sdk.set_context("request_data", data_dict)
         
-        data = Payload.from_dict(data_dict)
+        if "adaptor" not in data_dict:
+            raise ValueError("'adaptor' is required")
+        
+        adaptor = data_dict["adaptor"]
         force_refresh = data_dict.get("force_refresh", False)
-        result = await describe_package_async(data.adaptor, force_refresh)
+        result = await describe_package_async(adaptor, force_refresh)
         
         return result
     

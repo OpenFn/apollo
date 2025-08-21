@@ -1,7 +1,7 @@
 import json
 from util import create_logger, apollo
 from .retrieve_docs import retrieve_knowledge
-from describe_adaptor_py.describe_adaptor_py import describe_package
+from describe_adaptor.describe_adaptor import describe_package
 import time
 
 logger = create_logger("job_chat.prompt")
