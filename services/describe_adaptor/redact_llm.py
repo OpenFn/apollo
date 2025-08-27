@@ -38,6 +38,8 @@ class DocsFilter:
             logger.info(f"Saved filtered docs to Redis for {adaptor_specifier}")
         except Exception as e:
             logger.warning(f"Error saving to Redis: {e}")
+    
+    def build_filter_prompt(self, package_name: str) -> str:
         """Build the system prompt for filtering documentation"""
         return f"""You are tasked with filtering OpenFn adaptor documentation to keep only the most relevant information for an AI assistant that will help users write workflow code.
 
@@ -72,7 +74,7 @@ Return a clean, filtered version of the documentation that focuses on what makes
             logger.info(f"Filtering documentation for {package_name}")
             
             try:
-                system_prompt = self.build_filter_prompt(package_name, package_info['description'])
+                system_prompt = self.build_filter_prompt(package_name)
                 
                 message = self.client.messages.create(
                     model="claude-3-5-sonnet-20241022",
