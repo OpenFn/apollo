@@ -67,43 +67,45 @@ REMOVE:
 Return a clean, filtered version of the documentation that focuses on what makes this adaptor unique and how to use it specifically. Keep all function signatures and examples intact, but remove redundant type definitions and generic concepts."""
 
     def filter_documentation(self, package_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Filter documentation for each package using Claude"""
-        filtered_data = {}
-        
-        for package_name, package_info in package_data.items():
-            logger.info(f"Filtering documentation for {package_name}")
+            """Filter documentation for each package using Claude"""
+            filtered_data = {}
             
-            try:
-                system_prompt = self.build_filter_prompt(package_name)
+            for package_name, package_info in package_data.items():
+                if package_name == "_meta":
+                    continue
+                logger.info(f"Filtering documentation for {package_name}")
                 
-                message = self.client.messages.create(
-                    model="claude-3-5-sonnet-20241022",
-                    max_tokens=16384,
-                    system=system_prompt,
-                    messages=[{
-                        "role": "user", 
-                        "content": f"Filter this documentation:\n\n{package_info['description']}"
-                    }]
-                )
-                
-                filtered_content = ""
-                for content_block in message.content:
-                    if content_block.type == "text":
-                        filtered_content += content_block.text
-                
-                filtered_data[package_name] = {
-                    'name': package_name,
-                    'description': filtered_content.strip()
-                }
-                
-                logger.info(f"Successfully filtered {package_name}")
-                
-            except Exception as e:
-                logger.error(f"Error filtering {package_name}: {str(e)}")
-                # Fall back to original content if filtering fails
-                filtered_data[package_name] = package_info
-        
-        return filtered_data
+                try:
+                    system_prompt = self.build_filter_prompt(package_name)
+                    
+                    message = self.client.messages.create(
+                        model="claude-sonnet-4-20250514",
+                        max_tokens=200000,
+                        system=system_prompt,
+                        messages=[{
+                            "role": "user", 
+                            "content": f"Filter this documentation:\n\n{package_info['description']}"
+                        }]
+                    )
+                    
+                    filtered_content = ""
+                    for content_block in message.content:
+                        if content_block.type == "text":
+                            filtered_content += content_block.text
+                    
+                    filtered_data[package_name] = {
+                        'name': package_name,
+                        'description': filtered_content.strip()
+                    }
+                    
+                    logger.info(f"Successfully filtered {package_name}")
+                    
+                except Exception as e:
+                    logger.error(f"Error filtering {package_name}: {str(e)}")
+                    # Fall back to original content if filtering fails
+                    filtered_data[package_name] = package_info
+            
+            return filtered_data
     
     def save_filtered_docs(self, adaptor_specifier: str, filtered_data: Dict[str, Any]) -> str:
         """Save filtered documentation to local JSON file"""
