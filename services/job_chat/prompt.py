@@ -334,7 +334,9 @@ def build_prompt(content, history, context, rag=None, api_key=None):
             "generate_queries": {}
         }
     }
-    
+    # Remove escaped newlines which confuse the model
+    # context["expression"] = context["expression"].encode().decode('unicode_escape')
+
     if rag:
         retrieved_knowledge = rag
     else:
@@ -348,7 +350,7 @@ def build_prompt(content, history, context, rag=None, api_key=None):
           )
       except Exception as e:
           logger.error(f"Error retrieving knowledge: {str(e)}")
-
+    
     system_message = generate_system_message(
         context_dict=context, 
         search_results=retrieved_knowledge.get("search_results") if retrieved_knowledge is not None else None)

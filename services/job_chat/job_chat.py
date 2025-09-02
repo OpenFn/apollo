@@ -93,7 +93,7 @@ class AnthropicClient:
                         rag=rag, 
                         api_key=self.api_key
                     )
-                    prompt.append({"role": "assistant", "content": '{\n  "text_answer": "'}) #TODO
+                    prompt.append({"role": "assistant", "content": '{\n  "text_answer": "'})
 
                 else:
                     system_message, prompt, retrieved_knowledge = build_old_prompt(
@@ -123,8 +123,9 @@ class AnthropicClient:
                     logger.warning(f"Unhandled content type: {content_block.type}")
 
             response = "\n\n".join(response_parts)
-            if suggest_code is True: #TODO
-                response = '{\n  "text_answer": "' + response
+
+            if suggest_code is True:
+                response = '{\n  "text_answer": "' + response # Add back the prefilled opening brace
 
             if suggest_code is True:
                 # Parse JSON response and apply code edits
@@ -279,7 +280,7 @@ class AnthropicClient:
                 full_code=full_code,
                 text_explanation=text_explanation
             )
-            prompt.append({"role": "assistant", "content": '{\n  "explanation": "'}) #TODO
+            prompt.append({"role": "assistant", "content": '{\n  "explanation": "'})
             message = self.client.messages.create(
                 max_tokens=16384,
                 messages=prompt,
@@ -288,7 +289,7 @@ class AnthropicClient:
             )
             
             response = "\n\n".join([block.text for block in message.content if block.type == "text"])
-            response = '{\n  "explanation": "' + response  # Add back the prefilled opening brace #TODO
+            response = '{\n  "explanation": "' + response  # Add back the prefilled opening brace
             correction_data = json.loads(response)
 
             corrected_old = correction_data.get("corrected_old_code")
