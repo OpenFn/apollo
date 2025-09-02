@@ -24,7 +24,8 @@ fn(state => {
 });
 
 // Send transformed data to destination
-post('https://destination.org/upload', state => state.transformed);'''
+post('https://destination.org/upload', state => state.transformed);''',
+        "adaptor": "@openfn/language-gmail@2.0.2"
     }
     meta = {}
     service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True)
@@ -64,7 +65,8 @@ fn(state => {
 post('https://destination.org/upload', state => state.transformed);''',
         "adaptors": ["@openfn/language-http", "@openfn/language-common"],
         "jobId": "job-abc123",
-        "projectId": "project-xyz789"
+        "projectId": "project-xyz789",
+        "adaptor": "@openfn/language-fhir-4@0.1.10"
     }
     
     meta = {
@@ -93,6 +95,7 @@ post('https://destination.org/upload', state => state.transformed);''',
     assert "suggested_code" in response
     assert "meta" in response
     assert "usage" in response
+    assert response["suggested_code"] is not None, "JSON parsing failed - suggested_code is None"
     assert response["suggested_code"] != context["expression"], "Suggested code should be different from the original code"
 
 def test_duplicate_sections():
@@ -150,7 +153,8 @@ def test_duplicate_sections():
       )
     )
   )
-);'''
+);''',
+        "adaptor": "@openfn/language-dhis2@8.0.1"
     }
     meta = {}
     service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True)
@@ -159,6 +163,7 @@ def test_duplicate_sections():
     assert response is not None
     assert "response" in response
     assert "suggested_code" in response
+    assert response["suggested_code"] is not None, "JSON parsing failed - suggested_code is None"
     assert response["suggested_code"] != context["expression"], "Suggested code should be different from the original code"
 
 def test_duplicate_sections_additional():
@@ -189,7 +194,8 @@ post('https://api.example.com/endpoint', state => state.items);
 
 post('https://api.example.com/endpoint', state => state.items);
 
-post('https://api.example.com/endpoint', state => state.items);'''
+post('https://api.example.com/endpoint', state => state.items);''',
+        "adaptor": "@openfn/language-mailchimp@1.0.19"
     }
     meta = {}
     service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True)
@@ -198,4 +204,5 @@ post('https://api.example.com/endpoint', state => state.items);'''
     assert response is not None
     assert "response" in response
     assert "suggested_code" in response
+    assert response["suggested_code"] is not None, "JSON parsing failed - suggested_code is None"
     assert response["suggested_code"] != context["expression"], "Suggested code should be different from the original code"
