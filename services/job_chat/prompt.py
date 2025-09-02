@@ -173,12 +173,13 @@ We will use literal string replacement to apply your changes. To avoid duplicate
 1. Include ample surrounding context in the old_code to replace (comments, variable declarations, both similar pasages etc.)
 2. If in doubt, use "rewrite" action instead to rewrite the whole code
 
-**Output valid JSON strings**  
-All string values in your JSON (including "old_code", "new_code", and "text_answer") must be valid JSON strings.  
-- Escape all newlines as \\n  
-- Escape all double quotes as \\"  
+**Output valid JSON strings**
+Your answer MUST be parseable with json.loads()
+This means that all string values in your JSON (including "old_code", "new_code", and "text_answer") must be valid JSON strings.  
+- Escape all newlines as \\n (one backslash followed by n)  
+- Escape all double quotes as \\"  (one backslash followed by double quotation mark)  
 - Do not include unescaped control characters in any string value.  
-- If you include code in a string, ensure it is a single line with \\n for line breaks.
+- When you include code in a string, ensure it is a single line with \\n for line breaks.
 
 Example:
 {
@@ -189,6 +190,15 @@ Example:
     "new_code": "get('/patients');\\nfn(state => {\\n  if (!state.data) {\\n    throw new Error(\\\"No data received\\\");\\n  }\\n  return state;\\n});"
   }]
 }
+
+ALWAYS use \\n instead of actual newlines:
+THIS IS WRONG:
+"new_code": "function() {
+  return true;
+}"
+
+THIS IS CORRECT:
+"new_code": "function() {\\n  return true;\\n}"
 </code editing rules>
 </output format>
 """
@@ -226,6 +236,22 @@ Output JSON format:
   "corrected_old_code": "corrected old code with proper context",
   "corrected_new_code": "corrected new code"
 }
+
+**Output valid JSON strings**
+Your answer MUST be parseable with json.loads()
+- Escape all newlines as \\n (one backslash followed by n)  
+- Escape all double quotes as \\"  (one backslash followed by double quotation mark)  
+- Do not include unescaped control characters in any string value.  
+- When you include code in a string, ensure it is a single line with \\n for line breaks.
+
+ALWAYS use \\n instead of actual newlines:
+THIS IS WRONG:
+"corrected_new_code": "function() {
+  return true;
+}"
+
+THIS IS CORRECT:
+"corrected_new_code": "function() {\\n  return true;\\n}"
 """
 
 
