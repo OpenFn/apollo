@@ -242,7 +242,7 @@ def assert_no_special_chars(yaml_str_or_dict, context=''):
             match = special_char_pattern.search(name)
             assert not match, f"{context}: Job '{job_key}' name '{name}' contains special character '{match.group(0)}'"
     
-    # Check edge: source_job and target_job
+    # Check edge: source_job, target_job and edge key
     edges = data.get('edges', {})
     for edge_key, edge_data in edges.items():
         if 'source_job' in edge_data and edge_data['source_job']:
@@ -254,3 +254,12 @@ def assert_no_special_chars(yaml_str_or_dict, context=''):
             target = str(edge_data['target_job'])
             match = special_char_pattern.search(target)
             assert not match, f"{context}: Edge '{edge_key}' target_job '{target}' contains special character '{match.group(0)}'"
+
+        if "->" in edge_key:
+            source_part, target_part = edge_key.split("->", 1)
+            
+            match = special_char_pattern.search(source_part)
+            assert not match, f"{context}: Edge key '{edge_key}' source part '{source_part}' contains special character '{match.group(0)}'"
+            
+            match = special_char_pattern.search(target_part)
+            assert not match, f"{context}: Edge key '{edge_key}' target part '{target_part}' contains special character '{match.group(0)}'"
