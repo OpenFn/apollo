@@ -215,3 +215,42 @@ def assert_yaml_jobs_have_body(yaml_str_or_dict, context=''):
     for job_key, job_data in jobs.items():
         assert 'body' in job_data, f"{context}: Job '{job_key}' missing 'body' field."
         assert job_data['body'] not in (None, '', []), f"{context}: Job '{job_key}' has empty 'body' field."
+
+def assert_no_special_chars(yaml_str_or_dict, context=''):
+    """
+    Assert that there are no special characters in job names, source_job and target_job fields.
+    Special characters are anything that's not alphanumeric, space, hyphen, or underscore.
+    
+    Args:
+        yaml_str_or_dict: YAML as string or dict
+        context: Context string for error messages
+    """
+    import re
+    if isinstance(yaml_str_or_dict, str):
+        data = yaml.safe_load(yaml_str_or_dict)
+    else:
+        data = yaml_str_or_dict
+    
+    # Pattern matches any character that is NOT alphanumeric, space, hyphen, or underscore
+    special_char_pattern = re.compile(r'[^a-zA-Z0-9\s\-_]')
+    
+    # Check job names
+    jobs = data.get('jobs', {})
+    for job_key, job_data in jobs.items():
+        if 'name' in job_data and job_data['name']:
+            name = str(job_data['name'])
+            match = special_char_pattern.search(name)
+            assert not match, f"{context}: Job '{job_key}' name '{name}' contains special character '{match.group(0)}'"
+    
+    # Check edge: source_job and target_job
+    edges = data.get('edges', {})
+    for edge_key, edge_data in edges.items():
+        if 'source_job' in edge_data and edge_data['source_job']:
+            source = str(edge_data['source_job'])
+            match = special_char_pattern.search(source)
+            assert not match, f"{context}: Edge '{edge_key}' source_job '{source}' contains special character '{match.group(0)}'"
+        
+        if 'target_job' in edge_data and edge_data['target_job']:
+            target = str(edge_data['target_job'])
+            match = special_char_pattern.search(target)
+            assert not match, f"{context}: Edge '{edge_key}' target_job '{target}' contains special character '{match.group(0)}'"
