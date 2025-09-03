@@ -51,7 +51,7 @@ edges:
     content = "Actually I want to schedule it for midnight every day."
     service_input = make_service_input(existing_yaml, history, content=content)
     response = call_workflow_chat_service(service_input)
-    print_response_details(response, "change_trigger", content=content)
+    print_response_details(response, content=content)
     assert response is not None
     assert isinstance(response, dict)
     
@@ -65,13 +65,13 @@ edges:
     assert triggers["cron"].get("cron_expression") == "0 0 * * *", f"Expected cron_expression '0 0 * * *', got: {triggers['cron'].get('cron_expression')}"
     assert "webhook" not in triggers, "webhook trigger should have been replaced by cron"
 
-    # Use the reusable function to assert only triggers changed
     orig_yaml = yaml.safe_load(existing_yaml)
     assert_yaml_equal_except(
         orig_yaml, parsed,
         allowed_paths=["triggers", "edges"],
         context="YAML changed outside triggers or edges section."
     )
+    assert_no_special_chars(response["response_yaml"], context="test_change_trigger")
 
 
 def test_rename_two_jobs_commcare():
@@ -195,7 +195,7 @@ edges:
 """
     service_input = make_service_input(existing_yaml, history, content=content)
     response = call_workflow_chat_service(service_input)
-    print_response_details(response, "rename_two_jobs_commcare", content=content)
+    print_response_details(response, content=content)
     assert response is not None
     assert isinstance(response, dict)
 
@@ -204,6 +204,7 @@ edges:
     parsed = yaml.safe_load(yaml_str)
     expected = yaml.safe_load(target_yaml)
     assert parsed == expected
+    assert_no_special_chars(response["response_yaml"], context="test_rename_two_jobs_commcare")
 
 def test_special_characters():
     print("==================TEST==================")
@@ -218,7 +219,7 @@ def test_special_characters():
     content = "data about water systems and water sales"
     service_input = make_service_input(existing_yaml, history, content=content)
     response = call_workflow_chat_service(service_input)
-    print_response_details(response, "empty_water_bug", content=content)
+    print_response_details(response, content=content)
     assert response is not None
     assert isinstance(response, dict)
 

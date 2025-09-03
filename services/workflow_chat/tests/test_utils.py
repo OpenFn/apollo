@@ -108,7 +108,7 @@ def make_service_input(existing_yaml, history, content=None, errors=None):
     return service_input
 
 
-def print_response_details(response, test_name, content=None, errors=None):
+def print_response_details(response, content=None, errors=None):
     """Print detailed response information like the original script, including content or errors if provided."""
     if content is not None:
         print("\nUSER CONTENT:")

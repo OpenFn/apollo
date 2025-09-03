@@ -19,7 +19,7 @@ def test_basic_input():
     content = "Whenever fridge statistics are send to you, parse and aggregate the data and upload to a collection in redis."
     service_input = make_service_input(existing_yaml, history, content=content)
     response = call_workflow_chat_service(service_input)
-    print_response_details(response, "empty_input", content=content)
+    print_response_details(response, content=content)
 
     assert response is not None
     assert isinstance(response, dict)
@@ -27,6 +27,7 @@ def test_basic_input():
     if response.get("response_yaml"):
         assert_yaml_has_ids(response["response_yaml"], context="test_basic_input")
         assert_yaml_jobs_have_body(response["response_yaml"], context="test_basic_input")
+        assert_no_special_chars(response["response_yaml"], context="test_basic_input")
 
 def test_input_second_turn():
     print("Description: Simple second conversation turn requesting a change to the YAML")
@@ -101,12 +102,13 @@ edges:
     
     service_input = make_service_input(existing_yaml, history, content=content)
     response = call_workflow_chat_service(service_input)
-    print_response_details(response, "commcare_dhis2_integration", content=content)
+    print_response_details(response, content=content)
     
     assert response is not None
     assert isinstance(response, dict)
 
     assert_yaml_section_contains_all(existing_yaml, response.get("response_yaml", ""), "jobs", context="Jobs section")
+    assert_no_special_chars(response["response_yaml"], context="test_input_second_turn")
 
 def test_conversational_turn():
     print("==================TEST==================")
@@ -152,7 +154,7 @@ edges:
     content = "Can you explain that better"
     service_input = make_service_input(existing_yaml, history, content=content)
     response = call_workflow_chat_service(service_input)
-    print_response_details(response, "existing_convo_turn", content=content)
+    print_response_details(response, content=content)
     assert response is not None
     assert isinstance(response, dict)
 
@@ -162,6 +164,7 @@ edges:
         response_yaml = yaml.safe_load(response_yaml_str)
         # Check that the entire YAML is unchanged
         assert orig_yaml == response_yaml, "If YAML is present in response, it must be unchanged."
+        assert_no_special_chars(response["response_yaml"], context="test_conversational_turn")
 
 def test_simple_lang_bug():
     print("==================TEST==================")
@@ -171,7 +174,7 @@ def test_simple_lang_bug():
     content = "are you there?"
     service_input = make_service_input(existing_yaml, history, content=content)
     response = call_workflow_chat_service(service_input)
-    print_response_details(response, "empty_simple_lang_bug", content=content)
+    print_response_details(response, content=content)
     assert response is not None
     assert isinstance(response, dict)
     # Assert that the response text does not include the word 'YAML' (case-insensitive)
@@ -182,6 +185,7 @@ def test_simple_lang_bug():
     if response.get("response_yaml"):
         assert_yaml_has_ids(response["response_yaml"], context="test_simple_lang_bug")
         assert_yaml_jobs_have_body(response["response_yaml"], context="test_simple_lang_bug")
+        assert_no_special_chars(response["response_yaml"], context="test_simple_lang_bug")
 
 def test_single_trigger_node():
     print("==================TEST==================")
@@ -227,7 +231,9 @@ edges:
     content = "Actually I also want an email notification at the same time as the data is being parsed."
     service_input = make_service_input(existing_yaml, history, content=content)
     response = call_workflow_chat_service(service_input)
-    print_response_details(response, "empty_trigger_nodes", content=content)
+    if response.get("response_yaml"):
+      print_response_details(response, content=content)
+      assert_no_special_chars(response["response_yaml"], context="test_single_trigger_node")
 
     assert response is not None
     assert isinstance(response, dict)
@@ -275,7 +281,9 @@ edges:
     content = "Can you also fill in the job code for all the steps"
     service_input = make_service_input(existing_yaml, history, content=content)
     response = call_workflow_chat_service(service_input)
-    print_response_details(response, "existing_edit_job_code", content=content)
+    if response.get("response_yaml"):
+      print_response_details(response, content=content)
+      assert_no_special_chars(response["response_yaml"], context="test_edit_job_code")
 
     assert response is not None
     assert isinstance(response, dict)
@@ -325,7 +333,9 @@ edges:
 
     service_input = make_service_input(existing_yaml, history, errors=errors)
     response = call_workflow_chat_service(service_input)
-    print_response_details(response, "existing_error", errors=errors)
+    if response.get("response_yaml"):
+      print_response_details(response, errors=errors)
+      assert_no_special_chars(response["response_yaml"], context="test_error_field")
 
     assert response is not None
     assert isinstance(response, dict)
@@ -458,34 +468,13 @@ edges:
     content = "Perfect! One final addition - after updating Asana, I want to format the data for bulk emailing and then send out bulk emails using Mailgun."
     service_input = make_service_input(existing_yaml, history, content=content)
     response = call_workflow_chat_service(service_input)
-    print_response_details(response, "existing_long", content=content)
+    print_response_details(response, content=content)
     assert response is not None
     assert isinstance(response, dict)
 
     assert_yaml_section_contains_all(existing_yaml, response.get("response_yaml", ""), "jobs", context="Jobs section")
     assert_yaml_section_contains_all(existing_yaml, response.get("response_yaml", ""), "edges", context="Edges section")
-
-def test_special_characters():
-    print("==================TEST==================")
-    print("Description: Ask for a workflow that uses platforms with special characters in their names. "
-          "Verify that diacritics and punctuation removed/normalised correctly (e.g. é->e) in job names "
-          "in the generated YAML.")
-    existing_yaml = """"""
-    history = [
-        {"role": "user", "content": "Create a workflow that retrieves data from mwater, google sheets, netsuite, ferntech.io and processed it and sends it to frappé"},
-        {"role": "assistant", "content": "I'll need more information about your workflow to create an accurate YAML. Specifically: What kind of data are you retrieving from each source (mWater, Google Sheets, NetSuite, ferntech.io)? What processing needs to be done on this data? What type of data needs to be sent to Frappé? Should this workflow run on a schedule or be triggered by an event? With these details, I can create a proper workflow structure for you."}
-    ]
-    content = "data about water systems and water sales"
-    service_input = make_service_input(existing_yaml, history, content=content)
-    response = call_workflow_chat_service(service_input)
-    print_response_details(response, "empty_water_bug", content=content)
-    assert response is not None
-    assert isinstance(response, dict)
-    # Check for id fields in generated YAML
-    if response.get("response_yaml"):
-        assert_yaml_has_ids(response["response_yaml"], context="test_special_characters")
-        assert_yaml_jobs_have_body(response["response_yaml"], context="test_special_characters")
-        assert_no_special_chars(response["response_yaml"], context="test_special_characters")
+    assert_no_special_chars(response["response_yaml"], context="test_long_yaml")
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
