@@ -158,22 +158,56 @@ class AnthropicClient:
                 logger.warning(f"YAML parsing failed, retrying generation (attempt {attempt+1}/{max_retries})")
 
     def sanitize_job_names(self, yaml_data):
-        """Sanitize job names by removing special characters and normalizing diacritics."""
-        if yaml_data and "jobs" in yaml_data:
+        """
+        Sanitize job names by removing special characters and normalizing diacritics.
+        Also sanitizes job references in edges (source and target fields).
+        """
+        if not yaml_data:
+            return
+            
+        # Helper function to sanitize a single name
+        def sanitize_single_name(name):
+            if not name or not isinstance(name, str):
+                return name
+            # Normalize unicode characters (removes diacritics)
+            normalized = unicodedata.normalize('NFKD', name)
+            ascii_name = normalized.encode('ascii', 'ignore').decode('ascii')
+            # Keep only alphanumeric, spaces, hyphens, and underscores
+            return re.sub(r'[^a-zA-Z0-9\s\-_]', '', ascii_name)
+        
+        # First sanitize job names in the jobs section
+        if "jobs" in yaml_data:
             jobs = yaml_data["jobs"]
+            # Create a mapping of original to sanitized names
+            name_mapping = {}
+            
             for job_key, job_data in jobs.items():
                 if "name" in job_data:
                     original_name = str(job_data["name"])
-                    # Normalize unicode characters (removes diacritics)
-                    normalized = unicodedata.normalize('NFKD', original_name)
-                    ascii_name = normalized.encode('ascii', 'ignore').decode('ascii')
-                    # Keep only alphanumeric, spaces, hyphens, and underscores
-                    sanitized_name = re.sub(r'[^a-zA-Z0-9\s\-_]', '', ascii_name)
+                    sanitized_name = sanitize_single_name(original_name)
                     
                     job_data["name"] = sanitized_name
+                    name_mapping[original_name] = sanitized_name
                     
                     if original_name != sanitized_name:
                         logger.info(f"Sanitized job name: '{original_name}' -> '{sanitized_name}'")
+        
+        # Now sanitize job references in the edges section
+        if "edges" in yaml_data:
+            for edge_key, edge_data in yaml_data["edges"].items():
+                # Sanitize source field
+                if "source_job" in edge_data:
+                    original_source = str(edge_data["source_job"])
+                    edge_data["source_job"] = sanitize_single_name(original_source)
+                    if original_source != edge_data["source_job"]:
+                        logger.info(f"Sanitized edge source_job: '{original_source}' -> '{edge_data['source_job']}'")
+                
+                # Sanitize target field
+                if "target_job" in edge_data:
+                    original_target = str(edge_data["target_job"])
+                    edge_data["target_job"] = sanitize_single_name(original_target)
+                    if original_target != edge_data["target_job"]:
+                        logger.info(f"Sanitized edge target_job: '{original_target}' -> '{edge_data['target_job']}'")
 
     def split_format_yaml(self, response, preserved_values=None):
         """Split text and YAML in response and format the YAML."""
