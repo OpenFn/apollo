@@ -10,7 +10,7 @@ from util import ApolloError, create_logger
 
 logger = create_logger("describe_adaptor_direct")
 
-CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
+CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cache")
 CACHE_TTL = 43200  # 12 hours in seconds
 
 
