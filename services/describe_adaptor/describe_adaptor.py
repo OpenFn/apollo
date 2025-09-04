@@ -78,6 +78,7 @@ async def write_to_cache(specifier: str, data: Dict[str, Any]) -> None:
 async def fetch_file(session: aiohttp.ClientSession, path: str) -> str:
     """Fetch a file from jsdelivr CDN"""
     resolved_path = f"https://cdn.jsdelivr.net/npm/{path}"
+    logger.info(f"Fetching {resolved_path}")
     
     try:
         async with session.get(resolved_path, timeout=aiohttp.ClientTimeout(total=30)) as response:
