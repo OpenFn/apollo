@@ -1,5 +1,13 @@
 # apollo
 
+## 0.14.2
+
+### Patch Changes
+
+- Add caching to adaptor docs generation
+- 79bc424: Make job_chat json output more robust
+- ff7a9bc: add sanitisation to edges in yaml
+
 ## 0.14.1
 
 ### Patch Changes

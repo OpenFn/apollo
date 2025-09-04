@@ -52,7 +52,8 @@ fn(state => {
   return { ...state, transformed };
 });
 
-post('https://destination.org/upload', state => state.transformed);'''
+post('https://destination.org/upload', state => state.transformed);''',
+        "adaptor": "@openfn/language-salesforce@8.0.0"
     }
     
     expected_code = '''// Get data from external API
@@ -105,7 +106,8 @@ post('https://api.example.com/save', state => ({
 }));'''
     
     context = {
-        "expression": original_code
+        "expression": original_code,
+        "adaptor": "@openfn/language-salesforce@8.0.0"
     }
     
     # Service correctly uses 'del()' instead of 'delete()' (delete is reserved word in JS)
@@ -207,7 +209,8 @@ post(
     summary: state.summary,
     endpoint: getPatientData('summary')
   })
-);'''
+);''',
+        "adaptor": "@openfn/language-whatsapp@1.0.4"
     }
     
     expected_code = context["expression"].replace("getPatientData", "fetchPatientRecords")
@@ -328,7 +331,8 @@ post('https://notifications.example.com/endpooint/status', state => ({
 }));'''
     
     context = {
-        "expression": original_code
+        "expression": original_code,
+        "adaptor": "@openfn/language-googlesheets@4.0.1"
     }
     
     expected_code = original_code.replace("endpooint", "endpoint").replace("endpoooint", "endpoint")
@@ -376,7 +380,8 @@ fn(state => {
 post('/webhook', state => state.data);'''
     
     context = {
-        "expression": original_code
+        "expression": original_code,
+        "adaptor": "@openfn/language-kobotoolbox@4.2.3"
     }
     
     expected_code = original_code.replace('const data', 'const patients') \

@@ -108,7 +108,7 @@ def make_service_input(existing_yaml, history, content=None, errors=None):
     return service_input
 
 
-def print_response_details(response, test_name, content=None, errors=None):
+def print_response_details(response, content=None, errors=None):
     """Print detailed response information like the original script, including content or errors if provided."""
     if content is not None:
         print("\nUSER CONTENT:")
@@ -215,3 +215,51 @@ def assert_yaml_jobs_have_body(yaml_str_or_dict, context=''):
     for job_key, job_data in jobs.items():
         assert 'body' in job_data, f"{context}: Job '{job_key}' missing 'body' field."
         assert job_data['body'] not in (None, '', []), f"{context}: Job '{job_key}' has empty 'body' field."
+
+def assert_no_special_chars(yaml_str_or_dict, context=''):
+    """
+    Assert that there are no special characters in job names, source_job and target_job fields.
+    Special characters are anything that's not alphanumeric, space, hyphen, or underscore.
+    
+    Args:
+        yaml_str_or_dict: YAML as string or dict
+        context: Context string for error messages
+    """
+    import re
+    if isinstance(yaml_str_or_dict, str):
+        data = yaml.safe_load(yaml_str_or_dict)
+    else:
+        data = yaml_str_or_dict
+    
+    # Pattern matches any character that is NOT alphanumeric, space, hyphen, or underscore
+    special_char_pattern = re.compile(r'[^a-zA-Z0-9\s\-_]')
+    
+    # Check job names
+    jobs = data.get('jobs', {})
+    for job_key, job_data in jobs.items():
+        if 'name' in job_data and job_data['name']:
+            name = str(job_data['name'])
+            match = special_char_pattern.search(name)
+            assert not match, f"{context}: Job '{job_key}' name '{name}' contains special character '{match.group(0)}'"
+    
+    # Check edge: source_job, target_job and edge key
+    edges = data.get('edges', {})
+    for edge_key, edge_data in edges.items():
+        if 'source_job' in edge_data and edge_data['source_job']:
+            source = str(edge_data['source_job'])
+            match = special_char_pattern.search(source)
+            assert not match, f"{context}: Edge '{edge_key}' source_job '{source}' contains special character '{match.group(0)}'"
+        
+        if 'target_job' in edge_data and edge_data['target_job']:
+            target = str(edge_data['target_job'])
+            match = special_char_pattern.search(target)
+            assert not match, f"{context}: Edge '{edge_key}' target_job '{target}' contains special character '{match.group(0)}'"
+
+        if "->" in edge_key:
+            source_part, target_part = edge_key.split("->", 1)
+            
+            match = special_char_pattern.search(source_part)
+            assert not match, f"{context}: Edge key '{edge_key}' source part '{source_part}' contains special character '{match.group(0)}'"
+            
+            match = special_char_pattern.search(target_part)
+            assert not match, f"{context}: Edge key '{edge_key}' target part '{target_part}' contains special character '{match.group(0)}'"
