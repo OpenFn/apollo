@@ -34,7 +34,7 @@ sentry-sdk = "^2.35.0"
 optional = true
 
 [tool.poetry.group.ft.dependencies]
-torch = "^2.7.1"
+torch = "^2.8.0"
 
 [tool.poetry.group.dev]
 optional = false
