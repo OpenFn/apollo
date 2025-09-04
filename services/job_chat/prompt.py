@@ -1,6 +1,7 @@
 import json
 from util import create_logger, apollo
 from .retrieve_docs import retrieve_knowledge
+from describe_adaptor.describe_adaptor import describe_package
 
 logger = create_logger("job_chat.prompt")
 
@@ -281,7 +282,7 @@ def generate_system_message(context_dict, search_results):
         )
 
         try:
-            adaptor_docs = apollo("describe_adaptor", {"adaptor": context.adaptor})
+            adaptor_docs = describe_package(context.adaptor)
             for doc in adaptor_docs:
                 adaptor_string += f"Typescript definitions for doc {doc}"
                 adaptor_string += adaptor_docs[doc]["description"]
