@@ -20,6 +20,63 @@ from .old_prompt import build_old_prompt
 
 logger = create_logger("job_chat")
 
+def send_status(message: str):
+    """Send a status update via EVENT logging"""
+    logger.info(f"EVENT:STATUS:{message}")
+
+def send_chunk(text: str):
+    """Send a streaming text chunk via EVENT logging"""
+    logger.info(f"EVENT:CHUNK:{text}")
+
+def send_code_suggestion(suggested_code: str, diff: Optional[Dict[str, Any]] = None):
+    """Send code suggestion via EVENT logging"""
+    payload = {"suggested_code": suggested_code}
+    if diff:
+        payload["diff"] = diff
+    logger.info(f"EVENT:CODE:{json.dumps(payload)}")
+
+class TextAnswerExtractor:
+    """Extracts text_answer content from streaming JSON, handling escaped quotes properly"""
+    def __init__(self):
+        self.state = "searching"
+        self.buffer = ""
+        self.escape_next = False
+    
+    def add_chunk(self, chunk: str) -> tuple[str, bool]:
+        """Returns (new_text_to_display, is_complete)"""
+        self.buffer += chunk
+        
+        if self.state == "searching":
+            if '"text_answer": "' in self.buffer:
+                start_idx = self.buffer.find('"text_answer": "') + len('"text_answer": "')
+                self.state = "in_text"
+                remaining = self.buffer[start_idx:]
+                return self._process_text_content(remaining)
+        
+        elif self.state == "in_text":
+            return self._process_text_content(chunk)
+        
+        return "", self.state == "complete"
+    
+    def _process_text_content(self, text: str) -> tuple[str, bool]:
+        """Process text content, handling escaped quotes"""
+        new_text = ""
+        for char in text:
+            if self.escape_next:
+                new_text += char  # Add the escaped character
+                self.escape_next = False
+            elif char == '\\':
+                new_text += char
+                self.escape_next = True
+            elif char == '"':
+                # Unescaped quote - end of text_answer
+                self.state = "complete"
+                return new_text, True
+            else:
+                new_text += char
+        
+        return new_text, False
+
 @dataclass
 class Payload:
     """
@@ -32,6 +89,7 @@ class Payload:
     api_key: Optional[str] = None
     meta: Optional[str] = None
     suggest_code: Optional[bool] = None
+    stream: Optional[bool] = False
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
@@ -46,7 +104,8 @@ class Payload:
             context=data.get("context"), 
             api_key=data.get("api_key"), 
             meta=data.get("meta"),
-            suggest_code=data.get("suggest_code")
+            suggest_code=data.get("suggest_code"),
+            stream=data.get("stream", False)
         )
 
 
@@ -78,13 +137,14 @@ class AnthropicClient:
         self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[dict] = None, rag: Optional[str] = None, suggest_code: Optional[bool] = None
     ) -> ChatResponse:
         """
-        Generate a response using the Claude API with improved error handling and response processing.
+        Generate a response using the Claude API with optional streaming.
         """
         sentry_sdk.set_tag("prompt_type", "code_suggestions" if suggest_code else "no_code_suggestions")
 
         with sentry_sdk.start_transaction(name="chat_generation") as transaction:
             history = history.copy() if history else []
             with sentry_sdk.start_span(description="build_prompt"):
+                send_status("Researching...")
                 if suggest_code is True:
                     system_message, prompt, retrieved_knowledge = build_prompt(
                         content=content, 
@@ -104,10 +164,40 @@ class AnthropicClient:
                         api_key=self.api_key
                         )
 
+            send_status("Thinking...")
+
             with sentry_sdk.start_span(description="anthropic_api_call"):
-                message = self.client.messages.create(
-                    max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
-                )
+                if stream:
+                    # Use streaming API
+                    accumulated_response = ""
+                    
+                    with self.client.messages.stream(
+                        max_tokens=self.config.max_tokens, 
+                        messages=prompt, 
+                        model=self.config.model, 
+                        system=system_message
+                    ) as stream_obj:
+                        
+                        for event in stream_obj:
+                            if event.type == "content_block_delta":
+                                if event.delta.type == "text_delta":
+                                    text_chunk = event.delta.text
+                                    accumulated_response += text_chunk
+                                    send_chunk(text_chunk)
+                    
+                    response = accumulated_response
+                    
+                    message = stream_obj.get_final_message()
+                    usage_info = message.usage.model_dump() if hasattr(message, 'usage') else {}
+
+                    #needs to stop early then:
+                    send_status("Suggesting code...")
+
+                else:
+                    # Non-streaming API call
+                    message = self.client.messages.create(
+                        max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
+                    )
 
             if hasattr(message, "usage"):
                 if message.usage.cache_creation_input_tokens:
@@ -135,7 +225,9 @@ class AnthropicClient:
                 
                 with sentry_sdk.start_span(description="parse_and_apply_edits"):
                     text_response, suggested_code, diff = self.parse_and_apply_edits(response=response, content=content, original_code=job_code)
-            
+
+                if suggested_code:
+                    send_code_suggestion(suggested_code, diff)
             else:
                 text_response = response
                 suggested_code = None
