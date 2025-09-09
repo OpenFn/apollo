@@ -35,48 +35,6 @@ def send_code_suggestion(suggested_code: str, diff: Optional[Dict[str, Any]] = N
         payload["diff"] = diff
     logger.info(f"EVENT:CODE:{json.dumps(payload)}")
 
-class TextAnswerExtractor:
-    """Extracts text_answer content from streaming JSON, handling escaped quotes properly"""
-    def __init__(self):
-        self.state = "searching"
-        self.buffer = ""
-        self.escape_next = False
-    
-    def add_chunk(self, chunk: str) -> tuple[str, bool]:
-        """Returns (new_text_to_display, is_complete)"""
-        self.buffer += chunk
-        
-        if self.state == "searching":
-            if '"text_answer": "' in self.buffer:
-                start_idx = self.buffer.find('"text_answer": "') + len('"text_answer": "')
-                self.state = "in_text"
-                remaining = self.buffer[start_idx:]
-                return self._process_text_content(remaining)
-        
-        elif self.state == "in_text":
-            return self._process_text_content(chunk)
-        
-        return "", self.state == "complete"
-    
-    def _process_text_content(self, text: str) -> tuple[str, bool]:
-        """Process text content, handling escaped quotes"""
-        new_text = ""
-        for char in text:
-            if self.escape_next:
-                new_text += char  # Add the escaped character
-                self.escape_next = False
-            elif char == '\\':
-                new_text += char
-                self.escape_next = True
-            elif char == '"':
-                # Unescaped quote - end of text_answer
-                self.state = "complete"
-                return new_text, True
-            else:
-                new_text += char
-        
-        return new_text, False
-
 @dataclass
 class Payload:
     """
@@ -134,7 +92,7 @@ class AnthropicClient:
         self.client = Anthropic(api_key=self.api_key)
 
     def generate(
-        self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[dict] = None, rag: Optional[str] = None, suggest_code: Optional[bool] = None
+        self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[dict] = None, rag: Optional[str] = None, suggest_code: Optional[bool] = None, stream: Optional[bool] = False
     ) -> ChatResponse:
         """
         Generate a response using the Claude API with optional streaming.
@@ -168,9 +126,11 @@ class AnthropicClient:
 
             with sentry_sdk.start_span(description="anthropic_api_call"):
                 if stream:
-                    # Use streaming API
+                    logger.info("Making streaming API call")
+                    text_complete = False
+                    sent_length = 0
                     accumulated_response = ""
-                    
+                                        
                     with self.client.messages.stream(
                         max_tokens=self.config.max_tokens, 
                         messages=prompt, 
@@ -183,18 +143,32 @@ class AnthropicClient:
                                 if event.delta.type == "text_delta":
                                     text_chunk = event.delta.text
                                     accumulated_response += text_chunk
-                                    send_chunk(text_chunk)
-                    
-                    response = accumulated_response
-                    
+
+                                    if suggest_code and not text_complete:
+                                        # Stream chunks until we hit the end pattern (which might be split across chunks)
+                                        if '",\n  "code_edits"' in accumulated_response:
+                                            # Get only the text part and send any remaining unsent text
+                                            text_only = accumulated_response.split('",\n  "code_edits"')[0]
+                                            remaining_text = text_only[sent_length:]
+                                            if remaining_text:
+                                                send_chunk(remaining_text)
+                                            
+                                            send_status("Writing code...")
+                                            text_complete = True
+                                        else:
+                                            # Still in text_answer content, stream the full chunk
+                                            send_chunk(text_chunk)
+                                            sent_length += len(text_chunk)
+                                    elif not suggest_code:
+                                        # Normal streaming for non-code suggestions
+                                        send_chunk(text_chunk)
+                                        
                     message = stream_obj.get_final_message()
+
                     usage_info = message.usage.model_dump() if hasattr(message, 'usage') else {}
 
-                    #needs to stop early then:
-                    send_status("Suggesting code...")
-
                 else:
-                    # Non-streaming API call
+                    logger.info("Making non-streaming API call")
                     message = self.client.messages.create(
                         max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
                     )
@@ -432,14 +406,16 @@ def main(data_dict: dict) -> dict:
 
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
-
+        logger.info(f"stream bool: {data.stream}")
         result = client.generate(
             content=data.content, 
             history=data_dict.get("history", []), 
             context=data.context, 
             rag=data_dict.get("meta", {}).get("rag"),
-            suggest_code=data.suggest_code
+            suggest_code=data.suggest_code,
+            stream=data.stream
         )
+        
 
         response_dict = {
             "response": result.response,
