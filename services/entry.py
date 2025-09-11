@@ -62,6 +62,7 @@ def call(
         sentry_sdk.capture_exception(e)
         return ApolloError(code=500, message=str(e), type="INTERNAL_ERROR").to_dict()
     except ApolloError as e:
+        sentry_sdk.capture_exception(e)
         result = e.to_dict()
     except Exception as e:
         sentry_sdk.capture_exception(e)

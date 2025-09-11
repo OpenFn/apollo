@@ -379,6 +379,11 @@ def main(data_dict: dict) -> dict:
             429, "Rate limit exceeded, please try again later", type="RATE_LIMIT", details={"retry_after": 60}
         )
     except BadRequestError as e:
+        if "prompt is too long" in str(e):
+            error_message = "Input prompt exceeds maximum token limit (200,000 tokens). Please reduce the amount of text or context provided."
+            raise ApolloError(400, error_message, type="PROMPT_TOO_LONG")
+        raise ApolloError(400, str(e), type="BAD_REQUEST")
+    except BadRequestError as e:
         raise ApolloError(400, str(e), type="BAD_REQUEST")
     except PermissionDeniedError as e:
         raise ApolloError(403, "Not authorized to perform this action", type="FORBIDDEN")
