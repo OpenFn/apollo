@@ -14,26 +14,24 @@ from anthropic import (
     InternalServerError,
 )
 import sentry_sdk
-from util import ApolloError, create_logger
+from util import ApolloError, create_logger, create_event_logger
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
 
 logger = create_logger("job_chat")
+event_logger = create_event_logger(logger)
 
 def send_status(message: str):
     """Send a status update via EVENT logging"""
-    logger.info(f"EVENT:STATUS:{message}")
+    event_logger.send_status(message)
 
 def send_chunk(text: str):
     """Send a streaming text chunk via EVENT logging"""
-    logger.info(f"EVENT:CHUNK:{text}")
+    event_logger.send_chunk(text)
 
 def send_code_suggestion(suggested_code: str, diff: Optional[Dict[str, Any]] = None):
     """Send code suggestion via EVENT logging"""
-    payload = {"suggested_code": suggested_code}
-    if diff:
-        payload["diff"] = diff
-    logger.info(f"EVENT:CODE:{json.dumps(payload)}")
+    event_logger.send_code_suggestion(suggested_code, diff)
 
 @dataclass
 class Payload:
@@ -137,32 +135,14 @@ class AnthropicClient:
                         model=self.config.model, 
                         system=system_message
                     ) as stream_obj:
-                        
                         for event in stream_obj:
-                            if event.type == "content_block_delta":
-                                if event.delta.type == "text_delta":
-                                    text_chunk = event.delta.text
-                                    accumulated_response += text_chunk
-
-                                    if suggest_code and not text_complete:
-                                        # Stream chunks until we hit the end pattern (which might be split across chunks)
-                                        if '",\n  "code_edits"' in accumulated_response:
-                                            # Get only the text part and send any remaining unsent text
-                                            text_only = accumulated_response.split('",\n  "code_edits"')[0]
-                                            remaining_text = text_only[sent_length:]
-                                            if remaining_text:
-                                                send_chunk(remaining_text)
-                                            
-                                            send_status("Writing code...")
-                                            text_complete = True
-                                        else:
-                                            # Still in text_answer content, stream the full chunk
-                                            send_chunk(text_chunk)
-                                            sent_length += len(text_chunk)
-                                    elif not suggest_code:
-                                        # Normal streaming for non-code suggestions
-                                        send_chunk(text_chunk)
-                                        
+                            accumulated_response, text_complete, sent_length = self.process_stream_event(
+                                event,
+                                accumulated_response,
+                                suggest_code,
+                                text_complete,
+                                sent_length
+                            )     
                     message = stream_obj.get_final_message()
 
                     usage_info = message.usage.model_dump() if hasattr(message, 'usage') else {}
@@ -225,6 +205,43 @@ class AnthropicClient:
                 rag=retrieved_knowledge,
                 diff=diff
             )
+
+    def process_stream_event(
+        self,
+        event, 
+        accumulated_response, 
+        suggest_code, 
+        text_complete, 
+        sent_length
+    ):
+        """
+        Process a single stream event from the Anthropic API.
+        """
+        if event.type == "content_block_delta":
+            if event.delta.type == "text_delta":
+                text_chunk = event.delta.text
+                accumulated_response += text_chunk
+
+                if suggest_code and not text_complete:
+                    # Stream chunks until we hit the end pattern (which might be split across chunks)
+                    if '",\n  "code_edits"' in accumulated_response:
+                        # Get only the text part and send any remaining unsent text
+                        text_only = accumulated_response.split('",\n  "code_edits"')[0]
+                        remaining_text = text_only[sent_length:]
+                        if remaining_text:
+                            send_chunk(remaining_text)
+                        
+                        send_status("Writing code...")
+                        text_complete = True
+                    else:
+                        # Still in text_answer content, stream the full chunk
+                        send_chunk(text_chunk)
+                        sent_length += len(text_chunk)
+                elif not suggest_code:
+                    # Normal streaming for non-code suggestions
+                    send_chunk(text_chunk)
+        
+        return accumulated_response, text_complete, sent_length
 
     def parse_and_apply_edits(self, response: str, content: str, original_code: Optional[str] = None) -> tuple[str, Optional[str], Optional[Dict[str, Any]]]:
         """Parse JSON response and apply code edits to original code."""
