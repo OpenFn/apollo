@@ -1,8 +1,9 @@
+import json
 import logging
 import sys
 import requests
 from dataclasses import dataclass
-from typing import Optional, Any
+from typing import Optional, Any, Dict
 
 
 class DictObj:
@@ -93,3 +94,61 @@ def apollo(name, payload):
     url = f"http://127.0.0.1:{apollo_port}/services/{name}"
     r = requests.post(url, payload)
     return r.json()
+
+class EventLogger:
+    """
+    Utility class for sending standardized event logs across services.
+    This centralizes the event logging format and can be used by multiple services.
+    """
+    
+    def __init__(self, logger=None):
+        self.logger = logger
+    
+    def send_status(self, message: str):
+        """
+        Send a status update via EVENT logging
+        
+        :param message: Status message to log
+        """
+        if self.logger:
+            self.logger.info(f"EVENT:STATUS:{message}")
+        else:
+            logging.info(f"EVENT:STATUS:{message}")
+    
+    def send_chunk(self, text: str):
+        """
+        Send a streaming text chunk via EVENT logging
+        
+        :param text: Text chunk to log
+        """
+        if self.logger:
+            self.logger.info(f"EVENT:CHUNK:{text}")
+        else:
+            logging.info(f"EVENT:CHUNK:{text}")
+    
+    def send_code_suggestion(self, suggested_code: str, diff: Optional[Dict[str, Any]] = None):
+        """
+        Send code suggestion via EVENT logging
+        
+        :param suggested_code: The suggested code
+        :param diff: Optional diff information
+        """
+        payload = {"suggested_code": suggested_code}
+        if diff:
+            payload["diff"] = diff
+        
+        if self.logger:
+            self.logger.info(f"EVENT:CODE:{json.dumps(payload)}")
+        else:
+            logging.info(f"EVENT:CODE:{json.dumps(payload)}")
+
+
+def create_event_logger(logger=None):
+    """
+    Create a new EventLogger instance with the specified logger.
+    If no logger is provided, the EventLogger will use the default logger.
+    
+    :param logger: Optional logger instance to use for logging
+    :return: An EventLogger instance
+    """
+    return EventLogger(logger)
