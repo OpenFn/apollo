@@ -12,11 +12,13 @@ const callService = (
   m: ModuleDescription,
   port: number,
   payload?: any,
-  onLog?: (str: string) => void
+  onLog?: (str: string) => void,
+  onEvent?: (evt: string, payload: any) => void
 ) => {
   if (m.type === "py") {
-    return run(m.name, port, payload as any, onLog);
+    return run(m.name, port, payload as any, onLog, onEvent);
   } else {
+    // TODO add event handling to ts services
     return m.handler!(port, payload as any, onLog);
   }
 };
