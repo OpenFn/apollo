@@ -14,7 +14,8 @@ export const run = async (
   scriptName: string,
   port: number, // needed for self-calling services in pythonland
   args: JSON,
-  onLog?: (str: string) => void
+  onLog?: (str: string) => void,
+  onEvent?: (type: string, payload: any /* string or json tbh */) => void
 ) => {
   return new Promise<JSON | null>(async (resolve, reject) => {
     const id = crypto.randomUUID();
@@ -85,6 +86,17 @@ export const run = async (
         // TODO I'd love to break the log line up in to JSON actually
         // { source, level, message }
         onLog?.(line);
+      } else if (/^(EVENT)\:/.test(line)) {
+        // TODO does the event encoding need to be any more complex than this?
+        // Nice that it stays human readable
+        const [_prefix, type, ...payload] = line.split(":");
+        let processedPayload = payload.join(":");
+        try {
+          processedPayload = JSON.parse(processedPayload);
+        } catch (e) {
+          // No json, no problem
+        }
+        onEvent?.(type, processedPayload);
       }
     });
 

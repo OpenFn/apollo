@@ -63,8 +63,15 @@ export default async (app: Elysia, port: number) => {
                   data: log,
                 });
               };
+              const onEvent = (type: string, payload: any) => {
+                ws.send({
+                  event: "event",
+                  type,
+                  data: payload,
+                });
+              };
 
-              callService(m, port, message.data as any, onLog).then(
+              callService(m, port, message.data as any, onLog, onEvent).then(
                 (result) => {
                   ws.send({
                     event: "complete",
