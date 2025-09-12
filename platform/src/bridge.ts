@@ -78,11 +78,10 @@ export const run = async (
       crlfDelay: Infinity,
     });
     rl.on("line", (line) => {
-      // First divert the log line locally
-      console.log(line);
-
       // Then divert any logs from a logger object to the websocket
       if (/^(INFO|DEBUG|ERROR|WARN)\:/.test(line)) {
+        // Divert the log line locally
+        console.log(line);
         // TODO I'd love to break the log line up in to JSON actually
         // { source, level, message }
         onLog?.(line);

@@ -110,10 +110,12 @@ class EventLogger:
         
         :param message: Status message to log
         """
-        if self.logger:
-            self.logger.info(f"EVENT:STATUS:{message}")
-        else:
-            logging.info(f"EVENT:STATUS:{message}")
+        # if self.logger:
+        #     self.logger.info(f"EVENT:STATUS:{message}")
+        # else:
+        #     logging.info(f"EVENT:STATUS:{message}")
+        ## Don't use a logger for this because we don't want to prepend the service name stuff
+        print(f"EVENT:STATUS:{message}")
     
     def send_chunk(self, text: str):
         """
