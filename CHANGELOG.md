@@ -1,5 +1,13 @@
 # apollo
 
+## 0.14.3
+
+### Patch Changes
+
+- - Truncate adaptor docs for legacy job_chat
+  - Report apollo errors to sentry
+  - Update error message when the prompt is too long
+
 ## 0.14.2
 
 ### Patch Changes
