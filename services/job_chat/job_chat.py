@@ -22,14 +22,14 @@ logger = create_logger("job_chat")
 
 def send_chunk(text: str):
     """Send a streaming text chunk via EVENT logging"""
-    print(f"EVENT:CHUNK:{text}")
+    send_event('CHUNK', text)
 
 def send_code_suggestion(suggested_code: str, diff: Optional[Dict[str, Any]] = None):
     """Send code suggestion via EVENT logging"""
     payload = {"suggested_code": suggested_code}
     if diff:
         payload["diff"] = diff
-    print(f"EVENT:CODE:{json.dumps(payload)}")
+    send_event('CODE', json.dumps(payload))
 
 @dataclass
 class Payload:
