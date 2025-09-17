@@ -14,24 +14,22 @@ from anthropic import (
     InternalServerError,
 )
 import sentry_sdk
-from util import ApolloError, create_logger, create_event_logger
+from util import ApolloError, send_status
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
 
 logger = create_logger("job_chat")
-event_logger = create_event_logger(logger)
-
-def send_status(message: str):
-    """Send a status update via EVENT logging"""
-    event_logger.send_status(message)
 
 def send_chunk(text: str):
     """Send a streaming text chunk via EVENT logging"""
-    event_logger.send_chunk(text)
+    print(f"EVENT:CHUNK:{text}")
 
 def send_code_suggestion(suggested_code: str, diff: Optional[Dict[str, Any]] = None):
     """Send code suggestion via EVENT logging"""
-    event_logger.send_code_suggestion(suggested_code, diff)
+    payload = {"suggested_code": suggested_code}
+    if diff:
+        payload["diff"] = diff
+    print(f"EVENT:CODE:{json.dumps(payload)}")
 
 @dataclass
 class Payload:
