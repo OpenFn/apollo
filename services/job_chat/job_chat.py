@@ -14,15 +14,11 @@ from anthropic import (
     InternalServerError,
 )
 import sentry_sdk
-from util import ApolloError, send_status
+from util import ApolloError, send_event
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
 
 logger = create_logger("job_chat")
-
-def send_chunk(text: str):
-    """Send a streaming text chunk via EVENT logging"""
-    send_event('CHUNK', text)
 
 def send_code_suggestion(suggested_code: str, diff: Optional[Dict[str, Any]] = None):
     """Send code suggestion via EVENT logging"""
@@ -98,7 +94,7 @@ class AnthropicClient:
         with sentry_sdk.start_transaction(name="chat_generation") as transaction:
             history = history.copy() if history else []
             with sentry_sdk.start_span(description="build_prompt"):
-                send_status("Researching...")
+                send_event("STATUS", "Researching...")
                 if suggest_code is True:
                     system_message, prompt, retrieved_knowledge = build_prompt(
                         content=content, 
@@ -118,7 +114,7 @@ class AnthropicClient:
                         api_key=self.api_key
                         )
 
-            send_status("Thinking...")
+            send_event("STATUS", "Thinking...")
 
             with sentry_sdk.start_span(description="anthropic_api_call"):
                 if stream:
@@ -227,17 +223,17 @@ class AnthropicClient:
                         text_only = accumulated_response.split('",\n  "code_edits"')[0]
                         remaining_text = text_only[sent_length:]
                         if remaining_text:
-                            send_chunk(remaining_text)
+                            send_event("CHUNK", remaining_text)
                         
-                        send_status("Writing code...")
+                        send_event("STATUS", "Writing code...")
                         text_complete = True
                     else:
                         # Still in text_answer content, stream the full chunk
-                        send_chunk(text_chunk)
+                        send_event("CHUNK", text_chunk)
                         sent_length += len(text_chunk)
                 elif not suggest_code:
                     # Normal streaming for non-code suggestions
-                    send_chunk(text_chunk)
+                    send_event("CHUNK", text_chunk)
         
         return accumulated_response, text_complete, sent_length
 
