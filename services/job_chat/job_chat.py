@@ -14,7 +14,7 @@ from anthropic import (
     InternalServerError,
 )
 import sentry_sdk
-from util import ApolloError, send_event
+from util import ApolloError, create_logger, send_event
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
 
