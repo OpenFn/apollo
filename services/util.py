@@ -104,12 +104,3 @@ def send_event(name:str, message: str):
     :param message: Status message to log
     """
     print(f"EVENT:{name}:{message}")
-
-# TODO maybe remove
-def send_status(message: str):
-    """
-    Send a status update via EVENT logging
-    
-    :param message: Status message to log
-    """
-    print(f"EVENT:STATUS:{message}")

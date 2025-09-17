@@ -18,7 +18,7 @@ from anthropic import (
     InternalServerError,
 )
 import sentry_sdk
-from util import ApolloError, create_logger, send_status
+from util import ApolloError, create_logger, send_event
 from .gen_project_prompt import build_prompt
 from workflow_chat.available_adaptors import get_available_adaptors
 
@@ -100,7 +100,7 @@ class AnthropicClient:
                     logger.warning(f"Could not parse existing YAML for component extraction: {e}")
             
             with sentry_sdk.start_span(description="build_prompt"):
-                send_status("Analyzing workflow requirements...")
+                send_event("STATUS", "Analyzing workflow requirements...")
                 system_message, prompt = build_prompt(
                     content=content, 
                     existing_yaml=processed_existing_yaml, 
@@ -118,7 +118,7 @@ class AnthropicClient:
             max_retries = 1
             for attempt in range(max_retries + 1):
                 with sentry_sdk.start_span(description="anthropic_api_call"):
-                    send_status("Generating workflow...")
+                    send_event("STATUS", "Generating workflow...")
                     message = self.client.messages.create(
                         max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
                     )
@@ -140,7 +140,7 @@ class AnthropicClient:
                 response = "\n\n".join(response_parts)
 
                 with sentry_sdk.start_span(description="parse_and_format_yaml"):
-                    send_status("Formatting workflow...")
+                    send_event("STATUS", "Formatting workflow...")
                     response_text, response_yaml = self.split_format_yaml(response, preserved_values)
 
                 # If YAML parsing succeeded or we're on the last attempt, return the result
