@@ -96,6 +96,16 @@ def apollo(name, payload):
     return r.json()
 
 
+def send_event(name:str, message: str):
+    """
+    Send a generic event update via EVENT logging
+    
+    :param name: name/type of the event
+    :param message: Status message to log
+    """
+    print(f"EVENT:{name}:{message}")
+
+# TODO maybe remove
 def send_status(message: str):
     """
     Send a status update via EVENT logging
