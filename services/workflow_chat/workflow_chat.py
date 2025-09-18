@@ -37,7 +37,8 @@ class Payload:
     existing_yaml: Optional[str] = None
     history: Optional[List[Dict[str, str]]] = None
     api_key: Optional[str] = None
-
+    stream: Optional[bool] = False
+    
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
         """
@@ -50,6 +51,7 @@ class Payload:
             existing_yaml=data.get("existing_yaml"),
             history=data.get("history", []),
             api_key=data.get("api_key"),
+            stream=data.get("stream", False)
         )
 
 
@@ -82,6 +84,7 @@ class AnthropicClient:
         existing_yaml: str = None,
         errors: Optional[str] = None,
         history: Optional[List[Dict[str, str]]] = None,
+        stream: Optional[bool] = False,
     ) -> ChatResponse:
         """Generate a response using the Claude API. Retry up to 2 times if YAML/JSON parsing fails."""
         
@@ -108,6 +111,9 @@ class AnthropicClient:
                     history=history
                 )
 
+            # Add prefilled opening brace for JSON response
+            prompt.append({"role": "assistant", "content": '{\n  "text": "'})
+
             accumulated_usage = {
                 "cache_creation_input_tokens": 0,
                 "cache_read_input_tokens": 0,
@@ -119,9 +125,32 @@ class AnthropicClient:
             for attempt in range(max_retries + 1):
                 with sentry_sdk.start_span(description="anthropic_api_call"):
                     send_event("STATUS", "Generating workflow...")
-                    message = self.client.messages.create(
-                        max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
-                    )
+
+                    if stream:
+                        logger.info("Making streaming API call")
+                        text_complete = False
+                        sent_length = 0
+                        accumulated_response = ""
+                                            
+                        with self.client.messages.stream(
+                            max_tokens=self.config.max_tokens, 
+                            messages=prompt, 
+                            model=self.config.model, 
+                            system=system_message
+                        ) as stream_obj:
+                            for event in stream_obj:
+                                accumulated_response, text_complete, sent_length = self.process_stream_event(
+                                    event,
+                                    accumulated_response,
+                                    text_complete,
+                                    sent_length
+                                )     
+                        message = stream_obj.get_final_message()
+                    else:
+                        logger.info("Making non-streaming API call")
+                        message = self.client.messages.create(
+                            max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
+                        )
 
                 # Track usage from this attempt
                 if hasattr(message, "usage"):
@@ -138,6 +167,9 @@ class AnthropicClient:
                         logger.warning(f"Unhandled content type: {content_block.type}")
 
                 response = "\n\n".join(response_parts)
+
+                # Add back the prefilled opening brace
+                response = '{\n  "text": "' + response
 
                 with sentry_sdk.start_span(description="parse_and_format_yaml"):
                     send_event("STATUS", "Formatting workflow...")
@@ -374,6 +406,32 @@ class AnthropicClient:
                         edge_data["id"] = str(uuid.uuid4())
                 else:
                     edge_data["id"] = str(uuid.uuid4())
+
+    def process_stream_event(self, event, accumulated_response, text_complete, sent_length):
+        """
+        Process a single stream event from the Anthropic API.
+        """
+        if event.type == "content_block_delta":
+            if event.delta.type == "text_delta":
+                text_chunk = event.delta.text
+                accumulated_response += text_chunk
+
+                if not text_complete:
+                    # Stream chunks until we hit the YAML part
+                    if '"yaml":' in accumulated_response:
+                        # Get only the text part and send any remaining unsent text
+                        text_only = accumulated_response.split('"yaml":')[0]
+                        remaining_text = text_only[sent_length:]
+                        if remaining_text:
+                            send_event("CHUNK", remaining_text)
+                        
+                        send_event("STATUS", "Preparing workflow YAML...")
+                        text_complete = True
+                    else:
+                        # Still in text content, stream the full chunk
+                        send_event("CHUNK", text_chunk)
+                        sent_length += len(text_chunk)
+        return accumulated_response, text_complete, sent_length
 
 
 def main(data_dict: dict) -> dict:
