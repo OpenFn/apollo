@@ -1,5 +1,11 @@
 # apollo
 
+## 0.14.4
+
+### Patch Changes
+
+- 3c1b932: update to claude 4
+
 ## 0.14.3
 
 ### Patch Changes
