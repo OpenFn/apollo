@@ -12,11 +12,13 @@ const callService = (
   m: ModuleDescription,
   port: number,
   payload?: any,
-  onLog?: (str: string) => void
+  onLog?: (str: string) => void,
+  onEvent?: (evt: string, payload: any) => void
 ) => {
   if (m.type === "py") {
-    return run(m.name, port, payload as any, onLog);
+    return run(m.name, port, payload as any, onLog, onEvent);
   } else {
+    // TODO add event handling to ts services
     return m.handler!(port, payload as any, onLog);
   }
 };
@@ -63,8 +65,15 @@ export default async (app: Elysia, port: number) => {
                   data: log,
                 });
               };
+              const onEvent = (type: string, payload: any) => {
+                ws.send({
+                  event: "event",
+                  type,
+                  data: payload,
+                });
+              };
 
-              callService(m, port, message.data as any, onLog).then(
+              callService(m, port, message.data as any, onLog, onEvent).then(
                 (result) => {
                   ws.send({
                     event: "complete",

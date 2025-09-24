@@ -1,8 +1,9 @@
+import json
 import logging
 import sys
 import requests
 from dataclasses import dataclass
-from typing import Optional, Any
+from typing import Optional, Any, Dict
 
 
 class DictObj:
@@ -93,3 +94,13 @@ def apollo(name, payload):
     url = f"http://127.0.0.1:{apollo_port}/services/{name}"
     r = requests.post(url, payload)
     return r.json()
+
+
+def send_event(name:str, message: str):
+    """
+    Send a generic event update via EVENT logging
+    
+    :param name: name/type of the event
+    :param message: Status message to log
+    """
+    print(f"EVENT:{name}:{message}")

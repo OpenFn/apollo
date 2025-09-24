@@ -398,5 +398,54 @@ post('/webhook', state => state.data);'''
     assert response["suggested_code"] == expected_code, f"Variable name change did not produce expected result.\nExpected:\n{expected_code}\n\nActual:\n{response['suggested_code']}"
 
 
+def test_change_variable_names_only_streaming():
+    print("==================TEST==================")
+    print("Description: Testing if AI can change variable names without affecting state.data references when given simple instruction (with streaming).")
+    
+    history = []
+    content = "change the variable name 'data' to 'patients'"
+    
+    original_code = '''get('/api/patients');
+
+fn(state => {
+  const data = state.data;
+  let processedData = [];
+  
+  data.forEach(record => {
+    if (record.status === 'active') {
+      processedData.push({
+        id: record.id,
+        name: record.full_name,
+        status: record.status
+      });
+    }
+  });
+  
+  console.log(`Processed ${processedData.length} records from data`);
+  
+  return { ...state, data: processedData };
+});
+
+post('/webhook', state => state.data);'''
+    
+    context = {
+        "expression": original_code,
+        "adaptor": "@openfn/language-kobotoolbox@4.2.3"
+    }
+    
+    expected_code = original_code.replace('const data', 'const patients') \
+                                .replace('data.forEach', 'patients.forEach')
+    
+    meta = {}
+    service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True, stream=True)
+    response = call_job_chat_service(service_input)
+    print_response_details(response, "change_variable_names_streaming", content=content)
+    
+    assert response is not None
+    assert "suggested_code" in response
+    
+    assert response["suggested_code"] == expected_code, f"Variable name change did not produce expected result.\nExpected:\n{expected_code}\n\nActual:\n{response['suggested_code']}"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
