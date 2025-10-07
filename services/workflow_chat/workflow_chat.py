@@ -103,7 +103,6 @@ class AnthropicClient:
                     logger.warning(f"Could not parse existing YAML for component extraction: {e}")
             
             with sentry_sdk.start_span(description="build_prompt"):
-                send_event("STATUS", "Analyzing workflow requirements...")
                 system_message, prompt = build_prompt(
                     content=content, 
                     existing_yaml=processed_existing_yaml, 
@@ -124,7 +123,7 @@ class AnthropicClient:
             max_retries = 1
             for attempt in range(max_retries + 1):
                 with sentry_sdk.start_span(description="anthropic_api_call"):
-                    send_event("STATUS", "Generating workflow...")
+                    send_event("STATUS", "Thinking...")
 
                     if stream:
                         logger.info("Making streaming API call")
@@ -418,14 +417,13 @@ class AnthropicClient:
 
                 if not text_complete:
                     # Stream chunks until we hit the YAML part
-                    if '"yaml":' in accumulated_response:
+                    if '",\n  "yaml":' in accumulated_response:
                         # Get only the text part and send any remaining unsent text
                         text_only = accumulated_response.split('"yaml":')[0]
                         remaining_text = text_only[sent_length:]
                         if remaining_text:
                             send_event("CHUNK", remaining_text)
                         
-                        send_event("STATUS", "Preparing workflow YAML...")
                         text_complete = True
                     else:
                         # Still in text content, stream the full chunk
@@ -448,7 +446,7 @@ def main(data_dict: dict) -> dict:
         client = AnthropicClient(config)
 
         result = client.generate(
-            content=data.content, existing_yaml=data.existing_yaml, errors=data.errors, history=data.history
+            content=data.content, existing_yaml=data.existing_yaml, errors=data.errors, history=data.history, stream=data.stream
         )
 
         return {
