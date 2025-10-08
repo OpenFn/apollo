@@ -49,6 +49,64 @@ export default async (app: Elysia, port: number) => {
         return result;
       });
 
+      // HTTP streaming
+      app.post(`${name}/stream`, async (ctx) => {
+        console.log(`HTTP stream connnected to ${name}`);
+        const payload = ctx.body;
+
+        const stream = new ReadableStream({
+          async start(controller) {
+            const encoder = new TextEncoder();
+
+            const sendSSE = (event: string, data: any) => {
+              const message = `event: ${event}\ndata: ${JSON.stringify(
+                data
+              )}\n\n`;
+              controller.enqueue(encoder.encode(message));
+            };
+
+            const onLog = (log: string) => {
+              sendSSE("log", log);
+            };
+
+            const onEvent = (type: string, payload: any) => {
+              sendSSE("event", { type, data: payload });
+            };
+
+            try {
+              const result = await callService(
+                m,
+                port,
+                payload as any,
+                onLog,
+                onEvent
+              );
+
+              if (isApolloError(result)) {
+                sendSSE("error", result);
+              } else {
+                sendSSE("complete", result);
+              }
+            } catch (error) {
+              sendSSE("error", {
+                message:
+                  error instanceof Error ? error.message : "Unknown error",
+              });
+            } finally {
+              controller.close();
+            }
+          },
+        });
+
+        return new Response(stream, {
+          headers: {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+          },
+        });
+      });
+
       // websocket
       // TODO in the web socket API, does it make more sense to open a socket at root
       // and then pick the service you want? So you'd connect to /ws an send { call: 'echo', payload: {} }
