@@ -90,6 +90,21 @@ class AnthropicClient:
         
         with sentry_sdk.start_transaction(name="workflow_generation") as transaction:
             history = history.copy() if history else []
+
+            if stream:
+                send_event('message_start', {
+                    "type": "message_start",
+                    "message": {
+                        "id": f"msg_{uuid.uuid4().hex[:24]}",
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [],
+                        "model": self.config.model,
+                        "stop_reason": None,
+                        "stop_sequence": None,
+                        "usage": {"input_tokens": 0, "output_tokens": 0}
+                    }
+                })
             
             # Extract and preserve existing components
             preserved_values = {}
@@ -123,10 +138,39 @@ class AnthropicClient:
             max_retries = 1
             for attempt in range(max_retries + 1):
                 with sentry_sdk.start_span(description="anthropic_api_call"):
-                    send_event("STATUS", "Thinking...")
-
                     if stream:
                         logger.info("Making streaming API call")
+
+                        send_event('content_block_start', {
+                            "type": "content_block_start",
+                            "index": 0,
+                            "content_block": {"type": "thinking", "thinking": ""}
+                        })
+                        
+                        send_event('content_block_delta', {
+                            "type": "content_block_delta",
+                            "index": 0,
+                            "delta": {"type": "thinking_delta", "thinking": "Thinking..."}
+                        })
+                        
+                        send_event('content_block_delta', {
+                            "type": "content_block_delta",
+                            "index": 0,
+                            "delta": {"type": "signature_delta", "signature": "proxy_thinking_signature"}
+                        })
+                        
+                        send_event('content_block_stop', {
+                            "type": "content_block_stop",
+                            "index": 0
+                        })
+                        
+                        # Start text content block (index 1)
+                        send_event('content_block_start', {
+                            "type": "content_block_start",
+                            "index": 1,
+                            "content_block": {"type": "text", "text": ""}
+                        })
+
                         text_complete = False
                         sent_length = 0
                         accumulated_response = ""
@@ -145,6 +189,12 @@ class AnthropicClient:
                                     sent_length
                                 )     
                         message = stream_obj.get_final_message()
+
+                        send_event('content_block_stop', {
+                            "type": "content_block_stop",
+                            "index": 1
+                        })
+
                     else:
                         logger.info("Making non-streaming API call")
                         message = self.client.messages.create(
@@ -171,7 +221,30 @@ class AnthropicClient:
                 response = '{\n  "text": "' + response
 
                 with sentry_sdk.start_span(description="parse_and_format_yaml"):
-                    send_event("STATUS", "Formatting workflow...")
+                    if stream:
+                        send_event('content_block_start', {
+                            "type": "content_block_start",
+                            "index": 2,
+                            "content_block": {"type": "thinking", "thinking": ""}
+                        })
+                        
+                        send_event('content_block_delta', {
+                            "type": "content_block_delta",
+                            "index": 2,
+                            "delta": {"type": "thinking_delta", "thinking": "Formatting workflow..."}
+                        })
+                        
+                        send_event('content_block_delta', {
+                            "type": "content_block_delta",
+                            "index": 2,
+                            "delta": {"type": "signature_delta", "signature": "proxy_formatting_signature"}
+                        })
+                        
+                        send_event('content_block_stop', {
+                            "type": "content_block_stop",
+                            "index": 2
+                        })
+
                     response_text, response_yaml = self.split_format_yaml(response, preserved_values)
 
                 # If YAML parsing succeeded or we're on the last attempt, return the result
@@ -180,6 +253,17 @@ class AnthropicClient:
                         {"role": "user", "content": content},
                         {"role": "assistant", "content": response},
                     ]
+
+                    if stream:
+                        send_event('message_delta', {
+                            "type": "message_delta",
+                            "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+                            "usage": {"output_tokens": accumulated_usage.get("output_tokens", 0)}
+                        })
+                        
+                        send_event('message_stop', {
+                            "type": "message_stop"
+                        })
 
                     return ChatResponse(
                         content=response_text,
@@ -422,12 +506,20 @@ class AnthropicClient:
                         text_only = accumulated_response.split('"yaml":')[0]
                         remaining_text = text_only[sent_length:]
                         if remaining_text:
-                            send_event("CHUNK", remaining_text)
+                            send_event('content_block_delta', {
+                                "type": "content_block_delta",
+                                "index": 1,
+                                "delta": {"type": "text_delta", "text": remaining_text}
+                            })
                         
                         text_complete = True
                     else:
                         # Still in text content, stream the full chunk
-                        send_event("CHUNK", text_chunk)
+                        send_event('content_block_delta', {
+                            "type": "content_block_delta",
+                            "index": 1,
+                            "delta": {"type": "text_delta", "text": text_chunk}
+                        })
                         sent_length += len(text_chunk)
         return accumulated_response, text_complete, sent_length
 

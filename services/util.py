@@ -95,12 +95,13 @@ def apollo(name, payload):
     r = requests.post(url, payload)
     return r.json()
 
-
-def send_event(name:str, message: str):
+def send_event(event_type: str, data: dict):
     """
-    Send a generic event update via EVENT logging
+    Send Server-Sent Event in Anthropic format
     
-    :param name: name/type of the event
-    :param message: Status message to log
+    :param event_type: SSE event type (e.g., 'message_start', 'content_block_delta')
+    :param data: Event data dictionary
     """
-    print(f"EVENT:{name}:{message}")
+    print(f"event: {event_type}")
+    print(f"data: {json.dumps(data)}")
+    print()  # Empty line required by SSE spec
