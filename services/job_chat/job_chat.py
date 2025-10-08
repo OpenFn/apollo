@@ -1,6 +1,7 @@
 import os
 import json
 from typing import List, Optional, Dict, Any
+import uuid
 from dataclasses import dataclass
 from anthropic import (
     Anthropic,
@@ -19,13 +20,6 @@ from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
 
 logger = create_logger("job_chat")
-
-def send_code_suggestion(suggested_code: str, diff: Optional[Dict[str, Any]] = None):
-    """Send code suggestion via EVENT logging"""
-    payload = {"suggested_code": suggested_code}
-    if diff:
-        payload["diff"] = diff
-    send_event('CODE', json.dumps(payload))
 
 @dataclass
 class Payload:
@@ -93,8 +87,46 @@ class AnthropicClient:
 
         with sentry_sdk.start_transaction(name="chat_generation") as transaction:
             history = history.copy() if history else []
+
+            if stream:
+                send_event('message_start', {
+                    "type": "message_start",
+                    "message": {
+                        "id": f"msg_{uuid.uuid4().hex[:24]}",
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [],
+                        "model": self.config.model,
+                        "stop_reason": None,
+                        "stop_sequence": None,
+                        "usage": {"input_tokens": 0, "output_tokens": 0}
+                    }
+                })
+                
+                # Send thinking block for "Researching..."
+                send_event('content_block_start', {
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": {"type": "thinking", "thinking": ""}
+                })
+                
+                send_event('content_block_delta', {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "thinking_delta", "thinking": "Researching..."}
+                })
+                
+                send_event('content_block_delta', {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "signature_delta", "signature": "proxy_research_signature"}
+                })
+                
+                send_event('content_block_stop', {
+                    "type": "content_block_stop",
+                    "index": 0
+                })
             with sentry_sdk.start_span(description="build_prompt"):
-                send_event("STATUS", "Researching...")
                 if suggest_code is True:
                     system_message, prompt, retrieved_knowledge = build_prompt(
                         content=content, 
@@ -114,11 +146,14 @@ class AnthropicClient:
                         api_key=self.api_key
                         )
 
-            send_event("STATUS", "Thinking...")
-
             with sentry_sdk.start_span(description="anthropic_api_call"):
                 if stream:
                     logger.info("Making streaming API call")
+                    send_event('content_block_start', {
+                        "type": "content_block_start",
+                        "index": 1,
+                        "content_block": {"type": "text", "text": ""}
+                    })
                     text_complete = False
                     sent_length = 0
                     accumulated_response = ""
@@ -138,6 +173,13 @@ class AnthropicClient:
                                 sent_length
                             )     
                     message = stream_obj.get_final_message()
+
+                    # Close text content block if we didn't already close it
+                    if not suggest_code:
+                        send_event('content_block_stop', {
+                            "type": "content_block_stop",
+                            "index": 1
+                        })
 
                     usage_info = message.usage.model_dump() if hasattr(message, 'usage') else {}
 
@@ -174,8 +216,6 @@ class AnthropicClient:
                 with sentry_sdk.start_span(description="parse_and_apply_edits"):
                     text_response, suggested_code, diff = self.parse_and_apply_edits(response=response, content=content, original_code=job_code)
 
-                if suggested_code:
-                    send_code_suggestion(suggested_code, diff)
             else:
                 text_response = response
                 suggested_code = None
@@ -190,6 +230,17 @@ class AnthropicClient:
                 message.usage.model_dump() if hasattr(message, "usage") else {},
                 *[usage_data for usage_key, usage_data in retrieved_knowledge.get("usage", {}).items()]
             )
+
+            if stream:
+                send_event('message_delta', {
+                    "type": "message_delta",
+                    "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+                    "usage": {"output_tokens": usage.get("output_tokens", 0)}
+                })
+                
+                send_event('message_stop', {
+                    "type": "message_stop"
+                })
 
             return ChatResponse(
                 response=text_response,
@@ -223,17 +274,56 @@ class AnthropicClient:
                         text_only = accumulated_response.split('",\n  "code_edits"')[0]
                         remaining_text = text_only[sent_length:]
                         if remaining_text:
-                            send_event("CHUNK", remaining_text)
+                            send_event('content_block_delta', {
+                                "type": "content_block_delta",
+                                "index": 1,
+                                "delta": {"type": "text_delta", "text": remaining_text}
+                            })
                         
-                        send_event("STATUS", "Writing code...")
+                        send_event('content_block_stop', {
+                            "type": "content_block_stop",
+                            "index": 1
+                        })
+                        
+                        send_event('content_block_start', {
+                            "type": "content_block_start",
+                            "index": 2,
+                            "content_block": {"type": "thinking", "thinking": ""}
+                        })
+                        
+                        send_event('content_block_delta', {
+                            "type": "content_block_delta",
+                            "index": 2,
+                            "delta": {"type": "thinking_delta", "thinking": "Writing code..."}
+                        })
+                        
+                        send_event('content_block_delta', {
+                            "type": "content_block_delta",
+                            "index": 2,
+                            "delta": {"type": "signature_delta", "signature": "proxy_code_signature"}
+                        })
+                        
+                        send_event('content_block_stop', {
+                            "type": "content_block_stop",
+                            "index": 2
+                        })
+                        
                         text_complete = True
                     else:
                         # Still in text_answer content, stream the full chunk
-                        send_event("CHUNK", text_chunk)
+                        send_event('content_block_delta', {
+                            "type": "content_block_delta",
+                            "index": 1,
+                            "delta": {"type": "text_delta", "text": text_chunk}
+                        })
                         sent_length += len(text_chunk)
                 elif not suggest_code:
                     # Normal streaming for non-code suggestions
-                    send_event("CHUNK", text_chunk)
+                    send_event('content_block_delta', {
+                        "type": "content_block_delta",
+                        "index": 1,
+                        "delta": {"type": "text_delta", "text": text_chunk}
+                    })
         
         return accumulated_response, text_complete, sent_length
 
