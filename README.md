@@ -73,15 +73,22 @@ from a node_modules. None of this affects python.
 
 See [bun auto-install]() for more details.
 
-## Finetuning and poetry dependency groups
+## Python Setup
 
-`poetry install` will only install the main dependencies - the stuff used in the
-docker image.
+This repo uses `poetry` to manage dependencies.
 
-Dependencies for finetuning (which include huge models) are in a special
-optional `ft` group in the `pyproject.toml`.
+We use an "in-project" venv , which means a `.venv` folder will be created when
+you run `poetry install`.
 
-To install these, do `poetry install --with ft`
+All python is invoked through `entry.py`, which loads the environment properly
+so that relative imports work.
+
+You can invoke entry.py directly (ie, without HTTP or any intermedia js) through
+bun from the root:
+
+```
+bun py echo tmp/payload.json
+```
 
 ## CLI
 
@@ -175,23 +182,6 @@ process.
 Note that `print()` statements do not get send out to the web socket, as these
 are intended for local debugging. Only logs from a logger object are diverted.
 
-## Python Setup
-
-This repo uses `poetry` to manage dependencies.
-
-We use an "in-project" venv , which means a `.venv` folder will be created when
-you run `poetry install`.
-
-All python is invoked through `entry.py`, which loads the environment properly
-so that relative imports work.
-
-You can invoke entry.py directly (ie, without HTTP or any intermedia js) through
-bun from the root:
-
-```
-bun py echo tmp/payload.json
-```
-
 ## Docker
 
 To build the docker image:
@@ -205,6 +195,16 @@ To run it on port 3000
 ```bash
 docker run -p 3000:3000 openfn-apollo
 ```
+
+## Finetuning and poetry dependency groups
+
+`poetry install` will only install the main dependencies - the stuff used in the
+docker image.
+
+Dependencies for finetuning (which include huge models) are in a special
+optional `ft` group in the `pyproject.toml`.
+
+To install these, do `poetry install --with ft`
 
 ## Contributing
 
