@@ -70,7 +70,8 @@ export default async (app: Elysia, port: number) => {
             };
 
             const onEvent = (type: string, payload: any) => {
-              sendSSE("event", { type, data: payload });
+              // Send events in Anthropic SSE format
+              sendSSE(type, payload);
             };
 
             try {
