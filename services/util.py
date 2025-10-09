@@ -97,11 +97,11 @@ def apollo(name, payload):
 
 def send_event(event_type: str, data: dict):
     """
-    Send Server-Sent Event in Anthropic format
-    
+    Send event through bridge to be forwarded as SSE
+
     :param event_type: SSE event type (e.g., 'message_start', 'content_block_delta')
     :param data: Event data dictionary
     """
-    print(f"event: {event_type}")
-    print(f"data: {json.dumps(data)}")
-    print()  # Empty line required by SSE spec
+    # Use EVENT: prefix format that bridge.ts expects
+    # Bridge will convert this to proper SSE format
+    print(f"EVENT:{event_type}:{json.dumps(data)}", flush=True)
