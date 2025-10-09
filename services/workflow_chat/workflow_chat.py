@@ -503,7 +503,7 @@ class AnthropicClient:
                     # Stream chunks until we hit the YAML part
                     if '",\n  "yaml":' in accumulated_response:
                         # Get only the text part and send any remaining unsent text
-                        text_only = accumulated_response.split('"yaml":')[0]
+                        text_only = accumulated_response.split('",\n  "yaml":')[0]
                         remaining_text = text_only[sent_length:]
                         if remaining_text:
                             send_event('content_block_delta', {
