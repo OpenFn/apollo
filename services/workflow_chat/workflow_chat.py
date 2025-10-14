@@ -187,13 +187,24 @@ class AnthropicClient:
                                     accumulated_response,
                                     text_complete,
                                     sent_length
-                                )     
+                                )
                         message = stream_obj.get_final_message()
 
-                        send_event('content_block_stop', {
-                            "type": "content_block_stop",
-                            "index": 1
-                        })
+                        # Close text content block if we didn't already close it
+                        if not text_complete:
+                            # Flush any remaining buffered content
+                            if sent_length < len(accumulated_response):
+                                remaining = accumulated_response[sent_length:]
+                                send_event('content_block_delta', {
+                                    "type": "content_block_delta",
+                                    "index": 1,
+                                    "delta": {"type": "text_delta", "text": remaining}
+                                })
+
+                            send_event('content_block_stop', {
+                                "type": "content_block_stop",
+                                "index": 1
+                            })
 
                     else:
                         logger.info("Making non-streaming API call")
@@ -500,10 +511,12 @@ class AnthropicClient:
                 accumulated_response += text_chunk
 
                 if not text_complete:
+                    delimiter = '",\n  "yaml":'
+
                     # Stream chunks until we hit the YAML part
-                    if '",\n  "yaml":' in accumulated_response:
+                    if delimiter in accumulated_response:
                         # Get only the text part and send any remaining unsent text
-                        text_only = accumulated_response.split('",\n  "yaml":')[0]
+                        text_only = accumulated_response.split(delimiter)[0]
                         remaining_text = text_only[sent_length:]
                         if remaining_text:
                             send_event('content_block_delta', {
@@ -511,16 +524,28 @@ class AnthropicClient:
                                 "index": 1,
                                 "delta": {"type": "text_delta", "text": remaining_text}
                             })
-                        
+
+                        # Close the text content block
+                        send_event('content_block_stop', {
+                            "type": "content_block_stop",
+                            "index": 1
+                        })
+
                         text_complete = True
                     else:
-                        # Still in text content, stream the full chunk
-                        send_event('content_block_delta', {
-                            "type": "content_block_delta",
-                            "index": 1,
-                            "delta": {"type": "text_delta", "text": text_chunk}
-                        })
-                        sent_length += len(text_chunk)
+                        # Buffer to avoid sending partial delimiter
+                        # Only send content that we know won't be part of the delimiter
+                        buffer_size = len(delimiter) - 1
+                        safe_to_send_until = len(accumulated_response) - buffer_size
+
+                        if safe_to_send_until > sent_length:
+                            safe_text = accumulated_response[sent_length:safe_to_send_until]
+                            send_event('content_block_delta', {
+                                "type": "content_block_delta",
+                                "index": 1,
+                                "delta": {"type": "text_delta", "text": safe_text}
+                            })
+                            sent_length = safe_to_send_until
         return accumulated_response, text_complete, sent_length
 
 
