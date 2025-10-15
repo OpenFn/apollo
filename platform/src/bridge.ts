@@ -49,30 +49,6 @@ export const run = async (
       console.log(err);
     });
 
-    proc.on("close", async (code) => {
-      if (code) {
-        console.error("Python process exited with code", code);
-        reject(code);
-      }
-      const result = Bun.file(outputPath);
-      const text = await result.text();
-
-      try {
-        await rm(inputPath);
-        await rm(outputPath);
-      } catch (e) {
-        console.error("Error removing temporary files");
-        console.error(e);
-      }
-
-      if (text) {
-        resolve(JSON.parse(text));
-      } else {
-        console.warn("No data returned from pythonland");
-        resolve(null);
-      }
-    });
-
     const rl = readline.createInterface({
       input: proc.stdout,
       crlfDelay: Infinity,
@@ -107,6 +83,34 @@ export const run = async (
       console.error(line);
       // /Divert all errors to the websocket
       onLog?.(line);
+    });
+
+    proc.on("close", async (code) => {
+      // Clean up readline interfaces immediately to prevent race conditions
+      rl.close();
+      rl2.close();
+
+      if (code) {
+        console.error("Python process exited with code", code);
+        reject(code);
+      }
+      const result = Bun.file(outputPath);
+      const text = await result.text();
+
+      try {
+        await rm(inputPath);
+        await rm(outputPath);
+      } catch (e) {
+        console.error("Error removing temporary files");
+        console.error(e);
+      }
+
+      if (text) {
+        resolve(JSON.parse(text));
+      } else {
+        console.warn("No data returned from pythonland");
+        resolve(null);
+      }
     });
 
     return;

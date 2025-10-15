@@ -57,12 +57,21 @@ export default async (app: Elysia, port: number) => {
         const stream = new ReadableStream({
           async start(controller) {
             const encoder = new TextEncoder();
+            let isClosed = false;
 
             const sendSSE = (event: string, data: any) => {
-              const message = `event: ${event}\ndata: ${JSON.stringify(
-                data
-              )}\n\n`;
-              controller.enqueue(encoder.encode(message));
+              if (isClosed) {
+                return;
+              }
+              try {
+                const message = `event: ${event}\ndata: ${JSON.stringify(
+                  data
+                )}\n\n`;
+                controller.enqueue(encoder.encode(message));
+              } catch (error) {
+                // Stream may have been closed
+                isClosed = true;
+              }
             };
 
             const onLog = (log: string) => {
@@ -94,6 +103,7 @@ export default async (app: Elysia, port: number) => {
                   error instanceof Error ? error.message : "Unknown error",
               });
             } finally {
+              isClosed = true;
               controller.close();
             }
           },
