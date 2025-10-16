@@ -185,10 +185,8 @@ class AnthropicClient:
                 response = '{\n  "text": "' + response
 
                 with sentry_sdk.start_span(description="parse_and_format_yaml"):
-                    if stream:
-                        stream_manager.send_thinking("Formatting workflow...", signature="proxy_formatting_signature")
 
-                    response_text, response_yaml = self.split_format_yaml(response, preserved_values)
+                    response_text, response_yaml = self.split_format_yaml(response, preserved_values, stream_manager)
 
                 # If YAML parsing succeeded or we're on the last attempt, return the result
                 if response_yaml is not None or attempt == max_retries:
@@ -274,7 +272,7 @@ class AnthropicClient:
             
             yaml_data["edges"] = sanitized_edges
 
-    def split_format_yaml(self, response, preserved_values=None):
+    def split_format_yaml(self, response, preserved_values=None, stream_manager=None):
         """Split text and YAML in response and format the YAML."""
         output_text, output_yaml = "", None
 
@@ -287,6 +285,8 @@ class AnthropicClient:
             output_yaml = response_data.get("yaml", "")
 
             if output_yaml and output_yaml.strip():
+                if stream_manager:
+                    stream_manager.send_thinking("Formatting workflow...", signature="proxy_formatting_signature")
                 # Parse YAML string into Python object
                 output_yaml = yaml.safe_load(output_yaml)
 
