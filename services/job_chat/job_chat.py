@@ -89,12 +89,11 @@ class AnthropicClient:
         with sentry_sdk.start_transaction(name="chat_generation") as transaction:
             history = history.copy() if history else []
 
-            # Initialize StreamManager if streaming is enabled
             stream_manager = None
             if stream:
                 stream_manager = StreamManager(model=self.config.model)
                 stream_manager.start_stream()
-                stream_manager.send_thinking("Researching...")
+                stream_manager.send_thinking("Thinking...")
             with sentry_sdk.start_span(description="build_prompt"):
                 if suggest_code is True:
                     system_message, prompt, retrieved_knowledge = build_prompt(
@@ -102,7 +101,8 @@ class AnthropicClient:
                         history=history, 
                         context=context, 
                         rag=rag, 
-                        api_key=self.api_key
+                        api_key=self.api_key,
+                        stream_manager=stream_manager
                     )
                     prompt.append({"role": "assistant", "content": '{\n  "text_answer": "'})
 
