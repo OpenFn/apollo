@@ -15,9 +15,10 @@ from anthropic import (
     InternalServerError,
 )
 import sentry_sdk
-from util import ApolloError, create_logger, send_event
+from util import ApolloError, create_logger
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
+from streaming_util import StreamManager
 
 logger = create_logger("job_chat")
 
@@ -88,44 +89,12 @@ class AnthropicClient:
         with sentry_sdk.start_transaction(name="chat_generation") as transaction:
             history = history.copy() if history else []
 
+            # Initialize StreamManager if streaming is enabled
+            stream_manager = None
             if stream:
-                send_event('message_start', {
-                    "type": "message_start",
-                    "message": {
-                        "id": f"msg_{uuid.uuid4().hex[:24]}",
-                        "type": "message",
-                        "role": "assistant",
-                        "content": [],
-                        "model": self.config.model,
-                        "stop_reason": None,
-                        "stop_sequence": None,
-                        "usage": {"input_tokens": 0, "output_tokens": 0}
-                    }
-                })
-                
-                # Send thinking block for "Researching..."
-                send_event('content_block_start', {
-                    "type": "content_block_start",
-                    "index": 0,
-                    "content_block": {"type": "thinking", "thinking": ""}
-                })
-                
-                send_event('content_block_delta', {
-                    "type": "content_block_delta",
-                    "index": 0,
-                    "delta": {"type": "thinking_delta", "thinking": "Researching..."}
-                })
-                
-                send_event('content_block_delta', {
-                    "type": "content_block_delta",
-                    "index": 0,
-                    "delta": {"type": "signature_delta", "signature": "proxy_research_signature"}
-                })
-                
-                send_event('content_block_stop', {
-                    "type": "content_block_stop",
-                    "index": 0
-                })
+                stream_manager = StreamManager(model=self.config.model)
+                stream_manager.start_stream()
+                stream_manager.send_thinking("Researching...")
             with sentry_sdk.start_span(description="build_prompt"):
                 if suggest_code is True:
                     system_message, prompt, retrieved_knowledge = build_prompt(
@@ -149,19 +118,14 @@ class AnthropicClient:
             with sentry_sdk.start_span(description="anthropic_api_call"):
                 if stream:
                     logger.info("Making streaming API call")
-                    send_event('content_block_start', {
-                        "type": "content_block_start",
-                        "index": 1,
-                        "content_block": {"type": "text", "text": ""}
-                    })
                     text_complete = False
                     sent_length = 0
                     accumulated_response = ""
-                                        
+
                     with self.client.messages.stream(
-                        max_tokens=self.config.max_tokens, 
-                        messages=prompt, 
-                        model=self.config.model, 
+                        max_tokens=self.config.max_tokens,
+                        messages=prompt,
+                        model=self.config.model,
                         system=system_message
                     ) as stream_obj:
                         for event in stream_obj:
@@ -170,30 +134,16 @@ class AnthropicClient:
                                 accumulated_response,
                                 suggest_code,
                                 text_complete,
-                                sent_length
-                            )     
+                                sent_length,
+                                stream_manager
+                            )
                     message = stream_obj.get_final_message()
 
-                    # Close text content block if we didn't already close it
-                    if not suggest_code:
-                        send_event('content_block_stop', {
-                            "type": "content_block_stop",
-                            "index": 1
-                        })
-                    elif suggest_code and not text_complete:
-                        # Flush any remaining buffered content when suggest_code is true
+                    # Flush any remaining buffered content when suggest_code is true
+                    if suggest_code and not text_complete:
                         if sent_length < len(accumulated_response):
                             remaining = accumulated_response[sent_length:]
-                            send_event('content_block_delta', {
-                                "type": "content_block_delta",
-                                "index": 1,
-                                "delta": {"type": "text_delta", "text": remaining}
-                            })
-
-                        send_event('content_block_stop', {
-                            "type": "content_block_stop",
-                            "index": 1
-                        })
+                            stream_manager.send_text(remaining)
 
                     usage_info = message.usage.model_dump() if hasattr(message, 'usage') else {}
 
@@ -246,15 +196,7 @@ class AnthropicClient:
             )
 
             if stream:
-                send_event('message_delta', {
-                    "type": "message_delta",
-                    "delta": {"stop_reason": "end_turn", "stop_sequence": None},
-                    "usage": {"output_tokens": usage.get("output_tokens", 0)}
-                })
-                
-                send_event('message_stop', {
-                    "type": "message_stop"
-                })
+                stream_manager.end_stream()
 
             return ChatResponse(
                 response=text_response,
@@ -267,11 +209,12 @@ class AnthropicClient:
 
     def process_stream_event(
         self,
-        event, 
-        accumulated_response, 
-        suggest_code, 
-        text_complete, 
-        sent_length
+        event,
+        accumulated_response,
+        suggest_code,
+        text_complete,
+        sent_length,
+        stream_manager
     ):
         """
         Process a single stream event from the Anthropic API.
@@ -290,39 +233,10 @@ class AnthropicClient:
                         text_only = accumulated_response.split(delimiter)[0]
                         remaining_text = text_only[sent_length:]
                         if remaining_text:
-                            send_event('content_block_delta', {
-                                "type": "content_block_delta",
-                                "index": 1,
-                                "delta": {"type": "text_delta", "text": remaining_text}
-                            })
+                            stream_manager.send_text(remaining_text)
 
-                        send_event('content_block_stop', {
-                            "type": "content_block_stop",
-                            "index": 1
-                        })
-
-                        send_event('content_block_start', {
-                            "type": "content_block_start",
-                            "index": 2,
-                            "content_block": {"type": "thinking", "thinking": ""}
-                        })
-
-                        send_event('content_block_delta', {
-                            "type": "content_block_delta",
-                            "index": 2,
-                            "delta": {"type": "thinking_delta", "thinking": "Writing code..."}
-                        })
-
-                        send_event('content_block_delta', {
-                            "type": "content_block_delta",
-                            "index": 2,
-                            "delta": {"type": "signature_delta", "signature": "proxy_code_signature"}
-                        })
-
-                        send_event('content_block_stop', {
-                            "type": "content_block_stop",
-                            "index": 2
-                        })
+                        # Send "Writing code..." thinking block
+                        stream_manager.send_thinking("Writing code...")
 
                         text_complete = True
                     else:
@@ -333,20 +247,12 @@ class AnthropicClient:
 
                         if safe_to_send_until > sent_length:
                             safe_text = accumulated_response[sent_length:safe_to_send_until]
-                            send_event('content_block_delta', {
-                                "type": "content_block_delta",
-                                "index": 1,
-                                "delta": {"type": "text_delta", "text": safe_text}
-                            })
+                            stream_manager.send_text(safe_text)
                             sent_length = safe_to_send_until
                 elif not suggest_code:
                     # Normal streaming for non-code suggestions
-                    send_event('content_block_delta', {
-                        "type": "content_block_delta",
-                        "index": 1,
-                        "delta": {"type": "text_delta", "text": text_chunk}
-                    })
-        
+                    stream_manager.send_text(text_chunk)
+
         return accumulated_response, text_complete, sent_length
 
     def parse_and_apply_edits(self, response: str, content: str, original_code: Optional[str] = None) -> tuple[str, Optional[str], Optional[Dict[str, Any]]]:

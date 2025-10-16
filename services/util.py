@@ -94,14 +94,3 @@ def apollo(name, payload):
     url = f"http://127.0.0.1:{apollo_port}/services/{name}"
     r = requests.post(url, payload)
     return r.json()
-
-def send_event(event_type: str, data: dict):
-    """
-    Send event through bridge to be forwarded as SSE
-
-    :param event_type: SSE event type (e.g., 'message_start', 'content_block_delta')
-    :param data: Event data dictionary
-    """
-    # Use EVENT: prefix format that bridge.ts expects
-    # Bridge will convert this to proper SSE format
-    print(f"EVENT:{event_type}:{json.dumps(data)}", flush=True)
