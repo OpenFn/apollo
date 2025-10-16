@@ -79,7 +79,6 @@ export default async (app: Elysia, port: number) => {
             };
 
             const onEvent = (type: string, payload: any) => {
-              // Send events in Anthropic SSE format
               sendSSE(type, payload);
             };
 
