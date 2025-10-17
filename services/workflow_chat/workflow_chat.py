@@ -92,10 +92,7 @@ class AnthropicClient:
         with sentry_sdk.start_transaction(name="workflow_generation") as transaction:
             history = history.copy() if history else []
 
-            stream_manager = None
-            if stream:
-                stream_manager = StreamManager(model=self.config.model)
-                stream_manager.start_stream()
+            stream_manager = StreamManager(model=self.config.model, stream=stream)
             
             # Extract and preserve existing components
             preserved_values = {}
@@ -195,8 +192,7 @@ class AnthropicClient:
                         {"role": "assistant", "content": response},
                     ]
 
-                    if stream:
-                        stream_manager.end_stream()
+                    stream_manager.end_stream()
 
                     return ChatResponse(
                         content=response_text,
