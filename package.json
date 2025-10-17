@@ -1,11 +1,7 @@
 {
   "name": "apollo",
   "module": "platform/index.ts",
-<<<<<<< HEAD
-  "version": "0.15.0",
-=======
   "version": "0.16.0",
->>>>>>> 9d7a704 (version: 0.16.0)
   "type": "module",
   "scripts": {
     "start": "NODE_ENV=production bun platform/src/index.ts",
