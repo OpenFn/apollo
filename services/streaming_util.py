@@ -32,7 +32,7 @@ class StreamManager:
         manager.end_stream()
     """
 
-    def __init__(self, model: str = "claude-3-7-sonnet-20250219", stream = true):
+    def __init__(self, model: str = "claude-3-7-sonnet-20250219", stream = True):
         """
         Initialize the stream manager.
 
