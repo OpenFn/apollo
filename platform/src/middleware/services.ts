@@ -67,7 +67,7 @@ export default async (app: Elysia, port: number) => {
                 const message = `event: ${event}\ndata: ${JSON.stringify(
                   data
                 )}\n\n`;
-                console.log(message.trim());
+                //  console.log(message.trim());
                 controller.enqueue(encoder.encode(message));
               } catch (error) {
                 // Stream may have been closed
