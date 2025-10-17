@@ -4,6 +4,7 @@ import anthropic
 import sentry_sdk
 from search_docsite.search_docsite import DocsiteSearch
 from .rag_config_loader import ConfigLoader
+from streaming_util import StreamManager
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
 config_path = os.path.join(base_dir, "rag.yaml")

@@ -32,6 +32,7 @@ def chat_prompt(content, existing_yaml, history):
     return (system_message, prompt)
 
 def error_prompt(content, existing_yaml, errors, history):
+    send_event("STATUS", "Processing error...")
     if not existing_yaml:
         existing_yaml = ""
     else:

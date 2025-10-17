@@ -21,6 +21,7 @@ import sentry_sdk
 from util import ApolloError, create_logger
 from .gen_project_prompt import build_prompt
 from workflow_chat.available_adaptors import get_available_adaptors
+from streaming_util import StreamManager
 
 logger = create_logger("workflow_chat")
 
@@ -37,7 +38,8 @@ class Payload:
     existing_yaml: Optional[str] = None
     history: Optional[List[Dict[str, str]]] = None
     api_key: Optional[str] = None
-
+    stream: Optional[bool] = False
+    
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
         """
@@ -50,6 +52,7 @@ class Payload:
             existing_yaml=data.get("existing_yaml"),
             history=data.get("history", []),
             api_key=data.get("api_key"),
+            stream=data.get("stream", False)
         )
 
 
@@ -82,11 +85,14 @@ class AnthropicClient:
         existing_yaml: str = None,
         errors: Optional[str] = None,
         history: Optional[List[Dict[str, str]]] = None,
+        stream: Optional[bool] = False,
     ) -> ChatResponse:
         """Generate a response using the Claude API. Retry up to 2 times if YAML/JSON parsing fails."""
         
         with sentry_sdk.start_transaction(name="workflow_generation") as transaction:
             history = history.copy() if history else []
+
+            stream_manager = StreamManager(model=self.config.model, stream=stream)
             
             # Extract and preserve existing components
             preserved_values = {}
@@ -107,6 +113,9 @@ class AnthropicClient:
                     history=history
                 )
 
+            # Add prefilled opening brace for JSON response
+            prompt.append({"role": "assistant", "content": '{\n  "text": "'})
+
             accumulated_usage = {
                 "cache_creation_input_tokens": 0,
                 "cache_read_input_tokens": 0,
@@ -117,9 +126,41 @@ class AnthropicClient:
             max_retries = 1
             for attempt in range(max_retries + 1):
                 with sentry_sdk.start_span(description="anthropic_api_call"):
-                    message = self.client.messages.create(
-                        max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
-                    )
+                    if stream:
+                        logger.info("Making streaming API call")
+                        stream_manager.send_thinking("Thinking...")
+
+                        text_complete = False
+                        sent_length = 0
+                        accumulated_response = ""
+                                            
+                        with self.client.messages.stream(
+                            max_tokens=self.config.max_tokens,
+                            messages=prompt,
+                            model=self.config.model,
+                            system=system_message
+                        ) as stream_obj:
+                            for event in stream_obj:
+                                accumulated_response, text_complete, sent_length = self.process_stream_event(
+                                    event,
+                                    accumulated_response,
+                                    text_complete,
+                                    sent_length,
+                                    stream_manager
+                                )
+                        message = stream_obj.get_final_message()
+
+                        # Flush any remaining buffered content
+                        if not text_complete:
+                            if sent_length < len(accumulated_response):
+                                remaining = accumulated_response[sent_length:]
+                                stream_manager.send_text(remaining)
+
+                    else:
+                        logger.info("Making non-streaming API call")
+                        message = self.client.messages.create(
+                            max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
+                        )
 
                 # Track usage from this attempt
                 if hasattr(message, "usage"):
@@ -137,8 +178,12 @@ class AnthropicClient:
 
                 response = "\n\n".join(response_parts)
 
+                # Add back the prefilled opening brace
+                response = '{\n  "text": "' + response
+
                 with sentry_sdk.start_span(description="parse_and_format_yaml"):
-                    response_text, response_yaml = self.split_format_yaml(response, preserved_values)
+
+                    response_text, response_yaml = self.split_format_yaml(response, preserved_values, stream_manager)
 
                 # If YAML parsing succeeded or we're on the last attempt, return the result
                 if response_yaml is not None or attempt == max_retries:
@@ -146,6 +191,8 @@ class AnthropicClient:
                         {"role": "user", "content": content},
                         {"role": "assistant", "content": response},
                     ]
+
+                    stream_manager.end_stream()
 
                     return ChatResponse(
                         content=response_text,
@@ -221,7 +268,7 @@ class AnthropicClient:
             
             yaml_data["edges"] = sanitized_edges
 
-    def split_format_yaml(self, response, preserved_values=None):
+    def split_format_yaml(self, response, preserved_values=None, stream_manager=None):
         """Split text and YAML in response and format the YAML."""
         output_text, output_yaml = "", None
 
@@ -234,6 +281,8 @@ class AnthropicClient:
             output_yaml = response_data.get("yaml", "")
 
             if output_yaml and output_yaml.strip():
+                if stream_manager:
+                    stream_manager.send_thinking("Formatting workflow...", signature="proxy_formatting_signature")
                 # Parse YAML string into Python object
                 output_yaml = yaml.safe_load(output_yaml)
 
@@ -372,6 +421,39 @@ class AnthropicClient:
                 else:
                     edge_data["id"] = str(uuid.uuid4())
 
+    def process_stream_event(self, event, accumulated_response, text_complete, sent_length, stream_manager):
+        """
+        Process a single stream event from the Anthropic API.
+        """
+        if event.type == "content_block_delta":
+            if event.delta.type == "text_delta":
+                text_chunk = event.delta.text
+                accumulated_response += text_chunk
+
+                if not text_complete:
+                    delimiter = '",\n  "yaml":'
+
+                    # Stream chunks until we hit the YAML part
+                    if delimiter in accumulated_response:
+                        # Get only the text part and send any remaining unsent text
+                        text_only = accumulated_response.split(delimiter)[0]
+                        remaining_text = text_only[sent_length:]
+                        if remaining_text:
+                            stream_manager.send_text(remaining_text)
+
+                        text_complete = True
+                    else:
+                        # Buffer to avoid sending partial delimiter
+                        # Only send content that we know won't be part of the delimiter
+                        buffer_size = len(delimiter) - 1
+                        safe_to_send_until = len(accumulated_response) - buffer_size
+
+                        if safe_to_send_until > sent_length:
+                            safe_text = accumulated_response[sent_length:safe_to_send_until]
+                            stream_manager.send_text(safe_text)
+                            sent_length = safe_to_send_until
+        return accumulated_response, text_complete, sent_length
+
 
 def main(data_dict: dict) -> dict:
     """
@@ -387,7 +469,7 @@ def main(data_dict: dict) -> dict:
         client = AnthropicClient(config)
 
         result = client.generate(
-            content=data.content, existing_yaml=data.existing_yaml, errors=data.errors, history=data.history
+            content=data.content, existing_yaml=data.existing_yaml, errors=data.errors, history=data.history, stream=data.stream
         )
 
         return {

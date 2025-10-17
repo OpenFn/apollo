@@ -1,8 +1,9 @@
+import json
 import logging
 import sys
 import requests
 from dataclasses import dataclass
-from typing import Optional, Any
+from typing import Optional, Any, Dict
 
 
 class DictObj:

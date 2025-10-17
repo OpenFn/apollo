@@ -1,6 +1,7 @@
 import os
 import json
 from typing import List, Optional, Dict, Any
+import uuid
 from dataclasses import dataclass
 from anthropic import (
     Anthropic,
@@ -17,6 +18,7 @@ import sentry_sdk
 from util import ApolloError, create_logger
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
+from streaming_util import StreamManager
 
 logger = create_logger("job_chat")
 
@@ -32,6 +34,7 @@ class Payload:
     api_key: Optional[str] = None
     meta: Optional[str] = None
     suggest_code: Optional[bool] = None
+    stream: Optional[bool] = False
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
@@ -46,7 +49,8 @@ class Payload:
             context=data.get("context"), 
             api_key=data.get("api_key"), 
             meta=data.get("meta"),
-            suggest_code=data.get("suggest_code")
+            suggest_code=data.get("suggest_code"),
+            stream=data.get("stream", False)
         )
 
 
@@ -75,15 +79,19 @@ class AnthropicClient:
         self.client = Anthropic(api_key=self.api_key)
 
     def generate(
-        self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[dict] = None, rag: Optional[str] = None, suggest_code: Optional[bool] = None
+        self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[dict] = None, rag: Optional[str] = None, suggest_code: Optional[bool] = None, stream: Optional[bool] = False
     ) -> ChatResponse:
         """
-        Generate a response using the Claude API with improved error handling and response processing.
+        Generate a response using the Claude API with optional streaming.
         """
         sentry_sdk.set_tag("prompt_type", "code_suggestions" if suggest_code else "no_code_suggestions")
 
         with sentry_sdk.start_transaction(name="chat_generation") as transaction:
             history = history.copy() if history else []
+
+            stream_manager = StreamManager(model=self.config.model, stream=stream)
+            stream_manager.send_thinking("Thinking...")
+
             with sentry_sdk.start_span(description="build_prompt"):
                 if suggest_code is True:
                     system_message, prompt, retrieved_knowledge = build_prompt(
@@ -91,7 +99,8 @@ class AnthropicClient:
                         history=history, 
                         context=context, 
                         rag=rag, 
-                        api_key=self.api_key
+                        api_key=self.api_key,
+                        stream_manager=stream_manager
                     )
                     prompt.append({"role": "assistant", "content": '{\n  "text_answer": "'})
 
@@ -105,9 +114,42 @@ class AnthropicClient:
                         )
 
             with sentry_sdk.start_span(description="anthropic_api_call"):
-                message = self.client.messages.create(
-                    max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
-                )
+                if stream:
+                    logger.info("Making streaming API call")
+                    text_complete = False
+                    sent_length = 0
+                    accumulated_response = ""
+
+                    with self.client.messages.stream(
+                        max_tokens=self.config.max_tokens,
+                        messages=prompt,
+                        model=self.config.model,
+                        system=system_message
+                    ) as stream_obj:
+                        for event in stream_obj:
+                            accumulated_response, text_complete, sent_length = self.process_stream_event(
+                                event,
+                                accumulated_response,
+                                suggest_code,
+                                text_complete,
+                                sent_length,
+                                stream_manager
+                            )
+                    message = stream_obj.get_final_message()
+
+                    # Flush any remaining buffered content when suggest_code is true
+                    if suggest_code and not text_complete:
+                        if sent_length < len(accumulated_response):
+                            remaining = accumulated_response[sent_length:]
+                            stream_manager.send_text(remaining)
+
+                    usage_info = message.usage.model_dump() if hasattr(message, 'usage') else {}
+
+                else:
+                    logger.info("Making non-streaming API call")
+                    message = self.client.messages.create(
+                        max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
+                    )
 
             if hasattr(message, "usage"):
                 if message.usage.cache_creation_input_tokens:
@@ -135,7 +177,7 @@ class AnthropicClient:
                 
                 with sentry_sdk.start_span(description="parse_and_apply_edits"):
                     text_response, suggested_code, diff = self.parse_and_apply_edits(response=response, content=content, original_code=job_code)
-            
+
             else:
                 text_response = response
                 suggested_code = None
@@ -151,6 +193,8 @@ class AnthropicClient:
                 *[usage_data for usage_key, usage_data in retrieved_knowledge.get("usage", {}).items()]
             )
 
+            stream_manager.end_stream()
+
             return ChatResponse(
                 response=text_response,
                 suggested_code=suggested_code,
@@ -159,6 +203,54 @@ class AnthropicClient:
                 rag=retrieved_knowledge,
                 diff=diff
             )
+
+    def process_stream_event(
+        self,
+        event,
+        accumulated_response,
+        suggest_code,
+        text_complete,
+        sent_length,
+        stream_manager
+    ):
+        """
+        Process a single stream event from the Anthropic API.
+        """
+        if event.type == "content_block_delta":
+            if event.delta.type == "text_delta":
+                text_chunk = event.delta.text
+                accumulated_response += text_chunk
+
+                if suggest_code and not text_complete:
+                    delimiter = '",\n  "code_edits"'
+
+                    # Stream chunks until we hit the end pattern (which might be split across chunks)
+                    if delimiter in accumulated_response:
+                        # Get only the text part and send any remaining unsent text
+                        text_only = accumulated_response.split(delimiter)[0]
+                        remaining_text = text_only[sent_length:]
+                        if remaining_text:
+                            stream_manager.send_text(remaining_text)
+
+                        # Send "Writing code..." thinking block
+                        stream_manager.send_thinking("Writing code...")
+
+                        text_complete = True
+                    else:
+                        # Buffer to avoid sending partial delimiter
+                        # Only send content that we know won't be part of the delimiter
+                        buffer_size = len(delimiter) - 1
+                        safe_to_send_until = len(accumulated_response) - buffer_size
+
+                        if safe_to_send_until > sent_length:
+                            safe_text = accumulated_response[sent_length:safe_to_send_until]
+                            stream_manager.send_text(safe_text)
+                            sent_length = safe_to_send_until
+                elif not suggest_code:
+                    # Normal streaming for non-code suggestions
+                    stream_manager.send_text(text_chunk)
+
+        return accumulated_response, text_complete, sent_length
 
     def parse_and_apply_edits(self, response: str, content: str, original_code: Optional[str] = None) -> tuple[str, Optional[str], Optional[Dict[str, Any]]]:
         """Parse JSON response and apply code edits to original code."""
@@ -340,14 +432,16 @@ def main(data_dict: dict) -> dict:
 
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
-
+        logger.info(f"stream bool: {data.stream}")
         result = client.generate(
             content=data.content, 
             history=data_dict.get("history", []), 
             context=data.context, 
             rag=data_dict.get("meta", {}).get("rag"),
-            suggest_code=data.suggest_code
+            suggest_code=data.suggest_code,
+            stream=data.stream
         )
+        
 
         response_dict = {
             "response": result.response,

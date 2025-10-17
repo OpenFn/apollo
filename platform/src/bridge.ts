@@ -14,7 +14,8 @@ export const run = async (
   scriptName: string,
   port: number, // needed for self-calling services in pythonland
   args: JSON,
-  onLog?: (str: string) => void
+  onLog?: (str: string) => void,
+  onEvent?: (type: string, payload: any /* string or json tbh */) => void
 ) => {
   return new Promise<JSON | null>(async (resolve, reject) => {
     const id = crypto.randomUUID();
@@ -48,7 +49,47 @@ export const run = async (
       console.log(err);
     });
 
+    const rl = readline.createInterface({
+      input: proc.stdout,
+      crlfDelay: Infinity,
+    });
+    rl.on("line", (line) => {
+      // Then divert any logs from a logger object to the websocket
+      if (/^(INFO|DEBUG|ERROR|WARN)\:/.test(line)) {
+        // Divert the log line locally
+        console.log(line);
+        // TODO I'd love to break the log line up in to JSON actually
+        // { source, level, message }
+        onLog?.(line);
+      } else if (/^(EVENT)\:/.test(line)) {
+        // TODO does the event encoding need to be any more complex than this?
+        // Nice that it stays human readable
+        const [_prefix, type, ...payload] = line.split(":");
+        let processedPayload = payload.join(":");
+        try {
+          processedPayload = JSON.parse(processedPayload);
+        } catch (e) {
+          // No json, no problem
+        }
+        onEvent?.(type, processedPayload);
+      }
+    });
+
+    const rl2 = readline.createInterface({
+      input: proc.stderr,
+      crlfDelay: Infinity,
+    });
+    rl2.on("line", (line) => {
+      console.error(line);
+      // /Divert all errors to the websocket
+      onLog?.(line);
+    });
+
     proc.on("close", async (code) => {
+      // Clean up readline interfaces immediately to prevent race conditions
+      rl.close();
+      rl2.close();
+
       if (code) {
         console.error("Python process exited with code", code);
         reject(code);
@@ -70,32 +111,6 @@ export const run = async (
         console.warn("No data returned from pythonland");
         resolve(null);
       }
-    });
-
-    const rl = readline.createInterface({
-      input: proc.stdout,
-      crlfDelay: Infinity,
-    });
-    rl.on("line", (line) => {
-      // First divert the log line locally
-      console.log(line);
-
-      // Then divert any logs from a logger object to the websocket
-      if (/^(INFO|DEBUG|ERROR|WARN)\:/.test(line)) {
-        // TODO I'd love to break the log line up in to JSON actually
-        // { source, level, message }
-        onLog?.(line);
-      }
-    });
-
-    const rl2 = readline.createInterface({
-      input: proc.stderr,
-      crlfDelay: Infinity,
-    });
-    rl2.on("line", (line) => {
-      console.error(line);
-      // /Divert all errors to the websocket
-      onLog?.(line);
     });
 
     return;

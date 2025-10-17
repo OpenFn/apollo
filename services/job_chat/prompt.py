@@ -323,7 +323,7 @@ def format_search_results(search_results):
         for result in search_results
     ])
 
-def build_prompt(content, history, context, rag=None, api_key=None):
+def build_prompt(content, history, context, rag=None, api_key=None, stream_manager=None):
     retrieved_knowledge = {
         "search_results": [],
         "search_results_sections": [],
@@ -341,6 +341,7 @@ def build_prompt(content, history, context, rag=None, api_key=None):
     if rag:
         retrieved_knowledge = rag
     else:
+      stream_manager.send_thinking("Searching documentation...")
       try:
           retrieved_knowledge = retrieve_knowledge(
               content=content, 
