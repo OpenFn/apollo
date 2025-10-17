@@ -32,13 +32,14 @@ class StreamManager:
         manager.end_stream()
     """
 
-    def __init__(self, model: str = "claude-3-7-sonnet-20250219"):
+    def __init__(self, model: str = "claude-3-7-sonnet-20250219", stream = True):
         """
         Initialize the stream manager.
 
         Args:
             model: Model name to include in message_start event
         """
+        self.stream = stream
         self.model = model
         self.message_id: Optional[str] = None
         self.stream_started = False
@@ -58,7 +59,8 @@ class StreamManager:
         """
         # Use EVENT: prefix format that bridge.ts expects
         # Bridge will convert this to proper SSE format
-        print(f"EVENT:{event_type}:{json.dumps(data)}", flush=True)
+        if self.stream:
+            print(f"EVENT:{event_type}:{json.dumps(data)}", flush=True)
     
     def start_stream(self) -> None:
         """
@@ -98,11 +100,12 @@ class StreamManager:
             thinking_text: The thinking content to send
             signature: Optional signature to include with the thinking
         """
-        if not self.stream_started:
-            raise RuntimeError("Stream not started. Call start_stream() first")
         if self.stream_ended:
             raise RuntimeError("Stream already ended")
         
+        if not self.stream_started:
+            self.start_stream()
+
         self._close_open_blocks()
         
         # Create new thinking block
@@ -139,11 +142,12 @@ class StreamManager:
         Creates a new text block on first call, then streams to the same block
         on subsequent calls until another block type is sent or stream ends.
         """
-        if not self.stream_started:
-            raise RuntimeError("Stream not started. Call start_stream() first")
         if self.stream_ended:
             raise RuntimeError("Stream already ended")
-        
+
+        if not self.stream_started:
+            self.start_stream()
+
         # Check if we have an open text block
         current_text_block = self._get_current_text_block()
         
@@ -172,11 +176,10 @@ class StreamManager:
         """
         End the stream by closing all open blocks and sending final events.
         """
-        if not self.stream_started:
-            raise RuntimeError("Stream not started. Call start_stream() first")
-        if self.stream_ended:
-            raise RuntimeError("Stream already ended")
         
+        if self.stream_ended or not self.stream_started:
+            return
+
         # Close any remaining open blocks
         self._close_open_blocks()
 
