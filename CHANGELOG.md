@@ -1,5 +1,11 @@
 # apollo
 
+## 0.16.0
+
+### Minor Changes
+
+- Add support for HTTP streaming to job_chat and workflow_chat
+
 ## 0.15.0
 
 ### Patch Changes
