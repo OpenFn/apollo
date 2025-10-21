@@ -8,7 +8,7 @@ import { html } from "@elysiajs/html";
 export default async (port: number | string = 3000) => {
   const app = new Elysia({
     serve: {
-      idleTimeout: 255, // Max timeout (255 seconds = 4.25 minutes) for streaming responses
+      idleTimeout: 255,
     },
   });
 
