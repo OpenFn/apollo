@@ -1,5 +1,11 @@
 # apollo
 
+## 0.16.1
+
+### Patch Changes
+
+- Increase server timeout for streaming
+
 ## 0.16.0
 
 ### Minor Changes
