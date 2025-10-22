@@ -39,9 +39,10 @@ This service fetches plain text documents from URLs, chunks them using simple ov
 - `PINECONE_API_KEY`: Required for vector storage
 
 ### Chunking Parameters
-- Target chunk length: 1000 characters
-- Minimum chunk length: 700 characters
-- Overlap: 150 characters
+- Chunk size: 512 tokens
+- Chunk overlap: 50 tokens
+- Uses token-based splitting with tiktoken (cl100k_base encoding)
+- Ensures consistent embedding sizes and respects OpenAI token limits
 
 ### Pinecone Configuration
 - Index name: `doc_agent`
@@ -73,6 +74,7 @@ Each chunk is stored with metadata:
 ## Notes
 
 - Only plain text documents are supported (no HTML parsing)
-- Simple paragraph-based chunking with overlap
+- Token-based chunking using tiktoken ensures consistent embedding sizes
+- Suitable for any text type (documentation, articles, reports, etc.)
 - Creates Pinecone index automatically if it doesn't exist
 - One namespace per project for isolation

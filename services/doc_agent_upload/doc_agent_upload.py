@@ -56,7 +56,7 @@ def main(data: dict) -> dict:
         logger.info(f"Generated document UUID: {document_uuid}")
 
         # Process document - fetch and chunk
-        processor = DocProcessor(target_length=1000, min_length=700, overlap=150)
+        processor = DocProcessor(chunk_size=512, chunk_overlap=50)
         doc_title, chunks = processor.process_document(payload.doc_url)
         logger.info(f"Document processed: {len(chunks)} chunks created")
 
