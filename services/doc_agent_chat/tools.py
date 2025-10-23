@@ -33,16 +33,23 @@ def search_documents(doc_search, query: str, document_uuids: Optional[List[str]]
     )
 
 
-def format_search_results(results: List) -> str:
-    """Format search results as text for the LLM."""
+def format_search_results_as_documents(results: List) -> List[dict]:
+    """Format search results as Claude document content blocks with citations enabled."""
     if not results:
-        return "No results found."
+        return []
 
-    formatted = "Search Results:\n\n"
-    for i, result in enumerate(results, 1):
-        formatted += f"[Result {i}]\n"
-        formatted += f"Document: {result.metadata.get('doc_title', 'Unknown')}\n"
-        formatted += f"Score: {result.score:.3f}\n"
-        formatted += f"Content: {result.text}\n\n"
+    documents = []
+    for result in results:
+        doc_title = result.metadata.get('doc_title', 'Unknown')
+        documents.append({
+            "type": "document",
+            "source": {
+                "type": "text",
+                "media_type": "text/plain",
+                "data": result.text
+            },
+            "context": f"From document: {doc_title}",
+            "citations": {"enabled": True}
+        })
 
-    return formatted
+    return documents

@@ -62,6 +62,15 @@ This service provides an AI agent (Claude Sonnet 4.5) that can search through up
     "output_tokens": 567,
     "cache_read_input_tokens": 890
   },
+  "citations": [
+    {
+      "type": "document",
+      "document_index": 0,
+      "start": 45,
+      "end": 120,
+      "text": "cited text from document"
+    }
+  ],
   "meta": {
     "tool_calls": [
       {
@@ -148,4 +157,6 @@ The `DocSearch` class provides a DB-agnostic interface:
 - Agent decides when to search (no upfront RAG decision)
 - Tool results appended directly to conversation
 - Supports writing long reports (16k max tokens)
+- **Citations enabled**: Claude automatically cites sources when relevant
+- Citations include document index, character positions, and cited text
 - Simple prototype - no memory management or summarization yet

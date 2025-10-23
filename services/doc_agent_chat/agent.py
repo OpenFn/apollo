@@ -4,7 +4,7 @@ from anthropic import Anthropic
 from util import create_logger
 from doc_agent_chat.doc_search import DocSearch
 from doc_agent_chat.prompt import build_system_prompt
-from doc_agent_chat.tools import TOOL_DEFINITIONS, search_documents, format_search_results
+from doc_agent_chat.tools import TOOL_DEFINITIONS, search_documents, format_search_results_as_documents
 from doc_agent_chat.config_loader import ConfigLoader
 
 logger = create_logger("agent")
@@ -73,7 +73,7 @@ class Agent:
 
             elif response.stop_reason == "tool_use":
                 logger.info("Agent requested tool use")
-                tool_results = []
+                tool_results_content = []
 
                 for block in response.content:
                     if block.type == "tool_use" and block.name == "search_documents":
@@ -97,15 +97,18 @@ class Agent:
                         })
                         all_search_results.extend(search_results)
 
-                        results_text = format_search_results(search_results)
-                        tool_results.append({
+                        # Format as document blocks with citations
+                        document_blocks = format_search_results_as_documents(search_results)
+
+                        # Add tool_result with documents
+                        tool_results_content.append({
                             "type": "tool_result",
                             "tool_use_id": block.id,
-                            "content": results_text
+                            "content": document_blocks if document_blocks else "No results found."
                         })
 
                 messages.append({"role": "assistant", "content": response.content})
-                messages.append({"role": "user", "content": tool_results})
+                messages.append({"role": "user", "content": tool_results_content})
 
             else:
                 logger.info(f"Stopped due to: {response.stop_reason}")
@@ -117,7 +120,9 @@ class Agent:
             final_response = self._extract_text(response)
             messages.append({"role": "assistant", "content": response.content})
 
-        return {
+        citations = self._extract_citations(response)
+
+        result = {
             "response": final_response,
             "history": messages,
             "usage": total_usage,
@@ -127,6 +132,11 @@ class Agent:
             }
         }
 
+        if citations:
+            result["citations"] = citations
+
+        return result
+
     def _extract_text(self, response) -> str:
         """Extract text from response content blocks."""
         text_parts = []
@@ -134,3 +144,11 @@ class Agent:
             if block.type == "text":
                 text_parts.append(block.text)
         return "\n\n".join(text_parts)
+
+    def _extract_citations(self, response) -> list:
+        """Extract citations from response content blocks."""
+        citations = []
+        for block in response.content:
+            if block.type == "text" and hasattr(block, "citations") and block.citations:
+                citations.extend(block.citations)
+        return citations
