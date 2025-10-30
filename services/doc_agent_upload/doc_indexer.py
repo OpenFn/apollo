@@ -12,7 +12,7 @@ logger = create_logger("DocIndexer")
 
 
 class DocIndexer:
-    def __init__(self, project_id: str, index_name: str = "doc_agent", dimension: int = 1536):
+    def __init__(self, project_id: str, index_name: str = "doc-agent", dimension: int = 1536):
         self.project_id = project_id
         self.index_name = index_name
         self.dimension = dimension

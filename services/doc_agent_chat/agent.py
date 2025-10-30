@@ -38,7 +38,7 @@ class Agent:
         doc_search = DocSearch(
             project_id=context["project_id"],
             available_doc_uuids=[doc["uuid"] for doc in context["documents"]],
-            index_name="doc_agent"
+            index_name="doc-agent"
         )
 
         system_prompt = build_system_prompt(context)
@@ -47,7 +47,12 @@ class Agent:
 
         tool_calls_metadata = []
         all_search_results = []
-        total_usage = {}
+        total_usage = {
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+        }
 
         for iteration in range(self.max_tool_calls):
             logger.info(f"Agentic loop iteration {iteration + 1}")
@@ -62,8 +67,9 @@ class Agent:
 
             if hasattr(response, "usage"):
                 usage = response.usage.model_dump()
-                for key, value in usage.items():
-                    total_usage[key] = total_usage.get(key, 0) + value
+                for key in total_usage:
+                    if key in usage:
+                        total_usage[key] += usage[key]
 
             if response.stop_reason == "end_turn":
                 logger.info("Agent finished naturally")
@@ -122,9 +128,12 @@ class Agent:
 
         citations = self._extract_citations(response)
 
+        # Serialize history for JSON output
+        serialized_history = self._serialize_messages(messages)
+
         result = {
             "response": final_response,
-            "history": messages,
+            "history": serialized_history,
             "usage": total_usage,
             "meta": {
                 "tool_calls": tool_calls_metadata,
@@ -152,3 +161,24 @@ class Agent:
             if block.type == "text" and hasattr(block, "citations") and block.citations:
                 citations.extend(block.citations)
         return citations
+
+    def _serialize_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Serialize messages for JSON output, converting SDK objects to dicts."""
+        serialized = []
+        for msg in messages:
+            serialized_msg = {"role": msg["role"]}
+            content = msg["content"]
+
+            if isinstance(content, list):
+                serialized_content = []
+                for item in content:
+                    if hasattr(item, "model_dump"):
+                        serialized_content.append(item.model_dump())
+                    else:
+                        serialized_content.append(item)
+                serialized_msg["content"] = serialized_content
+            else:
+                serialized_msg["content"] = content
+
+            serialized.append(serialized_msg)
+        return serialized

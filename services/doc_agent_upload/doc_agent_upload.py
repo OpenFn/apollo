@@ -63,7 +63,7 @@ def main(data: dict) -> dict:
         # Upload to Pinecone
         indexer = DocIndexer(
             project_id=payload.project_id,
-            index_name="doc_agent"
+            index_name="doc-agent"
         )
         indexer.upload_document(
             chunks=chunks,
