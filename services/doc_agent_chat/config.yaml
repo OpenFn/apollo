@@ -1,0 +1,7 @@
+config_version: 1.0
+model: claude-sonnet-4-5-20250929
+max_tokens: 16384
+temperature: 0
+max_tool_calls: 10
+search_top_k: 5
+search_threshold: 0.7

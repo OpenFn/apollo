@@ -1,0 +1,184 @@
+import os
+from typing import List, Dict, Any, Optional
+from anthropic import Anthropic
+from util import create_logger
+from doc_agent_chat.doc_search import DocSearch
+from doc_agent_chat.prompt import build_system_prompt
+from doc_agent_chat.tools import TOOL_DEFINITIONS, search_documents, format_search_results_as_documents
+from doc_agent_chat.config_loader import ConfigLoader
+
+logger = create_logger("agent")
+
+base_dir = os.path.dirname(os.path.abspath(__file__))
+config_path = os.path.join(base_dir, "config.yaml")
+config_loader = ConfigLoader(config_path=config_path)
+config = config_loader.config
+
+
+class Agent:
+    def __init__(self, api_key: Optional[str] = None):
+        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
+        if not self.api_key:
+            raise ValueError("API key must be provided")
+
+        self.client = Anthropic(api_key=self.api_key)
+        self.model = config.get("model", "claude-sonnet-4-5-20250929")
+        self.max_tokens = config.get("max_tokens", 16384)
+        self.max_tool_calls = config.get("max_tool_calls", 10)
+        self.search_top_k = config.get("search_top_k", 5)
+        self.search_threshold = config.get("search_threshold", 0.7)
+
+    def run(
+        self,
+        content: str,
+        context: dict,
+        history: Optional[List[Dict[str, str]]] = None
+    ) -> Dict[str, Any]:
+        """Run the agent with the given content and context."""
+        doc_search = DocSearch(
+            project_id=context["project_id"],
+            available_doc_uuids=[doc["uuid"] for doc in context["documents"]],
+            index_name="doc-agent"
+        )
+
+        system_prompt = build_system_prompt(context)
+        messages = history.copy() if history else []
+        messages.append({"role": "user", "content": content})
+
+        tool_calls_metadata = []
+        all_search_results = []
+        total_usage = {
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+        }
+
+        for iteration in range(self.max_tool_calls):
+            logger.info(f"Agentic loop iteration {iteration + 1}")
+
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=self.max_tokens,
+                system=system_prompt,
+                messages=messages,
+                tools=TOOL_DEFINITIONS
+            )
+
+            if hasattr(response, "usage"):
+                usage = response.usage.model_dump()
+                for key in total_usage:
+                    if key in usage:
+                        total_usage[key] += usage[key]
+
+            if response.stop_reason == "end_turn":
+                logger.info("Agent finished naturally")
+                final_response = self._extract_text(response)
+                messages.append({"role": "assistant", "content": response.content})
+                break
+
+            elif response.stop_reason == "tool_use":
+                logger.info("Agent requested tool use")
+                tool_results_content = []
+
+                for block in response.content:
+                    if block.type == "tool_use" and block.name == "search_documents":
+                        logger.info(f"Executing tool: {block.name}")
+
+                        query = block.input.get("query")
+                        document_uuids = block.input.get("document_uuids")
+
+                        search_results = search_documents(
+                            doc_search=doc_search,
+                            query=query,
+                            document_uuids=document_uuids,
+                            top_k=self.search_top_k,
+                            threshold=self.search_threshold
+                        )
+
+                        tool_calls_metadata.append({
+                            "tool": "search_documents",
+                            "input": {"query": query, "document_uuids": document_uuids},
+                            "results_count": len(search_results)
+                        })
+                        all_search_results.extend(search_results)
+
+                        # Format as document blocks with citations
+                        document_blocks = format_search_results_as_documents(search_results)
+
+                        # Add tool_result with documents
+                        tool_results_content.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": document_blocks if document_blocks else "No results found."
+                        })
+
+                messages.append({"role": "assistant", "content": response.content})
+                messages.append({"role": "user", "content": tool_results_content})
+
+            else:
+                logger.info(f"Stopped due to: {response.stop_reason}")
+                final_response = self._extract_text(response)
+                messages.append({"role": "assistant", "content": response.content})
+                break
+        else:
+            logger.warning("Hit max tool call iterations")
+            final_response = self._extract_text(response)
+            messages.append({"role": "assistant", "content": response.content})
+
+        citations = self._extract_citations(response)
+
+        # Serialize history for JSON output
+        serialized_history = self._serialize_messages(messages)
+
+        result = {
+            "response": final_response,
+            "history": serialized_history,
+            "usage": total_usage,
+            "meta": {
+                "tool_calls": tool_calls_metadata,
+                "search_results": [r.to_json() for r in all_search_results]
+            }
+        }
+
+        if citations:
+            result["citations"] = citations
+
+        return result
+
+    def _extract_text(self, response) -> str:
+        """Extract text from response content blocks."""
+        text_parts = []
+        for block in response.content:
+            if block.type == "text":
+                text_parts.append(block.text)
+        return "\n\n".join(text_parts)
+
+    def _extract_citations(self, response) -> list:
+        """Extract citations from response content blocks."""
+        citations = []
+        for block in response.content:
+            if block.type == "text" and hasattr(block, "citations") and block.citations:
+                citations.extend(block.citations)
+        return citations
+
+    def _serialize_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Serialize messages for JSON output, converting SDK objects to dicts."""
+        serialized = []
+        for msg in messages:
+            serialized_msg = {"role": msg["role"]}
+            content = msg["content"]
+
+            if isinstance(content, list):
+                serialized_content = []
+                for item in content:
+                    if hasattr(item, "model_dump"):
+                        serialized_content.append(item.model_dump())
+                    else:
+                        serialized_content.append(item)
+                serialized_msg["content"] = serialized_content
+            else:
+                serialized_msg["content"] = content
+
+            serialized.append(serialized_msg)
+        return serialized
