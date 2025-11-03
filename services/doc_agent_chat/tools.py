@@ -41,6 +41,13 @@ def format_search_results_as_documents(results: List) -> List[dict]:
     documents = []
     for result in results:
         doc_title = result.metadata.get('doc_title', 'Unknown')
+        user_description = result.metadata.get('user_description', '')
+
+        # Build context: doc_title + user_description if available
+        context = f"From document: {doc_title}"
+        if user_description:
+            context += f" - {user_description}"
+
         documents.append({
             "type": "document",
             "source": {
@@ -48,7 +55,8 @@ def format_search_results_as_documents(results: List) -> List[dict]:
                 "media_type": "text/plain",
                 "data": result.text
             },
-            "context": f"From document: {doc_title}",
+            "title": doc_title,
+            "context": context,
             "citations": {"enabled": True}
         })
 
