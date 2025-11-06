@@ -3,6 +3,7 @@ import json
 from openai import OpenAI
 from pinecone import Pinecone
 from anthropic import Anthropic
+import psycopg2
 from util import create_logger
 
 logger = create_logger("status")
@@ -28,11 +29,26 @@ def test_anthropic_key(api_key):
     except Exception:
         return False
 
+def test_postgres_connection():
+    try:
+        conn = psycopg2.connect(
+            host=os.getenv('POSTGRES_HOST'),
+            port=os.getenv('POSTGRES_PORT'),
+            database=os.getenv('POSTGRES_DB'),
+            user=os.getenv('POSTGRES_USER'),
+            password=os.getenv('POSTGRES_PASSWORD')
+        )
+        conn.close()
+        return True
+    except Exception:
+        return False
+
 def main(data):
     status = {
         "openai": "working" if test_openai_key(os.getenv('OPENAI_API_KEY')) else "not working",
         "pinecone": "working" if test_pinecone_key(os.getenv('PINECONE_API_KEY')) else "not working",
-        "anthropic": "working" if test_anthropic_key(os.getenv('ANTHROPIC_API_KEY')) else "not working"
+        "anthropic": "working" if test_anthropic_key(os.getenv('ANTHROPIC_API_KEY')) else "not working",
+        "postgres": "working" if test_postgres_connection() else "not working"
     }
 
     logger.info(f"API Keys status: {json.dumps(status)}")
