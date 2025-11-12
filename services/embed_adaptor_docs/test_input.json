@@ -1,0 +1,7 @@
+{
+  "adaptor": "@openfn/language-http@5.0.0",
+  "force_refresh": false,
+  "token_limit": 150000,
+  "chunk_size": 100000,
+  "chunk_overlap": 2000
+}
