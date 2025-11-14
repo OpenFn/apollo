@@ -30,3 +30,11 @@ Returns:
   "errors": [/*name of any adaptor that fails*/]
 }
 ```
+
+## Usage
+
+This service can be called from any apollo module
+
+```py
+result = apollo("adaptor_apis", { "adaptors": ["kobotoolbox@4.2.7"] })
+```
