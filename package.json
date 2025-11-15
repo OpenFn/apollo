@@ -19,6 +19,7 @@
   "dependencies": {
     "@changesets/cli": "^2.27.3",
     "@elysiajs/html": "^1.0.2",
+    "@openfn/adaptor-apis": "^0.1.0",
     "elysia": "1.0.21"
   },
   "nodemonConfig": {
