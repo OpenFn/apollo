@@ -20,7 +20,8 @@
     "@changesets/cli": "^2.27.3",
     "@elysiajs/html": "^1.0.2",
     "@openfn/adaptor-apis": "0.2.0",
-    "elysia": "1.0.21"
+    "elysia": "1.0.21",
+    "jsdoc-babel": "^0.5.0"
   },
   "nodemonConfig": {
     "watch": [
