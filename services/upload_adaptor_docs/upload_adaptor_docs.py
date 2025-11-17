@@ -5,7 +5,7 @@ import psycopg2
 from psycopg2.extras import execute_values
 from util import create_logger, ApolloError
 
-logger = create_logger("embed_adaptor_docs")
+logger = create_logger("upload_adaptor_docs")
 
 
 def filter_function_docs(raw_docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -168,7 +168,7 @@ def upload_to_postgres(
 
 def main(data: dict) -> dict:
     """
-    Main entry point for embedding adaptor function docs.
+    Main entry point for uploading adaptor function docs.
 
     Expected payload:
     {
@@ -178,7 +178,7 @@ def main(data: dict) -> dict:
         "DATABASE_URL": "postgresql://..."  # Optional, will use env if not provided
     }
     """
-    logger.info("Starting embed_adaptor_docs...")
+    logger.info("Starting upload_adaptor_docs...")
 
     # Validate required fields
     if "adaptor" not in data:

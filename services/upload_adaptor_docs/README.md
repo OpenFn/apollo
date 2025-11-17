@@ -1,4 +1,4 @@
-# Embed Adaptor Docs
+# Upload Adaptor Docs
 
 Service to parse and upload version-specific adaptor function documentation to PostgreSQL.
 
@@ -77,14 +77,14 @@ Create a test input file:
 Run the service:
 
 ```bash
-python -m services.entry embed_adaptor_docs -i test_input.json
+python -m services.entry upload_adaptor_docs -i test_input.json
 ```
 
 ### Via HTTP/WebSocket (Production)
 
 **HTTP POST:**
 ```bash
-curl -X POST http://localhost:3000/services/embed_adaptor_docs \
+curl -X POST http://localhost:3000/services/upload_adaptor_docs \
   -H "Content-Type: application/json" \
   -d '{
     "adaptor": "@openfn/language-dhis2",
@@ -195,8 +195,8 @@ cur.execute("""
 ## File Structure
 
 ```
-services/embed_adaptor_docs/
-├── embed_adaptor_docs.py    # Main service
+services/upload_adaptor_docs/
+├── upload_adaptor_docs.py    # Main service
 ├── README.md                 # This file
 └── schema.sql                # Database schema (for reference)
 ```
