@@ -1,5 +1,11 @@
 # apollo
 
+## 0.16.2
+
+### Patch Changes
+
+- 02f2a8e: Add barebones support for postgresdb, with status check
+
 ## 0.16.1
 
 ### Patch Changes
