@@ -30,16 +30,28 @@ def filter_function_docs(raw_docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]
         if item.get("access") == "private":
             continue
 
+        # Get signature - handle both string and array formats
+        signature = item.get("signature", "")
+        if isinstance(signature, list):
+            # New format: array of signatures, take the first one
+            signature = signature[0] if signature else ""
+
         # Build simplified function doc
         function_doc = {
             "name": item.get("name"),
             "scope": item.get("scope", "global"),
-            "signature": item.get("signature", ""),
+            "signature": signature,
             "description": item.get("description", ""),
             "params": item.get("params", []),
             "examples": item.get("examples", []),
             "returns": item.get("returns", [])
         }
+
+        # Optionally include source and common flag if present (for common functions from language-common)
+        if item.get("source"):
+            function_doc["source"] = item.get("source")
+        if item.get("common"):
+            function_doc["common"] = True
 
         # Clean up params - keep only essential fields
         cleaned_params = []
@@ -170,31 +182,98 @@ def main(data: dict) -> dict:
     """
     Main entry point for uploading adaptor function docs.
 
-    Expected payload:
+    Expected payload (Format 1 - Legacy):
     {
         "adaptor": "@openfn/language-dhis2",
         "version": "4.2.10",
         "raw_docs": [...],  # Array of function docs from JSDoc
         "DATABASE_URL": "postgresql://..."  # Optional, will use env if not provided
     }
+
+    Expected payload (Format 2 - New):
+    {
+        "docs": {
+            "kobotoolbox@4.2.7": [...]
+        },
+        "errors": [],
+        "DATABASE_URL": "postgresql://..."  # Optional, will use env if not provided
+    }
     """
     logger.info("Starting upload_adaptor_docs...")
 
-    # Validate required fields
-    if "adaptor" not in data:
-        raise ApolloError(400, "Missing required field: 'adaptor'", type="BAD_REQUEST")
-    if "version" not in data:
-        raise ApolloError(400, "Missing required field: 'version'", type="BAD_REQUEST")
-    if "raw_docs" not in data:
-        raise ApolloError(400, "Missing required field: 'raw_docs'", type="BAD_REQUEST")
+    # Detect format and extract data
+    if "docs" in data:
+        # New format with nested structure
+        docs_dict = data["docs"]
+        errors = data.get("errors", [])
 
-    adaptor_name = data["adaptor"]
-    version = data["version"]
-    raw_docs = data["raw_docs"]
+        if errors:
+            logger.warning(f"Found {len(errors)} errors in payload: {errors}")
 
-    logger.info(f"Processing {adaptor_name}@{version}")
-    logger.info(f"Loaded {len(raw_docs)} items")
+        if not docs_dict:
+            raise ApolloError(400, "No adaptor docs found in 'docs' object", type="BAD_REQUEST")
 
+        # Process each adaptor in the docs object
+        results = []
+        for adaptor_version_key, raw_docs in docs_dict.items():
+            # Parse adaptor name and version from key like "kobotoolbox@4.2.7"
+            if "@" not in adaptor_version_key:
+                raise ApolloError(
+                    400,
+                    f"Invalid adaptor key format: '{adaptor_version_key}'. Expected format: 'adaptorName@version'",
+                    type="BAD_REQUEST"
+                )
+
+            adaptor_name, version = adaptor_version_key.rsplit("@", 1)
+
+            logger.info(f"Processing {adaptor_name}@{version}")
+            logger.info(f"Loaded {len(raw_docs)} items")
+
+            result = process_adaptor_docs(adaptor_name, version, raw_docs, data)
+            results.append(result)
+
+        # Return combined results
+        if len(results) == 1:
+            return results[0]
+        else:
+            return {
+                "success": True,
+                "adaptors_processed": len(results),
+                "results": results
+            }
+
+    else:
+        # Legacy format with direct fields
+        if "adaptor" not in data:
+            raise ApolloError(400, "Missing required field: 'adaptor'", type="BAD_REQUEST")
+        if "version" not in data:
+            raise ApolloError(400, "Missing required field: 'version'", type="BAD_REQUEST")
+        if "raw_docs" not in data:
+            raise ApolloError(400, "Missing required field: 'raw_docs'", type="BAD_REQUEST")
+
+        adaptor_name = data["adaptor"]
+        version = data["version"]
+        raw_docs = data["raw_docs"]
+
+        logger.info(f"Processing {adaptor_name}@{version}")
+        logger.info(f"Loaded {len(raw_docs)} items")
+
+        return process_adaptor_docs(adaptor_name, version, raw_docs, data)
+
+
+def process_adaptor_docs(adaptor_name: str, version: str, raw_docs: List[Dict[str, Any]], data: dict) -> dict:
+    """
+    Process and upload a single adaptor's documentation.
+
+    Args:
+        adaptor_name: The adaptor name (e.g., "kobotoolbox" or "@openfn/language-dhis2")
+        version: The version string (e.g., "4.2.7")
+        raw_docs: Array of raw documentation objects
+        data: The original payload (for extracting DATABASE_URL)
+
+    Returns:
+        Dictionary with success status and upload details
+    """
     # Filter and simplify
     filtered_docs = filter_function_docs(raw_docs)
     logger.info(f"Filtered to {len(filtered_docs)} functions")
