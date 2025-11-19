@@ -29,7 +29,7 @@ The service automatically creates this table if it doesn't exist:
 ```sql
 CREATE TABLE adaptor_function_docs (
     id SERIAL PRIMARY KEY,
-    adaptor_name VARCHAR(255) NOT NULL,      -- e.g., "@openfn/language-dhis2"
+    adaptor_name VARCHAR(255) NOT NULL,      -- e.g., "@openfn/language-dhis2", "@openfn/language-kobotoolbox"
     version VARCHAR(50) NOT NULL,             -- e.g., "4.2.10"
     function_name VARCHAR(255) NOT NULL,      -- e.g., "create" or "tracker.import"
     signature TEXT NOT NULL,                  -- e.g., "create(path: string, data: DHIS2Data, params: object): Operation"
@@ -49,82 +49,71 @@ CREATE INDEX IF NOT EXISTS idx_signature
 
 ## Usage
 
-### Via entry.py (Recommended)
+Provide just the adaptor name and version. The service will automatically call the `adaptor_apis` service to fetch the docs.
 
-Create a test input file:
-
+**Payload:**
 ```json
 {
-  "adaptor": "@openfn/language-dhis2",
-  "version": "4.2.10",
-  "raw_docs": [
-    {
-      "id": "create",
-      "name": "create",
-      "kind": "function",
-      "scope": "global",
-      "signature": "create(path: string, data: DHIS2Data, params: object): Operation",
-      "description": "Create a record",
-      "params": [...],
-      "examples": [...],
-      "returns": [...]
-    },
-    ...
-  ]
+  "adaptor": "kobotoolbox",
+  "version": "4.2.7"
 }
 ```
 
-Run the service:
-
-```bash
-python -m services.entry upload_adaptor_docs -i test_input.json
+You can also use the full adaptor name:
+```json
+{
+  "adaptor": "@openfn/language-kobotoolbox",
+  "version": "4.2.7"
+}
 ```
 
-### Via HTTP/WebSocket (Production)
+**Via entry.py:**
+```bash
+python -m services.entry upload_adaptor_docs -i services/upload_adaptor_docs/tmp/test_upload_simple.json
+```
 
-**HTTP POST:**
+**Via HTTP (requires running server):**
 ```bash
 curl -X POST http://localhost:3000/services/upload_adaptor_docs \
   -H "Content-Type: application/json" \
-  -d '{
-    "adaptor": "@openfn/language-dhis2",
-    "version": "4.2.10",
-    "raw_docs": [...]
-  }'
+  -d '{"adaptor": "kobotoolbox", "version": "4.2.7"}'
 ```
 
 **Response:**
 ```json
 {
   "success": true,
-  "adaptor": "@openfn/language-dhis2",
-  "version": "4.2.10",
-  "functions_uploaded": 15,
+  "adaptor": "@openfn/language-kobotoolbox",
+  "version": "4.2.7",
+  "functions_uploaded": 7,
   "function_list": [
-    "create",
-    "destroy",
-    "get",
+    "getDeploymentInfo",
+    "getForms",
+    "getSubmissions",
     "http.get",
-    "tracker.import",
-    "update",
-    "upsert",
-    "util.attr",
-    "util.dv"
+    "http.post",
+    "http.put",
+    "http.request"
   ]
 }
 ```
 
 ## Payload Schema
 
-### Required Fields
+**Required:**
+- **`adaptor`** (string): Adaptor name - accepts either:
+  - Short form: `"kobotoolbox"`, `"dhis2"`, etc.
+  - Full form: `"@openfn/language-kobotoolbox"`, `"@openfn/language-dhis2"`, etc.
+- **`version`** (string): Adaptor version (e.g., `"4.2.7"`)
 
-- **`adaptor`** (string): Adaptor package name (e.g., `"@openfn/language-dhis2"`)
-- **`version`** (string): Adaptor version (e.g., `"4.2.10"`)
-- **`raw_docs`** (array): Array of JSDoc-generated function documentation objects
-
-### Optional Fields
-
+**Optional:**
 - **`DATABASE_URL`** (string): PostgreSQL connection string (falls back to environment variable)
+
+The service will:
+1. Call `adaptor_apis` service to fetch the latest docs
+2. Filter and process the docs
+3. Delete any existing functions for this adaptor@version
+4. Upload new functions to PostgreSQL
 
 ## Integration with Other Services
 
@@ -203,8 +192,9 @@ services/upload_adaptor_docs/
 
 ## Notes
 
-- **UPSERT behavior**: Re-uploading the same adaptor/version/function updates existing records
+- **Replace behavior**: Re-uploading the same adaptor/version **deletes all existing functions** for that version first, then inserts the new data. This ensures no stale functions remain if the docs change.
 - **Idempotent**: Safe to run multiple times with the same data
 - **Scope handling**: Functions are stored with scope prefix (e.g., `util.attr`, `tracker.import`) or just name for global scope
 - **No vector search**: Designed for keyword and full-text search only
 - **Automatic table creation**: Creates `adaptor_function_docs` table if it doesn't exist
+- **Adaptor name normalization**: Adaptor names are stored with the full `@openfn/language-` prefix (e.g., `"@openfn/language-kobotoolbox"` not `"kobotoolbox"`)

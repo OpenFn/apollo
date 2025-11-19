@@ -3,7 +3,7 @@ import os
 from typing import Dict, List, Any
 import psycopg2
 from psycopg2.extras import execute_values
-from util import create_logger, ApolloError
+from util import create_logger, ApolloError, apollo
 
 logger = create_logger("upload_adaptor_docs")
 
@@ -136,12 +136,29 @@ def upload_to_postgres(
     Upload filtered function docs to PostgreSQL.
 
     Each function becomes a separate row:
-    - adaptor_name: e.g., "@openfn/language-dhis2"
+    - adaptor_name: e.g., "@openfn/language-dhis2", "@openfn/language-kobotoolbox"
     - version: e.g., "4.2.10"
     - function_name: e.g., "create" or "tracker.import"
     - signature: e.g., "create(path: string, data: DHIS2Data, params: object): Operation"
     - function_data: JSONB containing the full function doc
+
+    This function first deletes all existing rows for the adaptor version,
+    then inserts the new data. This ensures we don't have stale functions
+    if the docs change.
     """
+
+    # First, delete all existing rows for this adaptor version
+    delete_sql = """
+    DELETE FROM adaptor_function_docs
+    WHERE adaptor_name = %s AND version = %s
+    """
+
+    with conn.cursor() as cur:
+        cur.execute(delete_sql, (adaptor_name, version))
+        deleted_count = cur.rowcount
+        if deleted_count > 0:
+            logger.info(f"Deleted {deleted_count} existing functions for {adaptor_name}@{version}")
+        conn.commit()
 
     # Prepare data for insertion
     rows = []
@@ -159,16 +176,11 @@ def upload_to_postgres(
             json.dumps(func)
         ))
 
-    # Insert or update
+    # Insert new data
     insert_sql = """
     INSERT INTO adaptor_function_docs
         (adaptor_name, version, function_name, signature, function_data)
     VALUES %s
-    ON CONFLICT (adaptor_name, version, function_name)
-    DO UPDATE SET
-        signature = EXCLUDED.signature,
-        function_data = EXCLUDED.function_data,
-        updated_at = CURRENT_TIMESTAMP
     """
 
     with conn.cursor() as cur:
@@ -178,95 +190,12 @@ def upload_to_postgres(
     logger.info(f"Uploaded {len(rows)} functions for {adaptor_name}@{version}")
 
 
-def main(data: dict) -> dict:
-    """
-    Main entry point for uploading adaptor function docs.
-
-    Expected payload (Format 1 - Legacy):
-    {
-        "adaptor": "@openfn/language-dhis2",
-        "version": "4.2.10",
-        "raw_docs": [...],  # Array of function docs from JSDoc
-        "DATABASE_URL": "postgresql://..."  # Optional, will use env if not provided
-    }
-
-    Expected payload (Format 2 - New):
-    {
-        "docs": {
-            "kobotoolbox@4.2.7": [...]
-        },
-        "errors": [],
-        "DATABASE_URL": "postgresql://..."  # Optional, will use env if not provided
-    }
-    """
-    logger.info("Starting upload_adaptor_docs...")
-
-    # Detect format and extract data
-    if "docs" in data:
-        # New format with nested structure
-        docs_dict = data["docs"]
-        errors = data.get("errors", [])
-
-        if errors:
-            logger.warning(f"Found {len(errors)} errors in payload: {errors}")
-
-        if not docs_dict:
-            raise ApolloError(400, "No adaptor docs found in 'docs' object", type="BAD_REQUEST")
-
-        # Process each adaptor in the docs object
-        results = []
-        for adaptor_version_key, raw_docs in docs_dict.items():
-            # Parse adaptor name and version from key like "kobotoolbox@4.2.7"
-            if "@" not in adaptor_version_key:
-                raise ApolloError(
-                    400,
-                    f"Invalid adaptor key format: '{adaptor_version_key}'. Expected format: 'adaptorName@version'",
-                    type="BAD_REQUEST"
-                )
-
-            adaptor_name, version = adaptor_version_key.rsplit("@", 1)
-
-            logger.info(f"Processing {adaptor_name}@{version}")
-            logger.info(f"Loaded {len(raw_docs)} items")
-
-            result = process_adaptor_docs(adaptor_name, version, raw_docs, data)
-            results.append(result)
-
-        # Return combined results
-        if len(results) == 1:
-            return results[0]
-        else:
-            return {
-                "success": True,
-                "adaptors_processed": len(results),
-                "results": results
-            }
-
-    else:
-        # Legacy format with direct fields
-        if "adaptor" not in data:
-            raise ApolloError(400, "Missing required field: 'adaptor'", type="BAD_REQUEST")
-        if "version" not in data:
-            raise ApolloError(400, "Missing required field: 'version'", type="BAD_REQUEST")
-        if "raw_docs" not in data:
-            raise ApolloError(400, "Missing required field: 'raw_docs'", type="BAD_REQUEST")
-
-        adaptor_name = data["adaptor"]
-        version = data["version"]
-        raw_docs = data["raw_docs"]
-
-        logger.info(f"Processing {adaptor_name}@{version}")
-        logger.info(f"Loaded {len(raw_docs)} items")
-
-        return process_adaptor_docs(adaptor_name, version, raw_docs, data)
-
-
 def process_adaptor_docs(adaptor_name: str, version: str, raw_docs: List[Dict[str, Any]], data: dict) -> dict:
     """
     Process and upload a single adaptor's documentation.
 
     Args:
-        adaptor_name: The adaptor name (e.g., "kobotoolbox" or "@openfn/language-dhis2")
+        adaptor_name: The full adaptor name (e.g., "@openfn/language-kobotoolbox", "@openfn/language-dhis2")
         version: The version string (e.g., "4.2.7")
         raw_docs: Array of raw documentation objects
         data: The original payload (for extracting DATABASE_URL)
@@ -323,3 +252,75 @@ def process_adaptor_docs(adaptor_name: str, version: str, raw_docs: List[Dict[st
         raise ApolloError(500, f"Upload failed: {str(e)}", type="DATABASE_ERROR")
     finally:
         conn.close()
+
+
+def main(data: dict) -> dict:
+    """
+    Main entry point for uploading adaptor function docs.
+
+    Expected payload:
+    {
+        "adaptor": "kobotoolbox" or "@openfn/language-kobotoolbox",
+        "version": "4.2.7",
+        "DATABASE_URL": "postgresql://..."  # Optional, will use env if not provided
+    }
+
+    This will call adaptor_apis service to fetch the docs, then upload them.
+    """
+    logger.info("Starting upload_adaptor_docs...")
+
+    # Validate required fields
+    if "adaptor" not in data:
+        raise ApolloError(400, "Missing required field: 'adaptor'", type="BAD_REQUEST")
+    if "version" not in data:
+        raise ApolloError(400, "Missing required field: 'version'", type="BAD_REQUEST")
+
+    adaptor = data["adaptor"]
+    version = data["version"]
+
+    # Normalize adaptor name - ensure it has @openfn/language- prefix
+    if not adaptor.startswith("@openfn/"):
+        adaptor_full = f"@openfn/language-{adaptor}"
+    else:
+        adaptor_full = adaptor
+
+    adaptor_version_string = f"{adaptor_full}@{version}"
+
+    logger.info(f"Fetching docs from adaptor_apis for {adaptor_version_string}")
+
+    try:
+        # Call adaptor_apis service
+        api_result = apollo("adaptor_apis", {"adaptors": [adaptor_version_string]})
+
+        # Check for errors
+        if api_result.get("errors") and adaptor_version_string in api_result["errors"]:
+            raise ApolloError(
+                500,
+                f"Failed to fetch docs for {adaptor_version_string}",
+                type="ADAPTOR_API_ERROR"
+            )
+
+        # Extract docs
+        if "docs" not in api_result or adaptor_version_string not in api_result["docs"]:
+            raise ApolloError(
+                500,
+                f"No docs returned for {adaptor_version_string}",
+                type="ADAPTOR_API_ERROR"
+            )
+
+        raw_docs = api_result["docs"][adaptor_version_string]
+        logger.info(f"Received {len(raw_docs)} items from adaptor_apis")
+
+        # Process and upload using the full adaptor name
+        logger.info(f"Processing and uploading docs for {adaptor_full}@{version}")
+
+        result = process_adaptor_docs(adaptor_full, version, raw_docs, data)
+
+        logger.info(f"✓ Successfully uploaded {result['functions_uploaded']} functions for {adaptor_full}@{version}")
+        return result
+
+    except ApolloError:
+        raise
+    except Exception as e:
+        logger.error(f"Error calling adaptor_apis: {str(e)}")
+        raise ApolloError(500, f"Failed to fetch docs: {str(e)}", type="ADAPTOR_API_ERROR")

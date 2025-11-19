@@ -1,7 +1,9 @@
 import json
 from util import create_logger, apollo
 from .retrieve_docs import retrieve_knowledge
-from describe_adaptor.describe_adaptor import describe_package
+from search_adaptor_docs.search_adaptor_docs import fetch_signatures
+import psycopg2
+import os
 
 logger = create_logger("job_chat.prompt")
 
@@ -278,23 +280,45 @@ def generate_system_message(context_dict, search_results):
 
     if context.has("adaptor"):
         adaptor_string = (
-            f"<adaptor>The user is using the OpenFn {context.adaptor} adaptor. Use functions provided by its API."
+            f"<adaptor>The user is using the OpenFn {context.adaptor} adaptor. Use functions provided by its API.\n\n"
         )
 
         try:
-            adaptor_docs = describe_package(context.adaptor)
-            for doc in adaptor_docs:
-                adaptor_string += f"Typescript definitions for doc {doc}"
-                adaptor_string += adaptor_docs[doc]["description"]
+            # Get database connection
+            db_url = os.environ.get("DATABASE_URL")
+            if db_url:
+                conn = psycopg2.connect(db_url)
+                try:
+                    adaptor_parts = context.adaptor.split("@")
+                    if len(adaptor_parts) >= 2:
+                        adaptor_name = "@" + adaptor_parts[1]
+                        version = adaptor_parts[2] if len(adaptor_parts) == 3 else "latest"
+                    else:
+                        adaptor_name = context.adaptor
+                        version = "latest"
+
+                    # Fetch function signatures
+                    signatures = fetch_signatures(adaptor_name, version, conn)
+
+                    if signatures:
+                        adaptor_string += "These are the available functions in the adaptor:\n\n"
+                        for func_name, signature in signatures.items():
+                            adaptor_string += f"{signature}\n"
+                    else:
+                        adaptor_string += "The user is using an OpenFn Adaptor to write the job."
+                finally:
+                    conn.close()
+            else:
+                logger.warning("DATABASE_URL not available, cannot fetch adaptor docs")
+                adaptor_string += "The user is using an OpenFn Adaptor to write the job."
         except Exception as e:
             logger.warning(f"Could not fetch adaptor docs for {context.adaptor}: {e}")
-            adaptor_string += (
-                f"The user is using an OpenFn Adaptor to write the job."
-            )
+            adaptor_string += "The user is using an OpenFn Adaptor to write the job."
+
         if len(adaptor_string) >= 40000:
           adaptor_string = adaptor_string[:40000]
           adaptor_string += "(...)"
-          
+
         adaptor_string += "</adaptor>"
 
         message.append(adaptor_string)
@@ -335,8 +359,6 @@ def build_prompt(content, history, context, rag=None, api_key=None, stream_manag
             "generate_queries": {}
         }
     }
-    # Remove escaped newlines which confuse the model
-    # context["expression"] = context["expression"].encode().decode('unicode_escape')
 
     if rag:
         retrieved_knowledge = rag

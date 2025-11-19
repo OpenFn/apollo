@@ -6,6 +6,27 @@ from util import create_logger, ApolloError
 logger = create_logger("search_adaptor_docs")
 
 
+def resolve_latest_version(adaptor_name: str, conn) -> str:
+    """
+    Get the latest version for an adaptor by finding the most recently uploaded version.
+    Returns the version string or None if no versions found.
+    """
+    query = """
+    SELECT version
+    FROM adaptor_function_docs
+    WHERE adaptor_name = %s
+    ORDER BY created_at DESC
+    LIMIT 1
+    """
+
+    with conn.cursor() as cur:
+        cur.execute(query, (adaptor_name,))
+        row = cur.fetchone()
+        if row:
+            return row[0]
+        return None
+
+
 def fetch_function_list(adaptor_name: str, version: str, conn) -> list:
     """Fetch just the list of function names."""
     query = """
@@ -157,7 +178,7 @@ def main(data: dict) -> dict:
     Expected payload:
     {
         "adaptor": "@openfn/language-dhis2",
-        "version": "4.2.10",
+        "version": "4.2.10",  # Optional, defaults to "latest"
         "query_type": "list" | "signatures" | "function" | "all",
         "function_name": "create",  # Required if query_type is "function"
         "format": "json" | "natural_language",  # Optional, defaults to "json"
@@ -169,13 +190,11 @@ def main(data: dict) -> dict:
     # Validate required fields
     if "adaptor" not in data:
         raise ApolloError(400, "Missing required field: 'adaptor'", type="BAD_REQUEST")
-    if "version" not in data:
-        raise ApolloError(400, "Missing required field: 'version'", type="BAD_REQUEST")
     if "query_type" not in data:
         raise ApolloError(400, "Missing required field: 'query_type'", type="BAD_REQUEST")
 
     adaptor_name = data["adaptor"]
-    version = data["version"]
+    version = data.get("version", "latest")  # Default to "latest" if not provided
     query_type = data["query_type"]
     function_name = data.get("function_name")
     format = data.get("format", "json")
@@ -200,7 +219,6 @@ def main(data: dict) -> dict:
         raise ApolloError(500, msg, type="BAD_REQUEST")
 
     # Connect to PostgreSQL
-    logger.info(f"Querying {adaptor_name}@{version} (type: {query_type}, format: {format})")
     try:
         conn = psycopg2.connect(db_url)
     except Exception as e:
@@ -208,6 +226,18 @@ def main(data: dict) -> dict:
         raise ApolloError(500, f"Database connection failed: {str(e)}", type="DATABASE_ERROR")
 
     try:
+        # Resolve "latest" to actual version
+        if version.lower() in ["latest", "@latest"]:
+            logger.info(f"Resolving 'latest' version for {adaptor_name}")
+            resolved_version = resolve_latest_version(adaptor_name, conn)
+            if not resolved_version:
+                raise ApolloError(404, f"No versions found for {adaptor_name}", type="NOT_FOUND")
+            logger.info(f"Resolved 'latest' to version {resolved_version}")
+            version = resolved_version
+
+        logger.info(f"Querying {adaptor_name}@{version} (type: {query_type}, format: {format})")
+
+        # Execute queries
         if query_type == "list":
             # Return list of function names
             functions = fetch_function_list(adaptor_name, version, conn)
