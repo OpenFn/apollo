@@ -1,0 +1,16 @@
+{
+  "content": "What information is available in the documents about API usage and examples?",
+  "history": [],
+  "context": {
+    "project_id": "test_project_1",
+    "project_name": "API Documentation Test",
+    "project_description": "Testing the document agent with API documentation",
+    "documents": [
+      {
+        "uuid": "test-doc-uuid-1",
+        "title": "Anthropic Cookbook",
+        "description": "Anthropic's cookbook repository containing examples and guides for using Claude API"
+      }
+    ]
+  }
+}
