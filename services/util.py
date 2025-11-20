@@ -92,5 +92,5 @@ def apollo(name, payload):
     """
     global apollo_port
     url = f"http://127.0.0.1:{apollo_port}/services/{name}"
-    r = requests.post(url, payload)
+    r = requests.post(url, json = payload)
     return r.json()
