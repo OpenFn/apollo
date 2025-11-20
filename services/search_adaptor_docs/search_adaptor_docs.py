@@ -1,6 +1,7 @@
 import os
 from typing import Dict, List, Any
 import psycopg2
+import sentry_sdk
 from util import create_logger, ApolloError
 
 logger = create_logger("search_adaptor_docs")
@@ -187,6 +188,10 @@ def main(data: dict) -> dict:
     """
     logger.info("Starting search_adaptor_docs...")
 
+    sentry_sdk.set_context("request_data", {
+        k: v for k, v in data.items() if k not in ["DATABASE_URL", "api_key"]
+    })
+
     # Validate required fields
     if "adaptor" not in data:
         raise ApolloError(400, "Missing required field: 'adaptor'", type="BAD_REQUEST")
@@ -198,6 +203,9 @@ def main(data: dict) -> dict:
     query_type = data["query_type"]
     function_name = data.get("function_name")
     format = data.get("format", "json")
+
+    sentry_sdk.set_tag("adaptor", adaptor_name)
+    sentry_sdk.set_tag("query_type", query_type)
 
     # Validate query_type
     valid_types = ["list", "signatures", "function", "all"]

@@ -3,6 +3,7 @@ import os
 from typing import Dict, List, Any
 import psycopg2
 from psycopg2.extras import execute_values
+import sentry_sdk
 from util import create_logger, ApolloError, apollo
 
 logger = create_logger("upload_adaptor_docs")
@@ -35,7 +36,6 @@ def filter_function_docs(raw_docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]
         # Get signature - handle both string and array formats
         signature = item.get("signature", "")
         if isinstance(signature, list):
-            # New format: array of signatures, take the first one
             signature = signature[0] if signature else ""
 
         # Build simplified function doc
@@ -215,7 +215,7 @@ def process_adaptor_docs(adaptor_name: str, version: str, raw_docs: List[Dict[st
     function_list = extract_function_list(filtered_docs)
     logger.info(f"Functions: {', '.join(function_list)}")
 
-    # Get database URL
+    # Upload
     if data.get("DATABASE_URL"):
         db_url = data["DATABASE_URL"]
     else:
@@ -226,7 +226,6 @@ def process_adaptor_docs(adaptor_name: str, version: str, raw_docs: List[Dict[st
         logger.error(msg)
         raise ApolloError(500, msg, type="BAD_REQUEST")
 
-    # Connect to PostgreSQL
     logger.info("Connecting to PostgreSQL")
     try:
         conn = psycopg2.connect(db_url)
@@ -235,12 +234,8 @@ def process_adaptor_docs(adaptor_name: str, version: str, raw_docs: List[Dict[st
         raise ApolloError(500, f"Database connection failed: {str(e)}", type="DATABASE_ERROR")
 
     try:
-        # Create table if needed
         create_table_if_not_exists(conn)
-
-        # Upload
         upload_to_postgres(adaptor_name, version, filtered_docs, conn)
-
         logger.info("✓ Upload complete")
 
         return {
@@ -273,6 +268,10 @@ def main(data: dict) -> dict:
     """
     logger.info("Starting upload_adaptor_docs...")
 
+    sentry_sdk.set_context("request_data", {
+        k: v for k, v in data.items() if k not in ["DATABASE_URL", "api_key"]
+    })
+
     # Validate required fields
     if "adaptor" not in data:
         raise ApolloError(400, "Missing required field: 'adaptor'", type="BAD_REQUEST")
@@ -282,7 +281,9 @@ def main(data: dict) -> dict:
     adaptor = data["adaptor"]
     version = data["version"]
 
-    # Normalize adaptor name - ensure it has @openfn/language- prefix
+    sentry_sdk.set_tag("adaptor", adaptor)
+    sentry_sdk.set_tag("version", version)
+
     if not adaptor.startswith("@openfn/"):
         adaptor_full = f"@openfn/language-{adaptor}"
     else:
@@ -293,10 +294,9 @@ def main(data: dict) -> dict:
     logger.info(f"Fetching docs from adaptor_apis for {adaptor_version_string}")
 
     try:
-        # Call adaptor_apis service
-        api_result = apollo("adaptor_apis", {"adaptors": [adaptor_version_string]})
+        with sentry_sdk.start_span(description="fetch_adaptor_apis"):
+            api_result = apollo("adaptor_apis", {"adaptors": [adaptor_version_string]})
 
-        # Check if adaptor_apis itself returned an error
         if api_result.get("type") == "SERVICE_ERROR":
             raise ApolloError(
                 api_result.get("code", 500),
@@ -304,29 +304,22 @@ def main(data: dict) -> dict:
                 type=api_result.get("type", "ADAPTOR_API_ERROR")
             )
 
-        # Check for errors
         if api_result.get("errors") and adaptor_version_string in api_result["errors"]:
-            raise ApolloError(
-                500,
-                f"Failed to fetch docs for {adaptor_version_string}",
-                type="ADAPTOR_API_ERROR"
-            )
+            msg = f"Failed to fetch docs for {adaptor_version_string}"
+            raise ApolloError(500, msg, type="ADAPTOR_API_ERROR")
 
-        # Extract docs
         if "docs" not in api_result or adaptor_version_string not in api_result["docs"]:
-            raise ApolloError(
-                500,
-                f"No docs returned for {adaptor_version_string}",
-                type="ADAPTOR_API_ERROR"
-            )
+            msg = f"No docs returned for {adaptor_version_string}"
+            sentry_sdk.capture_message(msg, level="error")
+            raise ApolloError(500, msg, type="ADAPTOR_API_ERROR")
 
         raw_docs = api_result["docs"][adaptor_version_string]
         logger.info(f"Received {len(raw_docs)} items from adaptor_apis")
 
-        # Process and upload using the full adaptor name
         logger.info(f"Processing and uploading docs for {adaptor_full}@{version}")
 
-        result = process_adaptor_docs(adaptor_full, version, raw_docs, data)
+        with sentry_sdk.start_span(description="process_and_upload_docs"):
+            result = process_adaptor_docs(adaptor_full, version, raw_docs, data)
 
         logger.info(f"✓ Successfully uploaded {result['functions_uploaded']} functions for {adaptor_full}@{version}")
         return result
