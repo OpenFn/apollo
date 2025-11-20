@@ -14,18 +14,20 @@ def filter_function_docs(raw_docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]
 
     Keeps:
     - Functions (kind === "function")
+    - External functions (kind === "external-function") - from language-common
+    - External exports (kind === "external") - from language-common
     - Public access only
 
     Removes:
     - typedefs
-    - external-function / external (common functions)
     - private functions
     - meta, order, level, newscope, customTags, state
     """
     filtered = []
 
     for item in raw_docs:
-        if item.get("kind") != "function":
+        # Include function, external-function, and external kinds
+        if item.get("kind") not in ["function", "external-function", "external"]:
             continue
         if item.get("access") == "private":
             continue
@@ -47,9 +49,11 @@ def filter_function_docs(raw_docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]
             "returns": item.get("returns", [])
         }
 
-        # Optionally include source and common flag if present (for common functions from language-common)
+        # Optionally include source, version, and common flag if present (for common functions from language-common)
         if item.get("source"):
             function_doc["source"] = item.get("source")
+        if item.get("version"):
+            function_doc["version"] = item.get("version")
         if item.get("common"):
             function_doc["common"] = True
 
@@ -291,6 +295,14 @@ def main(data: dict) -> dict:
     try:
         # Call adaptor_apis service
         api_result = apollo("adaptor_apis", {"adaptors": [adaptor_version_string]})
+
+        # Check if adaptor_apis itself returned an error
+        if api_result.get("type") == "SERVICE_ERROR":
+            raise ApolloError(
+                api_result.get("code", 500),
+                api_result.get("message", "Unknown service error"),
+                type=api_result.get("type", "ADAPTOR_API_ERROR")
+            )
 
         # Check for errors
         if api_result.get("errors") and adaptor_version_string in api_result["errors"]:

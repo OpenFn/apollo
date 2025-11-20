@@ -10,12 +10,12 @@ This service processes JSDoc-generated adaptor documentation (raw JSON format) a
 
 **Removed:**
 - Type definitions (`kind: "typedef"`)
-- External/common functions (`kind: "external-function"` or `"external"`)
 - Private functions (`access: "private"`)
 - Internal metadata (`meta`, `order`, `level`, `newscope`, `customTags`, `state`)
 
 **Kept:**
 - Public functions (`kind: "function"`, `access: "public"`)
+- External/common functions from language-common (`kind: "external-function"` or `"external"`)
 - Function name, scope, description
 - **Signature** (e.g., `create(path: string, data: DHIS2Data, params: object): Operation`)
 - Parameters (name, type, description, optional flag)
