@@ -133,6 +133,15 @@ curl -X POST http://localhost:3000/services/load_adaptor_docs \
 }
 ```
 
+**Response (error, when docs unavailable from adaptor_apis):**
+```json
+{
+  "code": 500,
+  "type": "ADAPTOR_API_ERROR",
+  "message": "Failed to fetch docs for @openfn/language-http@3.1.11"
+}
+```
+
 ## Payload Schema
 
 **Required:**
