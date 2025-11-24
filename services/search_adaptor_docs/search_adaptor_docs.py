@@ -183,13 +183,13 @@ def main(data: dict) -> dict:
         "query_type": "list" | "signatures" | "function" | "all",
         "function_name": "create",  # Required if query_type is "function"
         "format": "json" | "natural_language",  # Optional, defaults to "json"
-        "DATABASE_URL": "postgresql://..."  # Optional, will use env if not provided
+        "POSTGRES_URL": "postgresql://..."  # Optional, will use env if not provided
     }
     """
     logger.info("Starting search_adaptor_docs...")
 
     sentry_sdk.set_context("request_data", {
-        k: v for k, v in data.items() if k not in ["DATABASE_URL", "api_key"]
+        k: v for k, v in data.items() if k not in ["POSTGRES_URL", "api_key"]
     })
 
     # Validate required fields
@@ -216,13 +216,13 @@ def main(data: dict) -> dict:
         raise ApolloError(400, "Missing required field: 'function_name' for query_type='function'", type="BAD_REQUEST")
 
     # Get database URL
-    if data.get("DATABASE_URL"):
-        db_url = data["DATABASE_URL"]
+    if data.get("POSTGRES_URL"):
+        db_url = data["POSTGRES_URL"]
     else:
-        db_url = os.environ.get("DATABASE_URL")
+        db_url = os.environ.get("POSTGRES_URL")
 
     if not db_url:
-        msg = "Missing DATABASE_URL in payload or environment"
+        msg = "Missing POSTGRES_URL in payload or environment"
         logger.error(msg)
         raise ApolloError(500, msg, type="BAD_REQUEST")
 

@@ -51,7 +51,7 @@ CREATE INDEX IF NOT EXISTS idx_signature
 
 Provide just the adaptor name and version. The service will automatically call the `adaptor_apis` service to fetch the docs.
 
-**Payload:**
+**Basic Payload:**
 ```json
 {
   "adaptor": "kobotoolbox",
@@ -67,24 +67,59 @@ You can also use the full adaptor name:
 }
 ```
 
+**Skip if already exists (recommended for bulk operations):**
+```json
+{
+  "adaptor": "kobotoolbox",
+  "version": "4.2.7",
+  "skip_if_exists": true
+}
+```
+
+When `skip_if_exists` is `true`:
+- Checks database first for existing docs for this adaptor+version
+- If found, returns existing function list immediately without calling `adaptor_apis`
+- If not found, proceeds with normal fetch and upload flow
+- **Use case**: Idempotent bulk uploads, CI/CD pipelines, avoiding redundant processing
+
 **Via entry.py:**
 ```bash
-python -m services.entry upload_adaptor_docs -i services/upload_adaptor_docs/tmp/test_upload_simple.json
+python -m services.entry load_adaptor_docs -i services/load_adaptor_docs/tmp/test_upload_simple.json
 ```
 
 **Via HTTP (requires running server):**
 ```bash
-curl -X POST http://localhost:3000/services/upload_adaptor_docs \
+curl -X POST http://localhost:3000/services/load_adaptor_docs \
   -H "Content-Type: application/json" \
   -d '{"adaptor": "kobotoolbox", "version": "4.2.7"}'
 ```
 
-**Response:**
+**Response (new upload):**
 ```json
 {
   "success": true,
   "adaptor": "@openfn/language-kobotoolbox",
   "version": "4.2.7",
+  "functions_uploaded": 7,
+  "function_list": [
+    "getDeploymentInfo",
+    "getForms",
+    "getSubmissions",
+    "http.get",
+    "http.post",
+    "http.put",
+    "http.request"
+  ]
+}
+```
+
+**Response (skipped, when docs already exist):**
+```json
+{
+  "success": true,
+  "adaptor": "@openfn/language-kobotoolbox",
+  "version": "4.2.7",
+  "skipped": true,
   "functions_uploaded": 7,
   "function_list": [
     "getDeploymentInfo",
@@ -107,13 +142,21 @@ curl -X POST http://localhost:3000/services/upload_adaptor_docs \
 - **`version`** (string): Adaptor version (e.g., `"4.2.7"`)
 
 **Optional:**
-- **`DATABASE_URL`** (string): PostgreSQL connection string (falls back to environment variable)
+- **`skip_if_exists`** (boolean): If `true`, checks database first and returns existing data if found. If `false` (default), always fetches and replaces docs.
+- **`POSTGRES_URL`** (string): PostgreSQL connection string (falls back to environment variable)
 
-The service will:
+### Behavior modes:
+
+**Default mode (`skip_if_exists: false` or not provided):**
 1. Call `adaptor_apis` service to fetch the latest docs
 2. Filter and process the docs
 3. Delete any existing functions for this adaptor@version
 4. Upload new functions to PostgreSQL
+
+**Skip mode (`skip_if_exists: true`):**
+1. Check if any docs exist for this adaptor@version in the database
+2. If exists: Return the existing function list immediately (no API call, no replacement)
+3. If not exists: Proceed with steps 1-4 from default mode
 
 ## Integration with Other Services
 
@@ -139,7 +182,7 @@ The `job_chat` service uses function signatures to:
 import psycopg2
 import os
 
-conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+conn = psycopg2.connect(os.getenv("POSTGRES_URL"))
 cur = conn.cursor()
 
 cur.execute("""
@@ -184,16 +227,17 @@ cur.execute("""
 ## File Structure
 
 ```
-services/upload_adaptor_docs/
-├── upload_adaptor_docs.py    # Main service
+services/load_adaptor_docs/
+├── load_adaptor_docs.py    # Main service
 ├── README.md                 # This file
 └── schema.sql                # Database schema (for reference)
 ```
 
 ## Notes
 
-- **Replace behavior**: Re-uploading the same adaptor/version **deletes all existing functions** for that version first, then inserts the new data. This ensures no stale functions remain if the docs change.
-- **Idempotent**: Safe to run multiple times with the same data
+- **Replace behavior (default)**: Re-uploading the same adaptor/version **deletes all existing functions** for that version first, then inserts the new data. This ensures no stale functions remain if the docs change.
+- **Skip behavior (`skip_if_exists: true`)**: Checks database first and returns existing data if found, avoiding redundant API calls and processing.
+- **Idempotent**: Safe to run multiple times with the same data (with or without `skip_if_exists`)
 - **Scope handling**: Functions are stored with scope prefix (e.g., `util.attr`, `tracker.import`) or just name for global scope
 - **No vector search**: Designed for keyword and full-text search only
 - **Automatic table creation**: Creates `adaptor_function_docs` table if it doesn't exist

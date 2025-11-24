@@ -31,10 +31,10 @@ def test_anthropic_key(api_key):
 
 def test_postgres_connection():
     try:
-        database_url = os.getenv('DATABASE_URL')
-        if not database_url:
+        POSTGRES_URL = os.getenv('POSTGRES_URL')
+        if not POSTGRES_URL:
             return False
-        conn = psycopg2.connect(database_url)
+        conn = psycopg2.connect(POSTGRES_URL)
         conn.close()
         return True
     except Exception:

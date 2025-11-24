@@ -4,7 +4,7 @@ This service retrieves adaptor function documentation from PostgreSQL for a spec
 
 ## Usage
 
-The service requires a `DATABASE_URL` environment variable to connect to PostgreSQL.
+The service requires a `POSTGRES_URL` environment variable to connect to PostgreSQL.
 
 ### With the CLI, returning to stdout:
 
@@ -33,7 +33,7 @@ The input payload is a JSON object with the following structure:
     "query_type": "list" | "signatures" | "function" | "all", // Query type (required)
     "function_name": "create", // Specific function name (required if query_type is "function")
     "format": "json" | "natural_language", // Output format (optional, defaults to "json")
-    "DATABASE_URL": "postgresql://..." // Database connection string (optional, falls back to environment variable)
+    "POSTGRES_URL": "postgresql://..." // Database connection string (optional, falls back to environment variable)
 }
 ```
 

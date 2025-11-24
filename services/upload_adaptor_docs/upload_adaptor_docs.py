@@ -6,7 +6,7 @@ from psycopg2.extras import execute_values
 import sentry_sdk
 from util import create_logger, ApolloError, apollo
 
-logger = create_logger("upload_adaptor_docs")
+logger = create_logger("load_adaptor_docs")
 
 
 def filter_function_docs(raw_docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -130,6 +130,35 @@ def create_table_if_not_exists(conn):
     logger.info("Table adaptor_function_docs ready")
 
 
+def check_existing_docs(adaptor_name: str, version: str, conn) -> dict:
+    """
+    Check if docs already exist for this adaptor+version and return their metadata.
+
+    Returns:
+        Dictionary with exists flag and function list, or None if not found
+    """
+    check_sql = """
+    SELECT function_name, signature
+    FROM adaptor_function_docs
+    WHERE adaptor_name = %s AND version = %s
+    ORDER BY function_name
+    """
+
+    with conn.cursor() as cur:
+        cur.execute(check_sql, (adaptor_name, version))
+        rows = cur.fetchall()
+
+        if rows:
+            function_list = [row[0] for row in rows]
+            return {
+                "exists": True,
+                "function_count": len(rows),
+                "function_list": function_list
+            }
+
+        return {"exists": False}
+
+
 def upload_to_postgres(
     adaptor_name: str,
     version: str,
@@ -202,7 +231,7 @@ def process_adaptor_docs(adaptor_name: str, version: str, raw_docs: List[Dict[st
         adaptor_name: The full adaptor name (e.g., "@openfn/language-kobotoolbox", "@openfn/language-dhis2")
         version: The version string (e.g., "4.2.7")
         raw_docs: Array of raw documentation objects
-        data: The original payload (for extracting DATABASE_URL)
+        data: The original payload (for extracting POSTGRES_URL)
 
     Returns:
         Dictionary with success status and upload details
@@ -216,13 +245,13 @@ def process_adaptor_docs(adaptor_name: str, version: str, raw_docs: List[Dict[st
     logger.info(f"Functions: {', '.join(function_list)}")
 
     # Upload
-    if data.get("DATABASE_URL"):
-        db_url = data["DATABASE_URL"]
+    if data.get("POSTGRES_URL"):
+        db_url = data["POSTGRES_URL"]
     else:
-        db_url = os.environ.get("DATABASE_URL")
+        db_url = os.environ.get("POSTGRES_URL")
 
     if not db_url:
-        msg = "Missing DATABASE_URL in payload or environment"
+        msg = "Missing POSTGRES_URL in payload or environment"
         logger.error(msg)
         raise ApolloError(500, msg, type="BAD_REQUEST")
 
@@ -261,15 +290,17 @@ def main(data: dict) -> dict:
     {
         "adaptor": "kobotoolbox" or "@openfn/language-kobotoolbox",
         "version": "4.2.7",
-        "DATABASE_URL": "postgresql://..."  # Optional, will use env if not provided
+        "skip_if_exists": false,  # Optional, defaults to false
+        "POSTGRES_URL": "postgresql://..."  # Optional, will use env if not provided
     }
 
     This will call adaptor_apis service to fetch the docs, then upload them.
+    If skip_if_exists is true and docs already exist, it returns existing data without reprocessing.
     """
-    logger.info("Starting upload_adaptor_docs...")
+    logger.info("Starting load_adaptor_docs...")
 
     sentry_sdk.set_context("request_data", {
-        k: v for k, v in data.items() if k not in ["DATABASE_URL", "api_key"]
+        k: v for k, v in data.items() if k not in ["POSTGRES_URL", "api_key"]
     })
 
     # Validate required fields
@@ -280,6 +311,7 @@ def main(data: dict) -> dict:
 
     adaptor = data["adaptor"]
     version = data["version"]
+    skip_if_exists = data.get("skip_if_exists", False)
 
     sentry_sdk.set_tag("adaptor", adaptor)
     sentry_sdk.set_tag("version", version)
@@ -290,6 +322,45 @@ def main(data: dict) -> dict:
         adaptor_full = adaptor
 
     adaptor_version_string = f"{adaptor_full}@{version}"
+
+    # Check if docs already exist (if skip_if_exists is enabled)
+    if skip_if_exists:
+        if data.get("POSTGRES_URL"):
+            db_url = data["POSTGRES_URL"]
+        else:
+            db_url = os.environ.get("POSTGRES_URL")
+
+        if not db_url:
+            msg = "Missing POSTGRES_URL in payload or environment"
+            logger.error(msg)
+            raise ApolloError(500, msg, type="BAD_REQUEST")
+
+        logger.info("Checking if docs already exist in database")
+        try:
+            conn = psycopg2.connect(db_url)
+        except Exception as e:
+            logger.error(f"Failed to connect to database: {str(e)}")
+            raise ApolloError(500, f"Database connection failed: {str(e)}", type="DATABASE_ERROR")
+
+        try:
+            create_table_if_not_exists(conn)
+            existing_check = check_existing_docs(adaptor_full, version, conn)
+
+            if existing_check["exists"]:
+                logger.info(f"✓ Docs already exist for {adaptor_full}@{version} ({existing_check['function_count']} functions), skipping upload")
+                return {
+                    "success": True,
+                    "adaptor": adaptor_full,
+                    "version": version,
+                    "skipped": True,
+                    "functions_uploaded": existing_check["function_count"],
+                    "function_list": existing_check["function_list"]
+                }
+            else:
+                logger.info(f"No existing docs found for {adaptor_full}@{version}, proceeding with upload")
+
+        finally:
+            conn.close()
 
     logger.info(f"Fetching docs from adaptor_apis for {adaptor_version_string}")
 

@@ -1,9 +1,8 @@
 import sentry_sdk
-from util import create_logger, apollo
+from util import create_logger
 from .retrieve_docs import retrieve_knowledge
+from .db_utils import get_db_connection
 from search_adaptor_docs.search_adaptor_docs import fetch_signatures
-import psycopg2
-import os
 
 logger = create_logger("job_chat.prompt")
 
@@ -166,10 +165,8 @@ def generate_system_message(context_dict, search_results):
         )
 
         try:
-            # Get database connection
-            db_url = os.environ.get("DATABASE_URL")
-            if db_url:
-                conn = psycopg2.connect(db_url)
+            conn = get_db_connection()
+            if conn:
                 try:
                     adaptor_parts = context.adaptor.split("@")
                     if len(adaptor_parts) >= 2:
@@ -199,7 +196,7 @@ def generate_system_message(context_dict, search_results):
                 finally:
                     conn.close()
             else:
-                logger.warning("DATABASE_URL not available, cannot fetch adaptor docs")
+                logger.warning("POSTGRES_URL not available, cannot fetch adaptor docs")
                 adaptor_string += "The user is using an OpenFn Adaptor to write the job."
         except Exception as e:
             logger.warning(f"Could not fetch adaptor docs for {context.adaptor}: {e}")
