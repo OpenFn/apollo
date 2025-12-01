@@ -1,7 +1,6 @@
 import os
 import json
 from typing import List, Optional, Dict, Any
-import uuid
 from dataclasses import dataclass
 from anthropic import (
     Anthropic,

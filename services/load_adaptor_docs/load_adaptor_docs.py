@@ -311,7 +311,7 @@ def main(data: dict) -> dict:
 
     adaptor = data["adaptor"]
     version = data["version"]
-    skip_if_exists = data.get("skip_if_exists", False)
+    skip_if_exists = data.get("skip_if_exists", True)
 
     sentry_sdk.set_tag("adaptor", adaptor)
     sentry_sdk.set_tag("version", version)

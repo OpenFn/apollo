@@ -67,20 +67,33 @@ You can also use the full adaptor name:
 }
 ```
 
-**Skip if already exists (recommended for bulk operations):**
+**Default behavior (skip if already exists):**
 ```json
 {
   "adaptor": "kobotoolbox",
-  "version": "4.2.7",
-  "skip_if_exists": true
+  "version": "4.2.7"
 }
 ```
 
-When `skip_if_exists` is `true`:
+By default (`skip_if_exists: true`):
 - Checks database first for existing docs for this adaptor+version
 - If found, returns existing function list immediately without calling `adaptor_apis`
 - If not found, proceeds with normal fetch and upload flow
 - **Use case**: Idempotent bulk uploads, CI/CD pipelines, avoiding redundant processing
+
+**Force replacement (overwrite existing docs):**
+```json
+{
+  "adaptor": "kobotoolbox",
+  "version": "4.2.7",
+  "skip_if_exists": false
+}
+```
+
+When `skip_if_exists` is `false`:
+- Always fetches docs from `adaptor_apis`
+- Deletes any existing functions for this adaptor@version
+- Uploads the new functions to PostgreSQL
 
 **Via entry.py:**
 ```bash
@@ -151,21 +164,21 @@ curl -X POST http://localhost:3000/services/load_adaptor_docs \
 - **`version`** (string): Adaptor version (e.g., `"4.2.7"`)
 
 **Optional:**
-- **`skip_if_exists`** (boolean): If `true`, checks database first and returns existing data if found. If `false` (default), always fetches and replaces docs.
+- **`skip_if_exists`** (boolean): If `true` (default), checks database first and returns existing data if found. If `false`, always fetches and replaces docs.
 - **`POSTGRES_URL`** (string): PostgreSQL connection string (falls back to environment variable)
 
 ### Behavior modes:
 
-**Default mode (`skip_if_exists: false` or not provided):**
+**Default mode (`skip_if_exists: true` or not provided):**
+1. Check if any docs exist for this adaptor@version in the database
+2. If exists: Return the existing function list immediately (no API call, no replacement)
+3. If not exists: Call `adaptor_apis` service, filter and process the docs, then upload to PostgreSQL
+
+**Force replace mode (`skip_if_exists: false`):**
 1. Call `adaptor_apis` service to fetch the latest docs
 2. Filter and process the docs
 3. Delete any existing functions for this adaptor@version
 4. Upload new functions to PostgreSQL
-
-**Skip mode (`skip_if_exists: true`):**
-1. Check if any docs exist for this adaptor@version in the database
-2. If exists: Return the existing function list immediately (no API call, no replacement)
-3. If not exists: Proceed with steps 1-4 from default mode
 
 ## Integration with Other Services
 
@@ -244,8 +257,8 @@ services/load_adaptor_docs/
 
 ## Notes
 
-- **Replace behavior (default)**: Re-uploading the same adaptor/version **deletes all existing functions** for that version first, then inserts the new data. This ensures no stale functions remain if the docs change.
-- **Skip behavior (`skip_if_exists: true`)**: Checks database first and returns existing data if found, avoiding redundant API calls and processing.
+- **Skip behavior (default)**: By default (`skip_if_exists: true`), checks database first and returns existing data if found, avoiding redundant API calls and processing.
+- **Replace behavior (`skip_if_exists: false`)**: Re-uploading the same adaptor/version **deletes all existing functions** for that version first, then inserts the new data. This ensures no stale functions remain if the docs change.
 - **Idempotent**: Safe to run multiple times with the same data (with or without `skip_if_exists`)
 - **Scope handling**: Functions are stored with scope prefix (e.g., `util.attr`, `tracker.import`) or just name for global scope
 - **No vector search**: Designed for keyword and full-text search only
