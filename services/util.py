@@ -94,3 +94,41 @@ def apollo(name, payload):
     url = f"http://127.0.0.1:{apollo_port}/services/{name}"
     r = requests.post(url, json = payload)
     return r.json()
+
+
+def parse_adaptor_string(adaptor_input: str) -> tuple[str, str, str]:
+    """
+    Parse adaptor string in format "@openfn/language-http@3.1.11" and return (adaptor_name, version, full_string).
+
+    Accepts:
+    - "@openfn/language-http@3.1.11" -> ("@openfn/language-http", "3.1.11", "@openfn/language-http@3.1.11")
+    - "http@3.1.11" -> ("@openfn/language-http", "3.1.11", "@openfn/language-http@3.1.11")
+
+    Raises ApolloError if version is not provided.
+    """
+    adaptor_parts = adaptor_input.split("@")
+
+    # Handle format: "@openfn/language-http@3.1.11"
+    if adaptor_input.startswith("@"):
+        if len(adaptor_parts) >= 3:
+            adaptor_name = "@" + adaptor_parts[1]
+            version = adaptor_parts[2]
+        else:
+            raise ApolloError(
+                400,
+                f"Version must be specified in adaptor string. Expected format: '@openfn/language-http@3.1.11', got: '{adaptor_input}'",
+                type="BAD_REQUEST"
+            )
+    # Handle format: "http@3.1.11"
+    elif len(adaptor_parts) == 2:
+        adaptor_name = f"@openfn/language-{adaptor_parts[0]}"
+        version = adaptor_parts[1]
+    else:
+        raise ApolloError(
+            400,
+            f"Version must be specified in adaptor string. Expected format: 'http@3.1.11' or '@openfn/language-http@3.1.11', got: '{adaptor_input}'",
+            type="BAD_REQUEST"
+        )
+
+    full_string = f"{adaptor_name}@{version}"
+    return adaptor_name, version, full_string

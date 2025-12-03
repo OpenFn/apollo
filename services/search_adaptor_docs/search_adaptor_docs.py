@@ -2,30 +2,9 @@ import os
 from typing import Dict, List, Any
 import psycopg2
 import sentry_sdk
-from util import create_logger, ApolloError
+from util import create_logger, ApolloError, parse_adaptor_string
 
 logger = create_logger("search_adaptor_docs")
-
-
-def resolve_latest_version(adaptor_name: str, conn) -> str:
-    """
-    Get the latest version for an adaptor by finding the most recently uploaded version.
-    Returns the version string or None if no versions found.
-    """
-    query = """
-    SELECT version
-    FROM adaptor_function_docs
-    WHERE adaptor_name = %s
-    ORDER BY created_at DESC
-    LIMIT 1
-    """
-
-    with conn.cursor() as cur:
-        cur.execute(query, (adaptor_name,))
-        row = cur.fetchone()
-        if row:
-            return row[0]
-        return None
 
 
 def fetch_function_list(adaptor_name: str, version: str, conn) -> list:
@@ -178,8 +157,7 @@ def main(data: dict) -> dict:
 
     Expected payload:
     {
-        "adaptor": "@openfn/language-dhis2",
-        "version": "4.2.10",  # Optional, defaults to "latest"
+        "adaptor": "@openfn/language-dhis2@4.2.10",  # Can also be "dhis2@4.2.10"
         "query_type": "list" | "signatures" | "function" | "all",
         "function_name": "create",  # Required if query_type is "function"
         "format": "json" | "natural_language"  # Optional, defaults to "json"
@@ -195,13 +173,16 @@ def main(data: dict) -> dict:
     if "query_type" not in data:
         raise ApolloError(400, "Missing required field: 'query_type'", type="BAD_REQUEST")
 
-    adaptor_name = data["adaptor"]
-    version = data.get("version", "latest")  # Default to "latest" if not provided
+    adaptor_input = data["adaptor"]
     query_type = data["query_type"]
     function_name = data.get("function_name")
     format = data.get("format", "json")
 
+    # Parse the adaptor string to extract name and version
+    adaptor_name, version, _ = parse_adaptor_string(adaptor_input)
+
     sentry_sdk.set_tag("adaptor", adaptor_name)
+    sentry_sdk.set_tag("version", version)
     sentry_sdk.set_tag("query_type", query_type)
 
     # Validate query_type
@@ -227,15 +208,6 @@ def main(data: dict) -> dict:
         raise ApolloError(500, f"Database connection failed: {str(e)}", type="DATABASE_ERROR")
 
     try:
-        # Resolve "latest" to actual version
-        if version.lower() in ["latest", "@latest"]:
-            logger.info(f"Resolving 'latest' version for {adaptor_name}")
-            resolved_version = resolve_latest_version(adaptor_name, conn)
-            if not resolved_version:
-                raise ApolloError(404, f"No versions found for {adaptor_name}", type="NOT_FOUND")
-            logger.info(f"Resolved 'latest' to version {resolved_version}")
-            version = resolved_version
-
         logger.info(f"Querying {adaptor_name}@{version} (type: {query_type}, format: {format})")
 
         # Execute queries

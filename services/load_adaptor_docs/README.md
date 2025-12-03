@@ -49,29 +49,26 @@ CREATE INDEX IF NOT EXISTS idx_signature
 
 ## Usage
 
-Provide just the adaptor name and version. The service will automatically call the `adaptor_apis` service to fetch the docs.
+Provide the adaptor with version in the format `@openfn/language-<name>@<version>` or `<name>@<version>`. The service will automatically call the `adaptor_apis` service to fetch the docs.
 
 **Basic Payload:**
 ```json
 {
-  "adaptor": "kobotoolbox",
-  "version": "4.2.7"
+  "adaptor": "@openfn/language-kobotoolbox@4.2.7"
 }
 ```
 
-You can also use the full adaptor name:
+**Short form (also supported):**
 ```json
 {
-  "adaptor": "@openfn/language-kobotoolbox",
-  "version": "4.2.7"
+  "adaptor": "kobotoolbox@4.2.7"
 }
 ```
 
 **Default behavior (skip if already exists):**
 ```json
 {
-  "adaptor": "kobotoolbox",
-  "version": "4.2.7"
+  "adaptor": "@openfn/language-kobotoolbox@4.2.7"
 }
 ```
 
@@ -84,8 +81,7 @@ By default (`skip_if_exists: true`):
 **Force replacement (overwrite existing docs):**
 ```json
 {
-  "adaptor": "kobotoolbox",
-  "version": "4.2.7",
+  "adaptor": "@openfn/language-kobotoolbox@4.2.7",
   "skip_if_exists": false
 }
 ```
@@ -104,7 +100,7 @@ python -m services.entry load_adaptor_docs -i services/load_adaptor_docs/tmp/tes
 ```bash
 curl -X POST http://localhost:3000/services/load_adaptor_docs \
   -H "Content-Type: application/json" \
-  -d '{"adaptor": "kobotoolbox", "version": "4.2.7"}'
+  -d '{"adaptor": "@openfn/language-kobotoolbox@4.2.7"}'
 ```
 
 **Response (new upload):**
@@ -158,10 +154,9 @@ curl -X POST http://localhost:3000/services/load_adaptor_docs \
 ## Payload Schema
 
 **Required:**
-- **`adaptor`** (string): Adaptor name - accepts either:
-  - Short form: `"kobotoolbox"`, `"dhis2"`, etc.
-  - Full form: `"@openfn/language-kobotoolbox"`, `"@openfn/language-dhis2"`, etc.
-- **`version`** (string): Adaptor version (e.g., `"4.2.7"`)
+- **`adaptor`** (string): Adaptor name with version - accepts either:
+  - Full form: `"@openfn/language-kobotoolbox@4.2.7"`, `"@openfn/language-dhis2@4.2.10"`, etc.
+  - Short form: `"kobotoolbox@4.2.7"`, `"dhis2@4.2.10"`, etc.
 
 **Optional:**
 - **`skip_if_exists`** (boolean): If `true` (default), checks database first and returns existing data if found. If `false`, always fetches and replaces docs.

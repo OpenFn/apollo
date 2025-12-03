@@ -28,8 +28,7 @@ The input payload is a JSON object with the following structure:
 
 ```js
 {
-    "adaptor": "@openfn/language-dhis2", // Adaptor name (required)
-    "version": "4.2.10" | "latest", // Adaptor version (optional, defaults to "latest")
+    "adaptor": "@openfn/language-dhis2@4.2.10", // Adaptor name with version (required) - can also use short form "dhis2@4.2.10"
     "query_type": "list" | "signatures" | "function" | "all", // Query type (required)
     "function_name": "create", // Specific function name (required if query_type is "function")
     "format": "json" | "natural_language", // Output format (optional, defaults to "json")
@@ -49,45 +48,28 @@ The input payload is a JSON object with the following structure:
 - **`json`**: Returns structured JSON data (default)
 - **`natural_language`**: Returns human-readable text format, suitable for LLM consumption
 
-### Version Resolution
+### Adaptor String Format
 
-The `version` field is **optional** and defaults to `"latest"` if not provided. You can also explicitly use `"latest"` or `"@latest"` as the version to automatically resolve to the most recently uploaded version for that adaptor:
+The `adaptor` field accepts the following formats:
+- **Full form with version**: `"@openfn/language-dhis2@4.2.10"`
+- **Short form with version**: `"dhis2@4.2.10"`
 
-```json
-{
-    "adaptor": "@openfn/language-dhis2",
-    "query_type": "list"
-}
-```
-
-Or explicitly:
-
-```json
-{
-    "adaptor": "@openfn/language-dhis2",
-    "version": "latest",
-    "query_type": "list"
-}
-```
-
-Both will query the database for the most recent version based on the `created_at` timestamp.
+The version **must** be included in the adaptor string. If the version is missing, the service will return a `400 BAD_REQUEST` error with a helpful message.
 
 ### Examples
 
 **Get list of function names:**
 ```json
 {
-    "adaptor": "@openfn/language-dhis2",
-    "version": "4.2.10",
+    "adaptor": "@openfn/language-dhis2@4.2.10",
     "query_type": "list"
 }
 ```
 
-**Get function signatures:**
+**Get function signatures (short form):**
 ```json
 {
-    "adaptor": "@openfn/language-dhis2",
-    "version": "4.2.10",
+    "adaptor": "dhis2@4.2.10",
     "query_type": "signatures"
 }
 ```
@@ -95,8 +77,7 @@ Both will query the database for the most recent version based on the `created_a
 **Get specific function in JSON format:**
 ```json
 {
-    "adaptor": "@openfn/language-dhis2",
-    "version": "4.2.10",
+    "adaptor": "@openfn/language-dhis2@4.2.10",
     "query_type": "function",
     "function_name": "create"
 }
@@ -105,8 +86,7 @@ Both will query the database for the most recent version based on the `created_a
 **Get specific function in natural language format:**
 ```json
 {
-    "adaptor": "@openfn/language-dhis2",
-    "version": "4.2.10",
+    "adaptor": "@openfn/language-dhis2@4.2.10",
     "query_type": "function",
     "function_name": "create",
     "format": "natural_language"
@@ -116,8 +96,7 @@ Both will query the database for the most recent version based on the `created_a
 **Get all functions in natural language format:**
 ```json
 {
-    "adaptor": "@openfn/language-dhis2",
-    "version": "4.2.10",
+    "adaptor": "@openfn/language-dhis2@4.2.10",
     "query_type": "all",
     "format": "natural_language"
 }

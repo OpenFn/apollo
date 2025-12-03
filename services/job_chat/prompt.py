@@ -290,25 +290,32 @@ def generate_system_message(context_dict, search_results):
                     adaptor_parts = context.adaptor.split("@")
                     if len(adaptor_parts) >= 2:
                         adaptor_name = "@" + adaptor_parts[1]
-                        version = adaptor_parts[2] if len(adaptor_parts) == 3 else "latest"
-                    else:
-                        adaptor_name = context.adaptor
-                        version = "latest"
+                        version = adaptor_parts[2] if len(adaptor_parts) == 3 else None
 
-                    # Fetch function signatures
-                    signatures = fetch_signatures(adaptor_name, version, conn)
+                    if version:
+                        signatures = fetch_signatures(adaptor_name, version, conn)
 
-                    if signatures:
-                        adaptor_string += "These are the available functions in the adaptor:\n\n"
-                        for func_name, signature in signatures.items():
-                            adaptor_string += f"{signature}\n"
+                        if signatures:
+                            adaptor_string += "These are the available functions in the adaptor:\n\n"
+                            for func_name, signature in signatures.items():
+                                adaptor_string += f"{signature}\n"
+                        else:
+                            msg = f"No adaptor signatures returned from search_adaptor_docs for {adaptor_name}@{version}"
+                            logger.warning(msg)
+                            sentry_sdk.capture_message(msg, level="warning")
+                            sentry_sdk.set_context("adaptor_context", {
+                                "adaptor_name": adaptor_name,
+                                "version": version,
+                                "parsed_from": context.adaptor
+                            })
+                            adaptor_string += "The user is using an OpenFn Adaptor to write the job."
                     else:
-                        msg = f"No adaptor signatures returned from search_adaptor_docs for {adaptor_name}@{version}"
+                        msg = f"No version provided for adaptor {adaptor_name}"
                         logger.warning(msg)
                         sentry_sdk.capture_message(msg, level="warning")
                         sentry_sdk.set_context("adaptor_context", {
                             "adaptor_name": adaptor_name,
-                            "version": version,
+                            "version": None,
                             "parsed_from": context.adaptor
                         })
                         adaptor_string += "The user is using an OpenFn Adaptor to write the job."

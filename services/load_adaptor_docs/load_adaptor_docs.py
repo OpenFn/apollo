@@ -4,7 +4,7 @@ from typing import Dict, List, Any
 import psycopg2
 from psycopg2.extras import execute_values
 import sentry_sdk
-from util import create_logger, ApolloError, apollo
+from util import create_logger, ApolloError, apollo, parse_adaptor_string
 
 logger = create_logger("load_adaptor_docs")
 
@@ -288,9 +288,8 @@ def main(data: dict) -> dict:
 
     Expected payload:
     {
-        "adaptor": "kobotoolbox" or "@openfn/language-kobotoolbox",
-        "version": "4.2.7",
-        "skip_if_exists": false,  # Optional, defaults to false
+        "adaptor": "@openfn/language-http@3.1.11",  # Can also be "http@3.1.11"
+        "skip_if_exists": true,  # Optional, defaults to true
         "POSTGRES_URL": "postgresql://..."  # Optional, will use env if not provided
     }
 
@@ -306,22 +305,15 @@ def main(data: dict) -> dict:
     # Validate required fields
     if "adaptor" not in data:
         raise ApolloError(400, "Missing required field: 'adaptor'", type="BAD_REQUEST")
-    if "version" not in data:
-        raise ApolloError(400, "Missing required field: 'version'", type="BAD_REQUEST")
 
-    adaptor = data["adaptor"]
-    version = data["version"]
+    adaptor_input = data["adaptor"]
     skip_if_exists = data.get("skip_if_exists", True)
 
-    sentry_sdk.set_tag("adaptor", adaptor)
+    # Parse the adaptor string to extract name and version
+    adaptor_full, version, adaptor_version_string = parse_adaptor_string(adaptor_input)
+
+    sentry_sdk.set_tag("adaptor", adaptor_full)
     sentry_sdk.set_tag("version", version)
-
-    if not adaptor.startswith("@openfn/"):
-        adaptor_full = f"@openfn/language-{adaptor}"
-    else:
-        adaptor_full = adaptor
-
-    adaptor_version_string = f"{adaptor_full}@{version}"
 
     # Check if docs already exist (if skip_if_exists is enabled)
     if skip_if_exists:
