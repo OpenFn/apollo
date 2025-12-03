@@ -14,7 +14,7 @@ from anthropic import (
     InternalServerError,
 )
 import sentry_sdk
-from util import ApolloError, create_logger
+from util import ApolloError, create_logger, apollo
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
 from streaming_util import StreamManager
@@ -34,6 +34,7 @@ class Payload:
     meta: Optional[str] = None
     suggest_code: Optional[bool] = None
     stream: Optional[bool] = False
+    download_adaptor_docs: Optional[bool] = True
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
@@ -44,12 +45,13 @@ class Payload:
             raise ValueError("'content' is required")
 
         return cls(
-            content=data["content"], 
-            context=data.get("context"), 
-            api_key=data.get("api_key"), 
+            content=data["content"],
+            context=data.get("context"),
+            api_key=data.get("api_key"),
             meta=data.get("meta"),
             suggest_code=data.get("suggest_code"),
-            stream=data.get("stream", False)
+            stream=data.get("stream", False),
+            download_adaptor_docs=data.get("download_adaptor_docs", True)
         )
 
 
@@ -428,6 +430,38 @@ def main(data_dict: dict) -> dict:
             })
 
         data = Payload.from_dict(data_dict)
+
+        # Download adaptor docs if requested and context contains adaptor info
+        if data.download_adaptor_docs and data.context and data.context.get("adaptor"):
+            try:
+                adaptor_full = data.context.get("adaptor")
+                # Parse adaptor name and version from format like "@openfn/language-http@3.1.11"
+                adaptor_parts = adaptor_full.split("@")
+                if len(adaptor_parts) >= 2:
+                    adaptor_name = "@" + adaptor_parts[1]
+                    version = adaptor_parts[2] if len(adaptor_parts) == 3 else None
+
+                    if version:
+                        logger.info(f"Checking/loading adaptor docs for {adaptor_name}@{version}")
+                        with sentry_sdk.start_span(description="load_adaptor_docs"):
+                            load_result = apollo("load_adaptor_docs", {
+                                "adaptor": adaptor_name,
+                                "version": version,
+                                "skip_if_exists": True
+                            })
+
+                            if load_result.get("skipped"):
+                                logger.info(f"Adaptor docs already exist for {adaptor_name}@{version}")
+                            elif load_result.get("success"):
+                                logger.info(f"Successfully loaded {load_result.get('functions_uploaded', 0)} functions for {adaptor_name}@{version}")
+                            else:
+                                logger.warning(f"Failed to load adaptor docs: {load_result}")
+                    else:
+                        logger.info(f"No version found in adaptor string: {adaptor_full}")
+            except Exception as e:
+                # Don't fail the whole request if adaptor docs loading fails
+                logger.warning(f"Failed to load adaptor docs: {str(e)}")
+                sentry_sdk.capture_exception(e)
 
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
