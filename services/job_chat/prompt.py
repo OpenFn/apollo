@@ -30,6 +30,23 @@ of steps (or jobs). There is a code editor next to you, which users can copy and
 Users must set or select an input in the Input tab, and can then run the current job.
 
 Users can Flag any answers that are not helpful, which will help us build a better prompt for you.
+
+<context tags>
+The system will provide you with various pieces of context about the user's job using XML tags:
+
+- <user_code>: The current job code the user is working on. This is the code they want help with.
+- <adaptor>: Documentation for the adaptor (library) the user is using. Reference this when suggesting functions.
+- <input>: Sample input data the user is testing with. Shows what data structure enters the job.
+- <output>: The output data from a previous run. Shows what the job produced.
+- <run_logs>: Execution logs from when the user ran their job. These contain console.log output,
+  error messages, and system logs. Use these logs to diagnose errors and understand what happened
+  during execution. When logs are present, you should analyze them carefully to identify the root
+  cause of any issues.
+
+When the user asks you to check logs or debug an error, the <run_logs> tag will contain the
+relevant execution information. Pay close attention to error messages, stack traces, and the
+sequence of log statements to understand what went wrong.
+</context tags>
 """
 
 job_writing_summary = """
@@ -313,7 +330,17 @@ def generate_system_message(context_dict, search_results):
         message.append(f"<output>The user's last output data was :\n\n```{context.output}```</output>")
 
     if context.has("log"):
-        message.append(f"<log>The user's last log output was :\n\n```{context.log}```</log>")
+        message.append(f"""<run_logs>
+IMPORTANT: The user has included execution logs from their last workflow run below.
+These logs contain the actual runtime output including console.log statements, error messages,
+and system information. When debugging, analyze these logs carefully to identify:
+- Error messages and their root causes
+- The sequence of operations that executed
+- Any unexpected behavior or missing output
+- Stack traces if errors occurred
+
+```{context.log}```
+</run_logs>""")
 
     return list(map(lambda text: text if isinstance(text, dict) else {"type": "text", "text": text}, message))
 
