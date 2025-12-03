@@ -1,6 +1,8 @@
-from util import create_logger, apollo
+import sentry_sdk
+from util import create_logger
 from .retrieve_docs import retrieve_knowledge
-from describe_adaptor.describe_adaptor import describe_package
+from .db_utils import get_db_connection
+from search_adaptor_docs.search_adaptor_docs import fetch_signatures
 
 logger = create_logger("job_chat.prompt")
 
@@ -159,23 +161,56 @@ def generate_system_message(context_dict, search_results):
 
     if context.has("adaptor"):
         adaptor_string = (
-            f"<adaptor>The user is using the OpenFn {context.adaptor} adaptor. Use functions provided by its API."
+            f"<adaptor>The user is using the OpenFn {context.adaptor} adaptor. Use functions provided by its API.\n\n"
         )
 
         try:
-            adaptor_docs = describe_package(context.adaptor)
-            for doc in adaptor_docs:
-                adaptor_string += f"Typescript definitions for doc {doc}"
-                adaptor_string += adaptor_docs[doc]["description"]
+            conn = get_db_connection()
+            if conn:
+                try:
+                    adaptor_parts = context.adaptor.split("@")
+                    if len(adaptor_parts) >= 2:
+                        adaptor_name = "@" + adaptor_parts[1]
+                        version = adaptor_parts[2] if len(adaptor_parts) == 3 else None
+
+                    if version:
+                        signatures = fetch_signatures(adaptor_name, version, conn)
+
+                        if signatures:
+                            adaptor_string += "These are the available functions in the adaptor:\n\n"
+                            for func_name, signature in signatures.items():
+                                adaptor_string += f"{signature}\n"
+                        else:
+                            msg = f"No adaptor signatures returned from search_adaptor_docs for {adaptor_name}@{version}"
+                            logger.warning(msg)
+                            sentry_sdk.capture_message(msg, level="warning")
+                            sentry_sdk.set_context("adaptor_context", {
+                                "adaptor_name": adaptor_name,
+                                "version": version,
+                                "parsed_from": context.adaptor
+                            })
+                    else:
+                        msg = f"No version provided for adaptor {adaptor_name}"
+                        logger.warning(msg)
+                        sentry_sdk.capture_message(msg, level="warning")
+                        sentry_sdk.set_context("adaptor_context", {
+                            "adaptor_name": adaptor_name,
+                            "version": None,
+                            "parsed_from": context.adaptor
+                        })
+                finally:
+                    conn.close()
+            else:
+                logger.warning("POSTGRES_URL not available, cannot fetch adaptor docs")
+                adaptor_string += "The user is using an OpenFn Adaptor to write the job."
         except Exception as e:
             logger.warning(f"Could not fetch adaptor docs for {context.adaptor}: {e}")
-            adaptor_string += (
-                f"The user is using an OpenFn Adaptor to write the job."
-            )
+            adaptor_string += "The user is using an OpenFn Adaptor to write the job."
+
         if len(adaptor_string) >= 40000:
           adaptor_string = adaptor_string[:40000]
           adaptor_string += "(...)"
-          
+
         adaptor_string += "</adaptor>"
 
         message.append(adaptor_string)

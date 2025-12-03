@@ -31,13 +31,10 @@ def test_anthropic_key(api_key):
 
 def test_postgres_connection():
     try:
-        conn = psycopg2.connect(
-            host=os.getenv('POSTGRES_HOST'),
-            port=os.getenv('POSTGRES_PORT'),
-            database=os.getenv('POSTGRES_DB'),
-            user=os.getenv('POSTGRES_USER'),
-            password=os.getenv('POSTGRES_PASSWORD')
-        )
+        POSTGRES_URL = os.getenv('POSTGRES_URL')
+        if not POSTGRES_URL:
+            return False
+        conn = psycopg2.connect(POSTGRES_URL)
         conn.close()
         return True
     except Exception:

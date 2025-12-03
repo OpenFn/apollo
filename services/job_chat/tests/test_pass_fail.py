@@ -107,7 +107,7 @@ post('https://api.example.com/save', state => ({
     
     context = {
         "expression": original_code,
-        "adaptor": "@openfn/language-salesforce@8.0.0"
+        "adaptor": "@openfn/language-http@6.0.0"
     }
     
     # Service correctly uses 'del()' instead of 'delete()' (delete is reserved word in JS)
