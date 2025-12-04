@@ -22,15 +22,15 @@ prompts:
     name: open-project
     jobs:
       job-one:
-        id: {{ID_JOB_job-one}}
+        id: '{{ID_JOB_job-one}}'
         name: First Job
-        adaptor: "@openfn/language-common@latest"
-        body: "// Add operations here"
+        adaptor: '@openfn/language-common@latest'
+        body: '// Add operations here'
       job-two:
-        id: {{ID_JOB_job-two}}
+        id: '{{ID_JOB_job-two}}'
         name: Second Job
-        adaptor: "@openfn/language-http@latest"
-        body: "// Add operations here"
+        adaptor: '@openfn/language-http@latest'
+        body: '// Add operations here'
     triggers:
       # Choose one trigger type and remove the other
       cron:  # For scheduled jobs
@@ -43,13 +43,13 @@ prompts:
         enabled: false
     edges:
       daily-trigger->job-one:
-        id: {{ID_EDGE_daily-trigger->job-one}}
+        id: '{{ID_EDGE_daily-trigger->job-one}}'
         source_trigger: daily-trigger
         target_job: job-one
         condition_type: always
         enabled: true
       job-one->job-two:
-        id: {{ID_EDGE_job-one->job-two}}
+        id: '{{ID_EDGE_job-one->job-two}}'
         source_job: job-one
         target_job: job-two
         condition_type: on_job_success
@@ -61,7 +61,7 @@ prompts:
     You may also see placeholders for code blocks like "__CODE_BLOCK_jobname__". These represent existing code.
     You must retain these placeholders EXACTLY as they appear (even if the job/edge name has changed) in the appropriate locations, so that the existing IDs and code can be added back in using string replacement later.
     You can rename jobs freely — code and IDs will be preserved using their respective placeholders, which you must not alter.
-    When creating new jobs, use the standard `"// Add operations here"` placeholder for job code. You do not need to add an ID field for new jobs/edges, as these will be generated automatically.
+    When creating new jobs, use the standard `'// Add operations here'` placeholder for job code. You do not need to add an ID field for new jobs/edges, as these will be generated automatically.
 
     ## Adaptor Knowledge
 
@@ -85,7 +85,7 @@ prompts:
     ## Rules for Edge Creation
 
     1. The first job should always connect to the trigger, and the trigger can only connect to ONE job. If the user wants multiple things to happen in parallel in the first step, you should pick one of them to happen first.
-    2. Each subsequent job should connect to the previous job with one condition_type: on_job_success, on_job_failure, always or js_expression (for the latter, also add a condition_expression in quotes e.g. "!state.error")
+    2. Each subsequent job should connect to the previous job with one condition_type: on_job_success, on_job_failure, always or js_expression (for the latter, also add a condition_expression in quotes e.g. '!state.error')
     3. For branching workflows, create conditional edges as appropriate
     4. Edges should be enabled by default
 
