@@ -22,12 +22,12 @@ prompts:
     name: open-project
     jobs:
       job-one:
-        id: '{{ID_JOB_job-one}}'
+        id: '__ID_JOB_job-one__'
         name: First Job
         adaptor: '@openfn/language-common@latest'
         body: '// Add operations here'
       job-two:
-        id: '{{ID_JOB_job-two}}'
+        id: '__ID_JOB_job-two__'
         name: Second Job
         adaptor: '@openfn/language-http@latest'
         body: '// Add operations here'
@@ -43,13 +43,13 @@ prompts:
         enabled: false
     edges:
       daily-trigger->job-one:
-        id: '{{ID_EDGE_daily-trigger->job-one}}'
+        id: '__ID_EDGE_daily-trigger->job-one__'
         source_trigger: daily-trigger
         target_job: job-one
         condition_type: always
         enabled: true
       job-one->job-two:
-        id: '{{ID_EDGE_job-one->job-two}}'
+        id: '__ID_EDGE_job-one->job-two__'
         source_job: job-one
         target_job: job-two
         condition_type: on_job_success
@@ -57,7 +57,7 @@ prompts:
     ```
 
     ## Editing existing workflows:
-    When editing existing workflows, you may see placeholders for IDs like {{ID_JOB_jobname}} or {{ID_EDGE_jobname}} in the YAML. These represent unique IDs for jobs and edges.
+    When editing existing workflows, you may see placeholders for IDs like __ID_JOB_jobname__ or __ID_EDGE_jobname__ in the YAML. These represent unique IDs for jobs and edges.
     You may also see placeholders for code blocks like "__CODE_BLOCK_jobname__". These represent existing code.
     You must retain these placeholders EXACTLY as they appear (even if the job/edge name has changed) in the appropriate locations, so that the existing IDs and code can be added back in using string replacement later.
     You can rename jobs freely — code and IDs will be preserved using their respective placeholders, which you must not alter.
