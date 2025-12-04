@@ -343,7 +343,7 @@ class AnthropicClient:
                         job_data["body"] = placeholder
                 
                 if "id" in job_data:
-                    placeholder = f"{{ID_JOB_{job_key}}}"
+                    placeholder = f"__ID_JOB_{job_key}__"
                     preserved_values[placeholder] = job_data["id"]
                     job_data["id"] = placeholder
         
@@ -358,7 +358,7 @@ class AnthropicClient:
         if "edges" in yaml_data:
             for edge_key, edge_data in yaml_data["edges"].items():
                 if "id" in edge_data:
-                    placeholder = f"{{ID_EDGE_{edge_key}}}"
+                    placeholder = f"__ID_EDGE_{edge_key}__"
                     preserved_values[placeholder] = edge_data["id"]
                     edge_data["id"] = placeholder
         
@@ -389,7 +389,7 @@ class AnthropicClient:
                     
                     if isinstance(current_id, str) and current_id in preserved_values:
                         job_data["id"] = preserved_values[current_id]
-                    elif isinstance(current_id, str) and current_id.startswith("{") and current_id.endswith("}"):
+                    elif isinstance(current_id, str) and current_id.startswith("__ID_") and current_id.endswith("__"):
                         msg = f"Unknown placeholder {current_id}, generating new ID"
                         logger.warning(msg)
                         sentry_sdk.capture_message(msg, level="warning")
@@ -413,7 +413,7 @@ class AnthropicClient:
                     
                     if isinstance(current_id, str) and current_id in preserved_values:
                         edge_data["id"] = preserved_values[current_id]
-                    elif isinstance(current_id, str) and current_id.startswith("{") and current_id.endswith("}"):
+                    elif isinstance(current_id, str) and current_id.startswith("__ID_") and current_id.endswith("__"):
                         msg = f"Unknown placeholder {current_id}, generating new ID"
                         logger.warning(msg)
                         sentry_sdk.capture_message(msg, level="warning")
