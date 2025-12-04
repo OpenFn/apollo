@@ -373,53 +373,74 @@ class AnthropicClient:
         
         preserved_values = preserved_values or {}
         
-        if "jobs" in yaml_data:
-            for job_key, job_data in yaml_data["jobs"].items():
-                if "body" in job_data:
-                    current_body = job_data["body"]
-                    if isinstance(current_body, str) and current_body in preserved_values:
-                        job_data["body"] = preserved_values[current_body]
-                    else:
-                        job_data["body"] = "// Add operations here"
+        def restore_body(job_data):
+            """Restore or initialize job body."""
+            if "body" in job_data:
+                current_body = job_data["body"]
+                if isinstance(current_body, str) and current_body in preserved_values:
+                    job_data["body"] = preserved_values[current_body]
                 else:
                     job_data["body"] = "// Add operations here"
-                
-                if "id" in job_data:
-                    current_id = job_data["id"]
-                    
-                    if isinstance(current_id, str) and current_id in preserved_values:
-                        job_data["id"] = preserved_values[current_id]
-                    elif isinstance(current_id, str) and current_id.startswith("{") and current_id.endswith("}"):
-                        msg = f"Unknown placeholder {current_id}, generating new ID"
+            else:
+                job_data["body"] = "// Add operations here"
+        
+        def restore_id(component_data, component_type):
+            """Restore or generate ID for a component (job or edge)."""
+            if "id" not in component_data:
+                component_data["id"] = str(uuid.uuid4())
+                return
+            
+            current_id = component_data["id"]
+            
+            # Handle dictionary (model mistake in YAML structure)
+            if isinstance(current_id, dict):
+                if current_id:
+                    placeholder_key = next(iter(current_id.keys()))
+                    lookup_key = f"{{{placeholder_key}}}"
+                    if lookup_key in preserved_values:
+                        component_data["id"] = preserved_values[lookup_key]
+                    else:
+                        msg = f"Model generated dict for {component_type} ID with key '{placeholder_key}', generating new ID"
                         logger.warning(msg)
                         sentry_sdk.capture_message(msg, level="warning")
-                        job_data["id"] = str(uuid.uuid4())
+                        component_data["id"] = str(uuid.uuid4())
                 else:
-                    job_data["id"] = str(uuid.uuid4())
+                    logger.warning(f"Empty dict for {component_type} ID, generating new ID")
+                    component_data["id"] = str(uuid.uuid4())
+            
+            # Handle string (correct format)
+            elif isinstance(current_id, str):
+                if current_id in preserved_values:
+                    component_data["id"] = preserved_values[current_id]
+                elif current_id.startswith("{") and current_id.endswith("}"):
+                    msg = f"Unknown placeholder {current_id}, generating new ID"
+                    logger.warning(msg)
+                    sentry_sdk.capture_message(msg, level="warning")
+                    component_data["id"] = str(uuid.uuid4())
+                else:
+                    logger.warning(f"Unexpected ID format '{current_id}', generating new ID")
+                    component_data["id"] = str(uuid.uuid4())
+            
+            else:
+                logger.warning(f"Unexpected ID type {type(current_id)}, generating new ID")
+                component_data["id"] = str(uuid.uuid4())
+        
+        # Restore all components
+        if "jobs" in yaml_data:
+            for job_key, job_data in yaml_data["jobs"].items():
+                restore_body(job_data)
+                restore_id(job_data, "job")
         
         if "triggers" in yaml_data:
             for trigger_key, trigger_data in yaml_data["triggers"].items():
                 if "trigger_id" in preserved_values:
-                    # Directly restore the preserved trigger ID
                     trigger_data["id"] = preserved_values["trigger_id"]
                 elif "id" not in trigger_data:
-                    # Generate new ID if no preserved ID exists
                     trigger_data["id"] = str(uuid.uuid4())
-
+        
         if "edges" in yaml_data:
             for edge_key, edge_data in yaml_data["edges"].items():
-                if "id" in edge_data:
-                    current_id = edge_data["id"]
-                    
-                    if isinstance(current_id, str) and current_id in preserved_values:
-                        edge_data["id"] = preserved_values[current_id]
-                    elif isinstance(current_id, str) and current_id.startswith("{") and current_id.endswith("}"):
-                        msg = f"Unknown placeholder {current_id}, generating new ID"
-                        logger.warning(msg)
-                        sentry_sdk.capture_message(msg, level="warning")
-                        edge_data["id"] = str(uuid.uuid4())
-                else:
-                    edge_data["id"] = str(uuid.uuid4())
+                restore_id(edge_data, "edge")
 
     def process_stream_event(self, event, accumulated_response, text_complete, sent_length, stream_manager):
         """
