@@ -80,7 +80,6 @@ prompts:
     3. Jobs should be connected in a logical sequence
     4. Choose the most specific adaptor available for each operation
     5. When in doubt about an adaptor, use `@openfn/language-common@latest` for data transformation and `@openfn/language-http@latest` for platform integrations.
-    6. Job IDs should be derived from their names, replacing spaces with hyphens
 
     ## Rules for Edge Creation
 
