@@ -1,5 +1,12 @@
 # apollo
 
+## 0.16.3
+
+### Patch Changes
+
+- fc9bc49: workflow_chat: fix an issue where ids may not be perserved properly
+- fc9bc49: job_chat: improved performance when reading logs from a run
+
 ## 0.16.2
 
 ### Patch Changes
