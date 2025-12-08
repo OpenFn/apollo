@@ -35,6 +35,7 @@ class Payload:
     suggest_code: Optional[bool] = None
     stream: Optional[bool] = False
     download_adaptor_docs: Optional[bool] = True
+    refresh_rag: Optional[bool] = False
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
@@ -52,6 +53,7 @@ class Payload:
             suggest_code=data.get("suggest_code"),
             stream=data.get("stream", False),
             download_adaptor_docs=data.get("download_adaptor_docs", True)
+            refresh_rag=data.get("refresh_rag", False)
         )
 
 
@@ -80,7 +82,15 @@ class AnthropicClient:
         self.client = Anthropic(api_key=self.api_key)
 
     def generate(
-        self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[dict] = None, rag: Optional[str] = None, suggest_code: Optional[bool] = None, stream: Optional[bool] = False, download_adaptor_docs: Optional[bool] = True
+        self,
+        content: str,
+        history: Optional[List[Dict[str, str]]] = None,
+        context: Optional[dict] = None,
+        rag: Optional[str] = None,
+        suggest_code: Optional[bool] = None,
+        stream: Optional[bool] = False,
+        download_adaptor_docs: Optional[bool] = True,
+        refresh_rag: Optional[bool] = False
     ) -> ChatResponse:
         """
         Generate a response using the Claude API with optional streaming.
@@ -103,6 +113,7 @@ class AnthropicClient:
                         api_key=self.api_key,
                         stream_manager=stream_manager,
                         download_adaptor_docs=download_adaptor_docs
+                        refresh_rag=refresh_rag
                     )
                     prompt.append({"role": "assistant", "content": '{\n  "text_answer": "'})
 
@@ -114,6 +125,7 @@ class AnthropicClient:
                         rag=rag,
                         api_key=self.api_key,
                         download_adaptor_docs=download_adaptor_docs
+                        refresh_rag=refresh_rag
                         )
 
             with sentry_sdk.start_span(description="anthropic_api_call"):
@@ -442,7 +454,11 @@ def main(data_dict: dict) -> dict:
             rag=data_dict.get("meta", {}).get("rag"),
             suggest_code=data.suggest_code,
             stream=data.stream,
+<<<<<<< HEAD
             download_adaptor_docs=data.download_adaptor_docs
+=======
+            refresh_rag=data.refresh_rag
+>>>>>>> d17718e (add refresh rag flag)
         )
         
 
