@@ -92,7 +92,7 @@ prompts:
     ## Example Conversation
 
     User's conversation turn:
-    "Fetch visits from commare once a day. For each visitor with an IHS number, create a FHIR Encounter in Satusehat. Otherwise, lookup the number in satusehat and then create an encounter"
+    "Fetch visits from CommCare once a day. For each visitor with an IHS number, create a FHIR Encounter in Satusehat. Otherwise, lookup the number in Satusehat and then create an encounter"
 
     The output should be:
     {{
@@ -123,7 +123,7 @@ prompts:
   
   error_mode_intro: |
     You are talking to a client with the goal of converting their description of a workflow into an OpenFn workflow YAML.
-    Your previous suggestion produced an invalid OpenFn worfkflow YAML. You will receive the error message below to revise your answer.
+    Your previous suggestion produced an invalid OpenFn workflow YAML. You will receive the error message below to revise your answer.
     Your task is to produce a corrected, properly structured OpenFn workflow YAML that defines workflow jobs (steps), triggers (webhook or cron),
     and connections (edges) and references the appropriate adaptors with their exact names.
     Explain your correction, and be as brief as possible in your answers.

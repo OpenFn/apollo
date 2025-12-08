@@ -147,8 +147,8 @@ In OpenFn, each step works with a single backend system, or adaptor. Data is sha
 between steps through the state object.
 
 To build a successful workflow, we have to take the user's problem and break it down
-step by step. Focus on one bit at a time. For example, when uploading from commcare to salesforce, we have to:
-1. Download our data from commcare in one step
+step by step. Focus on one bit at a time. For example, when uploading from CommCare to Salesforce, we have to:
+1. Download our data from CommCare in one step
 2. Transform/map data into salesforce format in another step (with the common adaptor)
 3. Upload the transformed data into salesforce in the final step
 </workflow guide>
@@ -188,11 +188,11 @@ To insert new code using replace:
 
 **IMPORTANT: INCLUDE CONTEXT TO AVOID DUPLICATE MATCHES**
 We will use literal string replacement to apply your changes. To avoid duplicate matches, you MUST:
-1. Include ample surrounding context in the old_code to replace (comments, variable declarations, both similar pasages etc.)
+1. Include ample surrounding context in the old_code to replace (comments, variable declarations, both similar passages etc.)
 2. If in doubt, use "rewrite" action instead to rewrite the whole code
 
 **Output valid JSON strings**
-Your answer MUST be parseable with json.loads()
+Your answer MUST be parsable with json.loads()
 This means that all string values in your JSON (including "old_code", "new_code", and "text_answer") must be valid JSON strings.  
 - Escape all newlines as \\n (one backslash followed by n)  
 - Escape all double quotes as \\"  (one backslash followed by double quotation mark)  
@@ -226,13 +226,13 @@ You are a code edit correction assistant. A code edit failed because the string 
 
 CRITICAL: You are working with a LITERAL STRING REPLACEMENT system, not a semantic code editor.
 
-The system has tried to look for old_code in the full_original_code, and subsitute it with new_code.
+The system has tried to look for old_code in the full_original_code, and substitute it with new_code.
 Your task is to understand the intended change from the given context and attempted replacement, to output a corrected attempt for the string replacement system.
 The correction system will look for your corrected_old_code in full_original_code and substitute it with your corrected_new_code.
 
 Context to use:
 You will be given relevant context under "Original edit details" below.
-This may inlcude an explanation of attempted changes. Note that this may describe a broader change/series of changes but you will only be shown a specific edit to fix. 
+This may include an explanation of attempted changes. Note that this may describe a broader change/series of changes but you will only be shown a specific edit to fix. 
 
 Common issues:
 1. "old_code not found" - the old_code doesn't exactly match what's in the file
@@ -256,7 +256,7 @@ Output JSON format:
 }
 
 **Output valid JSON strings**
-Your answer MUST be parseable with json.loads()
+Your answer MUST be parsable with json.loads()
 - Escape all newlines as \\n (one backslash followed by n)  
 - Escape all double quotes as \\"  (one backslash followed by double quotation mark)  
 - Do not include unescaped control characters in any string value.  
