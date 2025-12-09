@@ -1,4 +1,5 @@
 import json
+import time
 import sentry_sdk
 from util import create_logger
 from .retrieve_docs import retrieve_knowledge
@@ -284,7 +285,11 @@ def generate_system_message(context_dict, search_results):
         )
 
         try:
+            start_time = time.time()
             conn = get_db_connection()
+            duration = time.time() - start_time
+            logger.info(f"Database connection established in {duration:.3f}s")
+
             if conn:
                 try:
                     adaptor_parts = context.adaptor.split("@")
@@ -293,7 +298,10 @@ def generate_system_message(context_dict, search_results):
                         version = adaptor_parts[2] if len(adaptor_parts) == 3 else None
 
                     if version:
+                        start_time = time.time()
                         signatures = fetch_signatures(adaptor_name, version, conn)
+                        duration = time.time() - start_time
+                        logger.info(f"Fetched {len(signatures)} function signatures in {duration:.3f}s")
 
                         if signatures:
                             adaptor_string += "These are the available functions in the adaptor:\n\n"

@@ -1,4 +1,5 @@
 import os
+import time
 from typing import Dict, List, Any
 import psycopg2
 import sentry_sdk
@@ -34,7 +35,9 @@ def fetch_signatures(adaptor_name: str, version: str, conn) -> dict:
     with conn.cursor() as cur:
         cur.execute(query, (adaptor_name, version))
         rows = cur.fetchall()
-        return {row[0]: row[1] for row in rows}
+        result = {row[0]: row[1] for row in rows}
+
+    return result
 
 
 def json_to_natural_language(func_data: dict, adaptor_name: str = None, version: str = None) -> str:

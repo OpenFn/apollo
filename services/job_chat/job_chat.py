@@ -1,5 +1,6 @@
 import os
 import json
+import time
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 from anthropic import (
@@ -18,6 +19,7 @@ from util import ApolloError, create_logger, apollo
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
 from streaming_util import StreamManager
+from load_adaptor_docs.load_adaptor_docs import load_adaptor_docs
 
 logger = create_logger("job_chat")
 
@@ -437,21 +439,24 @@ def main(data_dict: dict) -> dict:
             if adaptor_full:
                 try:
                     logger.info(f"Checking/loading adaptor docs for {adaptor_full}")
+                    start_time = time.time()
                     with sentry_sdk.start_span(description="load_adaptor_docs"):
-                        load_result = apollo("load_adaptor_docs", {
-                            "adaptor": adaptor_full,
-                            "skip_if_exists": True
-                        })
+                        load_result = load_adaptor_docs(
+                            adaptor=adaptor_full,
+                            skip_if_exists=True
+                        )
+                    duration = time.time() - start_time
 
-                        if load_result.get("skipped"):
-                            logger.info(f"Adaptor docs already exist for {adaptor_full}")
-                        elif load_result.get("success"):
-                            logger.info(f"Successfully loaded {load_result.get('functions_uploaded', 0)} functions for {adaptor_full}")
-                        else:
-                            logger.warning(f"Failed to load adaptor docs: {load_result}")
+                    if load_result.get("skipped"):
+                        logger.info(f"Adaptor docs for {adaptor_full} (checked in {duration:.3f}s)")
+                    elif load_result.get("success"):
+                        logger.info(f"Successfully loaded {load_result.get('functions_uploaded', 0)} functions for {adaptor_full} in {duration:.3f}s")
+                    else:
+                        logger.warning(f"Failed to load adaptor docs for {load_result} after {duration:.3f}s)")
                 except Exception as e:
                     # Don't fail the whole request if adaptor docs loading fails
-                    logger.warning(f"Failed to load adaptor docs: {str(e)}")
+                    duration = time.time() - start_time
+                    logger.warning(f"Failed to load adaptor docs after {duration:.3f}s: {str(e)}")
                     sentry_sdk.capture_exception(e)
 
         config = ChatConfig(api_key=data.api_key) if data.api_key else None

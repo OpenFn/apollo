@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from typing import Dict, List, Any
 import psycopg2
 from psycopg2.extras import execute_values
@@ -150,12 +151,14 @@ def check_existing_docs(adaptor_name: str, version: str, conn) -> dict:
 
         if rows:
             function_list = [row[0] for row in rows]
+            logger.info(f"✓ Docs already exist for {adaptor_name}@{version} ({len(rows)} functions)")
             return {
                 "exists": True,
                 "function_count": len(rows),
                 "function_list": function_list
             }
 
+        logger.info(f"No existing docs found for {adaptor_name}@{version}")
         return {"exists": False}
 
 
@@ -282,48 +285,32 @@ def process_adaptor_docs(adaptor_name: str, version: str, raw_docs: List[Dict[st
         conn.close()
 
 
-def main(data: dict) -> dict:
+def load_adaptor_docs(adaptor: str, skip_if_exists: bool = True, postgres_url: str = None) -> dict:
     """
-    Main entry point for uploading adaptor function docs.
+    Load adaptor documentation into the database.
 
-    Expected payload:
-    {
-        "adaptor": "@openfn/language-http@3.1.11",  # Can also be "http@3.1.11"
-        "skip_if_exists": true,  # Optional, defaults to true
-        "POSTGRES_URL": "postgresql://..."  # Optional, will use env if not provided
-    }
+    Args:
+        adaptor: Adaptor string like "@openfn/language-http@3.1.11" or "http@3.1.11"
+        skip_if_exists: If True, skip if docs already exist in database
+        postgres_url: Database URL (optional, will use environment variable if not provided)
 
-    This will call adaptor_apis service to fetch the docs, then upload them.
-    If skip_if_exists is true and docs already exist, it returns existing data without reprocessing.
+    Returns:
+        Dictionary with success status and upload details
     """
-    logger.info("Starting load_adaptor_docs...")
-
-    sentry_sdk.set_context("request_data", {
-        k: v for k, v in data.items() if k not in ["POSTGRES_URL", "api_key"]
-    })
-
-    # Validate required fields
-    if "adaptor" not in data:
-        raise ApolloError(400, "Missing required field: 'adaptor'", type="BAD_REQUEST")
-
-    adaptor_input = data["adaptor"]
-    skip_if_exists = data.get("skip_if_exists", True)
+    logger.info(f"Loading adaptor docs for {adaptor}")
 
     # Parse the adaptor string to extract name and version
-    adaptor_full, version, adaptor_version_string = parse_adaptor_string(adaptor_input)
+    adaptor_full, version, adaptor_version_string = parse_adaptor_string(adaptor)
 
     sentry_sdk.set_tag("adaptor", adaptor_full)
     sentry_sdk.set_tag("version", version)
 
     # Check if docs already exist (if skip_if_exists is enabled)
     if skip_if_exists:
-        if data.get("POSTGRES_URL"):
-            db_url = data["POSTGRES_URL"]
-        else:
-            db_url = os.environ.get("POSTGRES_URL")
+        db_url = postgres_url or os.environ.get("POSTGRES_URL")
 
         if not db_url:
-            msg = "Missing POSTGRES_URL in payload or environment"
+            msg = "Missing POSTGRES_URL in parameters or environment"
             logger.error(msg)
             raise ApolloError(500, msg, type="BAD_REQUEST")
 
@@ -339,7 +326,6 @@ def main(data: dict) -> dict:
             existing_check = check_existing_docs(adaptor_full, version, conn)
 
             if existing_check["exists"]:
-                logger.info(f"✓ Docs already exist for {adaptor_full}@{version} ({existing_check['function_count']} functions), skipping upload")
                 return {
                     "success": True,
                     "adaptor": adaptor_full,
@@ -348,8 +334,6 @@ def main(data: dict) -> dict:
                     "functions_uploaded": existing_check["function_count"],
                     "function_list": existing_check["function_list"]
                 }
-            else:
-                logger.info(f"No existing docs found for {adaptor_full}@{version}, proceeding with upload")
 
         finally:
             conn.close()
@@ -382,7 +366,7 @@ def main(data: dict) -> dict:
         logger.info(f"Processing and uploading docs for {adaptor_full}@{version}")
 
         with sentry_sdk.start_span(description="process_and_upload_docs"):
-            result = process_adaptor_docs(adaptor_full, version, raw_docs, data)
+            result = process_adaptor_docs(adaptor_full, version, raw_docs, {"POSTGRES_URL": postgres_url})
 
         logger.info(f"✓ Successfully uploaded {result['functions_uploaded']} functions for {adaptor_full}@{version}")
         return result
@@ -392,3 +376,34 @@ def main(data: dict) -> dict:
     except Exception as e:
         logger.error(f"Error calling adaptor_apis: {str(e)}")
         raise ApolloError(500, f"Failed to fetch docs: {str(e)}", type="ADAPTOR_API_ERROR")
+
+
+def main(data: dict) -> dict:
+    """
+    Main entry point for uploading adaptor function docs when called as a service.
+
+    Expected payload:
+    {
+        "adaptor": "@openfn/language-http@3.1.11",  # Can also be "http@3.1.11"
+        "skip_if_exists": true,  # Optional, defaults to true
+        "POSTGRES_URL": "postgresql://..."  # Optional, will use env if not provided
+    }
+
+    This will call adaptor_apis service to fetch the docs, then upload them.
+    If skip_if_exists is true and docs already exist, it returns existing data without reprocessing.
+    """
+    logger.info("Starting load_adaptor_docs service...")
+
+    sentry_sdk.set_context("request_data", {
+        k: v for k, v in data.items() if k not in ["POSTGRES_URL", "api_key"]
+    })
+
+    # Validate required fields
+    if "adaptor" not in data:
+        raise ApolloError(400, "Missing required field: 'adaptor'", type="BAD_REQUEST")
+
+    return load_adaptor_docs(
+        adaptor=data["adaptor"],
+        skip_if_exists=data.get("skip_if_exists", True),
+        postgres_url=data.get("POSTGRES_URL")
+    )
