@@ -175,10 +175,7 @@ def generate_system_message(context_dict, search_results, download_adaptor_docs=
                     try:
                         adaptor = AdaptorSpecifier(context.adaptor)
 
-                        start_time = time.time()
                         signatures = fetch_signatures(adaptor, conn, auto_load=download_adaptor_docs)
-                        duration = time.time() - start_time
-                        logger.info(f"Fetched {len(signatures)} function signatures in {duration:.3f}s")
 
                         if signatures:
                             adaptor_string += "These are the available functions in the adaptor:\n\n"

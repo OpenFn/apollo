@@ -126,7 +126,6 @@ def create_table_if_not_exists(conn):
     with conn.cursor() as cur:
         cur.execute(create_table_sql)
         conn.commit()
-    logger.info("Table adaptor_function_docs ready")
 
 
 def check_existing_docs(adaptor: AdaptorSpecifier, conn) -> dict:
@@ -188,9 +187,6 @@ def upload_to_postgres(
 
     with conn.cursor() as cur:
         cur.execute(delete_sql, (adaptor.name, adaptor.version))
-        deleted_count = cur.rowcount
-        if deleted_count > 0:
-            logger.info(f"Deleted {deleted_count} existing functions for {adaptor.specifier}")
         conn.commit()
 
     # Prepare data for insertion
@@ -220,8 +216,6 @@ def upload_to_postgres(
         execute_values(cur, insert_sql, rows)
         conn.commit()
 
-    logger.info(f"Uploaded {len(rows)} functions for {adaptor.specifier}")
-
 
 def process_adaptor_docs(adaptor: AdaptorSpecifier, raw_docs: List[Dict[str, Any]]) -> dict:
     """
@@ -236,14 +230,11 @@ def process_adaptor_docs(adaptor: AdaptorSpecifier, raw_docs: List[Dict[str, Any
     """
     # Filter and simplify
     filtered_docs = filter_function_docs(raw_docs)
-    logger.info(f"Filtered to {len(filtered_docs)} functions")
 
     # Extract function list
     function_list = extract_function_list(filtered_docs)
-    logger.info(f"Functions: {', '.join(function_list)}")
 
     # Upload
-    logger.info("Connecting to PostgreSQL")
     conn = get_db_connection()
     if not conn:
         msg = "Missing POSTGRES_URL environment variable"
@@ -253,7 +244,6 @@ def process_adaptor_docs(adaptor: AdaptorSpecifier, raw_docs: List[Dict[str, Any
     try:
         create_table_if_not_exists(conn)
         upload_to_postgres(adaptor, filtered_docs, conn)
-        logger.info("✓ Upload complete")
 
         return {
             "success": True,
@@ -281,8 +271,6 @@ def load_adaptor_docs(adaptor: str, skip_if_exists: bool = True) -> dict:
     Returns:
         Dictionary with success status and upload details
     """
-    logger.info(f"Loading adaptor docs for {adaptor}")
-
     # Parse the adaptor string
     adaptor_spec = AdaptorSpecifier(adaptor)
 
@@ -314,8 +302,6 @@ def load_adaptor_docs(adaptor: str, skip_if_exists: bool = True) -> dict:
         finally:
             conn.close()
 
-    logger.info(f"Fetching docs from adaptor_apis for {adaptor_spec.specifier}")
-
     try:
         with sentry_sdk.start_span(description="fetch_adaptor_apis"):
             api_result = apollo("adaptor_apis", {"adaptors": [adaptor_spec.specifier]})
@@ -337,14 +323,10 @@ def load_adaptor_docs(adaptor: str, skip_if_exists: bool = True) -> dict:
             raise ApolloError(500, msg, type="ADAPTOR_API_ERROR")
 
         raw_docs = api_result["docs"][adaptor_spec.specifier]
-        logger.info(f"Received {len(raw_docs)} items from adaptor_apis")
-
-        logger.info(f"Processing and uploading docs for {adaptor_spec.specifier}")
 
         with sentry_sdk.start_span(description="process_and_upload_docs"):
             result = process_adaptor_docs(adaptor_spec, raw_docs)
 
-        logger.info(f"✓ Successfully uploaded {result['functions_uploaded']} functions for {adaptor_spec.specifier}")
         return result
 
     except ApolloError:
