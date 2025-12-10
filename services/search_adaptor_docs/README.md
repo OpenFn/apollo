@@ -22,6 +22,8 @@ bun py search_adaptor_docs tmp/payload.json -O
 
 The service queries the `adaptor_function_docs` PostgreSQL table to retrieve function documentation, signatures, or function lists for a specific adaptor and version.
 
+The fetch functions (`fetch_signatures`, `fetch_function_list`, etc.) support an `auto_load` parameter that automatically loads missing adaptor docs before querying.
+
 ## Payload Reference
 
 The input payload is a JSON object with the following structure:
@@ -31,8 +33,7 @@ The input payload is a JSON object with the following structure:
     "adaptor": "@openfn/language-dhis2@4.2.10", // Adaptor name with version (required) - can also use short form "dhis2@4.2.10"
     "query_type": "list" | "signatures" | "function" | "all", // Query type (required)
     "function_name": "create", // Specific function name (required if query_type is "function")
-    "format": "json" | "natural_language", // Output format (optional, defaults to "json")
-    "POSTGRES_URL": "postgresql://..." // Database connection string (optional, falls back to environment variable)
+    "format": "json" | "natural_language" // Output format (optional, defaults to "json")
 }
 ```
 

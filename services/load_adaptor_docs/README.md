@@ -49,6 +49,8 @@ CREATE INDEX IF NOT EXISTS idx_signature
 
 ## Usage
 
+The service requires a `POSTGRES_URL` environment variable to connect to PostgreSQL.
+
 Provide the adaptor with version in the format `@openfn/language-<name>@<version>` or `<name>@<version>`. The service will automatically call the `adaptor_apis` service to fetch the docs.
 
 **Basic Payload:**
@@ -160,7 +162,6 @@ curl -X POST http://localhost:3000/services/load_adaptor_docs \
 
 **Optional:**
 - **`skip_if_exists`** (boolean): If `true` (default), checks database first and returns existing data if found. If `false`, always fetches and replaces docs.
-- **`POSTGRES_URL`** (string): PostgreSQL connection string (falls back to environment variable)
 
 ### Behavior modes:
 
@@ -177,78 +178,10 @@ curl -X POST http://localhost:3000/services/load_adaptor_docs \
 
 ## Integration with Other Services
 
-### search_adaptor_docs
+This service populates the `adaptor_function_docs` table that is used by:
 
-The `search_adaptor_docs` service queries this database to retrieve function documentation by:
-- Adaptor name and version
-- Function name (keyword search)
-- Signature content (full-text search)
-
-### job_chat
-
-The `job_chat` service uses function signatures to:
-1. Show available functions in the system prompt
-2. Fetch specific function docs and examples when referenced
-3. Provide context-aware code suggestions
-
-## Example Queries
-
-### Get all functions for an adaptor version
-
-```python
-import psycopg2
-import os
-
-conn = psycopg2.connect(os.getenv("POSTGRES_URL"))
-cur = conn.cursor()
-
-cur.execute("""
-    SELECT function_name, signature
-    FROM adaptor_function_docs
-    WHERE adaptor_name = %s AND version = %s
-    ORDER BY function_name
-""", ("@openfn/language-dhis2", "4.2.10"))
-
-for row in cur.fetchall():
-    print(f"{row[0]}: {row[1]}")
-```
-
-### Get specific function with examples
-
-```python
-cur.execute("""
-    SELECT function_data
-    FROM adaptor_function_docs
-    WHERE adaptor_name = %s
-      AND version = %s
-      AND function_name = %s
-""", ("@openfn/language-dhis2", "4.2.10", "create"))
-
-doc = cur.fetchone()[0]
-print(doc['description'])
-print('\n'.join(doc['examples']))
-```
-
-### Search functions by signature content
-
-```python
-cur.execute("""
-    SELECT function_name, signature
-    FROM adaptor_function_docs
-    WHERE adaptor_name = %s
-      AND version = %s
-      AND to_tsvector('english', signature) @@ to_tsquery('english', %s)
-""", ("@openfn/language-dhis2", "4.2.10", "string & Operation"))
-```
-
-## File Structure
-
-```
-services/load_adaptor_docs/
-├── load_adaptor_docs.py    # Main service
-├── README.md                 # This file
-└── schema.sql                # Database schema (for reference)
-```
+- **`search_adaptor_docs`**: Queries the database to retrieve function documentation by adaptor/version, function name, or signature content
+- **`job_chat`**: Uses function signatures and documentation to provide context-aware code suggestions
 
 ## Notes
 

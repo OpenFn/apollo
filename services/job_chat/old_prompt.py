@@ -1,8 +1,7 @@
 import time
 import sentry_sdk
-from util import create_logger
+from util import create_logger, AdaptorSpecifier, get_db_connection
 from .retrieve_docs import retrieve_knowledge
-from .db_utils import get_db_connection
 from search_adaptor_docs.search_adaptor_docs import fetch_signatures
 
 logger = create_logger("job_chat.prompt")
@@ -148,7 +147,7 @@ class Context:
         return hasattr(self, key) and getattr(self, key) is not None
 
 
-def generate_system_message(context_dict, search_results):
+def generate_system_message(context_dict, search_results, download_adaptor_docs=True):
     context = context_dict if isinstance(context_dict, Context) else Context(**(context_dict or {}))
 
     message = [system_role]
@@ -173,14 +172,11 @@ def generate_system_message(context_dict, search_results):
 
             if conn:
                 try:
-                    adaptor_parts = context.adaptor.split("@")
-                    if len(adaptor_parts) >= 2:
-                        adaptor_name = "@" + adaptor_parts[1]
-                        version = adaptor_parts[2] if len(adaptor_parts) == 3 else None
+                    try:
+                        adaptor = AdaptorSpecifier(context.adaptor)
 
-                    if version:
                         start_time = time.time()
-                        signatures = fetch_signatures(adaptor_name, version, conn)
+                        signatures = fetch_signatures(adaptor, conn, auto_load=download_adaptor_docs)
                         duration = time.time() - start_time
                         logger.info(f"Fetched {len(signatures)} function signatures in {duration:.3f}s")
 
@@ -189,22 +185,21 @@ def generate_system_message(context_dict, search_results):
                             for func_name, signature in signatures.items():
                                 adaptor_string += f"{signature}\n"
                         else:
-                            msg = f"No adaptor signatures returned from search_adaptor_docs for {adaptor_name}@{version}"
+                            msg = f"No adaptor signatures returned from search_adaptor_docs for {adaptor.specifier}"
                             logger.warning(msg)
                             sentry_sdk.capture_message(msg, level="warning")
                             sentry_sdk.set_context("adaptor_context", {
-                                "adaptor_name": adaptor_name,
-                                "version": version,
+                                "adaptor_name": adaptor.name,
+                                "version": adaptor.version,
                                 "parsed_from": context.adaptor
                             })
-                    else:
-                        msg = f"No version provided for adaptor {adaptor_name}"
+                    except Exception as parse_error:
+                        msg = f"Failed to parse adaptor string '{context.adaptor}': {parse_error}"
                         logger.warning(msg)
                         sentry_sdk.capture_message(msg, level="warning")
                         sentry_sdk.set_context("adaptor_context", {
-                            "adaptor_name": adaptor_name,
-                            "version": None,
-                            "parsed_from": context.adaptor
+                            "parsed_from": context.adaptor,
+                            "error": str(parse_error)
                         })
                 finally:
                     conn.close()
@@ -247,7 +242,7 @@ def format_search_results(search_results):
         for result in search_results
     ])
 
-def build_old_prompt(content, history, context, rag=None, api_key=None):
+def build_old_prompt(content, history, context, rag=None, api_key=None, download_adaptor_docs=True):
     retrieved_knowledge = {
         "search_results": [],
         "search_results_sections": [],
@@ -259,15 +254,15 @@ def build_old_prompt(content, history, context, rag=None, api_key=None):
             "generate_queries": {}
         }
     }
-    
+
     if rag:
         retrieved_knowledge = rag
     else:
       try:
           retrieved_knowledge = retrieve_knowledge(
-              content=content, 
-              history=history, 
-              code=context.get("expression", ""), 
+              content=content,
+              history=history,
+              code=context.get("expression", ""),
               adaptor=context.get("adaptor", ""),
               api_key=api_key
           )
@@ -275,8 +270,9 @@ def build_old_prompt(content, history, context, rag=None, api_key=None):
           logger.error(f"Error retrieving knowledge: {str(e)}")
 
     system_message = generate_system_message(
-        context_dict=context, 
-        search_results=retrieved_knowledge.get("search_results") if retrieved_knowledge is not None else None)
+        context_dict=context,
+        search_results=retrieved_knowledge.get("search_results") if retrieved_knowledge is not None else None,
+        download_adaptor_docs=download_adaptor_docs)
 
     prompt = []
     prompt.extend(history)

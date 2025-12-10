@@ -1,15 +1,46 @@
-import os
 import time
 from typing import Dict, List, Any
-import psycopg2
 import sentry_sdk
-from util import create_logger, ApolloError, parse_adaptor_string
+from util import create_logger, ApolloError, AdaptorSpecifier, get_db_connection
+from load_adaptor_docs.load_adaptor_docs import load_adaptor_docs
 
 logger = create_logger("search_adaptor_docs")
 
 
-def fetch_function_list(adaptor_name: str, version: str, conn) -> list:
+def ensure_docs_loaded(adaptor: AdaptorSpecifier, skip_if_exists: bool = True) -> None:
+    """
+    Ensure adaptor documentation is loaded into the database.
+
+    Args:
+        adaptor: The adaptor specifier
+        skip_if_exists: If True, skip loading if docs already exist
+    """
+    try:
+        logger.info(f"Checking/loading adaptor docs for {adaptor.specifier}")
+        start_time = time.time()
+        load_result = load_adaptor_docs(
+            adaptor=adaptor.specifier,
+            skip_if_exists=skip_if_exists
+        )
+        duration = time.time() - start_time
+
+        if load_result.get("skipped"):
+            logger.info(f"Adaptor docs for {adaptor.specifier} already exist (checked in {duration:.3f}s)")
+        elif load_result.get("success"):
+            logger.info(f"Successfully loaded {load_result.get('functions_uploaded', 0)} functions for {adaptor.specifier} in {duration:.3f}s")
+        else:
+            logger.warning(f"Failed to load adaptor docs for {adaptor.specifier} after {duration:.3f}s")
+    except Exception as e:
+        duration = time.time() - start_time if 'start_time' in locals() else 0
+        logger.warning(f"Failed to load adaptor docs after {duration:.3f}s: {str(e)}")
+        sentry_sdk.capture_exception(e)
+
+
+def fetch_function_list(adaptor: AdaptorSpecifier, conn, auto_load: bool = False) -> list:
     """Fetch just the list of function names."""
+    if auto_load:
+        ensure_docs_loaded(adaptor)
+
     query = """
     SELECT function_name
     FROM adaptor_function_docs
@@ -18,13 +49,16 @@ def fetch_function_list(adaptor_name: str, version: str, conn) -> list:
     """
 
     with conn.cursor() as cur:
-        cur.execute(query, (adaptor_name, version))
+        cur.execute(query, (adaptor.name, adaptor.version))
         rows = cur.fetchall()
         return [row[0] for row in rows]
 
 
-def fetch_signatures(adaptor_name: str, version: str, conn) -> dict:
+def fetch_signatures(adaptor: AdaptorSpecifier, conn, auto_load: bool = False) -> dict:
     """Fetch function names with their signatures."""
+    if auto_load:
+        ensure_docs_loaded(adaptor)
+
     query = """
     SELECT function_name, signature
     FROM adaptor_function_docs
@@ -33,14 +67,14 @@ def fetch_signatures(adaptor_name: str, version: str, conn) -> dict:
     """
 
     with conn.cursor() as cur:
-        cur.execute(query, (adaptor_name, version))
+        cur.execute(query, (adaptor.name, adaptor.version))
         rows = cur.fetchall()
         result = {row[0]: row[1] for row in rows}
 
     return result
 
 
-def json_to_natural_language(func_data: dict, adaptor_name: str = None, version: str = None) -> str:
+def json_to_natural_language(func_data: dict, adaptor: AdaptorSpecifier = None) -> str:
     """
     Convert function JSON to natural language format for LLM consumption.
     """
@@ -50,10 +84,9 @@ def json_to_natural_language(func_data: dict, adaptor_name: str = None, version:
 
     nl = f"Function: {function_name}\n"
 
-    if adaptor_name:
-        nl += f"Adaptor: {adaptor_name}\n"
-    if version:
-        nl += f"Version: {version}\n"
+    if adaptor:
+        nl += f"Adaptor: {adaptor.name}\n"
+        nl += f"Version: {adaptor.version}\n"
 
     nl += "\n"
 
@@ -100,13 +133,17 @@ def json_to_natural_language(func_data: dict, adaptor_name: str = None, version:
     return nl.strip()
 
 
-def fetch_single_function(adaptor_name: str, version: str, function_name: str, conn, format: str = "json") -> dict | str:
+def fetch_single_function(adaptor: AdaptorSpecifier, function_name: str, conn, format: str = "json", auto_load: bool = False) -> dict | str:
     """
     Fetch a specific function's documentation.
 
     Args:
         format: "json" or "natural_language"
+        auto_load: If True, automatically load adaptor docs if not present
     """
+    if auto_load:
+        ensure_docs_loaded(adaptor)
+
     query = """
     SELECT function_data
     FROM adaptor_function_docs
@@ -114,23 +151,27 @@ def fetch_single_function(adaptor_name: str, version: str, function_name: str, c
     """
 
     with conn.cursor() as cur:
-        cur.execute(query, (adaptor_name, version, function_name))
+        cur.execute(query, (adaptor.name, adaptor.version, function_name))
         row = cur.fetchone()
         if row:
             func_data = row[0]  # JSONB data
             if format == "natural_language":
-                return json_to_natural_language(func_data, adaptor_name, version)
+                return json_to_natural_language(func_data, adaptor)
             return func_data
         return None
 
 
-def fetch_all_functions(adaptor_name: str, version: str, conn, format: str = "json") -> list:
+def fetch_all_functions(adaptor: AdaptorSpecifier, conn, format: str = "json", auto_load: bool = False) -> list:
     """
     Fetch all function documentation for an adaptor version.
 
     Args:
         format: "json" or "natural_language"
+        auto_load: If True, automatically load adaptor docs if not present
     """
+    if auto_load:
+        ensure_docs_loaded(adaptor)
+
     query = """
     SELECT function_name, function_data
     FROM adaptor_function_docs
@@ -139,14 +180,14 @@ def fetch_all_functions(adaptor_name: str, version: str, conn, format: str = "js
     """
 
     with conn.cursor() as cur:
-        cur.execute(query, (adaptor_name, version))
+        cur.execute(query, (adaptor.name, adaptor.version))
         rows = cur.fetchall()
 
         if format == "natural_language":
             return [
                 {
                     "function_name": row[0],
-                    "text": json_to_natural_language(row[1], adaptor_name, version)
+                    "text": json_to_natural_language(row[1], adaptor)
                 }
                 for row in rows
             ]
@@ -181,11 +222,11 @@ def main(data: dict) -> dict:
     function_name = data.get("function_name")
     format = data.get("format", "json")
 
-    # Parse the adaptor string to extract name and version
-    adaptor_name, version, _ = parse_adaptor_string(adaptor_input)
+    # Parse the adaptor string
+    adaptor = AdaptorSpecifier(adaptor_input)
 
-    sentry_sdk.set_tag("adaptor", adaptor_name)
-    sentry_sdk.set_tag("version", version)
+    sentry_sdk.set_tag("adaptor", adaptor.name)
+    sentry_sdk.set_tag("version", adaptor.version)
     sentry_sdk.set_tag("query_type", query_type)
 
     # Validate query_type
@@ -196,42 +237,35 @@ def main(data: dict) -> dict:
     if query_type == "function" and not function_name:
         raise ApolloError(400, "Missing required field: 'function_name' for query_type='function'", type="BAD_REQUEST")
 
-    # Get database URL from environment
-    db_url = os.environ.get("POSTGRES_URL")
-    if not db_url:
+    # Connect to PostgreSQL
+    conn = get_db_connection()
+    if not conn:
         msg = "Missing POSTGRES_URL environment variable"
         logger.error(msg)
         raise ApolloError(500, msg, type="BAD_REQUEST")
 
-    # Connect to PostgreSQL
     try:
-        conn = psycopg2.connect(db_url)
-    except Exception as e:
-        logger.error(f"Failed to connect to database: {str(e)}")
-        raise ApolloError(500, f"Database connection failed: {str(e)}", type="DATABASE_ERROR")
-
-    try:
-        logger.info(f"Querying {adaptor_name}@{version} (type: {query_type}, format: {format})")
+        logger.info(f"Querying {adaptor.specifier} (type: {query_type}, format: {format})")
 
         # Execute queries
         if query_type == "list":
             # Return list of function names
-            functions = fetch_function_list(adaptor_name, version, conn)
+            functions = fetch_function_list(adaptor, conn)
             logger.info(f"Found {len(functions)} functions")
             return {
-                "adaptor": adaptor_name,
-                "version": version,
+                "adaptor": adaptor.name,
+                "version": adaptor.version,
                 "query_type": "list",
                 "functions": functions
             }
 
         elif query_type == "signatures":
             # Return function names with signatures
-            signatures = fetch_signatures(adaptor_name, version, conn)
+            signatures = fetch_signatures(adaptor, conn)
             logger.info(f"Found {len(signatures)} function signatures")
             return {
-                "adaptor": adaptor_name,
-                "version": version,
+                "adaptor": adaptor.name,
+                "version": adaptor.version,
                 "query_type": "signatures",
                 "signatures": signatures
             }
@@ -239,13 +273,13 @@ def main(data: dict) -> dict:
         elif query_type == "function":
             # Fetch a specific function
             logger.info(f"Fetching function: {function_name}")
-            func_data = fetch_single_function(adaptor_name, version, function_name, conn, format)
+            func_data = fetch_single_function(adaptor, function_name, conn, format)
             if not func_data:
                 raise ApolloError(404, f"Function '{function_name}' not found", type="NOT_FOUND")
 
             return {
-                "adaptor": adaptor_name,
-                "version": version,
+                "adaptor": adaptor.name,
+                "version": adaptor.version,
                 "query_type": "function",
                 "function_name": function_name,
                 "format": format,
@@ -254,11 +288,11 @@ def main(data: dict) -> dict:
 
         elif query_type == "all":
             # Fetch all functions
-            functions = fetch_all_functions(adaptor_name, version, conn, format)
+            functions = fetch_all_functions(adaptor, conn, format)
             logger.info(f"Found {len(functions)} functions")
             return {
-                "adaptor": adaptor_name,
-                "version": version,
+                "adaptor": adaptor.name,
+                "version": adaptor.version,
                 "query_type": "all",
                 "format": format,
                 "count": len(functions),

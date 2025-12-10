@@ -1,11 +1,9 @@
 import json
-import os
 import time
 from typing import Dict, List, Any
-import psycopg2
 from psycopg2.extras import execute_values
 import sentry_sdk
-from util import create_logger, ApolloError, apollo, parse_adaptor_string
+from util import create_logger, ApolloError, apollo, AdaptorSpecifier, get_db_connection
 
 logger = create_logger("load_adaptor_docs")
 
@@ -131,7 +129,7 @@ def create_table_if_not_exists(conn):
     logger.info("Table adaptor_function_docs ready")
 
 
-def check_existing_docs(adaptor_name: str, version: str, conn) -> dict:
+def check_existing_docs(adaptor: AdaptorSpecifier, conn) -> dict:
     """
     Check if docs already exist for this adaptor+version and return their metadata.
 
@@ -146,25 +144,24 @@ def check_existing_docs(adaptor_name: str, version: str, conn) -> dict:
     """
 
     with conn.cursor() as cur:
-        cur.execute(check_sql, (adaptor_name, version))
+        cur.execute(check_sql, (adaptor.name, adaptor.version))
         rows = cur.fetchall()
 
         if rows:
             function_list = [row[0] for row in rows]
-            logger.info(f"✓ Docs already exist for {adaptor_name}@{version} ({len(rows)} functions)")
+            logger.info(f"✓ Docs already exist for {adaptor.specifier} ({len(rows)} functions)")
             return {
                 "exists": True,
                 "function_count": len(rows),
                 "function_list": function_list
             }
 
-        logger.info(f"No existing docs found for {adaptor_name}@{version}")
+        logger.info(f"No existing docs found for {adaptor.specifier}")
         return {"exists": False}
 
 
 def upload_to_postgres(
-    adaptor_name: str,
-    version: str,
+    adaptor: AdaptorSpecifier,
     filtered_docs: List[Dict[str, Any]],
     conn
 ):
@@ -190,10 +187,10 @@ def upload_to_postgres(
     """
 
     with conn.cursor() as cur:
-        cur.execute(delete_sql, (adaptor_name, version))
+        cur.execute(delete_sql, (adaptor.name, adaptor.version))
         deleted_count = cur.rowcount
         if deleted_count > 0:
-            logger.info(f"Deleted {deleted_count} existing functions for {adaptor_name}@{version}")
+            logger.info(f"Deleted {deleted_count} existing functions for {adaptor.specifier}")
         conn.commit()
 
     # Prepare data for insertion
@@ -205,8 +202,8 @@ def upload_to_postgres(
         signature = func.get("signature", "")
 
         rows.append((
-            adaptor_name,
-            version,
+            adaptor.name,
+            adaptor.version,
             function_name,
             signature,
             json.dumps(func)
@@ -223,18 +220,16 @@ def upload_to_postgres(
         execute_values(cur, insert_sql, rows)
         conn.commit()
 
-    logger.info(f"Uploaded {len(rows)} functions for {adaptor_name}@{version}")
+    logger.info(f"Uploaded {len(rows)} functions for {adaptor.specifier}")
 
 
-def process_adaptor_docs(adaptor_name: str, version: str, raw_docs: List[Dict[str, Any]], data: dict) -> dict:
+def process_adaptor_docs(adaptor: AdaptorSpecifier, raw_docs: List[Dict[str, Any]]) -> dict:
     """
     Process and upload a single adaptor's documentation.
 
     Args:
-        adaptor_name: The full adaptor name (e.g., "@openfn/language-kobotoolbox", "@openfn/language-dhis2")
-        version: The version string (e.g., "4.2.7")
+        adaptor: AdaptorSpecifier object containing name and version
         raw_docs: Array of raw documentation objects
-        data: The original payload (for extracting POSTGRES_URL)
 
     Returns:
         Dictionary with success status and upload details
@@ -248,32 +243,22 @@ def process_adaptor_docs(adaptor_name: str, version: str, raw_docs: List[Dict[st
     logger.info(f"Functions: {', '.join(function_list)}")
 
     # Upload
-    if data.get("POSTGRES_URL"):
-        db_url = data["POSTGRES_URL"]
-    else:
-        db_url = os.environ.get("POSTGRES_URL")
-
-    if not db_url:
-        msg = "Missing POSTGRES_URL in payload or environment"
+    logger.info("Connecting to PostgreSQL")
+    conn = get_db_connection()
+    if not conn:
+        msg = "Missing POSTGRES_URL environment variable"
         logger.error(msg)
         raise ApolloError(500, msg, type="BAD_REQUEST")
 
-    logger.info("Connecting to PostgreSQL")
-    try:
-        conn = psycopg2.connect(db_url)
-    except Exception as e:
-        logger.error(f"Failed to connect to database: {str(e)}")
-        raise ApolloError(500, f"Database connection failed: {str(e)}", type="DATABASE_ERROR")
-
     try:
         create_table_if_not_exists(conn)
-        upload_to_postgres(adaptor_name, version, filtered_docs, conn)
+        upload_to_postgres(adaptor, filtered_docs, conn)
         logger.info("✓ Upload complete")
 
         return {
             "success": True,
-            "adaptor": adaptor_name,
-            "version": version,
+            "adaptor": adaptor.name,
+            "version": adaptor.version,
             "functions_uploaded": len(filtered_docs),
             "function_list": function_list
         }
@@ -285,51 +270,42 @@ def process_adaptor_docs(adaptor_name: str, version: str, raw_docs: List[Dict[st
         conn.close()
 
 
-def load_adaptor_docs(adaptor: str, skip_if_exists: bool = True, postgres_url: str = None) -> dict:
+def load_adaptor_docs(adaptor: str, skip_if_exists: bool = True) -> dict:
     """
     Load adaptor documentation into the database.
 
     Args:
         adaptor: Adaptor string like "@openfn/language-http@3.1.11" or "http@3.1.11"
         skip_if_exists: If True, skip if docs already exist in database
-        postgres_url: Database URL (optional, will use environment variable if not provided)
 
     Returns:
         Dictionary with success status and upload details
     """
     logger.info(f"Loading adaptor docs for {adaptor}")
 
-    # Parse the adaptor string to extract name and version
-    adaptor_full, version, adaptor_version_string = parse_adaptor_string(adaptor)
+    # Parse the adaptor string
+    adaptor_spec = AdaptorSpecifier(adaptor)
 
-    sentry_sdk.set_tag("adaptor", adaptor_full)
-    sentry_sdk.set_tag("version", version)
+    sentry_sdk.set_tag("adaptor", adaptor_spec.name)
+    sentry_sdk.set_tag("version", adaptor_spec.version)
 
     # Check if docs already exist (if skip_if_exists is enabled)
     if skip_if_exists:
-        db_url = postgres_url or os.environ.get("POSTGRES_URL")
-
-        if not db_url:
-            msg = "Missing POSTGRES_URL in parameters or environment"
+        logger.info("Checking if docs already exist in database")
+        conn = get_db_connection()
+        if not conn:
+            msg = "Missing POSTGRES_URL environment variable"
             logger.error(msg)
             raise ApolloError(500, msg, type="BAD_REQUEST")
 
-        logger.info("Checking if docs already exist in database")
         try:
-            conn = psycopg2.connect(db_url)
-        except Exception as e:
-            logger.error(f"Failed to connect to database: {str(e)}")
-            raise ApolloError(500, f"Database connection failed: {str(e)}", type="DATABASE_ERROR")
-
-        try:
-            create_table_if_not_exists(conn)
-            existing_check = check_existing_docs(adaptor_full, version, conn)
+            existing_check = check_existing_docs(adaptor_spec, conn)
 
             if existing_check["exists"]:
                 return {
                     "success": True,
-                    "adaptor": adaptor_full,
-                    "version": version,
+                    "adaptor": adaptor_spec.name,
+                    "version": adaptor_spec.version,
                     "skipped": True,
                     "functions_uploaded": existing_check["function_count"],
                     "function_list": existing_check["function_list"]
@@ -338,11 +314,11 @@ def load_adaptor_docs(adaptor: str, skip_if_exists: bool = True, postgres_url: s
         finally:
             conn.close()
 
-    logger.info(f"Fetching docs from adaptor_apis for {adaptor_version_string}")
+    logger.info(f"Fetching docs from adaptor_apis for {adaptor_spec.specifier}")
 
     try:
         with sentry_sdk.start_span(description="fetch_adaptor_apis"):
-            api_result = apollo("adaptor_apis", {"adaptors": [adaptor_version_string]})
+            api_result = apollo("adaptor_apis", {"adaptors": [adaptor_spec.specifier]})
 
         if api_result.get("type") == "SERVICE_ERROR":
             raise ApolloError(
@@ -351,24 +327,24 @@ def load_adaptor_docs(adaptor: str, skip_if_exists: bool = True, postgres_url: s
                 type=api_result.get("type", "ADAPTOR_API_ERROR")
             )
 
-        if api_result.get("errors") and adaptor_version_string in api_result["errors"]:
-            msg = f"Failed to fetch docs for {adaptor_version_string}"
+        if api_result.get("errors") and adaptor_spec.specifier in api_result["errors"]:
+            msg = f"Failed to fetch docs for {adaptor_spec.specifier}"
             raise ApolloError(500, msg, type="ADAPTOR_API_ERROR")
 
-        if "docs" not in api_result or adaptor_version_string not in api_result["docs"]:
-            msg = f"No docs returned for {adaptor_version_string}"
+        if "docs" not in api_result or adaptor_spec.specifier not in api_result["docs"]:
+            msg = f"No docs returned for {adaptor_spec.specifier}"
             sentry_sdk.capture_message(msg, level="error")
             raise ApolloError(500, msg, type="ADAPTOR_API_ERROR")
 
-        raw_docs = api_result["docs"][adaptor_version_string]
+        raw_docs = api_result["docs"][adaptor_spec.specifier]
         logger.info(f"Received {len(raw_docs)} items from adaptor_apis")
 
-        logger.info(f"Processing and uploading docs for {adaptor_full}@{version}")
+        logger.info(f"Processing and uploading docs for {adaptor_spec.specifier}")
 
         with sentry_sdk.start_span(description="process_and_upload_docs"):
-            result = process_adaptor_docs(adaptor_full, version, raw_docs, {"POSTGRES_URL": postgres_url})
+            result = process_adaptor_docs(adaptor_spec, raw_docs)
 
-        logger.info(f"✓ Successfully uploaded {result['functions_uploaded']} functions for {adaptor_full}@{version}")
+        logger.info(f"✓ Successfully uploaded {result['functions_uploaded']} functions for {adaptor_spec.specifier}")
         return result
 
     except ApolloError:
@@ -385,8 +361,7 @@ def main(data: dict) -> dict:
     Expected payload:
     {
         "adaptor": "@openfn/language-http@3.1.11",  # Can also be "http@3.1.11"
-        "skip_if_exists": true,  # Optional, defaults to true
-        "POSTGRES_URL": "postgresql://..."  # Optional, will use env if not provided
+        "skip_if_exists": true  # Optional, defaults to true
     }
 
     This will call adaptor_apis service to fetch the docs, then upload them.
@@ -395,7 +370,7 @@ def main(data: dict) -> dict:
     logger.info("Starting load_adaptor_docs service...")
 
     sentry_sdk.set_context("request_data", {
-        k: v for k, v in data.items() if k not in ["POSTGRES_URL", "api_key"]
+        k: v for k, v in data.items() if k not in ["api_key"]
     })
 
     # Validate required fields
@@ -404,6 +379,5 @@ def main(data: dict) -> dict:
 
     return load_adaptor_docs(
         adaptor=data["adaptor"],
-        skip_if_exists=data.get("skip_if_exists", True),
-        postgres_url=data.get("POSTGRES_URL")
+        skip_if_exists=data.get("skip_if_exists", True)
     )

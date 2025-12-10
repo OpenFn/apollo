@@ -1,6 +1,5 @@
 import os
 import json
-import time
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 from anthropic import (
@@ -19,7 +18,6 @@ from util import ApolloError, create_logger, apollo
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
 from streaming_util import StreamManager
-from load_adaptor_docs.load_adaptor_docs import load_adaptor_docs
 
 logger = create_logger("job_chat")
 
@@ -82,7 +80,7 @@ class AnthropicClient:
         self.client = Anthropic(api_key=self.api_key)
 
     def generate(
-        self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[dict] = None, rag: Optional[str] = None, suggest_code: Optional[bool] = None, stream: Optional[bool] = False
+        self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[dict] = None, rag: Optional[str] = None, suggest_code: Optional[bool] = None, stream: Optional[bool] = False, download_adaptor_docs: Optional[bool] = True
     ) -> ChatResponse:
         """
         Generate a response using the Claude API with optional streaming.
@@ -98,22 +96,24 @@ class AnthropicClient:
             with sentry_sdk.start_span(description="build_prompt"):
                 if suggest_code is True:
                     system_message, prompt, retrieved_knowledge = build_prompt(
-                        content=content, 
-                        history=history, 
-                        context=context, 
-                        rag=rag, 
+                        content=content,
+                        history=history,
+                        context=context,
+                        rag=rag,
                         api_key=self.api_key,
-                        stream_manager=stream_manager
+                        stream_manager=stream_manager,
+                        download_adaptor_docs=download_adaptor_docs
                     )
                     prompt.append({"role": "assistant", "content": '{\n  "text_answer": "'})
 
                 else:
                     system_message, prompt, retrieved_knowledge = build_old_prompt(
-                        content=content, 
-                        history=history, 
-                        context=context, 
-                        rag=rag, 
-                        api_key=self.api_key
+                        content=content,
+                        history=history,
+                        context=context,
+                        rag=rag,
+                        api_key=self.api_key,
+                        download_adaptor_docs=download_adaptor_docs
                         )
 
             with sentry_sdk.start_span(description="anthropic_api_call"):
@@ -433,42 +433,16 @@ def main(data_dict: dict) -> dict:
 
         data = Payload.from_dict(data_dict)
 
-        # Download adaptor docs if requested and context contains adaptor info
-        if data.download_adaptor_docs and data.context:
-            adaptor_full = data.context.get("adaptor")
-            if adaptor_full:
-                try:
-                    logger.info(f"Checking/loading adaptor docs for {adaptor_full}")
-                    start_time = time.time()
-                    with sentry_sdk.start_span(description="load_adaptor_docs"):
-                        load_result = load_adaptor_docs(
-                            adaptor=adaptor_full,
-                            skip_if_exists=True
-                        )
-                    duration = time.time() - start_time
-
-                    if load_result.get("skipped"):
-                        logger.info(f"Adaptor docs for {adaptor_full} (checked in {duration:.3f}s)")
-                    elif load_result.get("success"):
-                        logger.info(f"Successfully loaded {load_result.get('functions_uploaded', 0)} functions for {adaptor_full} in {duration:.3f}s")
-                    else:
-                        logger.warning(f"Failed to load adaptor docs for {load_result} after {duration:.3f}s)")
-                except Exception as e:
-                    # Don't fail the whole request if adaptor docs loading fails
-                    duration = time.time() - start_time
-                    logger.warning(f"Failed to load adaptor docs after {duration:.3f}s: {str(e)}")
-                    sentry_sdk.capture_exception(e)
-
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
-        logger.info(f"stream bool: {data.stream}")
         result = client.generate(
-            content=data.content, 
-            history=data_dict.get("history", []), 
-            context=data.context, 
+            content=data.content,
+            history=data_dict.get("history", []),
+            context=data.context,
             rag=data_dict.get("meta", {}).get("rag"),
             suggest_code=data.suggest_code,
-            stream=data.stream
+            stream=data.stream,
+            download_adaptor_docs=data.download_adaptor_docs
         )
         
 
