@@ -52,7 +52,7 @@ class Payload:
             meta=data.get("meta"),
             suggest_code=data.get("suggest_code"),
             stream=data.get("stream", False),
-            download_adaptor_docs=data.get("download_adaptor_docs", True)
+            download_adaptor_docs=data.get("download_adaptor_docs", True),
             refresh_rag=data.get("refresh_rag", False)
         )
 
@@ -112,7 +112,7 @@ class AnthropicClient:
                         rag=rag,
                         api_key=self.api_key,
                         stream_manager=stream_manager,
-                        download_adaptor_docs=download_adaptor_docs
+                        download_adaptor_docs=download_adaptor_docs,
                         refresh_rag=refresh_rag
                     )
                     prompt.append({"role": "assistant", "content": '{\n  "text_answer": "'})
@@ -124,7 +124,7 @@ class AnthropicClient:
                         context=context,
                         rag=rag,
                         api_key=self.api_key,
-                        download_adaptor_docs=download_adaptor_docs
+                        download_adaptor_docs=download_adaptor_docs,
                         refresh_rag=refresh_rag
                         )
 
@@ -322,7 +322,7 @@ class AnthropicClient:
 
         sentry_sdk.set_context("code_edit_context", {
             "llm_text_answer": text_answer,
-            "llm_edit_answe": edit,
+            "llm_edit_answer": edit,
         })
 
         action = edit.get("action")
@@ -454,11 +454,8 @@ def main(data_dict: dict) -> dict:
             rag=data_dict.get("meta", {}).get("rag"),
             suggest_code=data.suggest_code,
             stream=data.stream,
-<<<<<<< HEAD
-            download_adaptor_docs=data.download_adaptor_docs
-=======
+            download_adaptor_docs=data.download_adaptor_docs,
             refresh_rag=data.refresh_rag
->>>>>>> d17718e (add refresh rag flag)
         )
         
 
