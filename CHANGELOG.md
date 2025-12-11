@@ -1,5 +1,24 @@
 # apollo
 
+## 0.17.1
+
+### Patch Changes
+
+Fix an issue where the server fails to start
+
+## 0.17.0
+
+### Minor Changes
+
+- 942cf4f: - Add `load_adaptor_docs` and `search_adaptor_docs` services, which
+  use postgres to cache and search docs data
+  - Use new adaptor docs lookup in `job_chat`, for faster, leaner and better
+    docs lookup
+
+### Patch Changes
+
+- 3095a37: add refresh rag flag
+
 ## 0.16.3
 
 ### Patch Changes
