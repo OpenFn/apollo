@@ -1,6 +1,6 @@
 import time
 import sentry_sdk
-from util import create_logger, AdaptorSpecifier, get_db_connection
+from util import create_logger, ApolloError, AdaptorSpecifier, get_db_connection
 from .retrieve_docs import retrieve_knowledge
 from search_adaptor_docs.search_adaptor_docs import fetch_signatures
 
@@ -165,44 +165,40 @@ def generate_system_message(context_dict, search_results, download_adaptor_docs=
         )
 
         try:
-            start_time = time.time()
             conn = get_db_connection()
-            duration = time.time() - start_time
-            logger.info(f"Database connection established in {duration:.3f}s")
 
-            if conn:
+            try:
                 try:
-                    try:
-                        adaptor = AdaptorSpecifier(context.adaptor)
+                    adaptor = AdaptorSpecifier(context.adaptor)
 
-                        signatures = fetch_signatures(adaptor, conn, auto_load=download_adaptor_docs)
+                    signatures = fetch_signatures(adaptor, conn, auto_load=download_adaptor_docs)
 
-                        if signatures:
-                            adaptor_string += "These are the available functions in the adaptor:\n\n"
-                            for func_name, signature in signatures.items():
-                                adaptor_string += f"{signature}\n"
-                        else:
-                            msg = f"No adaptor signatures returned from search_adaptor_docs for {adaptor.specifier}"
-                            logger.warning(msg)
-                            sentry_sdk.capture_message(msg, level="warning")
-                            sentry_sdk.set_context("adaptor_context", {
-                                "adaptor_name": adaptor.name,
-                                "version": adaptor.version,
-                                "parsed_from": context.adaptor
-                            })
-                    except Exception as parse_error:
-                        msg = f"Failed to parse adaptor string '{context.adaptor}': {parse_error}"
+                    if signatures:
+                        adaptor_string += "These are the available functions in the adaptor:\n\n"
+                        for func_name, signature in signatures.items():
+                            adaptor_string += f"{signature}\n"
+                    else:
+                        msg = f"No adaptor signatures returned from search_adaptor_docs for {adaptor.specifier}"
                         logger.warning(msg)
                         sentry_sdk.capture_message(msg, level="warning")
                         sentry_sdk.set_context("adaptor_context", {
-                            "parsed_from": context.adaptor,
-                            "error": str(parse_error)
+                            "adaptor_name": adaptor.name,
+                            "version": adaptor.version,
+                            "parsed_from": context.adaptor
                         })
-                finally:
-                    conn.close()
-            else:
-                logger.warning("POSTGRES_URL not available, cannot fetch adaptor docs")
-                adaptor_string += "The user is using an OpenFn Adaptor to write the job."
+                except Exception as parse_error:
+                    msg = f"Failed to parse adaptor string '{context.adaptor}': {parse_error}"
+                    logger.warning(msg)
+                    sentry_sdk.capture_message(msg, level="warning")
+                    sentry_sdk.set_context("adaptor_context", {
+                        "parsed_from": context.adaptor,
+                        "error": str(parse_error)
+                    })
+            finally:
+                conn.close()
+        except ApolloError as e:
+            logger.warning(f"Database not available: {e.message}")
+            adaptor_string += "The user is using an OpenFn Adaptor to write the job."
         except Exception as e:
             logger.warning(f"Could not fetch adaptor docs for {context.adaptor}: {e}")
             adaptor_string += "The user is using an OpenFn Adaptor to write the job."

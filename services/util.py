@@ -102,12 +102,15 @@ def get_db_connection():
     """Get database connection from POSTGRES_URL environment variable.
 
     Returns:
-        psycopg2.connection or None: Database connection if POSTGRES_URL is set, None otherwise
+        psycopg2.connection: Database connection
+
+    Raises:
+        ApolloError: If POSTGRES_URL environment variable is not set
     """
     db_url = os.environ.get("POSTGRES_URL")
-    if db_url:
-        return psycopg2.connect(db_url)
-    return None
+    if not db_url:
+        raise ApolloError(500, "Missing POSTGRES_URL environment variable", type="DATABASE_ERROR")
+    return psycopg2.connect(db_url)
 
 
 class AdaptorSpecifier:

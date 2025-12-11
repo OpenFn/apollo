@@ -7,12 +7,13 @@ from load_adaptor_docs.load_adaptor_docs import load_adaptor_docs
 logger = create_logger("search_adaptor_docs")
 
 
-def ensure_docs_loaded(adaptor: AdaptorSpecifier, skip_if_exists: bool = True) -> None:
+def ensure_docs_loaded(adaptor: AdaptorSpecifier, conn, skip_if_exists: bool = True) -> None:
     """
     Ensure adaptor documentation is loaded into the database.
 
     Args:
         adaptor: The adaptor specifier
+        conn: Database connection to reuse
         skip_if_exists: If True, skip loading if docs already exist
     """
     try:
@@ -20,7 +21,8 @@ def ensure_docs_loaded(adaptor: AdaptorSpecifier, skip_if_exists: bool = True) -
         start_time = time.time()
         load_result = load_adaptor_docs(
             adaptor=adaptor.specifier,
-            skip_if_exists=skip_if_exists
+            skip_if_exists=skip_if_exists,
+            conn=conn
         )
         duration = time.time() - start_time
 
@@ -39,7 +41,7 @@ def ensure_docs_loaded(adaptor: AdaptorSpecifier, skip_if_exists: bool = True) -
 def fetch_function_list(adaptor: AdaptorSpecifier, conn, auto_load: bool = False) -> list:
     """Fetch just the list of function names."""
     if auto_load:
-        ensure_docs_loaded(adaptor)
+        ensure_docs_loaded(adaptor, conn)
 
     query = """
     SELECT function_name
@@ -57,7 +59,7 @@ def fetch_function_list(adaptor: AdaptorSpecifier, conn, auto_load: bool = False
 def fetch_signatures(adaptor: AdaptorSpecifier, conn, auto_load: bool = False) -> dict:
     """Fetch function names with their signatures."""
     if auto_load:
-        ensure_docs_loaded(adaptor)
+        ensure_docs_loaded(adaptor, conn)
 
     query = """
     SELECT function_name, signature
@@ -142,7 +144,7 @@ def fetch_single_function(adaptor: AdaptorSpecifier, function_name: str, conn, f
         auto_load: If True, automatically load adaptor docs if not present
     """
     if auto_load:
-        ensure_docs_loaded(adaptor)
+        ensure_docs_loaded(adaptor, conn)
 
     query = """
     SELECT function_data
@@ -170,7 +172,7 @@ def fetch_all_functions(adaptor: AdaptorSpecifier, conn, format: str = "json", a
         auto_load: If True, automatically load adaptor docs if not present
     """
     if auto_load:
-        ensure_docs_loaded(adaptor)
+        ensure_docs_loaded(adaptor, conn)
 
     query = """
     SELECT function_name, function_data
@@ -239,10 +241,6 @@ def main(data: dict) -> dict:
 
     # Connect to PostgreSQL
     conn = get_db_connection()
-    if not conn:
-        msg = "Missing POSTGRES_URL environment variable"
-        logger.error(msg)
-        raise ApolloError(500, msg, type="BAD_REQUEST")
 
     try:
         logger.info(f"Querying {adaptor.specifier} (type: {query_type}, format: {format})")

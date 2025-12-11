@@ -217,13 +217,14 @@ def upload_to_postgres(
         conn.commit()
 
 
-def process_adaptor_docs(adaptor: AdaptorSpecifier, raw_docs: List[Dict[str, Any]]) -> dict:
+def process_adaptor_docs(adaptor: AdaptorSpecifier, raw_docs: List[Dict[str, Any]], conn=None) -> dict:
     """
     Process and upload a single adaptor's documentation.
 
     Args:
         adaptor: AdaptorSpecifier object containing name and version
         raw_docs: Array of raw documentation objects
+        conn: Optional database connection to reuse. If None, creates a new connection.
 
     Returns:
         Dictionary with success status and upload details
@@ -235,11 +236,9 @@ def process_adaptor_docs(adaptor: AdaptorSpecifier, raw_docs: List[Dict[str, Any
     function_list = extract_function_list(filtered_docs)
 
     # Upload
-    conn = get_db_connection()
-    if not conn:
-        msg = "Missing POSTGRES_URL environment variable"
-        logger.error(msg)
-        raise ApolloError(500, msg, type="BAD_REQUEST")
+    should_close_conn = conn is None
+    if conn is None:
+        conn = get_db_connection()
 
     try:
         create_table_if_not_exists(conn)
@@ -257,16 +256,18 @@ def process_adaptor_docs(adaptor: AdaptorSpecifier, raw_docs: List[Dict[str, Any
         logger.error(f"Error uploading to database: {str(e)}")
         raise ApolloError(500, f"Upload failed: {str(e)}", type="DATABASE_ERROR")
     finally:
-        conn.close()
+        if should_close_conn:
+            conn.close()
 
 
-def load_adaptor_docs(adaptor: str, skip_if_exists: bool = True) -> dict:
+def load_adaptor_docs(adaptor: str, skip_if_exists: bool = True, conn=None) -> dict:
     """
     Load adaptor documentation into the database.
 
     Args:
         adaptor: Adaptor string like "@openfn/language-http@3.1.11" or "http@3.1.11"
         skip_if_exists: If True, skip if docs already exist in database
+        conn: Optional database connection to reuse. If None, creates a new connection.
 
     Returns:
         Dictionary with success status and upload details
@@ -280,11 +281,9 @@ def load_adaptor_docs(adaptor: str, skip_if_exists: bool = True) -> dict:
     # Check if docs already exist (if skip_if_exists is enabled)
     if skip_if_exists:
         logger.info("Checking if docs already exist in database")
-        conn = get_db_connection()
-        if not conn:
-            msg = "Missing POSTGRES_URL environment variable"
-            logger.error(msg)
-            raise ApolloError(500, msg, type="BAD_REQUEST")
+        should_close_conn = conn is None
+        if conn is None:
+            conn = get_db_connection()
 
         try:
             existing_check = check_existing_docs(adaptor_spec, conn)
@@ -300,7 +299,8 @@ def load_adaptor_docs(adaptor: str, skip_if_exists: bool = True) -> dict:
                 }
 
         finally:
-            conn.close()
+            if should_close_conn:
+                conn.close()
 
     try:
         with sentry_sdk.start_span(description="fetch_adaptor_apis"):
@@ -325,7 +325,7 @@ def load_adaptor_docs(adaptor: str, skip_if_exists: bool = True) -> dict:
         raw_docs = api_result["docs"][adaptor_spec.specifier]
 
         with sentry_sdk.start_span(description="process_and_upload_docs"):
-            result = process_adaptor_docs(adaptor_spec, raw_docs)
+            result = process_adaptor_docs(adaptor_spec, raw_docs, conn=conn)
 
         return result
 
