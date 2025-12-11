@@ -85,11 +85,14 @@ The input payload is a JSON object with the following structure
       "search_results": []
     }
   },
+  "download_adaptor_docs": true,
   "api_key": "<Anthropic API key>"
 }
 ```
 
 All context is optional, as is history.
+
+The `download_adaptor_docs` flag (defaults to `true`) controls whether adaptor docs are automatically loaded before building prompts. Set to `false` to skip auto-loading.
 
 ## Response Reference
 

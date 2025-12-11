@@ -1,7 +1,6 @@
 import os
 import json
 from typing import List, Optional, Dict, Any
-import uuid
 from dataclasses import dataclass
 from anthropic import (
     Anthropic,
@@ -15,7 +14,7 @@ from anthropic import (
     InternalServerError,
 )
 import sentry_sdk
-from util import ApolloError, create_logger
+from util import ApolloError, create_logger, apollo
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
 from streaming_util import StreamManager
@@ -35,6 +34,7 @@ class Payload:
     meta: Optional[str] = None
     suggest_code: Optional[bool] = None
     stream: Optional[bool] = False
+    download_adaptor_docs: Optional[bool] = True
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
@@ -45,12 +45,13 @@ class Payload:
             raise ValueError("'content' is required")
 
         return cls(
-            content=data["content"], 
-            context=data.get("context"), 
-            api_key=data.get("api_key"), 
+            content=data["content"],
+            context=data.get("context"),
+            api_key=data.get("api_key"),
             meta=data.get("meta"),
             suggest_code=data.get("suggest_code"),
-            stream=data.get("stream", False)
+            stream=data.get("stream", False),
+            download_adaptor_docs=data.get("download_adaptor_docs", True)
         )
 
 
@@ -79,7 +80,7 @@ class AnthropicClient:
         self.client = Anthropic(api_key=self.api_key)
 
     def generate(
-        self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[dict] = None, rag: Optional[str] = None, suggest_code: Optional[bool] = None, stream: Optional[bool] = False
+        self, content: str, history: Optional[List[Dict[str, str]]] = None, context: Optional[dict] = None, rag: Optional[str] = None, suggest_code: Optional[bool] = None, stream: Optional[bool] = False, download_adaptor_docs: Optional[bool] = True
     ) -> ChatResponse:
         """
         Generate a response using the Claude API with optional streaming.
@@ -95,22 +96,24 @@ class AnthropicClient:
             with sentry_sdk.start_span(description="build_prompt"):
                 if suggest_code is True:
                     system_message, prompt, retrieved_knowledge = build_prompt(
-                        content=content, 
-                        history=history, 
-                        context=context, 
-                        rag=rag, 
+                        content=content,
+                        history=history,
+                        context=context,
+                        rag=rag,
                         api_key=self.api_key,
-                        stream_manager=stream_manager
+                        stream_manager=stream_manager,
+                        download_adaptor_docs=download_adaptor_docs
                     )
                     prompt.append({"role": "assistant", "content": '{\n  "text_answer": "'})
 
                 else:
                     system_message, prompt, retrieved_knowledge = build_old_prompt(
-                        content=content, 
-                        history=history, 
-                        context=context, 
-                        rag=rag, 
-                        api_key=self.api_key
+                        content=content,
+                        history=history,
+                        context=context,
+                        rag=rag,
+                        api_key=self.api_key,
+                        download_adaptor_docs=download_adaptor_docs
                         )
 
             with sentry_sdk.start_span(description="anthropic_api_call"):
@@ -432,14 +435,14 @@ def main(data_dict: dict) -> dict:
 
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
-        logger.info(f"stream bool: {data.stream}")
         result = client.generate(
-            content=data.content, 
-            history=data_dict.get("history", []), 
-            context=data.context, 
+            content=data.content,
+            history=data_dict.get("history", []),
+            context=data.context,
             rag=data_dict.get("meta", {}).get("rag"),
             suggest_code=data.suggest_code,
-            stream=data.stream
+            stream=data.stream,
+            download_adaptor_docs=data.download_adaptor_docs
         )
         
 

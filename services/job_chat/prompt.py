@@ -1,7 +1,9 @@
 import json
-from util import create_logger, apollo
+import time
+import sentry_sdk
+from util import create_logger, ApolloError, AdaptorSpecifier, get_db_connection
 from .retrieve_docs import retrieve_knowledge
-from describe_adaptor.describe_adaptor import describe_package
+from search_adaptor_docs.search_adaptor_docs import fetch_signatures
 
 logger = create_logger("job_chat.prompt")
 
@@ -281,7 +283,7 @@ class Context:
         return hasattr(self, key) and getattr(self, key) is not None
 
 
-def generate_system_message(context_dict, search_results):
+def generate_system_message(context_dict, search_results, download_adaptor_docs=True, stream_manager=None):
     context = context_dict if isinstance(context_dict, Context) else Context(**(context_dict or {}))
 
     message = [system_role]
@@ -295,23 +297,57 @@ def generate_system_message(context_dict, search_results):
 
     if context.has("adaptor"):
         adaptor_string = (
-            f"<adaptor>The user is using the OpenFn {context.adaptor} adaptor. Use functions provided by its API."
+            f"<adaptor>The user is using the OpenFn {context.adaptor} adaptor. Use functions provided by its API.\n\n"
         )
 
         try:
-            adaptor_docs = describe_package(context.adaptor)
-            for doc in adaptor_docs:
-                adaptor_string += f"Typescript definitions for doc {doc}"
-                adaptor_string += adaptor_docs[doc]["description"]
+            conn = get_db_connection()
+
+            try:
+                try:
+                    adaptor = AdaptorSpecifier(context.adaptor)
+
+                    if stream_manager:
+                        stream_manager.send_thinking("Loading adaptor documentation...")
+
+                    signatures = fetch_signatures(adaptor, conn, auto_load=download_adaptor_docs)
+
+                    if signatures:
+                        adaptor_string += "These are the available functions in the adaptor:\n\n"
+                        for func_name, signature in signatures.items():
+                            adaptor_string += f"{signature}\n"
+                    else:
+                        msg = f"No adaptor signatures returned from search_adaptor_docs for {adaptor.specifier}"
+                        logger.warning(msg)
+                        sentry_sdk.capture_message(msg, level="warning")
+                        sentry_sdk.set_context("adaptor_context", {
+                            "adaptor_name": adaptor.name,
+                            "version": adaptor.version,
+                            "parsed_from": context.adaptor
+                        })
+                        adaptor_string += "The user is using an OpenFn Adaptor to write the job."
+                except Exception as parse_error:
+                    msg = f"Failed to parse adaptor string '{context.adaptor}': {parse_error}"
+                    logger.warning(msg)
+                    sentry_sdk.capture_message(msg, level="warning")
+                    sentry_sdk.set_context("adaptor_context", {
+                        "parsed_from": context.adaptor,
+                        "error": str(parse_error)
+                    })
+                    adaptor_string += "The user is using an OpenFn Adaptor to write the job."
+            finally:
+                conn.close()
+        except ApolloError as e:
+            logger.warning(f"Database not available: {e.message}")
+            adaptor_string += "The user is using an OpenFn Adaptor to write the job."
         except Exception as e:
             logger.warning(f"Could not fetch adaptor docs for {context.adaptor}: {e}")
-            adaptor_string += (
-                f"The user is using an OpenFn Adaptor to write the job."
-            )
+            adaptor_string += "The user is using an OpenFn Adaptor to write the job."
+
         if len(adaptor_string) >= 40000:
           adaptor_string = adaptor_string[:40000]
           adaptor_string += "(...)"
-          
+
         adaptor_string += "</adaptor>"
 
         message.append(adaptor_string)
@@ -350,7 +386,7 @@ def format_search_results(search_results):
         for result in search_results
     ])
 
-def build_prompt(content, history, context, rag=None, api_key=None, stream_manager=None):
+def build_prompt(content, history, context, rag=None, api_key=None, stream_manager=None, download_adaptor_docs=True):
     retrieved_knowledge = {
         "search_results": [],
         "search_results_sections": [],
@@ -362,8 +398,6 @@ def build_prompt(content, history, context, rag=None, api_key=None, stream_manag
             "generate_queries": {}
         }
     }
-    # Remove escaped newlines which confuse the model
-    # context["expression"] = context["expression"].encode().decode('unicode_escape')
 
     if rag:
         retrieved_knowledge = rag
@@ -371,18 +405,20 @@ def build_prompt(content, history, context, rag=None, api_key=None, stream_manag
       stream_manager.send_thinking("Searching documentation...")
       try:
           retrieved_knowledge = retrieve_knowledge(
-              content=content, 
-              history=history, 
-              code=context.get("expression", ""), 
+              content=content,
+              history=history,
+              code=context.get("expression", ""),
               adaptor=context.get("adaptor", ""),
               api_key=api_key
           )
       except Exception as e:
           logger.error(f"Error retrieving knowledge: {str(e)}")
-    
+
     system_message = generate_system_message(
-        context_dict=context, 
-        search_results=retrieved_knowledge.get("search_results") if retrieved_knowledge is not None else None)
+        context_dict=context,
+        search_results=retrieved_knowledge.get("search_results") if retrieved_knowledge is not None else None,
+        download_adaptor_docs=download_adaptor_docs,
+        stream_manager=stream_manager)
 
     prompt = []
     prompt.extend(history)

@@ -1,7 +1,9 @@
 import json
 import logging
+import os
 import sys
 import requests
+import psycopg2
 from dataclasses import dataclass
 from typing import Optional, Any, Dict
 
@@ -92,5 +94,76 @@ def apollo(name, payload):
     """
     global apollo_port
     url = f"http://127.0.0.1:{apollo_port}/services/{name}"
-    r = requests.post(url, payload)
+    r = requests.post(url, json = payload)
     return r.json()
+
+
+def get_db_connection():
+    """Get database connection from POSTGRES_URL environment variable.
+
+    Returns:
+        psycopg2.connection: Database connection
+
+    Raises:
+        ApolloError: If POSTGRES_URL environment variable is not set
+    """
+    db_url = os.environ.get("POSTGRES_URL")
+    if not db_url:
+        raise ApolloError(500, "Missing POSTGRES_URL environment variable", type="DATABASE_ERROR")
+    return psycopg2.connect(db_url)
+
+
+class AdaptorSpecifier:
+    """
+    Represents a parsed adaptor identifier.
+
+    Accepts:
+    - "@openfn/language-http@3.1.11"
+    - "http@3.1.11" (shorthand)
+
+    Provides properties:
+    - name: "@openfn/language-http"
+    - version: "3.1.11"
+    - specifier: "@openfn/language-http@3.1.11"
+    - short_name: "http"
+    """
+
+    def __init__(self, adaptor_input: str):
+        """
+        Parse adaptor string.
+
+        Raises ApolloError if version is not provided.
+        """
+        adaptor_parts = adaptor_input.split("@")
+
+        # Handle format: "@openfn/language-http@3.1.11"
+        if adaptor_input.startswith("@"):
+            if len(adaptor_parts) >= 3:
+                self.name = "@" + adaptor_parts[1]
+                self.version = adaptor_parts[2]
+            else:
+                raise ApolloError(
+                    400,
+                    f"Version must be specified in adaptor string. Expected format: '@openfn/language-http@3.1.11', got: '{adaptor_input}'",
+                    type="BAD_REQUEST"
+                )
+        # Handle format: "http@3.1.11"
+        elif len(adaptor_parts) == 2:
+            self.name = f"@openfn/language-{adaptor_parts[0]}"
+            self.version = adaptor_parts[1]
+        else:
+            raise ApolloError(
+                400,
+                f"Version must be specified in adaptor string. Expected format: 'http@3.1.11' or '@openfn/language-http@3.1.11', got: '{adaptor_input}'",
+                type="BAD_REQUEST"
+            )
+
+    @property
+    def specifier(self) -> str:
+        """Full adaptor specifier: '@openfn/language-http@3.1.11'"""
+        return f"{self.name}@{self.version}"
+
+    @property
+    def short_name(self) -> str:
+        """Short name without @openfn/language- prefix: 'http'"""
+        return self.name.split("/")[-1].replace("language-", "")

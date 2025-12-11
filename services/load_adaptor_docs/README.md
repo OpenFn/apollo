@@ -1,0 +1,194 @@
+# Upload Adaptor Docs
+
+Service to parse and upload version-specific adaptor function documentation to PostgreSQL.
+
+## Overview
+
+This service processes JSDoc-generated adaptor documentation (raw JSON format) and stores it in PostgreSQL for keyword-based retrieval by `search_adaptor_docs` and `job_chat`.
+
+### What gets filtered:
+
+**Removed:**
+- Type definitions (`kind: "typedef"`)
+- Private functions (`access: "private"`)
+- Internal metadata (`meta`, `order`, `level`, `newscope`, `customTags`, `state`)
+
+**Kept:**
+- Public functions (`kind: "function"`, `access: "public"`)
+- External/common functions from language-common (`kind: "external-function"` or `"external"`)
+- Function name, scope, description
+- **Signature** (e.g., `create(path: string, data: DHIS2Data, params: object): Operation`)
+- Parameters (name, type, description, optional flag)
+- Examples
+- Return types
+
+## Database Schema
+
+The service automatically creates this table if it doesn't exist:
+
+```sql
+CREATE TABLE adaptor_function_docs (
+    id SERIAL PRIMARY KEY,
+    adaptor_name VARCHAR(255) NOT NULL,      -- e.g., "@openfn/language-dhis2", "@openfn/language-kobotoolbox"
+    version VARCHAR(50) NOT NULL,             -- e.g., "4.2.10"
+    function_name VARCHAR(255) NOT NULL,      -- e.g., "create" or "tracker.import"
+    signature TEXT NOT NULL,                  -- e.g., "create(path: string, data: DHIS2Data, params: object): Operation"
+    function_data JSONB NOT NULL,             -- Full function documentation
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(adaptor_name, version, function_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_adaptor_name_version
+    ON adaptor_function_docs(adaptor_name, version);
+CREATE INDEX IF NOT EXISTS idx_function_name
+    ON adaptor_function_docs(function_name);
+CREATE INDEX IF NOT EXISTS idx_signature
+    ON adaptor_function_docs USING gin(to_tsvector('english', signature));
+```
+
+## Usage
+
+The service requires a `POSTGRES_URL` environment variable to connect to PostgreSQL.
+
+Provide the adaptor with version in the format `@openfn/language-<name>@<version>` or `<name>@<version>`. The service will automatically call the `adaptor_apis` service to fetch the docs.
+
+**Basic Payload:**
+```json
+{
+  "adaptor": "@openfn/language-kobotoolbox@4.2.7"
+}
+```
+
+**Short form (also supported):**
+```json
+{
+  "adaptor": "kobotoolbox@4.2.7"
+}
+```
+
+**Default behavior (skip if already exists):**
+```json
+{
+  "adaptor": "@openfn/language-kobotoolbox@4.2.7"
+}
+```
+
+By default (`skip_if_exists: true`):
+- Checks database first for existing docs for this adaptor+version
+- If found, returns existing function list immediately without calling `adaptor_apis`
+- If not found, proceeds with normal fetch and upload flow
+- **Use case**: Idempotent bulk uploads, CI/CD pipelines, avoiding redundant processing
+
+**Force replacement (overwrite existing docs):**
+```json
+{
+  "adaptor": "@openfn/language-kobotoolbox@4.2.7",
+  "skip_if_exists": false
+}
+```
+
+When `skip_if_exists` is `false`:
+- Always fetches docs from `adaptor_apis`
+- Deletes any existing functions for this adaptor@version
+- Uploads the new functions to PostgreSQL
+
+**Via entry.py:**
+```bash
+python -m services.entry load_adaptor_docs -i services/load_adaptor_docs/tmp/test_upload_simple.json
+```
+
+**Via HTTP (requires running server):**
+```bash
+curl -X POST http://localhost:3000/services/load_adaptor_docs \
+  -H "Content-Type: application/json" \
+  -d '{"adaptor": "@openfn/language-kobotoolbox@4.2.7"}'
+```
+
+**Response (new upload):**
+```json
+{
+  "success": true,
+  "adaptor": "@openfn/language-kobotoolbox",
+  "version": "4.2.7",
+  "functions_uploaded": 7,
+  "function_list": [
+    "getDeploymentInfo",
+    "getForms",
+    "getSubmissions",
+    "http.get",
+    "http.post",
+    "http.put",
+    "http.request"
+  ]
+}
+```
+
+**Response (skipped, when docs already exist):**
+```json
+{
+  "success": true,
+  "adaptor": "@openfn/language-kobotoolbox",
+  "version": "4.2.7",
+  "skipped": true,
+  "functions_uploaded": 7,
+  "function_list": [
+    "getDeploymentInfo",
+    "getForms",
+    "getSubmissions",
+    "http.get",
+    "http.post",
+    "http.put",
+    "http.request"
+  ]
+}
+```
+
+**Response (error, when docs unavailable from adaptor_apis):**
+```json
+{
+  "code": 500,
+  "type": "ADAPTOR_API_ERROR",
+  "message": "Failed to fetch docs for @openfn/language-http@3.1.11"
+}
+```
+
+## Payload Schema
+
+**Required:**
+- **`adaptor`** (string): Adaptor name with version - accepts either:
+  - Full form: `"@openfn/language-kobotoolbox@4.2.7"`, `"@openfn/language-dhis2@4.2.10"`, etc.
+  - Short form: `"kobotoolbox@4.2.7"`, `"dhis2@4.2.10"`, etc.
+
+**Optional:**
+- **`skip_if_exists`** (boolean): If `true` (default), checks database first and returns existing data if found. If `false`, always fetches and replaces docs.
+
+### Behavior modes:
+
+**Default mode (`skip_if_exists: true` or not provided):**
+1. Check if any docs exist for this adaptor@version in the database
+2. If exists: Return the existing function list immediately (no API call, no replacement)
+3. If not exists: Call `adaptor_apis` service, filter and process the docs, then upload to PostgreSQL
+
+**Force replace mode (`skip_if_exists: false`):**
+1. Call `adaptor_apis` service to fetch the latest docs
+2. Filter and process the docs
+3. Delete any existing functions for this adaptor@version
+4. Upload new functions to PostgreSQL
+
+## Integration with Other Services
+
+This service populates the `adaptor_function_docs` table that is used by:
+
+- **`search_adaptor_docs`**: Queries the database to retrieve function documentation by adaptor/version, function name, or signature content
+- **`job_chat`**: Uses function signatures and documentation to provide context-aware code suggestions
+
+## Notes
+
+- **Skip behavior (default)**: By default (`skip_if_exists: true`), checks database first and returns existing data if found, avoiding redundant API calls and processing.
+- **Replace behavior (`skip_if_exists: false`)**: Re-uploading the same adaptor/version **deletes all existing functions** for that version first, then inserts the new data. This ensures no stale functions remain if the docs change.
+- **Idempotent**: Safe to run multiple times with the same data (with or without `skip_if_exists`)
+- **Scope handling**: Functions are stored with scope prefix (e.g., `util.attr`, `tracker.import`) or just name for global scope
+- **No vector search**: Designed for keyword and full-text search only
+- **Automatic table creation**: Creates `adaptor_function_docs` table if it doesn't exist
+- **Adaptor name normalization**: Adaptor names are stored with the full `@openfn/language-` prefix (e.g., `"@openfn/language-kobotoolbox"` not `"kobotoolbox"`)
