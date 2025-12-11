@@ -4,6 +4,12 @@
 
 ### Patch Changes
 
+- Fix server dependencies
+
+## 0.17.1
+
+### Patch Changes
+
 Fix an issue where the server fails to start
 
 ## 0.17.0
