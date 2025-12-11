@@ -235,7 +235,7 @@ def format_search_results(search_results):
         for result in search_results
     ])
 
-def build_old_prompt(content, history, context, rag=None, api_key=None, download_adaptor_docs=True):
+def build_old_prompt(content, history, context, rag=None, api_key=None, download_adaptor_docs=True, refresh_rag=False):
     retrieved_knowledge = {
         "search_results": [],
         "search_results_sections": [],
@@ -248,7 +248,8 @@ def build_old_prompt(content, history, context, rag=None, api_key=None, download
         }
     }
 
-    if rag:
+    # Run RAG if: (a) no RAG data provided, OR (b) refresh_rag flag is True
+    if rag and not refresh_rag:
         retrieved_knowledge = rag
     else:
       try:
@@ -270,5 +271,5 @@ def build_old_prompt(content, history, context, rag=None, api_key=None, download
     prompt = []
     prompt.extend(history)
     prompt.append({"role": "user", "content": content})
-      
+
     return (system_message, prompt, retrieved_knowledge)

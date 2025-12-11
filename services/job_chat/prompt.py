@@ -386,7 +386,7 @@ def format_search_results(search_results):
         for result in search_results
     ])
 
-def build_prompt(content, history, context, rag=None, api_key=None, stream_manager=None, download_adaptor_docs=True):
+def build_prompt(content, history, context, rag=None, api_key=None, stream_manager=None, download_adaptor_docs=True, refresh_rag=False):
     retrieved_knowledge = {
         "search_results": [],
         "search_results_sections": [],
@@ -399,7 +399,8 @@ def build_prompt(content, history, context, rag=None, api_key=None, stream_manag
         }
     }
 
-    if rag:
+    # Run RAG if: (a) no RAG data provided, OR (b) refresh_rag flag is True
+    if rag and not refresh_rag:
         retrieved_knowledge = rag
     else:
       stream_manager.send_thinking("Searching documentation...")
@@ -423,7 +424,7 @@ def build_prompt(content, history, context, rag=None, api_key=None, stream_manag
     prompt = []
     prompt.extend(history)
     prompt.append({"role": "user", "content": content})
-      
+
     return (system_message, prompt, retrieved_knowledge)
 
 def build_error_correction_prompt(content: str, error_message: str, old_code: str, new_code: str, full_code: str, text_explanation: str):
