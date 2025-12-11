@@ -1,5 +1,11 @@
 # apollo
 
+## 0.17.2
+
+### Patch Changes
+
+- Fix server dependencies
+
 ## 0.17.1
 
 ### Patch Changes
