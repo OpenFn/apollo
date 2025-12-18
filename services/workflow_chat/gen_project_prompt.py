@@ -10,7 +10,7 @@ config_loader = ConfigLoader(config_path=config_path, prompts_path=prompts_path)
 config = config_loader.config
 
 
-def _build_system_message(mode_config, existing_yaml=None):
+def build_system_message(mode_config, existing_yaml=None):
     """Build system message with mode-specific configuration."""
     system_message = config_loader.get_prompt("main_system_prompt").format(
         mode_specific_intro=config_loader.get_prompt(mode_config["intro"]),
@@ -74,7 +74,7 @@ def build_prompt(content, existing_yaml=None, errors=None, history=None, read_on
         }
         user_content = content
     
-    system_message = _build_system_message(mode_config, existing_yaml)
+    system_message = build_system_message(mode_config, existing_yaml)
     
     prompt = list(history)  # Create a copy
     prompt.append({"role": "user", "content": user_content})
