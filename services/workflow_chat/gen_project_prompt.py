@@ -1,6 +1,4 @@
-
 import os
-import json
 from .config_loader import ConfigLoader
 from .available_adaptors import get_adaptors_string
 
@@ -11,53 +9,74 @@ prompts_path = os.path.join(base_dir, "gen_project_prompts.yaml")
 config_loader = ConfigLoader(config_path=config_path, prompts_path=prompts_path)
 config = config_loader.config
 
-def chat_prompt(content, existing_yaml, history):
-    if not existing_yaml:
-        existing_yaml = ""
-    else:
-        existing_yaml = "\nFor context, the user is currently editing this YAML:\n" + existing_yaml
-    
-    system_message = config_loader.get_prompt("main_system_prompt")
-    system_message = system_message.format(
-        adaptors=get_adaptors_string(), 
-        mode_specific_intro=config_loader.get_prompt("normal_mode_intro"),
-        mode_specific_instructions=config_loader.get_prompt("normal_mode_instructions")
+
+def build_system_message(mode_config, existing_yaml=None):
+    """Build system message with mode-specific configuration."""
+    system_message = config_loader.get_prompt("main_system_prompt").format(
+        mode_specific_intro=config_loader.get_prompt(mode_config["intro"]),
+        yaml_structure=config_loader.get_prompt(mode_config["yaml_structure"]),
+        general_knowledge=config_loader.get_prompt("general_knowledge").format(
+            adaptors=get_adaptors_string()
+        ),
+        output_format=config_loader.get_prompt(mode_config["output_format"]),
+        mode_specific_answering_instructions=config_loader.get_prompt(
+            mode_config["answering_instructions"]
+        )
     )
-    system_message += existing_yaml
-
-    prompt = []
-    prompt.extend(history)
-    prompt.append({"role": "user", "content": content})
-      
-    return (system_message, prompt)
-
-def error_prompt(content, existing_yaml, errors, history):
-    send_event("STATUS", "Processing error...")
-    if not existing_yaml:
-        existing_yaml = ""
-    else:
-        existing_yaml = "\nThis is the YAML causing the error:\n" + existing_yaml
-
-    if not content:
-        content = ""
     
-    system_message = config_loader.get_prompt("main_system_prompt")
-    system_message = system_message.format(
-        adaptors=get_adaptors_string(),
-        mode_specific_intro=config_loader.get_prompt("error_mode_intro"), 
-        mode_specific_instructions=config_loader.get_prompt("error_mode_instructions")
-    )
-    system_message += existing_yaml
-    content += "\nThis is the error message:\n" + errors
+    if existing_yaml:
+        system_message += mode_config["yaml_prefix"] + existing_yaml
     
-    prompt = []
-    prompt.extend(history)
-    prompt.append({"role": "user", "content": content})
-      
-    return (system_message, prompt)
+    return system_message
 
-def build_prompt(content, existing_yaml, errors, history):
-    if errors:
-        return error_prompt(content, existing_yaml, errors, history)
+
+def build_prompt(content, existing_yaml=None, errors=None, history=None, read_only=False):
+    """
+    Build a prompt for the LLM based on mode and context.
+    
+    Args:
+        content: User message content
+        existing_yaml: Current YAML being edited (optional)
+        errors: Error messages if in error mode (optional)
+        history: Conversation history (optional)
+        read_only: Whether in read-only mode
+    
+    Returns:
+        Tuple of (system_message, prompt_messages)
+    """
+    history = history or []
+    
+    if read_only:
+        mode_config = {
+            "intro": "normal_mode_intro",
+            "yaml_structure": "yaml_structure_without_ids",
+            "output_format": "unstructured_output_format",
+            "answering_instructions": "readonly_mode_answering_instructions",
+            "yaml_prefix": "\nFor context, the user is viewing this read-only YAML:\n"
+        }
+        user_content = content
+    elif errors:
+        mode_config = {
+            "intro": "error_mode_intro",
+            "yaml_structure": "yaml_structure_with_ids",
+            "output_format": "json_output_format",
+            "answering_instructions": "error_mode_answering_instructions",
+            "yaml_prefix": "\nThis is the YAML causing the error:\n"
+        }
+        user_content = f"{content}\nThis is the error message:\n{errors}" if content else f"\nThis is the error message:\n{errors}"
     else:
-        return chat_prompt(content, existing_yaml, history)
+        mode_config = {
+            "intro": "normal_mode_intro",
+            "yaml_structure": "yaml_structure_with_ids",
+            "output_format": "json_output_format",
+            "answering_instructions": "normal_mode_answering_instructions",
+            "yaml_prefix": "\nFor context, the user is currently editing this YAML:\n"
+        }
+        user_content = content
+    
+    system_message = build_system_message(mode_config, existing_yaml)
+    
+    prompt = list(history)  # Create a copy
+    prompt.append({"role": "user", "content": user_content})
+    
+    return (system_message, prompt)

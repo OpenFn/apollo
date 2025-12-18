@@ -1,5 +1,6 @@
 import pytest
 from workflow_chat.workflow_chat import AnthropicClient, ChatConfig
+from workflow_chat.gen_project_prompt import build_prompt
 
 
 @pytest.fixture
@@ -91,15 +92,72 @@ def test_sanitize_job_names_preserves_allowed_characters(client):
 
 def test_sanitize_job_names_handles_empty_data(client):
     """Test that function handles edge cases gracefully."""
-    
+
     # Should not raise exceptions and return without error
     result1 = client.sanitize_job_names(None)
     result2 = client.sanitize_job_names({})
     result3 = client.sanitize_job_names({"jobs": {}})
-    
+
     assert result1 is None
     assert result2 is None
     assert result3 is None
+
+
+def test_build_prompt_normal_mode():
+    """Test that normal mode uses correct configuration."""
+    system_msg, prompt = build_prompt(
+        content='Create a workflow',
+        existing_yaml='name: test-workflow',
+        history=[{'role': 'user', 'content': 'Hello'}]
+    )
+
+    # Should use normal mode configuration
+    assert 'talk to a client with the goal of converting' in system_msg  # normal_mode_intro
+    assert 'You can either' in system_msg  # normal_mode_answering_instructions
+    assert 'user is currently editing this YAML' in system_msg
+    assert 'name: test-workflow' in system_msg
+
+    # Prompt structure
+    assert len(prompt) == 2
+    assert prompt[-1]['content'] == 'Create a workflow'
+
+
+def test_build_prompt_error_mode():
+    """Test that error mode uses correct configuration and appends error message."""
+    system_msg, prompt = build_prompt(
+        content='Fix the workflow',
+        existing_yaml='name: broken-workflow',
+        errors='Invalid trigger type',
+        history=[]
+    )
+
+    # Should use error mode configuration
+    assert 'Your previous suggestion produced an invalid' in system_msg  # error_mode_intro
+    assert 'Answer with BOTH the' in system_msg  # error_mode_answering_instructions
+    assert 'YAML causing the error' in system_msg
+    assert 'name: broken-workflow' in system_msg
+
+    # User content should have error appended
+    assert prompt[-1]['content'] == 'Fix the workflow\nThis is the error message:\nInvalid trigger type'
+
+
+def test_build_prompt_readonly_mode():
+    """Test that readonly mode uses unstructured output format."""
+    system_msg, prompt = build_prompt(
+        content='What does this workflow do?',
+        existing_yaml='name: readonly-workflow',
+        read_only=True,
+        history=[]
+    )
+
+    # Should use readonly mode configuration
+    assert 'Read-only Mode' in system_msg  # unstructured_output_format
+    assert 'triple-backticked YAML code blocks' in system_msg  # readonly_mode_answering_instructions
+    assert 'user is viewing this read-only YAML' in system_msg
+    assert 'name: readonly-workflow' in system_msg
+
+    # User content should be unchanged
+    assert prompt[-1]['content'] == 'What does this workflow do?'
 
 
 if __name__ == "__main__":
