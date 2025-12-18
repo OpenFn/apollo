@@ -39,7 +39,8 @@ class Payload:
     history: Optional[List[Dict[str, str]]] = None
     api_key: Optional[str] = None
     stream: Optional[bool] = False
-    
+    read_only: Optional[bool] = False
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
         """
@@ -52,7 +53,8 @@ class Payload:
             existing_yaml=data.get("existing_yaml"),
             history=data.get("history", []),
             api_key=data.get("api_key"),
-            stream=data.get("stream", False)
+            stream=data.get("stream", False),
+            read_only=data.get("read_only", False)
         )
 
 
@@ -86,6 +88,7 @@ class AnthropicClient:
         errors: Optional[str] = None,
         history: Optional[List[Dict[str, str]]] = None,
         stream: Optional[bool] = False,
+        read_only: Optional[bool] = False,
     ) -> ChatResponse:
         """Generate a response using the Claude API. Retry up to 2 times if YAML/JSON parsing fails."""
         
@@ -107,10 +110,11 @@ class AnthropicClient:
             
             with sentry_sdk.start_span(description="build_prompt"):
                 system_message, prompt = build_prompt(
-                    content=content, 
-                    existing_yaml=processed_existing_yaml, 
-                    errors=errors, 
-                    history=history
+                    content=content,
+                    existing_yaml=processed_existing_yaml,
+                    errors=errors,
+                    history=history,
+                    read_only=read_only
                 )
 
             # Add prefilled opening brace for JSON response
@@ -469,7 +473,12 @@ def main(data_dict: dict) -> dict:
         client = AnthropicClient(config)
 
         result = client.generate(
-            content=data.content, existing_yaml=data.existing_yaml, errors=data.errors, history=data.history, stream=data.stream
+            content=data.content,
+            existing_yaml=data.existing_yaml,
+            errors=data.errors,
+            history=data.history,
+            stream=data.stream,
+            read_only=data.read_only
         )
 
         return {
