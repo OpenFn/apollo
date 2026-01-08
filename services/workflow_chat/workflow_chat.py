@@ -39,7 +39,8 @@ class Payload:
     history: Optional[List[Dict[str, str]]] = None
     api_key: Optional[str] = None
     stream: Optional[bool] = False
-    
+    read_only: Optional[bool] = False
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
         """
@@ -52,7 +53,8 @@ class Payload:
             existing_yaml=data.get("existing_yaml"),
             history=data.get("history", []),
             api_key=data.get("api_key"),
-            stream=data.get("stream", False)
+            stream=data.get("stream", False),
+            read_only=data.get("read_only", False)
         )
 
 
@@ -86,6 +88,7 @@ class AnthropicClient:
         errors: Optional[str] = None,
         history: Optional[List[Dict[str, str]]] = None,
         stream: Optional[bool] = False,
+        read_only: Optional[bool] = False,
     ) -> ChatResponse:
         """Generate a response using the Claude API. Retry up to 2 times if YAML/JSON parsing fails."""
         
@@ -94,23 +97,28 @@ class AnthropicClient:
 
             stream_manager = StreamManager(model=self.config.model, stream=stream)
             
-            # Extract and preserve existing components
+            # Extract and preserve existing components (skip in read-only mode)
             preserved_values = {}
             processed_existing_yaml = existing_yaml
-            
+
             if existing_yaml and existing_yaml.strip():
-                try:
-                    yaml_data = yaml.safe_load(existing_yaml)
-                    preserved_values, processed_existing_yaml = self.extract_and_preserve_components(yaml_data)
-                except Exception as e:
-                    logger.warning(f"Could not parse existing YAML for component extraction: {e}")
+                if not read_only:
+                    try:
+                        yaml_data = yaml.safe_load(existing_yaml)
+                        preserved_values, processed_existing_yaml = self.extract_and_preserve_components(yaml_data)
+                    except Exception as e:
+                        logger.warning(f"Could not parse existing YAML for component extraction: {e}")
+                else:
+                    # In read-only mode, remove IDs to prevent regurgitation
+                    processed_existing_yaml = self.remove_ids_from_yaml(existing_yaml)
             
             with sentry_sdk.start_span(description="build_prompt"):
                 system_message, prompt = build_prompt(
-                    content=content, 
-                    existing_yaml=processed_existing_yaml, 
-                    errors=errors, 
-                    history=history
+                    content=content,
+                    existing_yaml=processed_existing_yaml,
+                    errors=errors,
+                    history=history,
+                    read_only=read_only
                 )
 
             # Add prefilled opening brace for JSON response
@@ -203,6 +211,28 @@ class AnthropicClient:
 
                 # Otherwise, log and retry
                 logger.warning(f"YAML parsing failed, retrying generation (attempt {attempt+1}/{max_retries})")
+
+    def remove_ids_from_yaml(self, yaml_str):
+        """Remove all 'id' fields from YAML to prevent ID regurgitation in read-only mode."""
+        if not yaml_str or not yaml_str.strip():
+            return yaml_str
+        try:
+            yaml_data = yaml.safe_load(yaml_str)
+
+            def remove_ids(obj):
+                if isinstance(obj, dict):
+                    obj.pop("id", None)
+                    for v in obj.values():
+                        remove_ids(v)
+                elif isinstance(obj, list):
+                    for item in obj:
+                        remove_ids(item)
+
+            remove_ids(yaml_data)
+            return yaml.dump(yaml_data, sort_keys=False, default_flow_style=False)
+        except Exception as e:
+            logger.warning(f"Could not remove IDs from YAML: {e}")
+            return yaml_str
 
     def sanitize_job_names(self, yaml_data):
         """
@@ -469,7 +499,12 @@ def main(data_dict: dict) -> dict:
         client = AnthropicClient(config)
 
         result = client.generate(
-            content=data.content, existing_yaml=data.existing_yaml, errors=data.errors, history=data.history, stream=data.stream
+            content=data.content,
+            existing_yaml=data.existing_yaml,
+            errors=data.errors,
+            history=data.history,
+            stream=data.stream,
+            read_only=data.read_only
         )
 
         return {
