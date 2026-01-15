@@ -51,9 +51,10 @@ class Payload:
     errors: Optional[str] = None
     existing_yaml: Optional[str] = None
     history: Optional[List[Dict[str, str]]] = None
+    context: Optional[dict] = None
     api_key: Optional[str] = None
     stream: Optional[bool] = False
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
         """
@@ -65,6 +66,7 @@ class Payload:
             errors=data.get("errors"),
             existing_yaml=data.get("existing_yaml"),
             history=data.get("history", []),
+            context=data.get("context"),
             api_key=data.get("api_key"),
             stream=data.get("stream", False)
         )
@@ -484,9 +486,17 @@ def main(data_dict: dict) -> dict:
 
         data = Payload.from_dict(data_dict)
 
-        # Extract page data from meta
-        input_meta = data_dict.get("meta", {})
-        current_page = input_meta.get("current_page")
+        # Construct current_page from context
+        current_page = None
+        if data.context:
+            page_name = data.context.get("page_name")
+
+            # Only construct page if we have page_name
+            if page_name:
+                current_page = {
+                    "type": "workflow",
+                    "name": page_name
+                }
 
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
@@ -500,15 +510,21 @@ def main(data_dict: dict) -> dict:
             current_page=current_page
         )
 
-        return {
+        # Build response with meta
+        response_dict = {
             "response": result.content,
             "response_yaml": result.content_yaml,
             "history": result.history,
-            "usage": result.usage,
-            "meta": {
+            "usage": result.usage
+        }
+
+        # Only add meta with last_page if we have current_page
+        if current_page:
+            response_dict["meta"] = {
                 "last_page": current_page
             }
-        }
+
+        return response_dict
 
     except ValueError as e:
         raise ApolloError(400, str(e), type="BAD_REQUEST")

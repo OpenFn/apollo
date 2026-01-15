@@ -14,7 +14,7 @@ from anthropic import (
     InternalServerError,
 )
 import sentry_sdk
-from util import ApolloError, create_logger, apollo
+from util import ApolloError, create_logger
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
 from streaming_util import StreamManager
@@ -473,9 +473,31 @@ def main(data_dict: dict) -> dict:
 
         data = Payload.from_dict(data_dict)
 
-        # Extract page data from meta
+        # Construct current_page from context
+        current_page = None
+        if data.context:
+            page_name = data.context.get("page_name")
+            adaptor_string = data.context.get("adaptor")
+
+            # Extract short adaptor name if present
+            adaptor_short_name = None
+            if adaptor_string:
+                try:
+                    adaptor = AdaptorSpecifier(adaptor_string)
+                    adaptor_short_name = adaptor.short_name
+                except Exception as e:
+                    logger.warning(f"Failed to parse adaptor string '{adaptor_string}': {e}")
+
+            # Only construct page if we have at least page_name or adaptor
+            if page_name or adaptor_short_name:
+                current_page = {
+                    "type": "job_code",
+                    "name": page_name,
+                    "adaptor": adaptor_short_name
+                }
+
+        # Extract last_page from meta
         input_meta = data_dict.get("meta", {})
-        current_page = input_meta.get("current_page")
         last_page = input_meta.get("last_page")
         rag_data = input_meta.get("rag")
 
@@ -502,16 +524,19 @@ def main(data_dict: dict) -> dict:
             "response": result.response,
             "suggested_code": result.suggested_code,
             "history": result.history,
-            "usage": result.usage,
-            "meta": {
-                "last_page": current_page,
-                "rag": result.rag
-            }
+            "usage": result.usage
         }
+
+        # Build meta dict - always include rag for backward compatibility
+        meta = {"rag": result.rag}
+        if current_page:
+            meta["last_page"] = current_page
+
+        response_dict["meta"] = meta
 
         if result.diff:
             response_dict["diff"] = result.diff
-        
+
         return response_dict
 
     except ValueError as e:
