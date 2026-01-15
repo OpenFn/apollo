@@ -26,6 +26,27 @@ from streaming_util import StreamManager
 logger = create_logger("workflow_chat")
 
 
+# Schema for structured output
+WORKFLOW_CHAT_OUTPUT_SCHEMA = {
+    "type": "json_schema",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "text": {
+                "type": "string",
+                "description": "Conversational explanation or response to user"
+            },
+            "yaml": {
+                "type": ["string", "null"],
+                "description": "YAML workflow definition, or null if no workflow to generate"
+            }
+        },
+        "required": ["text", "yaml"],
+        "additionalProperties": False
+    }
+}
+
+
 # Helper function for page navigation
 def add_page_prefix(content: str, page: Optional[dict]) -> str:
     """Add [pg:...] prefix to message."""
@@ -124,14 +145,11 @@ class AnthropicClient:
             
             with sentry_sdk.start_span(description="build_prompt"):
                 system_message, prompt = build_prompt(
-                    content=content, 
-                    existing_yaml=processed_existing_yaml, 
-                    errors=errors, 
+                    content=content,
+                    existing_yaml=processed_existing_yaml,
+                    errors=errors,
                     history=history
                 )
-
-            # Add prefilled opening brace for JSON response
-            prompt.append({"role": "assistant", "content": '{\n  "text": "'})
 
             accumulated_usage = {
                 "cache_creation_input_tokens": 0,
@@ -155,7 +173,9 @@ class AnthropicClient:
                             max_tokens=self.config.max_tokens,
                             messages=prompt,
                             model=self.config.model,
-                            system=system_message
+                            system=system_message,
+                            betas=["structured-outputs-2025-11-13"],
+                            output_format=WORKFLOW_CHAT_OUTPUT_SCHEMA
                         ) as stream_obj:
                             for event in stream_obj:
                                 accumulated_response, text_complete, sent_length = self.process_stream_event(
@@ -176,7 +196,12 @@ class AnthropicClient:
                     else:
                         logger.info("Making non-streaming API call")
                         message = self.client.messages.create(
-                            max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
+                            max_tokens=self.config.max_tokens,
+                            messages=prompt,
+                            model=self.config.model,
+                            system=system_message,
+                            betas=["structured-outputs-2025-11-13"],
+                            output_format=WORKFLOW_CHAT_OUTPUT_SCHEMA
                         )
 
                 # Track usage from this attempt
@@ -194,9 +219,6 @@ class AnthropicClient:
                         logger.warning(f"Unhandled content type: {content_block.type}")
 
                 response = "\n\n".join(response_parts)
-
-                # Add back the prefilled opening brace
-                response = '{\n  "text": "' + response
 
                 with sentry_sdk.start_span(description="parse_and_format_yaml"):
 
