@@ -26,6 +26,20 @@ from streaming_util import StreamManager
 logger = create_logger("workflow_chat")
 
 
+# Helper function for page navigation
+def add_page_prefix(content: str, page: Optional[dict]) -> str:
+    """Add [pg:...] prefix to message."""
+    if not page:
+        return content
+
+    prefix_parts = [page.get('type', ''), page.get('name', '')]
+    if page.get('adaptor'):
+        prefix_parts.append(page['adaptor'])
+
+    prefix = f"[pg:{'/'.join(prefix_parts)}]"
+    return f"{prefix} {content}"
+
+
 @dataclass
 class Payload:
     """
@@ -86,6 +100,7 @@ class AnthropicClient:
         errors: Optional[str] = None,
         history: Optional[List[Dict[str, str]]] = None,
         stream: Optional[bool] = False,
+        current_page: Optional[dict] = None,
     ) -> ChatResponse:
         """Generate a response using the Claude API. Retry up to 2 times if YAML/JSON parsing fails."""
         
@@ -187,9 +202,12 @@ class AnthropicClient:
 
                 # If YAML parsing succeeded or we're on the last attempt, return the result
                 if response_yaml is not None or attempt == max_retries:
+                    # Add prefix to content when building history
+                    prefixed_content = add_page_prefix(content, current_page)
+
                     updated_history = history + [
-                        {"role": "user", "content": content},
-                        {"role": "assistant", "content": response},
+                        {"role": "user", "content": prefixed_content},
+                        {"role": "assistant", "content": response_text},
                     ]
 
                     stream_manager.end_stream()
@@ -463,13 +481,23 @@ def main(data_dict: dict) -> dict:
         sentry_sdk.set_context("request_data", {
             k: v for k, v in data_dict.items() if k != "api_key"
             })
-        
+
         data = Payload.from_dict(data_dict)
+
+        # Extract page data from meta
+        input_meta = data_dict.get("meta", {})
+        current_page = input_meta.get("current_page")
+
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
 
         result = client.generate(
-            content=data.content, existing_yaml=data.existing_yaml, errors=data.errors, history=data.history, stream=data.stream
+            content=data.content,
+            existing_yaml=data.existing_yaml,
+            errors=data.errors,
+            history=data.history,
+            stream=data.stream,
+            current_page=current_page
         )
 
         return {
@@ -477,6 +505,9 @@ def main(data_dict: dict) -> dict:
             "response_yaml": result.content_yaml,
             "history": result.history,
             "usage": result.usage,
+            "meta": {
+                "last_page": current_page
+            }
         }
 
     except ValueError as e:

@@ -21,6 +21,30 @@ from streaming_util import StreamManager
 
 logger = create_logger("job_chat")
 
+# Helper functions for page navigation
+def add_page_prefix(content: str, page: Optional[dict]) -> str:
+    """Add [pg:...] prefix to message."""
+    if not page:
+        return content
+
+    prefix_parts = [page.get('type', ''), page.get('name', '')]
+    if page.get('adaptor'):
+        prefix_parts.append(page['adaptor'])
+
+    prefix = f"[pg:{'/'.join(prefix_parts)}]"
+    return f"{prefix} {content}"
+
+def has_navigated(current_page: Optional[dict], last_page: Optional[dict]) -> bool:
+    """Check if user navigated to a different page."""
+    if not current_page or not last_page:
+        return False
+
+    return (
+        current_page.get("type") != last_page.get("type") or
+        current_page.get("name") != last_page.get("name") or
+        current_page.get("adaptor") != last_page.get("adaptor")
+    )
+
 @dataclass
 class Payload:
     """
@@ -90,7 +114,8 @@ class AnthropicClient:
         suggest_code: Optional[bool] = None,
         stream: Optional[bool] = False,
         download_adaptor_docs: Optional[bool] = True,
-        refresh_rag: Optional[bool] = False
+        refresh_rag: Optional[bool] = False,
+        current_page: Optional[dict] = None
     ) -> ChatResponse:
         """
         Generate a response using the Claude API with optional streaming.
@@ -198,8 +223,11 @@ class AnthropicClient:
                 suggested_code = None
                 diff = None
 
+            # Add prefix to content when building history
+            prefixed_content = add_page_prefix(content, current_page)
+
             updated_history = history + [
-                {"role": "user", "content": content},
+                {"role": "user", "content": prefixed_content},
                 {"role": "assistant", "content": text_response},
             ]
 
@@ -445,26 +473,40 @@ def main(data_dict: dict) -> dict:
 
         data = Payload.from_dict(data_dict)
 
+        # Extract page data from meta
+        input_meta = data_dict.get("meta", {})
+        current_page = input_meta.get("current_page")
+        last_page = input_meta.get("last_page")
+        rag_data = input_meta.get("rag")
+
+        # Detect navigation
+        user_navigated = has_navigated(current_page, last_page)
+        should_refresh_rag = data.refresh_rag or user_navigated
+
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
         result = client.generate(
             content=data.content,
             history=data_dict.get("history", []),
             context=data.context,
-            rag=data_dict.get("meta", {}).get("rag"),
+            rag=rag_data,
             suggest_code=data.suggest_code,
             stream=data.stream,
             download_adaptor_docs=data.download_adaptor_docs,
-            refresh_rag=data.refresh_rag
+            refresh_rag=should_refresh_rag,
+            current_page=current_page
         )
-        
+
 
         response_dict = {
             "response": result.response,
             "suggested_code": result.suggested_code,
-            "history": result.history, 
-            "usage": result.usage, 
-            "meta": {"rag": result.rag}
+            "history": result.history,
+            "usage": result.usage,
+            "meta": {
+                "last_page": current_page,
+                "rag": result.rag
+            }
         }
 
         if result.diff:
