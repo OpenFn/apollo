@@ -4,10 +4,9 @@ on:
   push:
     branches:
       - main
-      - auto-tag-gh-action
 
 env:
-  TAG_PREFIX: "TEST@"
+  TAG_PREFIX: "@openfn/apollo@"
 
 jobs:
   tag-release:
