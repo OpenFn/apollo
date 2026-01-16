@@ -37,17 +37,23 @@ jobs:
             echo "Tag ${TAG_NAME} does not exist"
           fi
 
-      - name: Create and push tag
-        if: steps.check_tag.outputs.exists == 'false'
       - name: Setup GH user
-        run: git config user.name ${{ secrets.GH_USER }}
+        if: steps.check_tag.outputs.exists == 'false'
+        run: git config user.name "${{ secrets.GH_USER }}"
+
       - name: Setup GH email
-        run: git config user.email ${{ secrets.GH_EMAIL }}
+        if: steps.check_tag.outputs.exists == 'false'
+        run: git config user.email "${{ secrets.GH_EMAIL }}"
+
       - name: Generate tag
+        if: steps.check_tag.outputs.exists == 'false'
         run: |
           TAG_NAME="${{ steps.check_tag.outputs.tag_name }}"
           git tag "${TAG_NAME}"
+
       - name: Push latest tag
+        if: steps.check_tag.outputs.exists == 'false'
         run: |
+          TAG_NAME="${{ steps.check_tag.outputs.tag_name }}"
           git push origin "${TAG_NAME}"
           echo "Successfully created and pushed tag: ${TAG_NAME}"
