@@ -14,7 +14,7 @@ from anthropic import (
     InternalServerError,
 )
 import sentry_sdk
-from util import ApolloError, create_logger
+from util import ApolloError, create_logger, AdaptorSpecifier
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
 from streaming_util import StreamManager
@@ -94,9 +94,16 @@ def add_page_prefix(content: str, page: Optional[dict]) -> str:
     if not page:
         return content
 
-    prefix_parts = [page.get('type', ''), page.get('name', '')]
+    prefix_parts = []
+    if page.get('type'):
+        prefix_parts.append(str(page['type']))
+    if page.get('name'):
+        prefix_parts.append(str(page['name']))
     if page.get('adaptor'):
-        prefix_parts.append(page['adaptor'])
+        prefix_parts.append(str(page['adaptor']))
+
+    if not prefix_parts:
+        return content
 
     prefix = f"[pg:{'/'.join(prefix_parts)}]"
     return f"{prefix} {content}"
@@ -150,7 +157,7 @@ class Payload:
 
 @dataclass
 class ChatConfig:
-    model: str = "claude-sonnet-4-20250514"
+    model: str = "claude-sonnet-4-5-20250929"
     max_tokens: int = 16384
     api_key: Optional[str] = None
 
@@ -237,7 +244,9 @@ class AnthropicClient:
                         stream_params["betas"] = ["structured-outputs-2025-11-13"]
                         stream_params["output_format"] = CODE_SUGGESTIONS_OUTPUT_SCHEMA
 
-                    with self.client.messages.stream(**stream_params) as stream_obj:
+                    # Use beta client for structured outputs, regular client otherwise
+                    stream_method = self.client.beta.messages.stream if suggest_code else self.client.messages.stream
+                    with stream_method(**stream_params) as stream_obj:
                         for event in stream_obj:
                             accumulated_response, text_complete, sent_length = self.process_stream_event(
                                 event,
@@ -271,7 +280,9 @@ class AnthropicClient:
                         create_params["betas"] = ["structured-outputs-2025-11-13"]
                         create_params["output_format"] = CODE_SUGGESTIONS_OUTPUT_SCHEMA
 
-                    message = self.client.messages.create(**create_params)
+                    # Use beta client for structured outputs, regular client otherwise
+                    create_method = self.client.beta.messages.create if suggest_code else self.client.messages.create
+                    message = create_method(**create_params)
 
             if hasattr(message, "usage"):
                 if message.usage.cache_creation_input_tokens:
@@ -281,10 +292,8 @@ class AnthropicClient:
 
             response_parts = []
             for content_block in message.content:
-                if content_block.type == "text":
+                if content_block.type == "text" and content_block.text is not None:
                     response_parts.append(content_block.text)
-                else:
-                    logger.warning(f"Unhandled content type: {content_block.type}")
 
             response = "\n\n".join(response_parts)
 
@@ -494,7 +503,7 @@ class AnthropicClient:
                 full_code=full_code,
                 text_explanation=text_explanation
             )
-            message = self.client.messages.create(
+            message = self.client.beta.messages.create(
                 max_tokens=16384,
                 messages=prompt,
                 model=self.config.model,
@@ -503,7 +512,7 @@ class AnthropicClient:
                 output_format=ERROR_CORRECTION_OUTPUT_SCHEMA
             )
 
-            response = "\n\n".join([block.text for block in message.content if block.type == "text"])
+            response = "\n\n".join([block.text for block in message.content if block.type == "text" and block.text is not None])
             correction_data = json.loads(response)
 
             corrected_old = correction_data.get("corrected_old_code")
@@ -571,9 +580,11 @@ def main(data_dict: dict) -> dict:
             if page_name or adaptor_short_name:
                 current_page = {
                     "type": "job_code",
-                    "name": page_name,
-                    "adaptor": adaptor_short_name
+                    "name": page_name
                 }
+                # Only add adaptor if we successfully extracted it
+                if adaptor_short_name:
+                    current_page["adaptor"] = adaptor_short_name
 
         # Extract last_page from meta
         input_meta = data_dict.get("meta", {})

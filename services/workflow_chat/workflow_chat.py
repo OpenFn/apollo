@@ -53,9 +53,16 @@ def add_page_prefix(content: str, page: Optional[dict]) -> str:
     if not page:
         return content
 
-    prefix_parts = [page.get('type', ''), page.get('name', '')]
+    prefix_parts = []
+    if page.get('type'):
+        prefix_parts.append(str(page['type']))
+    if page.get('name'):
+        prefix_parts.append(str(page['name']))
     if page.get('adaptor'):
-        prefix_parts.append(page['adaptor'])
+        prefix_parts.append(str(page['adaptor']))
+
+    if not prefix_parts:
+        return content
 
     prefix = f"[pg:{'/'.join(prefix_parts)}]"
     return f"{prefix} {content}"
@@ -95,7 +102,7 @@ class Payload:
 
 @dataclass
 class ChatConfig:
-    model: str = "claude-sonnet-4-20250514"
+    model: str = "claude-sonnet-4-5-20250929"
     max_tokens: int = 8192
     api_key: Optional[str] = None
 
@@ -169,7 +176,7 @@ class AnthropicClient:
                         sent_length = 0
                         accumulated_response = ""
                                             
-                        with self.client.messages.stream(
+                        with self.client.beta.messages.stream(
                             max_tokens=self.config.max_tokens,
                             messages=prompt,
                             model=self.config.model,
@@ -195,7 +202,7 @@ class AnthropicClient:
 
                     else:
                         logger.info("Making non-streaming API call")
-                        message = self.client.messages.create(
+                        message = self.client.beta.messages.create(
                             max_tokens=self.config.max_tokens,
                             messages=prompt,
                             model=self.config.model,
@@ -213,10 +220,8 @@ class AnthropicClient:
 
                 response_parts = []
                 for content_block in message.content:
-                    if content_block.type == "text":
+                    if content_block.type == "text" and content_block.text is not None:
                         response_parts.append(content_block.text)
-                    else:
-                        logger.warning(f"Unhandled content type: {content_block.type}")
 
                 response = "\n\n".join(response_parts)
 
