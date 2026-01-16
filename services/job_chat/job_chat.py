@@ -22,72 +22,6 @@ from streaming_util import StreamManager
 logger = create_logger("job_chat")
 
 
-# Schema for code suggestions mode
-CODE_SUGGESTIONS_OUTPUT_SCHEMA = {
-    "type": "json_schema",
-    "schema": {
-        "type": "object",
-        "properties": {
-            "text_answer": {
-                "type": "string",
-                "description": "Conversational explanation or response to user"
-            },
-            "code_edits": {
-                "type": "array",
-                "description": "List of code edit operations to apply",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "action": {
-                            "type": "string",
-                            "enum": ["replace", "rewrite"],
-                            "description": "Type of edit: 'replace' for exact match, 'rewrite' for full replacement"
-                        },
-                        "old_code": {
-                            "type": "string",
-                            "description": "Exact code string to find (for replace action)"
-                        },
-                        "new_code": {
-                            "type": "string",
-                            "description": "New code to insert"
-                        }
-                    },
-                    "required": ["action", "old_code", "new_code"],
-                    "additionalProperties": False
-                }
-            }
-        },
-        "required": ["text_answer", "code_edits"],
-        "additionalProperties": False
-    }
-}
-
-
-# Schema for error correction mode
-ERROR_CORRECTION_OUTPUT_SCHEMA = {
-    "type": "json_schema",
-    "schema": {
-        "type": "object",
-        "properties": {
-            "explanation": {
-                "type": "string",
-                "description": "1-sentence explanation of the correction"
-            },
-            "corrected_old_code": {
-                "type": "string",
-                "description": "Corrected old code with proper context"
-            },
-            "corrected_new_code": {
-                "type": "string",
-                "description": "Corrected new code"
-            }
-        },
-        "required": ["explanation", "corrected_old_code", "corrected_new_code"],
-        "additionalProperties": False
-    }
-}
-
-
 # Helper functions for page navigation
 def add_page_prefix(content: str, page: Optional[dict]) -> str:
     """Add [pg:...] prefix to message."""
@@ -214,6 +148,8 @@ class AnthropicClient:
                         download_adaptor_docs=download_adaptor_docs,
                         refresh_rag=refresh_rag
                     )
+                    prompt.append({"role": "assistant", "content": '{\n  "text_answer": "'})
+
                 else:
                     system_message, prompt, retrieved_knowledge = build_old_prompt(
                         content=content,
@@ -232,21 +168,12 @@ class AnthropicClient:
                     sent_length = 0
                     accumulated_response = ""
 
-                    stream_params = {
-                        "max_tokens": self.config.max_tokens,
-                        "messages": prompt,
-                        "model": self.config.model,
-                        "system": system_message
-                    }
-
-                    # Add structured outputs for code suggestions mode
-                    if suggest_code:
-                        stream_params["betas"] = ["structured-outputs-2025-11-13"]
-                        stream_params["output_format"] = CODE_SUGGESTIONS_OUTPUT_SCHEMA
-
-                    # Use beta client for structured outputs, regular client otherwise
-                    stream_method = self.client.beta.messages.stream if suggest_code else self.client.messages.stream
-                    with stream_method(**stream_params) as stream_obj:
+                    with self.client.messages.stream(
+                        max_tokens=self.config.max_tokens,
+                        messages=prompt,
+                        model=self.config.model,
+                        system=system_message
+                    ) as stream_obj:
                         for event in stream_obj:
                             accumulated_response, text_complete, sent_length = self.process_stream_event(
                                 event,
@@ -268,21 +195,9 @@ class AnthropicClient:
 
                 else:
                     logger.info("Making non-streaming API call")
-                    create_params = {
-                        "max_tokens": self.config.max_tokens,
-                        "messages": prompt,
-                        "model": self.config.model,
-                        "system": system_message
-                    }
-
-                    # Add structured outputs for code suggestions mode
-                    if suggest_code:
-                        create_params["betas"] = ["structured-outputs-2025-11-13"]
-                        create_params["output_format"] = CODE_SUGGESTIONS_OUTPUT_SCHEMA
-
-                    # Use beta client for structured outputs, regular client otherwise
-                    create_method = self.client.beta.messages.create if suggest_code else self.client.messages.create
-                    message = create_method(**create_params)
+                    message = self.client.messages.create(
+                        max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
+                    )
 
             if hasattr(message, "usage"):
                 if message.usage.cache_creation_input_tokens:
@@ -292,10 +207,15 @@ class AnthropicClient:
 
             response_parts = []
             for content_block in message.content:
-                if content_block.type == "text" and content_block.text is not None:
+                if content_block.type == "text":
                     response_parts.append(content_block.text)
+                else:
+                    logger.warning(f"Unhandled content type: {content_block.type}")
 
             response = "\n\n".join(response_parts)
+
+            if suggest_code is True:
+                response = '{\n  "text_answer": "' + response # Add back the prefilled opening brace
 
             if suggest_code is True:
                 # Parse JSON response and apply code edits
@@ -503,16 +423,16 @@ class AnthropicClient:
                 full_code=full_code,
                 text_explanation=text_explanation
             )
-            message = self.client.beta.messages.create(
+            prompt.append({"role": "assistant", "content": '{\n  "explanation": "'})
+            message = self.client.messages.create(
                 max_tokens=16384,
                 messages=prompt,
                 model=self.config.model,
-                system=system_message,
-                betas=["structured-outputs-2025-11-13"],
-                output_format=ERROR_CORRECTION_OUTPUT_SCHEMA
+                system=system_message
             )
 
-            response = "\n\n".join([block.text for block in message.content if block.type == "text" and block.text is not None])
+            response = "\n\n".join([block.text for block in message.content if block.type == "text"])
+            response = '{\n  "explanation": "' + response  # Add back the prefilled opening brace
             correction_data = json.loads(response)
 
             corrected_old = correction_data.get("corrected_old_code")
