@@ -1,0 +1,53 @@
+name: Auto Tag Release
+
+on:
+  push:
+    branches:
+      - main
+      - auto-tag-gh-actions
+
+env:
+  TAG_PREFIX: "TEST@"
+
+jobs:
+  tag-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if tag exists
+        id: check_tag
+        run: |
+          VERSION=$(jq -r '.version' package.json)
+          TAG_NAME="${{ env.TAG_PREFIX }}${VERSION}"
+
+          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
+
+          if git ls-remote --tags origin | grep -q "refs/tags/${TAG_NAME}"; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Tag ${TAG_NAME} already exists"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Tag ${TAG_NAME} does not exist"
+          fi
+
+      - name: Create and push tag
+        if: steps.check_tag.outputs.exists == 'false'
+      - name: Setup GH user
+        run: git config user.name ${{ secrets.GH_USER }}
+      - name: Setup GH email
+        run: git config user.email ${{ secrets.GH_EMAIL }}
+      - name: Generate tag
+        run: |
+          TAG_NAME="${{ steps.check_tag.outputs.tag_name }}"
+          git tag "${TAG_NAME}"
+      - name: Push latest tag
+        run: |
+          git push origin "${TAG_NAME}"
+          echo "Successfully created and pushed tag: ${TAG_NAME}"
