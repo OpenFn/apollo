@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - auto-tag-gh-actions
+      - auto-tag-gh-action
 
 env:
   TAG_PREFIX: "TEST@"
