@@ -4,4 +4,3 @@ llm_retrieval: "claude-3-7-sonnet-20250219"
 threshold: 0.7
 top_k: 5
 temperature: 0
-prompts_version: 1.2.0

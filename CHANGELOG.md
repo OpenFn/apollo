@@ -1,5 +1,17 @@
 # apollo
 
+## 0.18.0
+
+### Minor Changes
+
+- ec31a56: workflow_chat: support read_only mode flag
+
+### Patch Changes
+
+- ec31a56: workflow_chat: prevent identical job names being created in generated
+  workflows
+- 66d3839: Fix anthropic healthcheck
+
 ## 0.17.2
 
 ### Patch Changes
