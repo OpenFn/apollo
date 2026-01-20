@@ -463,29 +463,27 @@ def main(data_dict: dict) -> dict:
         data = Payload.from_dict(data_dict)
 
         # Construct current_page from context
-        current_page = None
-        if data.context:
-            page_name = data.context.get("page_name")
-            adaptor_string = data.context.get("adaptor")
+        # Always create page with type, extract name/adaptor from context if available
+        page_name = data.context.get("page_name") if data.context else None
+        adaptor_string = data.context.get("adaptor") if data.context else None
 
-            # Extract short adaptor name if present
-            adaptor_short_name = None
-            if adaptor_string:
-                try:
-                    adaptor = AdaptorSpecifier(adaptor_string)
-                    adaptor_short_name = adaptor.short_name
-                except Exception as e:
-                    logger.warning(f"Failed to parse adaptor string '{adaptor_string}': {e}")
+        # Extract short adaptor name if present
+        adaptor_short_name = None
+        if adaptor_string:
+            try:
+                adaptor = AdaptorSpecifier(adaptor_string)
+                adaptor_short_name = adaptor.short_name
+            except Exception as e:
+                logger.warning(f"Failed to parse adaptor string '{adaptor_string}': {e}")
 
-            # Only construct page if we have at least page_name or adaptor
-            if page_name or adaptor_short_name:
-                current_page = {
-                    "type": "job_code",
-                    "name": page_name
-                }
-                # Only add adaptor if we successfully extracted it
-                if adaptor_short_name:
-                    current_page["adaptor"] = adaptor_short_name
+        # Always construct page with type
+        current_page = {
+            "type": "job_code",
+            "name": page_name
+        }
+        # Only add adaptor if we successfully extracted it
+        if adaptor_short_name:
+            current_page["adaptor"] = adaptor_short_name
 
         # Extract last_page from meta
         input_meta = data_dict.get("meta", {})

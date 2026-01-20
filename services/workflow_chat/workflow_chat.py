@@ -503,16 +503,12 @@ def main(data_dict: dict) -> dict:
         data = Payload.from_dict(data_dict)
 
         # Construct current_page from context
-        current_page = None
-        if data.context:
-            page_name = data.context.get("page_name")
-
-            # Only construct page if we have page_name
-            if page_name:
-                current_page = {
-                    "type": "workflow",
-                    "name": page_name
-                }
+        # Always create page with type, extract name from context if available
+        page_name = data.context.get("page_name") if data.context else None
+        current_page = {
+            "type": "workflow",
+            "name": page_name
+        }
 
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
