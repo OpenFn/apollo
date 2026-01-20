@@ -24,7 +24,12 @@ def test_pinecone_key(api_key):
 
 def test_anthropic_key(api_key):
     try:
-        Anthropic(api_key=api_key).models.list()
+        client = Anthropic(api_key=api_key)
+        client.messages.create(
+            model="claude-3-5-haiku-20241022",
+            max_tokens=1,
+            messages=[{"role": "user", "content": "test"}]
+        )
         return True
     except Exception:
         return False
