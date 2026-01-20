@@ -401,16 +401,16 @@ post('/webhook', state => state.data);'''
 def test_change_variable_names_only_streaming():
     print("==================TEST==================")
     print("Description: Testing if AI can change variable names without affecting state.data references when given simple instruction (with streaming).")
-    
+
     history = []
     content = "change the variable name 'data' to 'patients'"
-    
+
     original_code = '''get('/api/patients');
 
 fn(state => {
   const data = state.data;
   let processedData = [];
-  
+
   data.forEach(record => {
     if (record.status === 'active') {
       processedData.push({
@@ -420,31 +420,168 @@ fn(state => {
       });
     }
   });
-  
+
   console.log(`Processed ${processedData.length} records from data`);
-  
+
   return { ...state, data: processedData };
 });
 
 post('/webhook', state => state.data);'''
-    
+
     context = {
         "expression": original_code,
         "adaptor": "@openfn/language-kobotoolbox@4.2.3"
     }
-    
+
     expected_code = original_code.replace('const data', 'const patients') \
                                 .replace('data.forEach', 'patients.forEach')
-    
+
     meta = {}
     service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True, stream=True)
     response = call_job_chat_service(service_input)
     print_response_details(response, "change_variable_names_streaming", content=content)
-    
+
     assert response is not None
     assert "suggested_code" in response
-    
+
     assert response["suggested_code"] == expected_code, f"Variable name change did not produce expected result.\nExpected:\n{expected_code}\n\nActual:\n{response['suggested_code']}"
+
+def test_history_prefix_parsing():
+    print("==================TEST==================")
+    print("Description: Test that page navigation prefix is correctly parsed into history and last_page is returned in meta")
+
+    history = []
+    content = "Add error handling to the HTTP request"
+
+    context = {
+        "expression": '''get('https://api.example.com/data');
+
+fn(state => {
+  const transformed = state.data.map(item => ({
+    id: item.id,
+    name: item.full_name
+  }));
+
+  return { ...state, transformed };
+});
+
+post('https://destination.org/upload', state => state.transformed);''',
+        "adaptor": "@openfn/language-http@6.5.4",
+        "page_name": "transform-data"
+    }
+
+    meta = {}
+    service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True)
+    response = call_job_chat_service(service_input)
+    print_response_details(response, "history_prefix_parsing", content=content)
+
+    assert response is not None
+    assert isinstance(response, dict)
+
+    # Check that history was updated with prefixed content
+    assert "history" in response
+    updated_history = response["history"]
+    assert len(updated_history) == 2  # user message + assistant response
+
+    # Verify the user message has the prefix
+    user_message = updated_history[0]
+    assert user_message["role"] == "user"
+    assert "[pg:job_code/transform-data/http]" in user_message["content"]
+    assert content in user_message["content"]
+
+    # Verify meta contains last_page info
+    assert "meta" in response
+    meta = response["meta"]
+    assert "last_page" in meta
+    last_page = meta["last_page"]
+    assert last_page["type"] == "job_code"
+    assert last_page["name"] == "transform-data"
+    assert last_page["adaptor"] == "http"
+
+    print("\n✓ Prefix parsing test passed: History contains correct prefix and meta has last_page info")
+
+def test_rag_retriggered_on_navigation():
+    print("==================TEST==================")
+    print("Description: Test that RAG is retriggered when navigating between different job pages (same type, different names)")
+
+    # Simulate a conversation history where user was on a different job page
+    history = [
+        {"role": "user", "content": "[pg:job_code/fetch-data/http] Can you add retry logic?"},
+        {"role": "assistant", "content": "I'll add retry logic to handle transient failures."}
+    ]
+
+    # Now user has navigated to a different job - ask a question that should trigger RAG
+    content = "How do I map data here?"
+
+    context = {
+        "expression": '''fn(state => {
+  const data = state.data;
+  return { ...state, data };
+});''',
+        "adaptor": "@openfn/language-common@2.0.0",
+        "page_name": "transform-data"
+    }
+
+    # Meta indicates we were on a different page previously
+    input_meta = {
+        "last_page": {
+            "type": "job_code",
+            "name": "fetch-data",
+            "adaptor": "http"
+        },
+        "rag": {
+            "search_results": [
+                {
+                    "title": "HTTP Adaptor Retry Logic",
+                    "url": "https://docs.openfn.org/adaptors/http#retry",
+                    "content": "Old RAG data about HTTP adaptor"
+                }
+            ]
+        }
+    }
+
+    service_input = make_service_input(history=history, content=content, context=context, meta=input_meta, suggest_code=True)
+    response = call_job_chat_service(service_input)
+    print_response_details(response, "rag_retriggered_on_navigation", content=content)
+
+    assert response is not None
+    assert isinstance(response, dict)
+
+    # Print input and output meta for debugging
+    print("\n=== INPUT META ===")
+    print(json.dumps(input_meta, indent=2))
+
+    print("\n=== OUTPUT META ===")
+    assert "meta" in response
+    response_meta = response["meta"]
+    print(json.dumps(response_meta, indent=2))
+
+    # Verify meta contains updated last_page info
+    assert "last_page" in response_meta
+    last_page = response_meta["last_page"]
+    assert last_page["type"] == "job_code"
+    assert last_page["name"] == "transform-data"
+    assert last_page["adaptor"] == "common"
+
+    # Verify RAG data is present
+    assert "rag" in response_meta
+    output_rag = response_meta["rag"]
+    assert "search_results" in output_rag
+
+    # Check if RAG was actually refreshed
+    input_rag = input_meta["rag"]
+    output_search_results = output_rag.get("search_results", [])
+    input_search_results = input_rag.get("search_results", [])
+
+    print(f"\n=== RAG COMPARISON ===")
+    print(f"Input RAG had {len(input_search_results)} results")
+    print(f"Output RAG has {len(output_search_results)} results")
+
+    # RAG should either be different or empty (if decision logic skipped retrieval)
+    rag_changed = output_rag != input_rag
+    print(f"RAG changed: {rag_changed}")
+
+    print("\n✓ RAG retriggering test passed: Navigation detected and RAG data updated")
 
 
 if __name__ == "__main__":

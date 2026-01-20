@@ -206,3 +206,64 @@ post('https://api.example.com/endpoint', state => state.items);''',
     assert "suggested_code" in response
     assert response["suggested_code"] is not None, "JSON parsing failed - suggested_code is None"
     assert response["suggested_code"] != context["expression"], "Suggested code should be different from the original code"
+
+
+def test_navigation_workflow_to_job():
+    print("==================TEST==================")
+    print("Description: Testing cross-service navigation from workflow editor to job editor - model should infer context change")
+
+    # History shows user was on workflow page discussing workflow structure
+    history = [
+        {"role": "user", "content": "[pg:workflow/patient-sync] Create a workflow to sync patient data from source to destination"},
+        {"role": "assistant", "content": "I'll create a workflow with jobs to fetch patient data, transform it, and sync to the destination system."},
+        {"role": "user", "content": "[pg:workflow/patient-sync] Add validation between fetch and transform"},
+        {"role": "assistant", "content": "I'll add a validation job that checks the patient data before transformation."}
+    ]
+
+    # Now user is on job editor with a different page - abrupt question about current code
+    content = "Add a log statement at the start"
+
+    # Current context is job code, not workflow
+    context = {
+        "expression": '''fn(state => {
+  const patients = state.data.map(patient => ({
+    id: patient.patient_id,
+    name: patient.full_name,
+    dob: patient.date_of_birth
+  }));
+
+  return { ...state, patients };
+});
+
+post('https://destination.api/patients', state => state.patients);''',
+        "adaptor": "@openfn/language-common@latest",
+        "page_name": "map-patient-data"
+    }
+
+    # Meta shows navigation happened
+    meta = {
+        "last_page": {
+            "type": "workflow",
+            "name": "patient-sync"
+        }
+    }
+
+    service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True)
+    response = call_job_chat_service(service_input)
+    print_response_details(response, "navigation_workflow_to_job", content=content)
+
+    # Assertions to verify model correctly inferred navigation and responded about job code
+    assert response is not None
+    assert "response" in response
+    assert "suggested_code" in response
+    assert response["suggested_code"] is not None, "Model should have generated code for the job"
+
+    # Verify logging was added to the code
+    assert "console.log" in response["suggested_code"], "Log statement not found in suggested code"
+
+    # Verify response talks about job code, not workflow
+    response_text = response["response"].lower()
+    assert not any(word in response_text for word in ["workflow", "yaml", "trigger", "edge"]), \
+        "Response should be about job code, not workflow structure"
+
+    print("\n✓ Navigation test passed: Model correctly inferred navigation from workflow to job editor")

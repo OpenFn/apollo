@@ -228,5 +228,68 @@ def test_special_characters():
         assert_yaml_jobs_have_body(response["response_yaml"], context="test_special_characters")
         assert_no_special_chars(response["response_yaml"], context="test_special_characters")
 
+def test_history_prefix_parsing():
+    print("==================TEST==================")
+    print("Description: Test that page navigation prefix is correctly parsed into history and last_page is returned in meta")
+
+    existing_yaml = """
+name: data-pipeline
+jobs:
+  fetch-data:
+    id: job-fetch-id
+    name: Fetch Data
+    adaptor: '@openfn/language-http@latest'
+    body: 'get("https://api.example.com/data");'
+triggers:
+  webhook:
+    id: trigger-webhook-id
+    type: webhook
+    enabled: false
+edges:
+  webhook->fetch-data:
+    id: edge-webhook-fetch-id
+    source_trigger: webhook
+    target_job: fetch-data
+    condition_type: always
+    enabled: true
+"""
+
+    history = []
+    content = "Add a job to transform the data"
+
+    # Set current page context
+    context = {
+        "page_name": "data-pipeline"
+    }
+
+    service_input = make_service_input(existing_yaml, history, content=content, context=context)
+    response = call_workflow_chat_service(service_input)
+    print_response_details(response, content=content)
+
+    assert response is not None
+    assert isinstance(response, dict)
+
+    # Check that history was updated with prefixed content
+    assert "history" in response
+    updated_history = response["history"]
+    assert len(updated_history) == 2  # user message + assistant response
+
+    # Verify the user message has the prefix
+    user_message = updated_history[0]
+    assert user_message["role"] == "user"
+    assert "[pg:workflow/data-pipeline]" in user_message["content"]
+    assert content in user_message["content"]
+
+    # Verify meta contains last_page info
+    assert "meta" in response
+    meta = response["meta"]
+    assert "last_page" in meta
+    last_page = meta["last_page"]
+    assert last_page["type"] == "workflow"
+    assert last_page["name"] == "data-pipeline"
+
+    print("\n✓ Prefix parsing test passed: History contains correct prefix and meta has last_page info")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"]) 

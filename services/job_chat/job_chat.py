@@ -14,7 +14,7 @@ from anthropic import (
     InternalServerError,
 )
 import sentry_sdk
-from util import ApolloError, create_logger, AdaptorSpecifier
+from util import ApolloError, create_logger, AdaptorSpecifier, add_page_prefix
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
 from streaming_util import StreamManager
@@ -22,26 +22,7 @@ from streaming_util import StreamManager
 logger = create_logger("job_chat")
 
 
-# Helper functions for page navigation
-def add_page_prefix(content: str, page: Optional[dict]) -> str:
-    """Add [pg:...] prefix to message."""
-    if not page:
-        return content
-
-    prefix_parts = []
-    if page.get('type'):
-        prefix_parts.append(str(page['type']))
-    if page.get('name'):
-        prefix_parts.append(str(page['name']))
-    if page.get('adaptor'):
-        prefix_parts.append(str(page['adaptor']))
-
-    if not prefix_parts:
-        return content
-
-    prefix = f"[pg:{'/'.join(prefix_parts)}]"
-    return f"{prefix} {content}"
-
+# Helper function for page navigation
 def has_navigated(current_page: Optional[dict], last_page: Optional[dict]) -> bool:
     """Check if user navigated to a different page."""
     if not current_page or not last_page:

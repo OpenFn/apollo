@@ -18,33 +18,12 @@ from anthropic import (
     InternalServerError,
 )
 import sentry_sdk
-from util import ApolloError, create_logger
+from util import ApolloError, create_logger, add_page_prefix
 from .gen_project_prompt import build_prompt
 from workflow_chat.available_adaptors import get_available_adaptors
 from streaming_util import StreamManager
 
 logger = create_logger("workflow_chat")
-
-
-# Helper function for page navigation
-def add_page_prefix(content: str, page: Optional[dict]) -> str:
-    """Add [pg:...] prefix to message."""
-    if not page:
-        return content
-
-    prefix_parts = []
-    if page.get('type'):
-        prefix_parts.append(str(page['type']))
-    if page.get('name'):
-        prefix_parts.append(str(page['name']))
-    if page.get('adaptor'):
-        prefix_parts.append(str(page['adaptor']))
-
-    if not prefix_parts:
-        return content
-
-    prefix = f"[pg:{'/'.join(prefix_parts)}]"
-    return f"{prefix} {content}"
 
 
 @dataclass
@@ -216,7 +195,7 @@ class AnthropicClient:
 
                     updated_history = history + [
                         {"role": "user", "content": prefixed_content},
-                        {"role": "assistant", "content": response},
+                        {"role": "assistant", "content": response_text},
                     ]
 
                     stream_manager.end_stream()
