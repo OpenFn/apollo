@@ -523,7 +523,7 @@ def main(data_dict: dict) -> dict:
             errors=data.errors,
             history=data.history,
             stream=data.stream,
-            current_page=current_page
+            current_page=current_page,
             read_only=data.read_only
         )
 

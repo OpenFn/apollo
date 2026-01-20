@@ -421,7 +421,7 @@ fn(state => {
     }
   });
 
-  console.log(`Processed ${processedData.length} records from data`);
+  console.log(`Processed ${processedData.length} records`);
 
   return { ...state, data: processedData };
 });
