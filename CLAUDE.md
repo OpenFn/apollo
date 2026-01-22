@@ -51,9 +51,14 @@ for the OpenFn platform and toolchain.
 ### Key Python Services
 
 #### AI & Generation Services
+The key services deployed online are `job_chat/` and `workflow_chat/`.
 
 - `job_chat/` - AI chatbot for OpenFn job assistance with RAG
+  - Accepts optional `refresh_rag` flag to force re-retrieval of documentation even when RAG data is provided in metadata
+  - By default, RAG retrieval runs only when RAG data is not present in the payload
+  - When `refresh_rag=true`, fresh documentation search is performed regardless of existing RAG data
 - `workflow_chat/` - AI assistant for OpenFn workflow creation
+- `doc_agent_*/` - Fully agentic sub-agent service prototype. Check for agentic pattern usage.
 - `vocab_mapper/` - Maps medical vocabularies (LOINC/SNOMED) using embeddings
 
 #### Embeddings & Search Services
@@ -75,6 +80,9 @@ is utilise by job_chat to dynamically add context to user questions.
 
 - `latest_adaptors/` - Retrieves latest adaptor versions
 - `status/` - System health and status checks
+
+#### Obsolete services
+- When researching repository code patterns, prioritise patterns in more recent folders
 
 ### Communication Protocols
 
