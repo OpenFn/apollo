@@ -78,3 +78,5 @@ adaptors_cache.json
 .context
 
 .adaptors
+
+.claude/settings.local.json
