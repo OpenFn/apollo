@@ -26,9 +26,22 @@ Simple input:
 {
   "content": "Whenever fridge statistics are send to you, parse and aggregate the data and upload to a collection in redis.",
   "existing_yaml": "",
-  "history": []
+  "history": [],
+  "context": {},
+  "stream": false,
+  "read_only": false
 }
 ```
+
+**Request Parameters:**
+- `content` (optional): The user's question or instruction
+- `existing_yaml` (optional): Current workflow YAML to modify
+- `errors` (optional): Error message to fix
+- `history` (optional, default: `[]`): Array of previous conversation turns
+- `context` (optional): Context including `page_name` for navigation tracking
+- `stream` (optional, default: `false`): Enable streaming response
+- `read_only` (optional, default: `false`): Enable read-only mode (IDs removed, no code preservation)
+- `api_key` (optional): Anthropic API key (falls back to environment variable)
 
 Second conversation turn example:
 
@@ -80,8 +93,13 @@ exact instructions.
 
 ### Example Output
 
-The serivce returns a JSON object which will have a `response`, `response_yaml`,
-`history`, and `usage` field. The `response_yaml` might be `None`.
+The service returns a JSON object with `response`, `response_yaml`, `history`, and `usage` fields. The `response_yaml` may be `null` if no YAML was generated.
+
+**Response Fields:**
+- `response`: The assistant's text response
+- `response_yaml`: Generated workflow YAML (may be `null`)
+- `history`: Updated conversation history with page prefixes (e.g., `[pg:workflow/my_workflow]`)
+- `usage`: Token usage breakdown
 
 ````json
 {
@@ -90,11 +108,11 @@ The serivce returns a JSON object which will have a `response`, `response_yaml`,
   "history": [
     {
       "role": "user",
-      "content": "Whenever fridge statistics are send to you, parse and aggregate the data and upload to a collection in redis."
+      "content": "[pg:workflow/fridge-statistics-processing] Whenever fridge statistics are send to you, parse and aggregate the data and upload to a collection in redis."
     },
     {
       "role": "assistant",
-      "content": "This workflow will handle incoming fridge statistics via a webhook, process the data, and store it in Redis. I've chosen a webhook trigger since you're receiving data, and used the Redis adaptor for the final storage step.\n\n```\nname: Fridge-Statistics-Processing\njobs:\n  parse-fridge-data:\n    name: Parse and Aggregate Fridge Data\n    adaptor: \"@openfn/language-common@latest\"\n    body: \"| // Add data parsing and aggregation operations here\"\n  upload-to-redis:\n    name: Upload to Redis Collection\n    adaptor: \"@openfn/language-redis@latest\"\n    body: \"| // Add Redis collection storage operations here\"\ntriggers:\n  webhook:\n    type: webhook\n    enabled: false\nedges:\n  webhook->parse-fridge-data:\n    source_trigger: webhook\n    target_job: parse-fridge-data\n    condition_type: always\n    enabled: true\n  parse-fridge-data->upload-to-redis:\n    source_job: parse-fridge-data\n    target_job: upload-to-redis\n    condition_type: on_job_success\n    enabled: true\n```"
+      "content": "This workflow will handle incoming fridge statistics via a webhook, process the data, and store it in Redis. I've chosen a webhook trigger since you're receiving data, and used the Redis adaptor for the final storage step."
     }
   ],
   "usage": {

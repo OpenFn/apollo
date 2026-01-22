@@ -182,8 +182,8 @@ def add_page_prefix(content: str, page: Optional[dict]) -> str:
         otherwise returns the original content unchanged.
 
     Example:
-        >>> add_page_prefix("Hello", {"type": "job_code", "name": "Transform", "adaptor": "http"})
-        "[pg:job_code/Transform/http] Hello"
+        >>> add_page_prefix("Hello", {"type": "job_code", "name": "Transform", "adaptor": "http@6.5.4"})
+        "[pg:job_code/Transform/http@6.5.4] Hello"
     """
     if not page:
         return content

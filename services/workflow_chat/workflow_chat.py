@@ -26,6 +26,22 @@ from streaming_util import StreamManager
 logger = create_logger("workflow_chat")
 
 
+# Helper function for page navigation
+def extract_page_prefix_from_last_turn(history: List[Dict[str, str]]) -> Optional[str]:
+    """Extract page prefix from last user message if present."""
+    if len(history) < 2:
+        return None
+
+    # Second-to-last turn is the last user message
+    content = history[-2].get("content", "")
+
+    # Extract [pg:...] prefix if present
+    if content.startswith("[pg:") and "]" in content:
+        return content[:content.find("]") + 1]
+
+    return None
+
+
 @dataclass
 class Payload:
     """
@@ -502,9 +518,11 @@ def main(data_dict: dict) -> dict:
 
         data = Payload.from_dict(data_dict)
 
+        if data.context is None:
+            data.context = {}
+
         # Construct current_page from context
-        # Always create page with type, extract name from context if available
-        page_name = data.context.get("page_name") if data.context else None
+        page_name = data.context.get("page_name")
         current_page = {
             "type": "workflow",
             "name": page_name
@@ -523,19 +541,13 @@ def main(data_dict: dict) -> dict:
             read_only=data.read_only
         )
 
-        # Build response with meta
+        # Build response
         response_dict = {
             "response": result.content,
             "response_yaml": result.content_yaml,
             "history": result.history,
             "usage": result.usage
         }
-
-        # Only add meta with last_page if we have current_page
-        if current_page:
-            response_dict["meta"] = {
-                "last_page": current_page
-            }
 
         return response_dict
 

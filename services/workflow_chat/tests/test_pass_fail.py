@@ -277,7 +277,7 @@ edges:
     
 def test_history_prefix_parsing():
     print("==================TEST==================")
-    print("Description: Test that page navigation prefix is correctly parsed into history and last_page is returned in meta")
+    print("Description: Test that page navigation prefix is correctly added to user messages in history")
 
     existing_yaml = """
 name: data-pipeline
@@ -327,15 +327,8 @@ edges:
     assert "[pg:workflow/data-pipeline]" in user_message["content"]
     assert content in user_message["content"]
 
-    # Verify meta contains last_page info
-    assert "meta" in response
-    meta = response["meta"]
-    assert "last_page" in meta
-    last_page = meta["last_page"]
-    assert last_page["type"] == "workflow"
-    assert last_page["name"] == "data-pipeline"
 
-    print("\n✓ Prefix parsing test passed: History contains correct prefix and meta has last_page info")
+    print("\n✓ Prefix parsing test passed: History contains correct prefix")
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"]) 

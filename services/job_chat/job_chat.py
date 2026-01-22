@@ -23,16 +23,19 @@ logger = create_logger("job_chat")
 
 
 # Helper function for page navigation
-def has_navigated(current_page: Optional[dict], last_page: Optional[dict]) -> bool:
-    """Check if user navigated to a different page."""
-    if not current_page or not last_page:
-        return False
+def extract_page_prefix_from_last_turn(history: List[Dict[str, str]]) -> Optional[str]:
+    """Extract page prefix from last user message if present."""
+    if len(history) < 2:
+        return None
 
-    return (
-        current_page.get("type") != last_page.get("type") or
-        current_page.get("name") != last_page.get("name") or
-        current_page.get("adaptor") != last_page.get("adaptor")
-    )
+    # Second-to-last turn is the last user message
+    content = history[-2].get("content", "")
+
+    # Extract [pg:...] prefix if present
+    if content.startswith("[pg:") and "]" in content:
+        return content[:content.find("]") + 1]
+
+    return None
 
 @dataclass
 class Payload:
@@ -172,8 +175,6 @@ class AnthropicClient:
                             remaining = accumulated_response[sent_length:]
                             stream_manager.send_text(remaining)
 
-                    usage_info = message.usage.model_dump() if hasattr(message, 'usage') else {}
-
                 else:
                     logger.info("Making non-streaming API call")
                     message = self.client.messages.create(
@@ -307,7 +308,6 @@ class AnthropicClient:
     def apply_code_edits(self, content: str, text_answer: str, original_code: str, code_edits: List[Dict[str, Any]]) -> tuple[Optional[str], Dict[str, Any]]:
         """Apply a list of code edits to the original code."""
         current_code = original_code
-        total_changes = len(code_edits)
         patches_applied = 0
         warnings = []
         
@@ -462,36 +462,33 @@ def main(data_dict: dict) -> dict:
 
         data = Payload.from_dict(data_dict)
 
+        if data.context is None:
+            data.context = {}
+
         # Construct current_page from context
-        # Always create page with type, extract name/adaptor from context if available
-        page_name = data.context.get("page_name") if data.context else None
-        adaptor_string = data.context.get("adaptor") if data.context else None
+        page_name = data.context.get("page_name")
+        adaptor_string = data.context.get("adaptor")
 
-        # Extract short adaptor name if present
-        adaptor_short_name = None
-        if adaptor_string:
-            try:
-                adaptor = AdaptorSpecifier(adaptor_string)
-                adaptor_short_name = adaptor.short_name
-            except Exception as e:
-                logger.warning(f"Failed to parse adaptor string '{adaptor_string}': {e}")
-
-        # Always construct page with type
         current_page = {
             "type": "job_code",
             "name": page_name
         }
-        # Only add adaptor if we successfully extracted it
-        if adaptor_short_name:
-            current_page["adaptor"] = adaptor_short_name
 
-        # Extract last_page from meta
+        if adaptor_string:
+            try:
+                adaptor = AdaptorSpecifier(adaptor_string)
+                current_page["adaptor"] = f"{adaptor.short_name}@{adaptor.version}"
+            except Exception as e:
+                logger.warning(f"Failed to parse adaptor string '{adaptor_string}': {e}")
+
+        # Extract rag_data from meta if present
         input_meta = data_dict.get("meta", {})
-        last_page = input_meta.get("last_page")
         rag_data = input_meta.get("rag")
 
-        # Detect navigation
-        user_navigated = has_navigated(current_page, last_page)
+        # Detect navigation by comparing current page prefix with last turn's prefix
+        current_prefix = add_page_prefix("", current_page).strip()
+        last_prefix = extract_page_prefix_from_last_turn(data_dict.get("history", []))
+        user_navigated = last_prefix is not None and current_prefix != last_prefix
         should_refresh_rag = data.refresh_rag or user_navigated
 
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
@@ -513,15 +510,9 @@ def main(data_dict: dict) -> dict:
             "response": result.response,
             "suggested_code": result.suggested_code,
             "history": result.history,
-            "usage": result.usage
+            "usage": result.usage,
+            "meta": {"rag": result.rag}
         }
-
-        # Build meta dict - always include rag for backward compatibility
-        meta = {"rag": result.rag}
-        if current_page:
-            meta["last_page"] = current_page
-
-        response_dict["meta"] = meta
 
         if result.diff:
             response_dict["diff"] = result.diff
@@ -548,8 +539,6 @@ def main(data_dict: dict) -> dict:
         if "prompt is too long" in str(e):
             error_message = "Input prompt exceeds maximum token limit (200,000 tokens). Please reduce the amount of text or context provided."
             raise ApolloError(400, error_message, type="PROMPT_TOO_LONG")
-        raise ApolloError(400, str(e), type="BAD_REQUEST")
-    except BadRequestError as e:
         raise ApolloError(400, str(e), type="BAD_REQUEST")
     except PermissionDeniedError as e:
         raise ApolloError(403, "Not authorized to perform this action", type="FORBIDDEN")
