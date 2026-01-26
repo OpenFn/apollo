@@ -274,6 +274,61 @@ edges:
 
     # Should contain inline YAML in triple-backticked code blocks
     assert "```yaml" in response_text or "```" in response_text, "Response should contain triple-backticked YAML code block"
+    
+def test_history_prefix_parsing():
+    print("==================TEST==================")
+    print("Description: Test that page navigation prefix is correctly added to user messages in history")
+
+    existing_yaml = """
+name: data-pipeline
+jobs:
+  fetch-data:
+    id: job-fetch-id
+    name: Fetch Data
+    adaptor: '@openfn/language-http@latest'
+    body: 'get("https://api.example.com/data");'
+triggers:
+  webhook:
+    id: trigger-webhook-id
+    type: webhook
+    enabled: false
+edges:
+  webhook->fetch-data:
+    id: edge-webhook-fetch-id
+    source_trigger: webhook
+    target_job: fetch-data
+    condition_type: always
+    enabled: true
+"""
+
+    history = []
+    content = "Add a job to transform the data"
+
+    # Set current page context
+    context = {
+        "page_name": "data-pipeline"
+    }
+
+    service_input = make_service_input(existing_yaml, history, content=content, context=context)
+    response = call_workflow_chat_service(service_input)
+    print_response_details(response, content=content)
+
+    assert response is not None
+    assert isinstance(response, dict)
+
+    # Check that history was updated with prefixed content
+    assert "history" in response
+    updated_history = response["history"]
+    assert len(updated_history) == 2  # user message + assistant response
+
+    # Verify the user message has the prefix
+    user_message = updated_history[0]
+    assert user_message["role"] == "user"
+    assert "[pg:workflow/data-pipeline]" in user_message["content"]
+    assert content in user_message["content"]
+
+
+    print("\n✓ Prefix parsing test passed: History contains correct prefix")
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"]) 
