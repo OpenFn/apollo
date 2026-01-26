@@ -206,3 +206,125 @@ post('https://api.example.com/endpoint', state => state.items);''',
     assert "suggested_code" in response
     assert response["suggested_code"] is not None, "JSON parsing failed - suggested_code is None"
     assert response["suggested_code"] != context["expression"], "Suggested code should be different from the original code"
+
+
+def test_navigation_workflow_to_job():
+    print("==================TEST==================")
+    print("Description: Testing cross-service navigation from workflow editor to job editor - model should infer context change")
+
+    # History shows user was on workflow page discussing workflow structure
+    history = [
+        {"role": "user", "content": "[pg:workflow/patient-sync] Create a workflow to sync patient data from source to destination"},
+        {"role": "assistant", "content": "I'll create a workflow with jobs to fetch patient data, transform it, and sync to the destination system."},
+        {"role": "user", "content": "[pg:workflow/patient-sync] Add validation between fetch and transform"},
+        {"role": "assistant", "content": "I'll add a validation job that checks the patient data before transformation."}
+    ]
+
+    # Now user is on job editor with a different page - abrupt question about current code
+    content = "Add a log statement at the start"
+
+    # Current context is job code, not workflow
+    context = {
+        "expression": '''fn(state => {
+  const patients = state.data.map(patient => ({
+    id: patient.patient_id,
+    name: patient.full_name,
+    dob: patient.date_of_birth
+  }));
+
+  return { ...state, patients };
+});
+
+post('https://destination.api/patients', state => state.patients);''',
+        "adaptor": "@openfn/language-common@latest",
+        "page_name": "map-patient-data"
+    }
+
+    # Meta shows navigation happened
+    meta = {
+        "last_page": {
+            "type": "workflow",
+            "name": "patient-sync"
+        }
+    }
+
+    service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True)
+    response = call_job_chat_service(service_input)
+    print_response_details(response, "navigation_workflow_to_job", content=content)
+
+    # Assertions to verify model correctly inferred navigation and responded about job code
+    assert response is not None
+    assert "response" in response
+    assert "suggested_code" in response
+    assert response["suggested_code"] is not None, "Model should have generated code for the job"
+
+    # Verify logging was added to the code
+    assert "console.log" in response["suggested_code"], "Log statement not found in suggested code"
+
+    # Verify response talks about job code, not workflow
+    response_text = response["response"].lower()
+    assert not any(word in response_text for word in ["workflow", "yaml", "trigger", "edge"]), \
+        "Response should be about job code, not workflow structure"
+
+    print("\n✓ Navigation test passed: Model correctly inferred navigation from workflow to job editor")
+
+def test_adaptor_context_switching():
+    print("==================TEST==================")
+    print("Description: Test that the model pays attention to page prefix changes and provides adaptor-specific answers")
+
+    # Simulate a conversation history where:
+    # 1. User was on a Salesforce job page and asked "How do I get data?"
+    # 2. Assistant answered with Salesforce-specific guidance (query, SOQL, etc.)
+    # 3. User has now navigated to a DHIS2 job page and asks the SAME question again
+    # Expected: The model should recognize the context switch and mention DHIS2-specific functions
+
+    history = [
+        {"role": "user", "content": "[pg:job_code/fetch-records/salesforce@9.0.3] How do I get data?"},
+        {"role": "assistant", "content": "To get data from Salesforce, you can use the `query()` operation with SOQL (Salesforce Object Query Language). For example:\n\n```js\nquery('SELECT Id, Name FROM Account WHERE Status = \"Active\"');\n```\n\nThis will fetch records from Salesforce and store them in `state.data`."}
+    ]
+
+    # Now user has navigated to a DHIS2 job page and asks the same question
+    content = "How do I get data?"
+
+    context = {
+        "expression": '''
+fn(state => {
+  return state;
+});''',
+        "adaptor": "@openfn/language-dhis2@8.0.7",
+        "page_name": "fetch-data"
+    }
+
+    meta = {}
+    service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=False)
+    response = call_job_chat_service(service_input)
+    print_response_details(response, "adaptor_context_switching", content=content)
+
+    assert response is not None
+    assert "response" in response
+
+    response_text = response["response"].lower()
+    print(f"\n=== RESPONSE (DHIS2 Context) ===")
+    print(response["response"])
+
+    # Check that DHIS2-specific functions are mentioned
+    dhis2_mentioned = "dhis" in response_text
+    assert dhis2_mentioned, f"Expected DHIS2 to be mentioned in response when on DHIS2 page. Response: {response['response']}"
+
+    # Check the history was properly prefixed with the new page context
+    assert "history" in response
+    updated_history = response["history"]
+    assert len(updated_history) == 4  # 2 previous turns + 1 new turn = 4 messages
+
+    # Verify the latest user message has the correct DHIS2 prefix (with version)
+    latest_user_message = updated_history[2]
+    assert latest_user_message["role"] == "user"
+    assert "[pg:job_code/fetch-data/dhis2@8.0.7]" in latest_user_message["content"], "Expected DHIS2 page prefix with version in latest user message"
+
+    print(f"\n=== CONTEXT SWITCH VERIFICATION ===")
+    print(f"Previous context: Salesforce (from history)")
+    print(f"Current context: DHIS2 (from page prefix)")
+    print(f"DHIS2 mentioned in response: {dhis2_mentioned}")
+    print(f"Latest user message prefix: [pg:job_code/fetch-data/dhis2]")
+
+    print("\n✓ Adaptor context switching test passed: Model recognizes page prefix change and provides DHIS2-specific guidance")

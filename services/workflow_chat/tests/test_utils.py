@@ -96,7 +96,7 @@ def call_workflow_chat_service(service_input):
             pass
 
 
-def make_service_input(existing_yaml, history, content=None, errors=None):
+def make_service_input(existing_yaml, history, content=None, errors=None, context=None, meta=None):
     service_input = {
         "existing_yaml": existing_yaml,
         "history": history
@@ -105,6 +105,10 @@ def make_service_input(existing_yaml, history, content=None, errors=None):
         service_input["content"] = content
     if errors is not None:
         service_input["errors"] = errors
+    if context is not None:
+        service_input["context"] = context
+    if meta is not None:
+        service_input["meta"] = meta
     return service_input
 
 

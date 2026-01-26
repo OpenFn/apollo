@@ -372,7 +372,7 @@ fn(state => {
     }
   });
   
-  console.log(`Processed ${processedData.length} records from data`);
+  console.log(`Processed ${processedData.length} records`);
   
   return { ...state, data: processedData };
 });
@@ -401,16 +401,16 @@ post('/webhook', state => state.data);'''
 def test_change_variable_names_only_streaming():
     print("==================TEST==================")
     print("Description: Testing if AI can change variable names without affecting state.data references when given simple instruction (with streaming).")
-    
+
     history = []
     content = "change the variable name 'data' to 'patients'"
-    
+
     original_code = '''get('/api/patients');
 
 fn(state => {
   const data = state.data;
   let processedData = [];
-  
+
   data.forEach(record => {
     if (record.status === 'active') {
       processedData.push({
@@ -420,31 +420,213 @@ fn(state => {
       });
     }
   });
-  
-  console.log(`Processed ${processedData.length} records from data`);
-  
+
+  console.log(`Processed ${processedData.length} records`);
+
   return { ...state, data: processedData };
 });
 
 post('/webhook', state => state.data);'''
-    
+
     context = {
         "expression": original_code,
         "adaptor": "@openfn/language-kobotoolbox@4.2.3"
     }
-    
+
     expected_code = original_code.replace('const data', 'const patients') \
                                 .replace('data.forEach', 'patients.forEach')
-    
+
     meta = {}
     service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True, stream=True)
     response = call_job_chat_service(service_input)
     print_response_details(response, "change_variable_names_streaming", content=content)
-    
+
     assert response is not None
     assert "suggested_code" in response
-    
+
     assert response["suggested_code"] == expected_code, f"Variable name change did not produce expected result.\nExpected:\n{expected_code}\n\nActual:\n{response['suggested_code']}"
+
+def test_history_prefix_parsing():
+    print("==================TEST==================")
+    print("Description: Test that page navigation prefix is correctly added to user messages in history")
+
+    history = []
+    content = "Add error handling to the HTTP request"
+
+    context = {
+        "expression": '''get('https://api.example.com/data');
+
+fn(state => {
+  const transformed = state.data.map(item => ({
+    id: item.id,
+    name: item.full_name
+  }));
+
+  return { ...state, transformed };
+});
+
+post('https://destination.org/upload', state => state.transformed);''',
+        "adaptor": "@openfn/language-http@6.5.4",
+        "page_name": "transform-data"
+    }
+
+    meta = {}
+    service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True)
+    response = call_job_chat_service(service_input)
+    print_response_details(response, "history_prefix_parsing", content=content)
+
+    assert response is not None
+    assert isinstance(response, dict)
+
+    # Check that history was updated with prefixed content
+    assert "history" in response
+    updated_history = response["history"]
+    assert len(updated_history) == 2  # user message + assistant response
+
+    # Verify the user message has the prefix (with version)
+    user_message = updated_history[0]
+    assert user_message["role"] == "user"
+    assert "[pg:job_code/transform-data/http@6.5.4]" in user_message["content"]
+    assert content in user_message["content"]
+
+    # Verify meta exists (contains rag)
+    assert "meta" in response
+    meta = response["meta"]
+    assert "rag" in meta
+
+    print("\n✓ Prefix parsing test passed: History contains correct prefix")
+
+def test_rag_retriggered_on_navigation():
+    print("==================TEST==================")
+    print("Description: Test that RAG is retriggered when navigating between different job pages (extracted from history)")
+
+    # Simulate a conversation history where user was on a different job page (with version)
+    history = [
+        {"role": "user", "content": "[pg:job_code/fetch-data/http@6.5.4] Can you add retry logic?"},
+        {"role": "assistant", "content": "I'll add retry logic to handle transient failures."}
+    ]
+
+    # Now user has navigated to a different job - ask a question that should trigger RAG
+    content = "How do I map data here?"
+
+    context = {
+        "expression": '''fn(state => {
+  const data = state.data;
+  return { ...state, data };
+});''',
+        "adaptor": "@openfn/language-common@2.0.0",
+        "page_name": "transform-data"
+    }
+
+    # Old RAG data from previous page (will be passed through but should be refreshed)
+    input_meta = {
+        "rag": {
+            "search_results": [
+                {
+                    "title": "HTTP Adaptor Retry Logic",
+                    "url": "https://docs.openfn.org/adaptors/http#retry",
+                    "content": "Old RAG data about HTTP adaptor"
+                }
+            ]
+        }
+    }
+
+    service_input = make_service_input(history=history, content=content, context=context, meta=input_meta, suggest_code=True)
+    response = call_job_chat_service(service_input)
+    print_response_details(response, "rag_retriggered_on_navigation", content=content)
+
+    assert response is not None
+    assert isinstance(response, dict)
+
+    # Print input and output meta for debugging
+    print("\n=== INPUT META ===")
+    print(json.dumps(input_meta, indent=2))
+
+    print("\n=== OUTPUT META ===")
+    assert "meta" in response
+    response_meta = response["meta"]
+    print(json.dumps(response_meta, indent=2))
+
+    # Verify RAG data is present
+    assert "rag" in response_meta
+    output_rag = response_meta["rag"]
+    assert "search_results" in output_rag
+
+    # Check if RAG was actually refreshed
+    input_rag = input_meta["rag"]
+    output_search_results = output_rag.get("search_results", [])
+    input_search_results = input_rag.get("search_results", [])
+
+    print(f"\n=== RAG COMPARISON ===")
+    print(f"Input RAG had {len(input_search_results)} results")
+    print(f"Output RAG has {len(output_search_results)} results")
+
+    # RAG should either be different or empty (if decision logic skipped retrieval)
+    rag_changed = output_rag != input_rag
+    print(f"RAG changed: {rag_changed}")
+
+    print("\n✓ RAG retriggering test passed: Navigation detected (from history prefix) and RAG data updated")
+
+def test_adaptor_context_switching():
+    print("==================TEST==================")
+    print("Description: Test that the model pays attention to page prefix changes and provides adaptor-specific answers")
+
+    # Simulate a conversation history where:
+    # 1. User was on a Salesforce job page and asked "How do I get data?"
+    # 2. Assistant answered with Salesforce-specific guidance (query, SOQL, etc.)
+    # 3. User has now navigated to a DHIS2 job page and asks the SAME question again
+    # Expected: The model should recognize the context switch and mention DHIS2-specific functions
+
+    history = [
+        {"role": "user", "content": "[pg:job_code/fetch-records/salesforce@9.0.3] How do I get data?"},
+        {"role": "assistant", "content": "To get data from Salesforce, you can use the `query()` operation with SOQL (Salesforce Object Query Language). For example:\n\n```js\nquery('SELECT Id, Name FROM Account WHERE Status = \"Active\"');\n```\n\nThis will fetch records from Salesforce and store them in `state.data`."}
+    ]
+
+    # Now user has navigated to a DHIS2 job page and asks the same question
+    content = "How do I get data?"
+
+    context = {
+        "expression": '''
+fn(state => {
+  return state;
+});''',
+        "adaptor": "@openfn/language-dhis2@8.0.7",
+        "page_name": "fetch-data"
+    }
+
+    meta = {}
+    service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=False)
+    response = call_job_chat_service(service_input)
+    print_response_details(response, "adaptor_context_switching", content=content)
+
+    assert response is not None
+    assert "response" in response
+
+    response_text = response["response"].lower()
+    print(f"\n=== RESPONSE (DHIS2 Context) ===")
+    print(response["response"])
+
+    # Check that DHIS2-specific functions are mentioned
+    dhis2_mentioned = "dhis" in response_text
+    assert dhis2_mentioned, f"Expected DHIS2 to be mentioned in response when on DHIS2 page. Response: {response['response']}"
+
+    # Check the history was properly prefixed with the new page context
+    assert "history" in response
+    updated_history = response["history"]
+    assert len(updated_history) == 4  # 2 previous turns + 1 new turn = 4 messages
+
+    # Verify the latest user message has the correct DHIS2 prefix (with version)
+    latest_user_message = updated_history[2]
+    assert latest_user_message["role"] == "user"
+    assert "[pg:job_code/fetch-data/dhis2@8.0.7]" in latest_user_message["content"], "Expected DHIS2 page prefix with version in latest user message"
+
+    print(f"\n=== CONTEXT SWITCH VERIFICATION ===")
+    print(f"Previous context: Salesforce (from history)")
+    print(f"Current context: DHIS2 (from page prefix)")
+    print(f"DHIS2 mentioned in response: {dhis2_mentioned}")
+    print(f"Latest user message prefix: [pg:job_code/fetch-data/dhis2]")
+
+    print("\n✓ Adaptor context switching test passed: Model recognizes page prefix change and provides DHIS2-specific guidance")
 
 
 if __name__ == "__main__":

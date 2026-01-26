@@ -76,6 +76,7 @@ The input payload is a JSON object with the following structure
   "context": {
     "expression": "// write your job code here",
     "adaptor": "@openfn/language-salesforce@4.6.10",
+    "page_name": "my_job",
     "input": { "data": { "field1": "value1" } },
     "output": { "previous": "output" },
     "log": "execution log text"
@@ -85,7 +86,10 @@ The input payload is a JSON object with the following structure
       "search_results": []
     }
   },
+  "suggest_code": true,
+  "stream": false,
   "download_adaptor_docs": true,
+  "refresh_rag": false,
   "api_key": "<Anthropic API key>"
 }
 ```
@@ -102,12 +106,12 @@ The server returns the following JSON response:
 {
   "response": "To insert a new sobject record in Salesforce, you can use the create operation...",
   "history": [
-    { "role": "user", "content": "How do I use Salesforce?" },
+    { "role": "user", "content": "[pg:job_code/my_job/salesforce@4.6.10] How do I use Salesforce?" },
     {
       "role": "assistant",
       "content": "Salesforce provides many operations..."
     },
-    { "role": "user", "content": "how do I insert a new sobject record?" },
+    { "role": "user", "content": "[pg:job_code/my_job/salesforce@4.6.10] how do I insert a new sobject record?" },
     {
       "role": "assistant",
       "content": "To insert a new sobject record in Salesforce, you can use the create operation..."
@@ -123,7 +127,8 @@ The server returns the following JSON response:
     "rag": {
       "search_results": [],
       "search_results_sections": [],
-      "search_queries": []
+      "search_queries": [],
+      "usage": {}
     }
   }
 }
@@ -155,7 +160,7 @@ provides diagnostic information about the patch.
 }
 ```
 
-To use this new approach, include `suggest_code` in the request payload:
+To use this approach, set `suggest_code: true` in the request payload:
 
 ```json
 {
@@ -163,24 +168,17 @@ To use this new approach, include `suggest_code` in the request payload:
   "context": {
     "expression": "// write your job code here"
   },
-  "suggest_code": false
+  "suggest_code": true
 }
 ```
 
 For backwards compatibility, this functionality is disabled by default.
 
-When `suggest_code` is `false` (or omitted), the service uses the original
-prompt format where:
+**When `suggest_code` is `false` (or omitted):**
+- Code suggestions are embedded directly within the `response` text as markdown code blocks
+- The `suggested_code` and `diff` fields will not be included in the response
 
-- Code suggestions are embedded directly within the `response` text as markdown
-  code blocks
-- The `suggested_code` field will not be included in the response
-- The `application_status` field will not be included in the response
-
-When `suggest_code` is `true`, the service uses the new structured format where:
-
-- Edited job code is separated into a dedicated `suggested_code` field
-- The `response` field contains explanatory text and code blocks (e.g. example
-  code that might not relate to the current job code)
-- When code edits are applied, an additional `application_status` field may be
-  included with details about the code edit application
+**When `suggest_code` is `true`:**
+- Edited job code is returned in a dedicated `suggested_code` field
+- The `response` field contains explanatory text
+- A `diff` field provides details about code edit application with `patches_applied` count and optional `warning` messages

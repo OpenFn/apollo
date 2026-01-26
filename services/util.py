@@ -167,3 +167,37 @@ class AdaptorSpecifier:
     def short_name(self) -> str:
         """Short name without @openfn/language- prefix: 'http'"""
         return self.name.split("/")[-1].replace("language-", "")
+
+
+def add_page_prefix(content: str, page: Optional[dict]) -> str:
+    """
+    Add [pg:...] prefix to message for page navigation tracking.
+
+    Args:
+        content: The message content to prefix
+        page: Dictionary containing page metadata with optional 'type', 'name', and 'adaptor' keys
+
+    Returns:
+        The content with a [pg:type/name/adaptor] prefix if page data is present,
+        otherwise returns the original content unchanged.
+
+    Example:
+        >>> add_page_prefix("Hello", {"type": "job_code", "name": "Transform", "adaptor": "http@6.5.4"})
+        "[pg:job_code/Transform/http@6.5.4] Hello"
+    """
+    if not page:
+        return content
+
+    prefix_parts = []
+    if page.get('type'):
+        prefix_parts.append(str(page['type']))
+    if page.get('name'):
+        prefix_parts.append(str(page['name']))
+    if page.get('adaptor'):
+        prefix_parts.append(str(page['adaptor']))
+
+    if not prefix_parts:
+        return content
+
+    prefix = f"[pg:{'/'.join(prefix_parts)}]"
+    return f"{prefix} {content}"

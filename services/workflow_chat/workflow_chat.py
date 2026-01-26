@@ -18,12 +18,28 @@ from anthropic import (
     InternalServerError,
 )
 import sentry_sdk
-from util import ApolloError, create_logger
+from util import ApolloError, create_logger, add_page_prefix
 from .gen_project_prompt import build_prompt
 from workflow_chat.available_adaptors import get_available_adaptors
 from streaming_util import StreamManager
 
 logger = create_logger("workflow_chat")
+
+
+# Helper function for page navigation
+def extract_page_prefix_from_last_turn(history: List[Dict[str, str]]) -> Optional[str]:
+    """Extract page prefix from last user message if present."""
+    if len(history) < 2:
+        return None
+
+    # Second-to-last turn is the last user message
+    content = history[-2].get("content", "")
+
+    # Extract [pg:...] prefix if present
+    if content.startswith("[pg:") and "]" in content:
+        return content[:content.find("]") + 1]
+
+    return None
 
 
 @dataclass
@@ -37,6 +53,7 @@ class Payload:
     errors: Optional[str] = None
     existing_yaml: Optional[str] = None
     history: Optional[List[Dict[str, str]]] = None
+    context: Optional[dict] = None
     api_key: Optional[str] = None
     stream: Optional[bool] = False
     read_only: Optional[bool] = False
@@ -52,6 +69,7 @@ class Payload:
             errors=data.get("errors"),
             existing_yaml=data.get("existing_yaml"),
             history=data.get("history", []),
+            context=data.get("context"),
             api_key=data.get("api_key"),
             stream=data.get("stream", False),
             read_only=data.get("read_only", False)
@@ -60,7 +78,7 @@ class Payload:
 
 @dataclass
 class ChatConfig:
-    model: str = "claude-sonnet-4-20250514"
+    model: str = "claude-sonnet-4-5-20250929"
     max_tokens: int = 8192
     api_key: Optional[str] = None
 
@@ -88,6 +106,7 @@ class AnthropicClient:
         errors: Optional[str] = None,
         history: Optional[List[Dict[str, str]]] = None,
         stream: Optional[bool] = False,
+        current_page: Optional[dict] = None,
         read_only: Optional[bool] = False,
     ) -> ChatResponse:
         """Generate a response using the Claude API. Retry up to 2 times if YAML/JSON parsing fails."""
@@ -141,7 +160,7 @@ class AnthropicClient:
                         text_complete = False
                         sent_length = 0
                         accumulated_response = ""
-                                            
+
                         with self.client.messages.stream(
                             max_tokens=self.config.max_tokens,
                             messages=prompt,
@@ -195,9 +214,12 @@ class AnthropicClient:
 
                 # If YAML parsing succeeded or we're on the last attempt, return the result
                 if response_yaml is not None or attempt == max_retries:
+                    # Add prefix to content when building history
+                    prefixed_content = add_page_prefix(content, current_page)
+
                     updated_history = history + [
-                        {"role": "user", "content": content},
-                        {"role": "assistant", "content": response},
+                        {"role": "user", "content": prefixed_content},
+                        {"role": "assistant", "content": response_text},
                     ]
 
                     stream_manager.end_stream()
@@ -493,8 +515,19 @@ def main(data_dict: dict) -> dict:
         sentry_sdk.set_context("request_data", {
             k: v for k, v in data_dict.items() if k != "api_key"
             })
-        
+
         data = Payload.from_dict(data_dict)
+
+        if data.context is None:
+            data.context = {}
+
+        # Construct current_page from context
+        page_name = data.context.get("page_name")
+        current_page = {
+            "type": "workflow",
+            "name": page_name
+        }
+
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
 
@@ -504,15 +537,19 @@ def main(data_dict: dict) -> dict:
             errors=data.errors,
             history=data.history,
             stream=data.stream,
+            current_page=current_page,
             read_only=data.read_only
         )
 
-        return {
+        # Build response
+        response_dict = {
             "response": result.content,
             "response_yaml": result.content_yaml,
             "history": result.history,
-            "usage": result.usage,
+            "usage": result.usage
         }
+
+        return response_dict
 
     except ValueError as e:
         raise ApolloError(400, str(e), type="BAD_REQUEST")

@@ -1,5 +1,18 @@
 # apollo
 
+## 0.19.0
+
+### Minor Changes
+
+- 9a7ede4: Support mixed-history sessions in chat services
+
+  job_chat: add navigation prefixes and rag refresh
+
+### Patch Changes
+
+- 133a38e: workflow_chat: improve the model's understanding of edge branching
+  behaviour
+
 ## 0.18.0
 
 ### Minor Changes
