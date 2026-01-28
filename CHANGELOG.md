@@ -1,5 +1,11 @@
 # apollo
 
+## 0.19.1
+
+### Patch Changes
+
+- Update claude model version for RAG
+
 ## 0.19.0
 
 ### Minor Changes
