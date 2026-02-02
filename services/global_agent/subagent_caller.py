@@ -68,7 +68,7 @@ def call_workflow_agent(
 
     # Call workflow agent
     try:
-        from global_agent.subagents.workflow_agent.workflow_agent import main as workflow_agent_main
+        from agents.workflow_agent.workflow_agent import main as workflow_agent_main
         result = workflow_agent_main(workflow_payload)
 
         logger.info("workflow_agent completed successfully")

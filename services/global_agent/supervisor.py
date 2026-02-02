@@ -16,8 +16,8 @@ sys.path.append(str(Path(__file__).parent.parent))
 from util import create_logger, ApolloError
 from global_agent.config_loader import ConfigLoader
 from global_agent.tools.tool_definitions import TOOL_DEFINITIONS
-from global_agent.tools.documentation import search_documentation
-from global_agent.tools.subagent_caller import call_workflow_agent, format_subagent_result_for_llm
+from tools.search_documentation.search_documentation import search_documentation_tool
+from global_agent.subagent_caller import call_workflow_agent, format_subagent_result_for_llm
 
 logger = create_logger(__name__)
 
@@ -134,7 +134,7 @@ class SupervisorAgent:
 
                     # Execute tool
                     if tool_use_block.name == "search_documentation":
-                        tool_result = search_documentation(tool_use_block.input)
+                        tool_result = search_documentation_tool(tool_use_block.input)
 
                         tool_calls_meta.append({
                             "tool": "search_documentation",
