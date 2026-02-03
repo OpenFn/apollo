@@ -119,6 +119,12 @@ class SupervisorAgent:
                     final_text = self._extract_text(response)
                     final_yaml = self._get_yaml_from_subagents()
 
+                    # Add final assistant message to messages
+                    messages.append({
+                        "role": "assistant",
+                        "content": final_text
+                    })
+
                     logger.info(f"Tool loop completed. Total calls: {tool_call_count}")
                     break
 
@@ -158,12 +164,43 @@ class SupervisorAgent:
                             final_text = subagent_result["response"]
                             final_yaml = subagent_result.get("response_yaml")
 
+                            # Add tool use and tool result to messages for proper history
+                            content_blocks = []
+                            for block in response.content:
+                                if block.type == "text":
+                                    content_blocks.append({
+                                        "type": "text",
+                                        "text": block.text
+                                    })
+                                elif block.type == "tool_use":
+                                    content_blocks.append({
+                                        "type": "tool_use",
+                                        "id": block.id,
+                                        "name": block.name,
+                                        "input": block.input
+                                    })
+
+                            messages.append({
+                                "role": "assistant",
+                                "content": content_blocks
+                            })
+                            messages.append({
+                                "role": "user",
+                                "content": [{
+                                    "type": "tool_result",
+                                    "tool_use_id": tool_use_block.id,
+                                    "content": format_subagent_result_for_llm(subagent_result)
+                                }]
+                            })
+                            messages.append({
+                                "role": "assistant",
+                                "content": final_text
+                            })
+
                             return SupervisorResult(
                                 response=final_text,
                                 response_yaml=final_yaml,
-                                history=messages + [
-                                    {"role": "assistant", "content": final_text}
-                                ],
+                                history=messages,  # Messages already updated above
                                 usage=total_usage,
                                 meta={
                                     "tool_calls": tool_calls_meta + [{
@@ -236,13 +273,11 @@ class SupervisorAgent:
             final_yaml = self._get_yaml_from_subagents()
             logger.warning(f"Loop exited without end_turn (reason: {response.stop_reason})")
 
-        # Build result
+        # Build result - don't add final_text again, it's already in messages
         result = SupervisorResult(
             response=final_text,
             response_yaml=final_yaml,
-            history=messages + [
-                {"role": "assistant", "content": final_text}
-            ],
+            history=messages,  # Changed: use messages directly
             usage=total_usage,
             meta={
                 "iteration": 2,
