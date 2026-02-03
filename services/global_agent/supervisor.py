@@ -46,6 +46,7 @@ class SupervisorAgent:
             api_key: Optional API key override
         """
         self.config = config_loader.config
+        self.config_loader = config_loader
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
 
         if not self.api_key:
@@ -160,62 +161,6 @@ class SupervisorAgent:
                         if "usage" in subagent_result:
                             total_usage = sum_usage(total_usage, subagent_result["usage"])
 
-                        # Check for copy_response flag
-                        if tool_use_block.input.get("copy_response", False):
-                            # Direct pass-through: return subagent response immediately
-                            logger.info("copy_response=True, returning workflow_agent response directly")
-
-                            final_text = subagent_result["response"]
-                            final_yaml = subagent_result.get("response_yaml")
-
-                            # Add tool use and tool result to messages for proper history
-                            content_blocks = []
-                            for block in response.content:
-                                if block.type == "text":
-                                    content_blocks.append({
-                                        "type": "text",
-                                        "text": block.text
-                                    })
-                                elif block.type == "tool_use":
-                                    content_blocks.append({
-                                        "type": "tool_use",
-                                        "id": block.id,
-                                        "name": block.name,
-                                        "input": block.input
-                                    })
-
-                            messages.append({
-                                "role": "assistant",
-                                "content": content_blocks
-                            })
-                            messages.append({
-                                "role": "user",
-                                "content": [{
-                                    "type": "tool_result",
-                                    "tool_use_id": tool_use_block.id,
-                                    "content": format_subagent_result_for_llm(subagent_result)
-                                }]
-                            })
-                            messages.append({
-                                "role": "assistant",
-                                "content": final_text
-                            })
-
-                            return SupervisorResult(
-                                response=final_text,
-                                response_yaml=final_yaml,
-                                history=messages,
-                                usage=total_usage,
-                                meta={
-                                    "tool_calls": tool_calls_meta + [{
-                                        "tool": "call_workflow_agent",
-                                        "input": tool_use_block.input,
-                                        "mode": "direct_copy"
-                                    }],
-                                    "subagent_calls": [subagent_result]
-                                }
-                            )
-
                         # Store subagent result
                         self.subagent_results.append(subagent_result)
 
@@ -323,55 +268,4 @@ class SupervisorAgent:
 
     def _build_system_prompt(self) -> str:
         """Build system prompt for supervisor with tool descriptions."""
-        return """You are a supervisor agent that coordinates specialized tools and agents to help users with OpenFn workflows and jobs.
-
-You have access to two tools:
-
-1. **search_documentation**: Search OpenFn documentation for information about adaptors, functions, and concepts
-2. **call_workflow_agent**: Create or modify OpenFn workflows (YAML)
-
-## Your Role
-
-- Understand user requests and determine if you need to search documentation or call the workflow agent
-- For workflow-related tasks (creation, modification, debugging), use call_workflow_agent
-- Use search_documentation when you need information about OpenFn features before responding
-- You can call multiple tools in sequence if needed
-
-## Important Guidelines
-
-### YAML Handling
-- YAML workflows are attached to requests as separate data (you won't see them in messages)
-- When you call workflow_agent, the YAML is automatically passed - DO NOT include YAML in your message
-- Simply describe what changes are needed; the YAML will be handled separately
-
-### Message Modes
-When calling the workflow agent, choose the appropriate mode:
-- **pass_through**: Use when the user's request is clear and can be sent directly (saves tokens)
-- **custom_message**: Use when you need to break down the task, add context, or rephrase
-- **copy_response**: Set to true with pass_through for ultra-efficiency (direct return)
-
-### Examples
-
-**Example 1: Simple workflow request (ultra-efficient)**
-User: "Add a job that sends an SMS notification"
-Action: call_workflow_agent(mode="pass_through", copy_response=true)
-Result: User's message passed directly, workflow_agent's response returned directly (minimal tokens)
-
-**Example 2: Need documentation first**
-User: "Add a job that sends an SMS notification"
-Actions:
-1. search_documentation(query="SMS notification adaptor functions")
-2. call_workflow_agent(mode="custom_message", message="Add a job that sends an SMS using the messaging adaptor...")
-Result: You provide context from docs, write custom instructions
-
-**Example 3: Pure information request**
-User: "How do I use the http adaptor?"
-Action: search_documentation(query="http adaptor usage examples")
-Result: Synthesize search results into a helpful response (no workflow generation)
-
-## Response Style
-
-- Be concise and helpful
-- When calling the workflow agent, let it do the heavy lifting
-- Provide context from documentation when relevant
-- If a workflow is being modified, explain what changes were made"""
+        return self.config_loader.get_prompt("supervisor_system_prompt")
