@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from util import create_logger, ApolloError
+from util import create_logger, ApolloError, sum_usage
 from global_agent.config_loader import ConfigLoader
 from global_agent.tools.tool_definitions import TOOL_DEFINITIONS
 from tools.search_documentation.search_documentation import search_documentation_tool
@@ -156,6 +156,10 @@ class SupervisorAgent:
                             read_only=read_only
                         )
 
+                        # Aggregate subagent token usage into total
+                        if "usage" in subagent_result:
+                            total_usage = sum_usage(total_usage, subagent_result["usage"])
+
                         # Check for copy_response flag
                         if tool_use_block.input.get("copy_response", False):
                             # Direct pass-through: return subagent response immediately
@@ -200,7 +204,7 @@ class SupervisorAgent:
                             return SupervisorResult(
                                 response=final_text,
                                 response_yaml=final_yaml,
-                                history=messages,  # Messages already updated above
+                                history=messages,
                                 usage=total_usage,
                                 meta={
                                     "tool_calls": tool_calls_meta + [{
