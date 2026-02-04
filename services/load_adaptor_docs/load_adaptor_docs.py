@@ -241,7 +241,6 @@ def process_adaptor_docs(adaptor: AdaptorSpecifier, raw_docs: List[Dict[str, Any
         conn = get_db_connection()
 
     try:
-        create_table_if_not_exists(conn)
         upload_to_postgres(adaptor, filtered_docs, conn)
 
         return {
