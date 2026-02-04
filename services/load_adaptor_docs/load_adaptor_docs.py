@@ -271,21 +271,22 @@ def load_adaptor_docs(adaptor: str, skip_if_exists: bool = True, conn=None) -> d
     Returns:
         Dictionary with success status and upload details
     """
-    create_table_if_not_exists(conn)
-    # Parse the adaptor string
     adaptor_spec = AdaptorSpecifier(adaptor)
 
     sentry_sdk.set_tag("adaptor", adaptor_spec.name)
     sentry_sdk.set_tag("version", adaptor_spec.version)
 
-    # Check if docs already exist (if skip_if_exists is enabled)
-    if skip_if_exists:
-        logger.info("Checking if docs already exist in database")
-        should_close_conn = conn is None
-        if conn is None:
-            conn = get_db_connection()
+    # Ensure we have a connection and create table if needed
+    should_close_conn = conn is None
+    if conn is None:
+        conn = get_db_connection()
 
-        try:
+    try:
+        create_table_if_not_exists(conn)
+
+        # Check if docs already exist (if skip_if_exists is enabled)
+        if skip_if_exists:
+            logger.info("Checking if docs already exist in database")
             existing_check = check_existing_docs(adaptor_spec, conn)
 
             if existing_check["exists"]:
@@ -297,12 +298,6 @@ def load_adaptor_docs(adaptor: str, skip_if_exists: bool = True, conn=None) -> d
                     "functions_uploaded": existing_check["function_count"],
                     "function_list": existing_check["function_list"]
                 }
-
-        finally:
-            if should_close_conn:
-                conn.close()
-
-    try:
         with sentry_sdk.start_span(description="fetch_adaptor_apis"):
             api_result = apollo("adaptor_apis", {"adaptors": [adaptor_spec.specifier]})
 
@@ -334,6 +329,9 @@ def load_adaptor_docs(adaptor: str, skip_if_exists: bool = True, conn=None) -> d
     except Exception as e:
         logger.error(f"Error calling adaptor_apis: {str(e)}")
         raise ApolloError(500, f"Failed to fetch docs: {str(e)}", type="ADAPTOR_API_ERROR")
+    finally:
+        if should_close_conn:
+            conn.close()
 
 
 def main(data: dict) -> dict:
