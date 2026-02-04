@@ -272,6 +272,7 @@ def load_adaptor_docs(adaptor: str, skip_if_exists: bool = True, conn=None) -> d
     Returns:
         Dictionary with success status and upload details
     """
+    create_table_if_not_exists(conn)
     # Parse the adaptor string
     adaptor_spec = AdaptorSpecifier(adaptor)
 
