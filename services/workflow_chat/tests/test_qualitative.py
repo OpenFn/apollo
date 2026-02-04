@@ -476,5 +476,112 @@ edges:
     assert_yaml_section_contains_all(existing_yaml, response.get("response_yaml", ""), "edges", context="Edges section")
     assert_no_special_chars(response["response_yaml"], context="test_long_yaml")
 
+def test_navigation_job_to_workflow():
+    print("==================TEST==================")
+    print("Description: Testing cross-service navigation from job editor to workflow editor - model should infer context change")
+
+    # History shows user was on job editor discussing job code
+    history = [
+        {"role": "user", "content": "[pg:job_code/transform-data/http] Can you add error handling to this HTTP request?"},
+        {"role": "assistant", "content": "I'll add try-catch error handling to catch any request failures in your HTTP job."},
+        {"role": "user", "content": "[pg:job_code/transform-data/http] Also add retry logic with backoff"},
+        {"role": "assistant", "content": "I'll add exponential backoff retry logic to handle transient failures."}
+    ]
+
+    # Now user is on workflow editor - abrupt question about adding a job
+    content = "Add a step to send the results via email"
+
+    # Current context is workflow, not job code
+    existing_yaml = """name: data-pipeline
+jobs:
+  fetch-source-data:
+    id: job-fetch-id
+    name: Fetch Source Data
+    adaptor: '@openfn/language-http@6.5.4'
+    body: 'get("https://source.api/data");'
+  transform-data:
+    id: job-transform-id
+    name: Transform Data
+    adaptor: '@openfn/language-common@latest'
+    body: 'fn(state => { return { ...state, transformed: true }; });'
+  save-to-database:
+    id: job-save-id
+    name: Save to Database
+    adaptor: '@openfn/language-http@6.5.4'
+    body: 'post("https://db.api/save", state => state.data);'
+triggers:
+  webhook:
+    id: trigger-webhook-id
+    type: webhook
+    enabled: false
+edges:
+  webhook->fetch-source-data:
+    id: edge-webhook-fetch-id
+    source_trigger: webhook
+    target_job: fetch-source-data
+    condition_type: always
+    enabled: true
+  fetch-source-data->transform-data:
+    id: edge-fetch-transform-id
+    source_job: fetch-source-data
+    target_job: transform-data
+    condition_type: on_job_success
+    enabled: true
+  transform-data->save-to-database:
+    id: edge-transform-save-id
+    source_job: transform-data
+    target_job: save-to-database
+    condition_type: on_job_success
+    enabled: true
+"""
+
+    context = {
+        "page_name": "data-pipeline"
+    }
+
+    # Meta shows navigation happened
+    meta = {
+        "last_page": {
+            "type": "job_code",
+            "name": "transform-data",
+            "adaptor": "http"
+        }
+    }
+
+    service_input = make_service_input(existing_yaml, history, content=content, context=context, meta=meta)
+    response = call_workflow_chat_service(service_input)
+    print_response_details(response, content=content)
+
+    # Assertions to verify model correctly inferred navigation and responded about workflow
+    assert response is not None
+    assert "response_yaml" in response
+    assert response["response_yaml"] is not None, "Model should have generated YAML for the workflow"
+
+    # Verify email job was added
+    yaml_obj = yaml.safe_load(response["response_yaml"])
+    assert "jobs" in yaml_obj
+
+    job_names = [job.get("name", "").lower() for job in yaml_obj["jobs"].values()]
+    job_adaptors = [job.get("adaptor", "").lower() for job in yaml_obj["jobs"].values()]
+
+    # Check that an email-related job was added
+    assert any("email" in name or "mail" in name or "send" in name for name in job_names), \
+        "Email job not found in workflow"
+
+    # Check that a new job was added (could be gmail, mailgun, or http for email API)
+    # This is flexible since the model may choose different adaptors for sending email
+    orig_yaml_obj = yaml.safe_load(existing_yaml)
+    orig_job_count = len(orig_yaml_obj["jobs"])
+    new_job_count = len(yaml_obj["jobs"])
+    assert new_job_count > orig_job_count, f"Expected new job to be added. Original: {orig_job_count}, New: {new_job_count}"
+
+    # Verify response talks about workflow, not job code
+    response_text = response["response"].lower()
+    assert not any(phrase in response_text for phrase in ["try", "catch", "retry", "backoff", "error handling in the code"]), \
+        "Response should be about workflow structure, not job code error handling"
+
+    print("\n✓ Navigation test passed: Model correctly inferred navigation from job editor to workflow editor")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

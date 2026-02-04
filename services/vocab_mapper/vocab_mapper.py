@@ -36,7 +36,7 @@ class VocabMapper:
     def _call_llm(self, system_prompt: str, user_prompt: str) -> str:
         """Helper method to make LLM calls."""
         message = self.client.messages.create(
-            model="claude-3-7-sonnet-20250219",
+            model="claude-sonnet-4-5-20250929",
             max_tokens=500,
             temperature=0,
             system=system_prompt,

@@ -14,12 +14,28 @@ from anthropic import (
     InternalServerError,
 )
 import sentry_sdk
-from util import ApolloError, create_logger, apollo
+from util import ApolloError, create_logger, AdaptorSpecifier, add_page_prefix
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
 from streaming_util import StreamManager
 
 logger = create_logger("job_chat")
+
+
+# Helper function for page navigation
+def extract_page_prefix_from_last_turn(history: List[Dict[str, str]]) -> Optional[str]:
+    """Extract page prefix from last user message if present."""
+    if len(history) < 2:
+        return None
+
+    # Second-to-last turn is the last user message
+    content = history[-2].get("content", "")
+
+    # Extract [pg:...] prefix if present
+    if content.startswith("[pg:") and "]" in content:
+        return content[:content.find("]") + 1]
+
+    return None
 
 @dataclass
 class Payload:
@@ -59,7 +75,7 @@ class Payload:
 
 @dataclass
 class ChatConfig:
-    model: str = "claude-sonnet-4-20250514"
+    model: str = "claude-sonnet-4-5-20250929"
     max_tokens: int = 16384
     api_key: Optional[str] = None
 
@@ -90,7 +106,8 @@ class AnthropicClient:
         suggest_code: Optional[bool] = None,
         stream: Optional[bool] = False,
         download_adaptor_docs: Optional[bool] = True,
-        refresh_rag: Optional[bool] = False
+        refresh_rag: Optional[bool] = False,
+        current_page: Optional[dict] = None
     ) -> ChatResponse:
         """
         Generate a response using the Claude API with optional streaming.
@@ -158,8 +175,6 @@ class AnthropicClient:
                             remaining = accumulated_response[sent_length:]
                             stream_manager.send_text(remaining)
 
-                    usage_info = message.usage.model_dump() if hasattr(message, 'usage') else {}
-
                 else:
                     logger.info("Making non-streaming API call")
                     message = self.client.messages.create(
@@ -198,8 +213,11 @@ class AnthropicClient:
                 suggested_code = None
                 diff = None
 
+            # Add prefix to content when building history
+            prefixed_content = add_page_prefix(content, current_page)
+
             updated_history = history + [
-                {"role": "user", "content": content},
+                {"role": "user", "content": prefixed_content},
                 {"role": "assistant", "content": text_response},
             ]
 
@@ -290,7 +308,6 @@ class AnthropicClient:
     def apply_code_edits(self, content: str, text_answer: str, original_code: str, code_edits: List[Dict[str, Any]]) -> tuple[Optional[str], Dict[str, Any]]:
         """Apply a list of code edits to the original code."""
         current_code = original_code
-        total_changes = len(code_edits)
         patches_applied = 0
         warnings = []
         
@@ -394,7 +411,7 @@ class AnthropicClient:
                 model=self.config.model,
                 system=system_message
             )
-            
+
             response = "\n\n".join([block.text for block in message.content if block.type == "text"])
             response = '{\n  "explanation": "' + response  # Add back the prefilled opening brace
             correction_data = json.loads(response)
@@ -445,31 +462,61 @@ def main(data_dict: dict) -> dict:
 
         data = Payload.from_dict(data_dict)
 
+        if data.context is None:
+            data.context = {}
+
+        # Construct current_page from context
+        page_name = data.context.get("page_name")
+        adaptor_string = data.context.get("adaptor")
+
+        current_page = {
+            "type": "job_code",
+            "name": page_name
+        }
+
+        if adaptor_string:
+            try:
+                adaptor = AdaptorSpecifier(adaptor_string)
+                current_page["adaptor"] = f"{adaptor.short_name}@{adaptor.version}"
+            except Exception as e:
+                logger.warning(f"Failed to parse adaptor string '{adaptor_string}': {e}")
+
+        # Extract rag_data from meta if present
+        input_meta = data_dict.get("meta", {})
+        rag_data = input_meta.get("rag")
+
+        # Detect navigation by comparing current page prefix with last turn's prefix
+        current_prefix = add_page_prefix("", current_page).strip()
+        last_prefix = extract_page_prefix_from_last_turn(data_dict.get("history", []))
+        user_navigated = last_prefix is not None and current_prefix != last_prefix
+        should_refresh_rag = data.refresh_rag or user_navigated
+
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
         result = client.generate(
             content=data.content,
             history=data_dict.get("history", []),
             context=data.context,
-            rag=data_dict.get("meta", {}).get("rag"),
+            rag=rag_data,
             suggest_code=data.suggest_code,
             stream=data.stream,
             download_adaptor_docs=data.download_adaptor_docs,
-            refresh_rag=data.refresh_rag
+            refresh_rag=should_refresh_rag,
+            current_page=current_page
         )
-        
+
 
         response_dict = {
             "response": result.response,
             "suggested_code": result.suggested_code,
-            "history": result.history, 
-            "usage": result.usage, 
+            "history": result.history,
+            "usage": result.usage,
             "meta": {"rag": result.rag}
         }
 
         if result.diff:
             response_dict["diff"] = result.diff
-        
+
         return response_dict
 
     except ValueError as e:
@@ -492,8 +539,6 @@ def main(data_dict: dict) -> dict:
         if "prompt is too long" in str(e):
             error_message = "Input prompt exceeds maximum token limit (200,000 tokens). Please reduce the amount of text or context provided."
             raise ApolloError(400, error_message, type="PROMPT_TOO_LONG")
-        raise ApolloError(400, str(e), type="BAD_REQUEST")
-    except BadRequestError as e:
         raise ApolloError(400, str(e), type="BAD_REQUEST")
     except PermissionDeniedError as e:
         raise ApolloError(403, "Not authorized to perform this action", type="FORBIDDEN")
