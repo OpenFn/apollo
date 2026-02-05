@@ -62,11 +62,40 @@ response to the user. Never forget to return the YAML output.""",
             "message": {
                 "type": "string",
                 "description": "Custom message for the workflow_agent (required if mode is custom_message)"
+            }
+        },
+        "required": ["mode"]
+    }
+}
+
+# Tool 3: Call job code agent
+CALL_JOB_CODE_AGENT_TOOL = {
+    "name": "call_job_code_agent",
+    "description": """Get help with OpenFn job code (JavaScript expressions for individual steps).
+
+OpenFn workflows define high-level orchestration (triggers, jobs, edges). Job code defines what
+each step actually does using adaptor functions. Use this tool for:
+- Writing job expressions using adaptor functions (e.g., create(), upsert(), get())
+- Understanding adaptor-specific syntax and parameters
+- Debugging job code errors
+- Getting code examples for specific adaptors
+
+Similar modes as workflow_agent:
+1. Pass the user's message directly (mode: 'pass_through') - token-efficient
+2. Write a custom message (mode: 'custom_message') - for context or rephrasing
+
+The agent has access to adaptor documentation and will provide code examples.""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "mode": {
+                "type": "string",
+                "enum": ["pass_through", "custom_message"],
+                "description": "How to communicate with the job code agent"
             },
-            "copy_response": {
-                "type": "boolean",
-                "description": "If true, return workflow_agent's exact response without modification. Only valid with pass_through mode. Use to save tokens when no synthesis needed.",
-                "default": False
+            "message": {
+                "type": "string",
+                "description": "Custom message for the job code agent (required if mode is custom_message)"
             }
         },
         "required": ["mode"]
@@ -76,5 +105,6 @@ response to the user. Never forget to return the YAML output.""",
 # Export all tool definitions
 TOOL_DEFINITIONS = [
     SEARCH_DOCUMENTATION_TOOL,
-    CALL_WORKFLOW_AGENT_TOOL
+    CALL_WORKFLOW_AGENT_TOOL,
+    CALL_JOB_CODE_AGENT_TOOL
 ]

@@ -39,12 +39,11 @@ def call_workflow_agent(
         Dictionary with workflow agent response (raw, not formatted)
     """
     mode = tool_input.get("mode")
-    copy_response = tool_input.get("copy_response", False)
 
     if not mode:
         raise ApolloError(400, "mode is required")
 
-    logger.info(f"Calling workflow_agent (mode: {mode}, copy_response: {copy_response})")
+    logger.info(f"Calling workflow_agent (mode: {mode})")
 
     # Determine message to send
     if mode == "pass_through":
@@ -66,18 +65,17 @@ def call_workflow_agent(
         "read_only": read_only
     }
 
-    # Call workflow agent
+    # Call workflow agent 
     try:
-        from agents.workflow_agent.workflow_agent import main as workflow_agent_main
-        result = workflow_agent_main(workflow_payload)
+        from workflow_chat.workflow_chat import main as workflow_chat_main
+        result = workflow_chat_main(workflow_payload)
 
         logger.info("workflow_agent completed successfully")
 
         # Add metadata about the call
         result["_call_metadata"] = {
             "subagent": "workflow_agent",
-            "mode": mode,
-            "copy_response": copy_response
+            "mode": mode
         }
 
         return result
@@ -89,12 +87,74 @@ def call_workflow_agent(
         raise ApolloError(500, f"workflow_agent failed: {str(e)}")
 
 
+def call_job_agent(
+    tool_input: Dict,
+    history: List[Dict]
+) -> Dict:
+    """
+    Call the job code agent and return its results.
+
+    Args:
+        tool_input: Tool input from supervisor containing mode, message
+        history: Conversation history
+
+    Returns:
+        Dictionary with job agent response (raw, not formatted)
+    """
+    mode = tool_input.get("mode")
+
+    if not mode:
+        raise ApolloError(400, "mode is required")
+
+    logger.info(f"Calling job_agent (mode: {mode})")
+
+    # Determine message to send
+    if mode == "pass_through":
+        # Get the original user message from history
+        user_message = _get_original_user_message(history)
+    elif mode == "custom_message":
+        user_message = tool_input.get("message", "")
+        if not user_message:
+            raise ApolloError(400, "custom_message mode requires 'message' field")
+    else:
+        raise ApolloError(400, f"Invalid mode: {mode}")
+
+    # Build job agent payload
+    job_payload = {
+        "content": user_message,
+        "context": {},
+        "suggest_code": True,
+        "stream": False,
+        "history": history
+    }
+
+    # Call job agent
+    try:
+        from job_chat.job_chat import main as job_chat_main
+        result = job_chat_main(job_payload)
+
+        logger.info("job_agent completed successfully")
+
+        # Add metadata about the call
+        result["_call_metadata"] = {
+            "subagent": "job_agent",
+            "mode": mode
+        }
+
+        return result
+
+    except ApolloError:
+        raise
+    except Exception as e:
+        logger.exception("Error calling job_agent")
+        raise ApolloError(500, f"job_agent failed: {str(e)}")
+
+
 def format_subagent_result_for_llm(result: Dict) -> str:
     """
     Format subagent result for LLM to read.
 
-    This is used when copy_response=False, allowing the supervisor
-    to synthesize the response in its own words.
+    Allows the supervisor to synthesize the subagent response in its own words.
 
     Args:
         result: Raw subagent response
@@ -105,16 +165,35 @@ def format_subagent_result_for_llm(result: Dict) -> str:
     metadata = result.get("_call_metadata", {})
     subagent = metadata.get("subagent", "unknown")
 
+    # Handle different subagent types
+    if subagent == "workflow_agent":
+        if result.get('response_yaml'):
+            output_info = "YAML: Attached separately"
+            reminder = "CRITICAL: Do NOT include YAML in your text response - it's already attached."
+        else:
+            output_info = "YAML: Not generated (agent provided clarification/explanation)"
+            reminder = ""
+    elif subagent == "job_agent":
+        if result.get('suggested_code'):
+            output_info = "Job Code: Attached separately"
+            reminder = "CRITICAL: Do NOT include job code in your text response - it's already attached."
+        else:
+            output_info = "Job Code: Not generated (agent provided clarification/explanation)"
+            reminder = ""
+    else:
+        output_info = "Output: Unknown"
+        reminder = ""
+
     formatted = f"""Subagent '{subagent}' completed successfully.
 
 Response: {result.get('response', 'No response')}
 
-YAML Output: {"Generated" if result.get('response_yaml') else "None"}
+{output_info}
 
 Token Usage: {result.get('usage', {}).get('input_tokens', 0)} input, {result.get('usage', {}).get('output_tokens', 0)} output tokens
 
 You should now synthesize this information into your response to the user.
-If YAML was generated, make sure to include it in your final response."""
+{reminder}"""
 
     return formatted
 

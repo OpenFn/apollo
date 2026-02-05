@@ -1,5 +1,0 @@
-# Workflow agent configuration (stub for Phase 1)
-# In Phase 2, this will be replaced with actual workflow generation logic
-model: "claude-sonnet-4-20250514"
-max_tokens: 8192
-temperature: 1.0

@@ -17,7 +17,7 @@ from util import create_logger, ApolloError, sum_usage
 from global_agent.config_loader import ConfigLoader
 from global_agent.tools.tool_definitions import TOOL_DEFINITIONS
 from tools.search_documentation.search_documentation import search_documentation_tool
-from global_agent.subagent_caller import call_workflow_agent, format_subagent_result_for_llm
+from global_agent.subagent_caller import call_workflow_agent, call_job_agent, format_subagent_result_for_llm
 
 logger = create_logger(__name__)
 
@@ -27,6 +27,7 @@ class SupervisorResult:
     """Result from supervisor run."""
     response: str
     response_yaml: Optional[str]
+    suggested_code: Optional[str]
     history: List[Dict]
     usage: Dict
     meta: Dict
@@ -119,6 +120,7 @@ class SupervisorAgent:
                     # Done - extract final response
                     final_text = self._extract_text(response)
                     final_yaml = self._get_yaml_from_subagents()
+                    final_code = self._get_code_from_subagents()
 
                     # Add final assistant message to messages
                     messages.append({
@@ -172,6 +174,27 @@ class SupervisorAgent:
                             "input": tool_use_block.input
                         })
 
+                    elif tool_use_block.name == "call_job_code_agent":
+                        subagent_result = call_job_agent(
+                            tool_use_block.input,
+                            history=messages
+                        )
+
+                        # Aggregate subagent token usage into total
+                        if "usage" in subagent_result:
+                            total_usage = sum_usage(total_usage, subagent_result["usage"])
+
+                        # Store subagent result
+                        self.subagent_results.append(subagent_result)
+
+                        # Format result for LLM
+                        tool_result = format_subagent_result_for_llm(subagent_result)
+
+                        tool_calls_meta.append({
+                            "tool": "call_job_code_agent",
+                            "input": tool_use_block.input
+                        })
+
                     else:
                         logger.error(f"Unknown tool: {tool_use_block.name}")
                         tool_result = f"Error: Unknown tool {tool_use_block.name}"
@@ -220,12 +243,14 @@ class SupervisorAgent:
         if response.stop_reason != "end_turn":
             final_text = self._extract_text(response)
             final_yaml = self._get_yaml_from_subagents()
+            final_code = self._get_code_from_subagents()
             logger.warning(f"Loop exited without end_turn (reason: {response.stop_reason})")
 
         # Build result - don't add final_text again, it's already in messages
         result = SupervisorResult(
             response=final_text,
             response_yaml=final_yaml,
+            suggested_code=final_code,
             history=messages,  # Changed: use messages directly
             usage=total_usage,
             meta={
@@ -264,6 +289,18 @@ class SupervisorAgent:
             metadata = result.get("_call_metadata", {})
             if metadata.get("subagent") == "workflow_agent":
                 return result.get("response_yaml")
+        return None
+
+    def _get_code_from_subagents(self) -> Optional[str]:
+        """
+        Get suggested code from subagent results.
+
+        Returns the code from job_agent if it was called, else None.
+        """
+        for result in self.subagent_results:
+            metadata = result.get("_call_metadata", {})
+            if metadata.get("subagent") == "job_agent":
+                return result.get("suggested_code")
         return None
 
     def _build_system_prompt(self) -> str:
