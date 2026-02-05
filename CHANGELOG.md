@@ -1,5 +1,11 @@
 # apollo
 
+## 0.19.2
+
+### Patch Changes
+
+- 27fda5b: Ensure db tables are checked before adaptors are uploaded
+
 ## 0.19.1
 
 ### Patch Changes
