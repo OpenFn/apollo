@@ -1,0 +1,7 @@
+# Global agent supervisor configuration
+model: "claude-sonnet-4-20250514"
+max_tokens: 8192
+temperature: 1.0
+
+# Tool calling (for iteration 2)
+max_tool_calls: 10
