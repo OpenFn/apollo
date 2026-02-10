@@ -99,7 +99,8 @@ The agent has access to adaptor documentation and will provide code examples."""
             }
         },
         "required": ["mode"]
-    }
+    },
+    "cache_control": {"type": "ephemeral"}
 }
 
 # Export all tool definitions

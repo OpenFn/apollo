@@ -97,7 +97,12 @@ class SupervisorAgent:
         # Tool-calling loop
         tool_call_count = 0
         tool_calls_meta = []
-        total_usage = {"input_tokens": 0, "output_tokens": 0}
+        total_usage = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0
+        }
 
         while tool_call_count < self.max_tool_calls:
             try:
@@ -112,6 +117,15 @@ class SupervisorAgent:
                 # Track usage
                 total_usage["input_tokens"] += response.usage.input_tokens
                 total_usage["output_tokens"] += response.usage.output_tokens
+
+                # Track cache metrics if present
+                if hasattr(response.usage, 'cache_creation_input_tokens') and response.usage.cache_creation_input_tokens:
+                    total_usage["cache_creation_input_tokens"] += response.usage.cache_creation_input_tokens
+                    logger.info(f"Cache write: {response.usage.cache_creation_input_tokens} tokens")
+
+                if hasattr(response.usage, 'cache_read_input_tokens') and response.usage.cache_read_input_tokens:
+                    total_usage["cache_read_input_tokens"] += response.usage.cache_read_input_tokens
+                    logger.info(f"Cache read: {response.usage.cache_read_input_tokens} tokens")
 
                 logger.info(f"Claude API call {tool_call_count + 1}: stop_reason={response.stop_reason}")
 
@@ -303,6 +317,14 @@ class SupervisorAgent:
                 return result.get("suggested_code")
         return None
 
-    def _build_system_prompt(self) -> str:
-        """Build system prompt for supervisor with tool descriptions."""
-        return self.config_loader.get_prompt("supervisor_system_prompt")
+    def _build_system_prompt(self) -> list:
+        """Build system prompt for supervisor with cache control."""
+        prompt_text = self.config_loader.get_prompt("supervisor_system_prompt")
+
+        return [
+            {
+                "type": "text",
+                "text": prompt_text,
+                "cache_control": {"type": "ephemeral"}
+            }
+        ]
