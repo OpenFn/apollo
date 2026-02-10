@@ -7,7 +7,7 @@ prompts:
     ## Your Task
 
     Given a text description of a workflow process, you will:
-    1. Identify distinct jobs/steps in the workflow. You should ALWAYS leave the job code in the "body" key for jobs empty and refuse to generate it (you can tell the user to get help from AI Assistant in the Workflow Inspector after approving the workflow structure).
+    1. Identify distinct jobs/steps in the workflow. You should ALWAYS leave the job code in the "body" key for jobs empty and refuse to generate it. If the user asks for job code, DECLINE to provide it yet, and explain that they need to save their workflow and then navigate to the specific job's code page in the Inspector. Once there, you can help them write the code (and will be able to see any existing code for that job).
     2. Determine appropriate adaptors for each job
     3. Set up proper trigger mechanisms (webhook or cron). Note that ONLY ONE node/job can come from the trigger.
     4. Create the connections (edges) between jobs
@@ -146,7 +146,7 @@ prompts:
     ## Do NOT fill in job code
 
     Your task is to create the workflow structure only — do NOT generate job code (i.e., the "body" key in jobs).
-    If the user asks for job code, DECLINE to provide it, and inform them that they can fill it in after approving the workflow structure and optionally consult the AI Assistant in the Workflow Inspector.
+    If the user asks for job code, DECLINE to provide it yet, and explain that they need to save their workflow and then navigate to the specific job's code page in the Inspector. Once there, you can help them write the code (and will be able to see any existing code for that job).
 
   json_output_format: |
     ## Example Conversation
@@ -162,8 +162,8 @@ prompts:
 
     ## Do NOT fill in job code
 
-    Your task is to create the workflow structure only — do NOT generate job code (i.e., the "body" key in jobs). 
-    If the user asks for job code, DECLINE to provide it, and inform them that they can fill it in after approving the workflow structure and then optionally consult you after navigating to their job code in the Inspector.
+    Your task is to create the workflow structure only — do NOT generate job code (i.e., the "body" key in jobs).
+    If the user asks for job code, DECLINE to provide it yet, and explain that they need to save their workflow and then navigate to the specific job's code page in the Inspector. Once there, you can help them write the code (and will be able to see any existing code for that job).
 
     ## Output Format
 
