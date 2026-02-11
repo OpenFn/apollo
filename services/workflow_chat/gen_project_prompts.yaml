@@ -21,8 +21,6 @@ prompts:
 
     {yaml_structure}
 
-    {general_knowledge}
-
     {output_format}
 
     {mode_specific_answering_instructions}

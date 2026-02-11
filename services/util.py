@@ -113,6 +113,40 @@ def get_db_connection():
     return psycopg2.connect(db_url)
 
 
+def sum_usage(*usage_objects):
+    """
+    Sum multiple usage object token counts and return an aggregated count dictionary.
+
+    Aggregates token counts from multiple LLM API calls (e.g., main calls, RAG pipeline calls,
+    subagent calls) into a single usage dictionary.
+
+    Args:
+        *usage_objects: Variable number of usage dictionaries, each containing token count fields
+
+    Returns:
+        dict: Aggregated usage dictionary with summed token counts for:
+            - cache_creation_input_tokens
+            - cache_read_input_tokens
+            - input_tokens
+            - output_tokens
+
+    Example:
+        usage1 = {"input_tokens": 100, "output_tokens": 50}
+        usage2 = {"input_tokens": 200, "output_tokens": 75}
+        total = sum_usage(usage1, usage2)
+        # Returns: {"input_tokens": 300, "output_tokens": 125}
+    """
+    result = {}
+
+    for usage in usage_objects:
+        for field in ["cache_creation_input_tokens", "cache_read_input_tokens", "input_tokens", "output_tokens"]:
+            value = usage.get(field)
+            if value is not None:
+                result[field] = result.get(field, 0) + value
+
+    return result
+
+
 class AdaptorSpecifier:
     """
     Represents a parsed adaptor identifier.
