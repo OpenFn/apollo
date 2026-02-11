@@ -1,5 +1,11 @@
 # apollo
 
+## 0.19.5
+
+### Patch Changes
+
+- Fix doc loading in production environments
+
 ## 0.19.4
 
 ### Patch Changes
