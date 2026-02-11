@@ -1,5 +1,11 @@
 # apollo
 
+## 0.19.3
+
+### Patch Changes
+
+- af07795: Update adaptor apis package
+
 ## 0.19.2
 
 ### Patch Changes
