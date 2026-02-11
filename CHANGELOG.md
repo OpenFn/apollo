@@ -1,5 +1,12 @@
 # apollo
 
+## 0.19.4
+
+### Patch Changes
+
+- bd2c51b: workflow_chat: don't refer to a seperate AI assistant when asked to
+  write job code
+
 ## 0.19.3
 
 ### Patch Changes
