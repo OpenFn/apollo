@@ -38,13 +38,8 @@ Use this tool when the user wants to:
 - Modify workflow structure or configuration
 - Debug or fix workflow YAML errors
 
-You can either:
-1. Pass the user's message directly (mode: 'pass_through') - use when the user's
-   request is clear and doesn't need rephrasing. You will directly return the
-   workflow_agent's response with minimal processing (token-efficient).
-2. Write a custom message for the workflow_agent (mode: 'custom_message') - use when
-   you need to break down the task or provide specific instructions. You will
-   synthesize the workflow_agent's response in your own words.
+Write a clear message for the workflow_agent. Include any relevant conversation
+context that the agent needs to understand the request.
 
 CRITICAL: If there is a YAML workflow attached, it will be automatically passed
 to the workflow_agent. Do NOT include YAML in your message - it will be handled separately.
@@ -54,17 +49,12 @@ response to the user. Never forget to return the YAML output.""",
     "input_schema": {
         "type": "object",
         "properties": {
-            "mode": {
-                "type": "string",
-                "enum": ["pass_through", "custom_message"],
-                "description": "How to communicate with the workflow_agent and handle the response"
-            },
             "message": {
                 "type": "string",
-                "description": "Custom message for the workflow_agent (required if mode is custom_message)"
+                "description": "Message for the workflow_agent with relevant context"
             }
         },
-        "required": ["mode"]
+        "required": ["message"]
     }
 }
 
@@ -80,25 +70,19 @@ each step actually does using adaptor functions. Use this tool for:
 - Debugging job code errors
 - Getting code examples for specific adaptors
 
-Similar modes as workflow_agent:
-1. Pass the user's message directly (mode: 'pass_through') - token-efficient
-2. Write a custom message (mode: 'custom_message') - for context or rephrasing
+Write a clear message for the job code agent. Include any relevant conversation
+context that the agent needs to understand the request.
 
 The agent has access to adaptor documentation and will provide code examples.""",
     "input_schema": {
         "type": "object",
         "properties": {
-            "mode": {
-                "type": "string",
-                "enum": ["pass_through", "custom_message"],
-                "description": "How to communicate with the job code agent"
-            },
             "message": {
                 "type": "string",
-                "description": "Custom message for the job code agent (required if mode is custom_message)"
+                "description": "Message for the job code agent with relevant context"
             }
         },
-        "required": ["mode"]
+        "required": ["message"]
     },
     "cache_control": {"type": "ephemeral"}
 }

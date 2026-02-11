@@ -106,26 +106,35 @@ class SupervisorAgent:
 
         while tool_call_count < self.max_tool_calls:
             try:
-                response = self.client.messages.create(
+                response = self.client.beta.messages.create(
                     model=self.config["model"],
                     max_tokens=self.config["max_tokens"],
                     system=system_prompt,
                     messages=messages,
-                    tools=self.tools
+                    tools=self.tools,
+                    betas=["context-management-2025-06-27"],
+                    context_management={
+                        "edits": [
+                            {
+                                "type": "clear_tool_uses_20250919",
+                                "trigger": {
+                                    "type": "tool_uses",
+                                    "value": 3
+                                },
+                                "keep": {
+                                    "type": "tool_uses",
+                                    "value": 2
+                                },
+                                "exclude_tools": ["search_documentation"],
+                                "clear_tool_inputs": True
+                            }
+                        ]
+                    }
                 )
 
-                # Track usage
-                total_usage["input_tokens"] += response.usage.input_tokens
-                total_usage["output_tokens"] += response.usage.output_tokens
-
-                # Track cache metrics if present
-                if hasattr(response.usage, 'cache_creation_input_tokens') and response.usage.cache_creation_input_tokens:
-                    total_usage["cache_creation_input_tokens"] += response.usage.cache_creation_input_tokens
-                    logger.info(f"Cache write: {response.usage.cache_creation_input_tokens} tokens")
-
-                if hasattr(response.usage, 'cache_read_input_tokens') and response.usage.cache_read_input_tokens:
-                    total_usage["cache_read_input_tokens"] += response.usage.cache_read_input_tokens
-                    logger.info(f"Cache read: {response.usage.cache_read_input_tokens} tokens")
+                # Track usage across all fields
+                for field in ["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"]:
+                    total_usage[field] += getattr(response.usage, field, 0)
 
                 logger.info(f"Claude API call {tool_call_count + 1}: stop_reason={response.stop_reason}")
 
@@ -260,12 +269,12 @@ class SupervisorAgent:
             final_code = self._get_code_from_subagents()
             logger.warning(f"Loop exited without end_turn (reason: {response.stop_reason})")
 
-        # Build result - don't add final_text again, it's already in messages
+        # Build result
         result = SupervisorResult(
             response=final_text,
             response_yaml=final_yaml,
             suggested_code=final_code,
-            history=messages,  # Changed: use messages directly
+            history=messages,
             usage=total_usage,
             meta={
                 "iteration": 2,
