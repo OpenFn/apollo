@@ -8,8 +8,7 @@ These are Claude API tool schemas that define what tools are available.
 SEARCH_DOCUMENTATION_TOOL = {
     "name": "search_documentation",
     "description": """Search OpenFn documentation using semantic similarity.
-Use this when you need to find information about OpenFn adaptors, functions,
-or workflow concepts to help answer the user's question.""",
+Use this when you need to find general information about OpenFn and its automation concepts to help answer the user's question.""",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -33,8 +32,8 @@ CALL_WORKFLOW_AGENT_TOOL = {
     "description": """Create or modify OpenFn workflows (YAML).
 
 Use this tool when the user wants to:
-- Generate a new workflow from scratch
-- Add jobs, steps, or triggers to an existing workflow
+- Do anything related to workflows
+- Add jobs, steps, or triggers to an existing workflow or create a new workflow from scratch
 - Modify workflow structure or configuration
 - Debug or fix workflow YAML errors
 

@@ -20,7 +20,6 @@ def call_workflow_agent(
     tool_input: Dict,
     existing_yaml: Optional[str],
     errors: Optional[str],
-    history: List[Dict],
     read_only: bool
 ) -> Dict:
     """
@@ -76,14 +75,14 @@ def call_workflow_agent(
 
 def call_job_agent(
     tool_input: Dict,
-    history: List[Dict]
+    context: Dict = None
 ) -> Dict:
     """
     Call the job code agent and return its results.
 
     Args:
-        tool_input: Tool input from supervisor containing mode, message
-        history: Conversation history
+        tool_input: Tool input from supervisor containing message
+        context: Job code context (current code being worked on)
 
     Returns:
         Dictionary with job agent response (raw, not formatted)
@@ -97,7 +96,7 @@ def call_job_agent(
     # Build job agent payload
     job_payload = {
         "content": user_message,
-        "context": {},
+        "context": context or {},
         "suggest_code": True,
         "stream": False,
         "history": []  # Supervisor includes context in message

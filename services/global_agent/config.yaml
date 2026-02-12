@@ -1,7 +1,14 @@
-# Global agent supervisor configuration
-model: "claude-sonnet-4-20250514"
-max_tokens: 8192
-temperature: 1.0
+# Global agent configuration
 
-# Tool calling (for iteration 2)
-max_tool_calls: 10
+# Router configuration (lightweight routing)
+router:
+  model: "claude-haiku-4-5-20251001"
+  max_tokens: 500
+  temperature: 0.0
+
+# Planner configuration (complex orchestration)
+planner:
+  model: "claude-sonnet-4-20250514"
+  max_tokens: 8192
+  temperature: 1.0
+  max_tool_calls: 10
