@@ -1,5 +1,5 @@
 """
-Supervisor Agent - Coordinates tools and subagents.
+Planner Agent - Coordinates tools and subagents for complex multi-step tasks.
 
 Iteration 2: Full tool-calling implementation
 """
@@ -23,8 +23,8 @@ logger = create_logger(__name__)
 
 
 @dataclass
-class SupervisorResult:
-    """Result from supervisor run."""
+class PlannerResult:
+    """Result from planner run."""
     response: str
     response_yaml: Optional[str]
     suggested_code: Optional[str]
@@ -33,14 +33,14 @@ class SupervisorResult:
     meta: Dict
 
 
-class SupervisorAgent:
+class PlannerAgent:
     """
-    Supervisor agent that coordinates subagents and tools.
+    Planner agent that coordinates subagents and tools for complex multi-step tasks.
     """
 
     def __init__(self, config_loader: ConfigLoader, api_key: Optional[str] = None):
         """
-        Initialize supervisor agent.
+        Initialize planner agent.
 
         Args:
             config_loader: Configuration loader instance
@@ -60,32 +60,38 @@ class SupervisorAgent:
         # Track subagent calls
         self.subagent_results = []
 
-        logger.info("SupervisorAgent initialized with tool-calling capability")
+        logger.info("PlannerAgent initialized with tool-calling capability")
 
     def run(
         self,
         content: str,
         existing_yaml: Optional[str],
         errors: Optional[str],
+        context: Optional[Dict],
         history: List[Dict],
         read_only: bool,
         stream: bool
-    ) -> SupervisorResult:
+    ) -> PlannerResult:
         """
-        Run the supervisor agent with tool-calling loop.
+        Run the planner agent with tool-calling loop.
 
         Args:
             content: User message
             existing_yaml: YAML workflow (as string, never parsed)
+            errors: Error context
+            context: Job code context
+            history: Conversation history
+            read_only: Read-only mode flag
+            stream: Streaming flag
             errors: Error context
             history: Conversation history
             read_only: Read-only mode flag
             stream: Streaming flag (not implemented)
 
         Returns:
-            SupervisorResult with response, YAML, history, usage, meta
+            PlannerResult with response, YAML, history, usage, meta
         """
-        logger.info("Supervisor.run() called")
+        logger.info("Planner.run() called")
 
         # Build system prompt
         system_prompt = self._build_system_prompt()
@@ -178,7 +184,6 @@ class SupervisorAgent:
                             tool_use_block.input,
                             existing_yaml=existing_yaml,
                             errors=errors,
-                            history=messages,
                             read_only=read_only
                         )
 
@@ -200,7 +205,7 @@ class SupervisorAgent:
                     elif tool_use_block.name == "call_job_code_agent":
                         subagent_result = call_job_agent(
                             tool_use_block.input,
-                            history=messages
+                            context=context or {}
                         )
 
                         # Aggregate subagent token usage into total
