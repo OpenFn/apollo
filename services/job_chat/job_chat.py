@@ -523,17 +523,19 @@ def main(data_dict: dict) -> dict:
         raise ApolloError(400, str(e), type="BAD_REQUEST")
 
     except APIConnectionError as e:
+        details = {"cause": str(e.__cause__)} if e.__cause__ else {}
         raise ApolloError(
             503,
             "Unable to reach the Anthropic AI Service",
             type="CONNECTION_ERROR",
-            details={"cause": str(e.__cause__)},
+            details=details,
         )
     except AuthenticationError as e:
         raise ApolloError(401, "Authentication failed", type="AUTH_ERROR")
     except RateLimitError as e:
+        retry_after = int(e.response.headers.get('retry-after', 60)) if hasattr(e, 'response') else 60
         raise ApolloError(
-            429, "Rate limit exceeded, please try again later", type="RATE_LIMIT", details={"retry_after": 60}
+            429, "Rate limit exceeded, please try again later", type="RATE_LIMIT", details={"retry_after": retry_after}
         )
     except BadRequestError as e:
         if "prompt is too long" in str(e):
