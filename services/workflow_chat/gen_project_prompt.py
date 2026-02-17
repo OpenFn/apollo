@@ -11,23 +11,40 @@ config = config_loader.config
 
 
 def build_system_message(mode_config, existing_yaml=None):
-    """Build system message with mode-specific configuration."""
-    system_message = config_loader.get_prompt("main_system_prompt").format(
+    """Build system message with caching breakpoints as array of content blocks."""
+
+    # Build main prompt without general_knowledge (will add separately)
+    main_prompt = config_loader.get_prompt("main_system_prompt").format(
         mode_specific_intro=config_loader.get_prompt(mode_config["intro"]),
         yaml_structure=config_loader.get_prompt(mode_config["yaml_structure"]),
-        general_knowledge=config_loader.get_prompt("general_knowledge").format(
-            adaptors=get_adaptors_string()
-        ),
+        general_knowledge="",  # Empty - will add as separate block
         output_format=config_loader.get_prompt(mode_config["output_format"]),
         mode_specific_answering_instructions=config_loader.get_prompt(
             mode_config["answering_instructions"]
         )
     )
-    
+
+    # Build as array of content blocks
+    message = [{"type": "text", "text": main_prompt}]
+
+    # Cache breakpoint 1: After main system instructions (~1550 tokens)
+    message.append({"type": "text", "text": ".", "cache_control": {"type": "ephemeral"}})
+
+    # Add general knowledge with adaptors (quasi-static, ~2500 tokens)
+    general_knowledge_section = config_loader.get_prompt("general_knowledge").format(
+        adaptors=get_adaptors_string()
+    )
+    message.append({"type": "text", "text": general_knowledge_section})
+
+    # Cache breakpoint 2: After general knowledge (~4050 tokens total)
+    message.append({"type": "text", "text": ".", "cache_control": {"type": "ephemeral"}})
+
+    # Add existing YAML if provided (DYNAMIC - not cached)
     if existing_yaml:
-        system_message += mode_config["yaml_prefix"] + existing_yaml
-    
-    return system_message
+        yaml_context = mode_config["yaml_prefix"] + existing_yaml
+        message.append({"type": "text", "text": yaml_context})
+
+    return message
 
 
 def build_prompt(content, existing_yaml=None, errors=None, history=None, read_only=False):
