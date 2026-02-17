@@ -5,7 +5,6 @@ Routes requests to workflow_chat, job_chat, or planner based on user intent.
 """
 import os
 import json
-import time
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 from anthropic import Anthropic
@@ -99,17 +98,13 @@ class RouterAgent:
             RouterResult with response, YAML, code, history, usage, meta
         """
         logger.info("Router.route_and_execute() called")
-        start_time = time.time()
 
         # Make routing decision
-        routing_start = time.time()
         try:
             decision = self._make_routing_decision(content, existing_yaml, errors, context, history)
-            routing_time = time.time() - routing_start
-            logger.info(f"Router decision: {decision.destination} (confidence: {decision.confidence}) [took {routing_time:.2f}s]")
+            logger.info(f"Router decision: {decision.destination} (confidence: {decision.confidence})")
         except Exception as e:
-            routing_time = time.time() - routing_start
-            logger.warning(f"Routing decision failed: {e}. Defaulting to planner for safety. [took {routing_time:.2f}s]")
+            logger.warning(f"Routing decision failed: {e}. Defaulting to planner for safety.")
             decision = RouterDecision(destination="planner", confidence=1)
 
         # Execute based on decision
@@ -125,9 +120,6 @@ class RouterAgent:
             result = self._route_to_planner(
                 content, existing_yaml, errors, context, history, read_only, stream, decision.confidence
             )
-
-        total_time = time.time() - start_time
-        logger.info(f"Total router took {total_time:.2f}s")
 
         return result
 
@@ -281,7 +273,6 @@ class RouterAgent:
         from workflow_chat.workflow_chat import main as workflow_chat_main
 
         logger.info("Routing to workflow_chat")
-        start_time = time.time()
 
         payload = {
             "content": content,
@@ -294,8 +285,6 @@ class RouterAgent:
 
         # Call service directly - let ApolloError propagate if service fails
         result = workflow_chat_main(payload)
-        elapsed = time.time() - start_time
-        logger.info(f"workflow_chat took {elapsed:.2f}s")
 
         # Aggregate token usage
         total_usage = sum_usage(self.routing_usage, result["usage"])
@@ -326,7 +315,6 @@ class RouterAgent:
         from job_chat.job_chat import main as job_chat_main
 
         logger.info("Routing to job_chat")
-        start_time = time.time()
 
         payload = {
             "content": content,
@@ -338,8 +326,6 @@ class RouterAgent:
 
         # Call service directly - let ApolloError propagate if service fails
         result = job_chat_main(payload)
-        elapsed = time.time() - start_time
-        logger.info(f"job_chat took {elapsed:.2f}s")
 
         # Aggregate token usage
         total_usage = sum_usage(self.routing_usage, result["usage"])
@@ -374,7 +360,6 @@ class RouterAgent:
         from global_agent.planner import PlannerAgent
 
         logger.info("Routing to planner")
-        start_time = time.time()
 
         planner = PlannerAgent(self.config_loader, self.api_key)
         planner_result = planner.run(
@@ -386,8 +371,6 @@ class RouterAgent:
             read_only=read_only,
             stream=stream
         )
-        elapsed = time.time() - start_time
-        logger.info(f"planner took {elapsed:.2f}s")
 
         # Aggregate token usage
         total_usage = sum_usage(self.routing_usage, planner_result.usage)

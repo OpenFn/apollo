@@ -1,0 +1,596 @@
+#!/usr/bin/env python3
+
+import pytest
+import json
+import sys
+import tempfile
+import subprocess
+import yaml
+from pathlib import Path
+from .test_utils import call_global_agent_service, make_service_input, print_response_details, assert_routed_to, assert_yaml_section_contains_all, assert_yaml_has_ids, assert_yaml_jobs_have_body, assert_no_special_chars
+
+# ---- TESTS ----
+def test_basic_input():
+    print("==================TEST==================")
+    print("Description: Basic input test. Check if the service can handle a simple input "
+          "without a YAML and generate a message and a YAML or ask for more information.")
+    existing_yaml = """"""
+    history = []
+    content = "Whenever fridge statistics are send to you, parse and aggregate the data and upload to a collection in redis."
+    service_input = make_service_input(existing_yaml, history, content=content)
+    response = call_global_agent_service(service_input)
+    assert_routed_to(response, "workflow_agent", context="test_basic_input")
+    print_response_details(response, content=content)
+
+    assert response is not None
+    assert isinstance(response, dict)
+    # Check for id fields in generated YAML
+    if response.get("response_yaml"):
+        assert_yaml_has_ids(response["response_yaml"], context="test_basic_input")
+        assert_yaml_jobs_have_body(response["response_yaml"], context="test_basic_input")
+        assert_no_special_chars(response["response_yaml"], context="test_basic_input")
+
+def test_input_second_turn():
+    print("Description: Simple second conversation turn requesting a change to the YAML")
+    
+    existing_yaml = """
+name: CommCare-to-DHIS2-Patient-Integration
+jobs:
+  receive-commcare-data:
+    id: job-receive-id
+    name: Receive CommCare Patient Data
+    adaptor: '@openfn/language-commcare@latest'
+    body: 'PLACEHOLDER 1'
+  validate-patient-data:
+    id: job-validate-id
+    name: Validate Patient Data
+    adaptor: '@openfn/language-common@latest'
+    body: 'PLACEHOLDER 2'
+  log-validation-errors:
+    id: job-log-id
+    name: Log Validation Errors to Google Sheets
+    adaptor: '@openfn/language-googlesheets@latest'
+    body: 'PLACEHOLDER 3'
+  transform-and-upload-to-dhis2:
+    id: job-transform-id
+    name: Transform and Upload to DHIS2
+    adaptor: '@openfn/language-dhis2@latest'
+    body: 'PLACEHOLER 4'
+triggers:
+  webhook:
+    id: trigger-webhook-id
+    type: webhook
+    enabled: false
+edges:
+  webhook->receive-commcare-data:
+    id: edge-webhook-receive-id
+    source_trigger: webhook
+    target_job: receive-commcare-data
+    condition_type: always
+    enabled: true
+  receive-commcare-data->validate-patient-data:
+    id: edge-receive-validate-id
+    source_job: receive-commcare-data
+    target_job: validate-patient-data
+    condition_type: on_job_success
+    enabled: true
+  validate-patient-data->log-validation-errors:
+    id: edge-validate-log-id
+    source_job: validate-patient-data
+    target_job: log-validation-errors
+    condition_type: on_job_failure
+    enabled: true
+  validate-patient-data->transform-and-upload-to-dhis2:
+    id: edge-validate-transform-id
+    source_job: validate-patient-data
+    target_job: transform-and-upload-to-dhis2
+    condition_type: on_job_success
+    enabled: true
+"""
+    
+    history = [
+        {
+            "role": "user", 
+            "content": "Set up an OpenFn workflow to automatically receive new patient data from CommCare, validate the data and if there's an issue log it to a google sheet, otherwise map it to the DHIS2 data model, and load it into the DHIS2 national health information system"
+        },
+        {
+            "role": "assistant", 
+            "content": '{"text":"I\'ll create a workflow to process CommCare patient data. The flow will receive data via webhook, validate it, then either log issues to Google Sheets or transform and send valid data to DHIS2. This creates four distinct jobs with appropriate connections and error handling.","yaml":"name: CommCare-to-DHIS2-Patient-Integration\\njobs:\\n  receive-commcare-data:\\n    name: Receive CommCare Patient Data\\n    adaptor: \\"@openfn/language-commcare@latest\\"\\n    body: \\"// Add operations here\\"\\n  validate-patient-data:\\n    name: Validate Patient Data\\n    adaptor: \\"@openfn/language-common@latest\\"\\n    body: \\"// Add operations here\\"\\n  log-validation-errors:\\n    name: Log Validation Errors to Google Sheets\\n    adaptor: \\"@openfn/language-googlesheets@latest\\"\\n    body: \\"// Add operations here\\"\\n  transform-and-upload-to-dhis2:\\n    name: Transform and Upload to DHIS2\\n    adaptor: \\"@openfn/language-dhis2@latest\\"\\n    body: \\"// Add operations here\\"\\ntriggers:\\n  webhook:\\n    type: webhook\\n    enabled: false\\nedges:\\n  webhook->receive-commcare-data:\\n    source_trigger: webhook\\n    target_job: receive-commcare-data\\n    condition_type: always\\n    enabled: true\\n  receive-commcare-data->validate-patient-data:\\n    source_job: receive-commcare-data\\n    target_job: validate-patient-data\\n    condition_type: on_job_success\\n    enabled: true\\n  validate-patient-data->log-validation-errors:\\n    source_job: validate-patient-data\\n    target_job: log-validation-errors\\n    condition_type: on_job_failure\\n    enabled: true\\n  validate-patient-data->transform-and-upload-to-dhis2:\\n    source_job: validate-patient-data\\n    target_job: transform-and-upload-to-dhis2\\n    condition_type: on_job_success\\n    enabled: true"}'
+        }
+    ]
+    
+    content = "Actually, let's add data deduplication before validation to prevent duplicate patient records"
+    
+    service_input = make_service_input(existing_yaml, history, content=content)
+    response = call_global_agent_service(service_input)
+    assert_routed_to(response, "workflow_agent", context="test_input_second_turn")
+    print_response_details(response, content=content)
+    
+    assert response is not None
+    assert isinstance(response, dict)
+
+    assert_yaml_section_contains_all(existing_yaml, response.get("response_yaml", ""), "jobs", context="Jobs section")
+    assert_no_special_chars(response["response_yaml"], context="test_input_second_turn")
+
+def test_conversational_turn():
+    print("==================TEST==================")
+    print("Description: There is an existing YAML and the user asks a question that should not "
+          "lead to a change in the YAML. Check the service only outputs a message, and no YAML, "
+          "or an unchanged YAML.")
+    existing_yaml = """
+name: fridge-statistics-processing
+jobs:
+  parse-and-aggregate-fridge-data:
+    id: job-parse-id
+    name: Parse and Aggregate Fridge Data
+    adaptor: '@openfn/language-common@latest'
+    body: '| // Add data parsing and aggregation operations here'
+  upload-to-redis:
+    id: job-upload-id
+    name: Upload to Redis Collection
+    adaptor: '@openfn/language-redis@latest'
+    body: '| // Add Redis collection upload operations here'
+triggers:
+  webhook:
+    id: trigger-webhook-id
+    type: webhook
+    enabled: false
+edges:
+  webhook->parse-and-aggregate-fridge-data:
+    id: edge-webhook-parse-id
+    source_trigger: webhook
+    target_job: parse-and-aggregate-fridge-data
+    condition_type: always
+    enabled: true
+  parse-and-aggregate-fridge-data->upload-to-redis:
+    id: edge-parse-upload-id
+    source_job: parse-and-aggregate-fridge-data
+    target_job: upload-to-redis
+    condition_type: on_job_success
+    enabled: true 
+"""
+    history = [
+        {"role": "user", "content": "Whenever fridge statistics are send to you, parse and aggregate the data and upload to a collection in redis."},
+        {"role": "assistant", "content": "I'll create a workflow that processes fridge statistics through a webhook trigger, then aggregates and stores the data in Redis.\n\n```\nname: fridge-statistics-processing\njobs:\n  parse-and-aggregate-fridge-data:\n    name: Parse and Aggregate Fridge Data\n    adaptor: \"@openfn/language-common@latest\"\n    body: \"| // Add data parsing and aggregation operations here\"\n  upload-to-redis:\n    name: Upload to Redis Collection\n    adaptor: \"@openfn/language-redis@latest\"\n    body: \"| // Add Redis collection upload operations here\"\ntriggers:\n  webhook:\n    type: webhook\n    enabled: false\nedges:\n  webhook->parse-and-aggregate-fridge-data:\n    source_trigger: webhook\n    target_job: parse-and-aggregate-fridge-data\n    condition_type: always\n    enabled: true\n  parse-and-aggregate-fridge-data->upload-to-redis:\n    source_job: parse-and-aggregate-fridge-data\n    target_job: upload-to-redis\n    condition_type: on_job_success\n    enabled: true\n```"}
+    ]
+    content = "Can you explain that better"
+    service_input = make_service_input(existing_yaml, history, content=content)
+    response = call_global_agent_service(service_input)
+    assert_routed_to(response, "workflow_agent", context="test_conversational_turn")
+    print_response_details(response, content=content)
+    assert response is not None
+    assert isinstance(response, dict)
+
+    response_yaml_str = response.get("response_yaml", None)
+    if response_yaml_str and str(response_yaml_str).strip():
+        orig_yaml = yaml.safe_load(existing_yaml)
+        response_yaml = yaml.safe_load(response_yaml_str)
+        # Check that the entire YAML is unchanged
+        assert orig_yaml == response_yaml, "If YAML is present in response, it must be unchanged."
+        assert_no_special_chars(response["response_yaml"], context="test_conversational_turn")
+
+def test_simple_lang_bug():
+    print("==================TEST==================")
+    print("Description: Check how the service describes itself. It should use simple language and not mention YAMLs.")
+    existing_yaml = """"""
+    history = []
+    content = "are you there?"
+    service_input = make_service_input(existing_yaml, history, content=content)
+    response = call_global_agent_service(service_input)
+    assert_routed_to(response, "workflow_agent", context="test_simple_lang_bug")
+    print_response_details(response, content=content)
+    assert response is not None
+    assert isinstance(response, dict)
+    # Assert that the response text does not include the word 'YAML' (case-insensitive)
+    response_text = response.get("response", "")
+
+    assert "yaml" not in response_text.lower(), f"Response text should not mention 'YAML', but got: {response_text}"
+    # Check for id fields in generated YAML
+    if response.get("response_yaml"):
+        assert_yaml_has_ids(response["response_yaml"], context="test_simple_lang_bug")
+        assert_yaml_jobs_have_body(response["response_yaml"], context="test_simple_lang_bug")
+        assert_no_special_chars(response["response_yaml"], context="test_simple_lang_bug")
+
+def test_single_trigger_node():
+    print("==================TEST==================")
+    print("Description: The user asks for a change that implies they want multiple nodes from the trigger. "
+          "As only one node can come from the trigger, the service should select one job to be run first, "
+          "and that one can have multiple nodes for the other jobs.")
+    existing_yaml = """
+name: fridge-statistics-processing
+jobs:
+  parse-and-aggregate-fridge-data:
+    id: job-parse-id
+    name: Parse and Aggregate Fridge Data
+    adaptor: '@openfn/language-common@latest'
+    body: 'print("hello a")'
+  upload-to-redis:
+    id: job-upload-id
+    name: Upload to Redis Collection
+    adaptor: '@openfn/language-redis@latest'
+    body: 'print("hello b")'
+triggers:
+  webhook:
+    id: trigger-webhook-id
+    type: webhook
+    enabled: false
+edges:
+  webhook->parse-and-aggregate-fridge-data:
+    id: edge-webhook-parse-id
+    source_trigger: webhook
+    target_job: parse-and-aggregate-fridge-data
+    condition_type: always
+    enabled: true
+  parse-and-aggregate-fridge-data->upload-to-redis:
+    id: edge-parse-upload-id
+    source_job: parse-and-aggregate-fridge-data
+    target_job: upload-to-redis
+    condition_type: on_job_success
+    enabled: true 
+"""
+    history = [
+        {"role": "user", "content": "Whenever fridge statistics are send to you, parse and aggregate the data and upload to a collection in redis."},
+        {"role": "assistant", "content": "I'll create a workflow that processes fridge statistics through a webhook trigger, then aggregates and stores the data in Redis.\n\n```\nname: fridge-statistics-processing\njobs:\n  parse-and-aggregate-fridge-data:\n    name: Parse and Aggregate Fridge Data\n    adaptor: \"@openfn/language-common@latest\"\n    body: \"| // Add data parsing and aggregation operations here\"\n  upload-to-redis:\n    name: Upload to Redis Collection\n    adaptor: \"@openfn/language-redis@latest\"\n    body: \"| // Add Redis collection upload operations here\"\ntriggers:\n  webhook:\n    type: webhook\n    enabled: false\nedges:\n  webhook->parse-and-aggregate-fridge-data:\n    source_trigger: webhook\n    target_job: parse-and-aggregate-fridge-data\n    condition_type: always\n    enabled: true\n  parse-and-aggregate-fridge-data->upload-to-redis:\n    source_job: parse-and-aggregate-fridge-data\n    target_job: upload-to-redis\n    condition_type: on_job_success\n    enabled: true\n```"}
+    ]
+    content = "Actually I also want an email notification at the same time as the data is being parsed."
+    service_input = make_service_input(existing_yaml, history, content=content)
+    response = call_global_agent_service(service_input)
+    assert_routed_to(response, "workflow_agent", context="test_single_trigger_node")
+    if response.get("response_yaml"):
+      print_response_details(response, content=content)
+      assert_no_special_chars(response["response_yaml"], context="test_single_trigger_node")
+
+    assert response is not None
+    assert isinstance(response, dict)
+
+def test_edit_job_code():
+    print("==================TEST==================")
+    print("Description: The user asks for job code to be filled in. The service should explain why it can't. "
+          "A new YAML should not be generated or it should be identical to the existing one.")
+    existing_yaml = """
+name: fridge-statistics-processing
+jobs:
+  parse-and-aggregate-fridge-data:
+    id: job-parse-id
+    name: Parse and Aggregate Fridge Data
+    adaptor: '@openfn/language-common@latest'
+    body: 'print("hello a")'
+  upload-to-redis:
+    id: job-upload-id
+    name: Upload to Redis Collection
+    adaptor: '@openfn/language-redis@latest'
+    body: 'print("hello a")'
+triggers:
+  webhook:
+    id: trigger-webhook-id
+    type: webhook
+    enabled: false
+edges:
+  webhook->parse-and-aggregate-fridge-data:
+    id: edge-webhook-parse-id
+    source_trigger: webhook
+    target_job: parse-and-aggregate-fridge-data
+    condition_type: always
+    enabled: true
+  parse-and-aggregate-fridge-data->upload-to-redis:
+    id: edge-parse-upload-id
+    source_job: parse-and-aggregate-fridge-data
+    target_job: upload-to-redis
+    condition_type: on_job_success
+    enabled: true 
+"""
+    history = [
+        {"role": "user", "content": "Whenever fridge statistics are send to you, parse and aggregate the data and upload to a collection in redis."},
+        {"role": "assistant", "content": "I'll create a workflow that processes fridge statistics through a webhook trigger, then aggregates and stores the data in Redis.\n\n```\nname: fridge-statistics-processing\njobs:\n  parse-and-aggregate-fridge-data:\n    name: Parse and Aggregate Fridge Data\n    adaptor: \"@openfn/language-common@latest\"\n    body: \"| // Add data parsing and aggregation operations here\"\n  upload-to-redis:\n    name: Upload to Redis Collection\n    adaptor: \"@openfn/language-redis@latest\"\n    body: \"| // Add Redis collection upload operations here\"\ntriggers:\n  webhook:\n    type: webhook\n    enabled: false\nedges:\n  webhook->parse-and-aggregate-fridge-data:\n    source_trigger: webhook\n    target_job: parse-and-aggregate-fridge-data\n    condition_type: always\n    enabled: true\n  parse-and-aggregate-fridge-data->upload-to-redis:\n    source_job: parse-and-aggregate-fridge-data\n    target_job: upload-to-redis\n    condition_type: on_job_success\n    enabled: true\n```"}
+    ]
+    content = "Can you also fill in the job code for all the steps"
+    service_input = make_service_input(existing_yaml, history, content=content)
+    response = call_global_agent_service(service_input)
+    assert_routed_to(response, "workflow_agent", context="test_edit_job_code")
+    if response.get("response_yaml"):
+      print_response_details(response, content=content)
+      assert_no_special_chars(response["response_yaml"], context="test_edit_job_code")
+
+    assert response is not None
+    assert isinstance(response, dict)
+
+def test_error_field():
+    print("==================TEST==================")
+    print("Description: This tests that the service can handle an error field input (that replaces the content field). "
+          "Check that the service comments on the error and produces a new YAML.")
+    existing_yaml = """
+name: fridge-statistics-processing
+jobs:
+  parse-and-aggregate-fridge-data:
+    id: job-parse-id
+    name: Parse and Aggregate Fridge Data
+    adaptor: '@openfn/language-commons@latest'
+    body: '| // Add data parsing and aggregation operations here'
+  upload-to-redis:
+    id: job-upload-id
+    name: Upload to Redis Collection
+    adaptor: '@openfn/language-redis@latest'
+    body: '| // Add Redis collection upload operations here'
+triggers:
+  webhook:
+    id: trigger-webhook-id
+    type: webhook
+    enabled: false
+edges:
+  webhook->parse-and-aggregate-fridge-data:
+    id: edge-webhook-parse-id
+    source_trigger: webhook
+    target_job: parse-and-aggregate-fridge-data
+    condition_type: always
+    enabled: true
+  parse-and-aggregate-fridge-data->upload-to-redis:
+    id: edge-parse-upload-id
+    source_job: parse-and-aggregate-fridge-data
+    target_job: upload-to-redis
+    condition_type: on_job_success
+    enabled: true 
+"""
+    history = [
+        {"role": "user", "content": "Whenever fridge statistics are send to you, parse and aggregate the data and upload to a collection in redis."},
+        {"role": "assistant", "content": "I'll create a workflow that processes fridge statistics through a webhook trigger, then aggregates and stores the data in Redis.\n\n```\nname: fridge-statistics-processing\njobs:\n  parse-and-aggregate-fridge-data:\n    name: Parse and Aggregate Fridge Data\n    adaptor: \"@openfn/language-common@latest\"\n    body: \"| // Add data parsing and aggregation operations here\"\n  upload-to-redis:\n    name: Upload to Redis Collection\n    adaptor: \"@openfn/language-redis@latest\"\n    body: \"| // Add Redis collection upload operations here\"\ntriggers:\n  webhook:\n    type: webhook\n    enabled: false\nedges:\n  webhook->parse-and-aggregate-fridge-data:\n    source_trigger: webhook\n    target_job: parse-and-aggregate-fridge-data\n    condition_type: always\n    enabled: true\n  parse-and-aggregate-fridge-data->upload-to-redis:\n    source_job: parse-and-aggregate-fridge-data\n    target_job: upload-to-redis\n    condition_type: on_job_success\n    enabled: true\n```"}
+    ]
+    errors = "adaptor error"
+    # This test uses errors, so no content field
+
+    service_input = make_service_input(existing_yaml, history, errors=errors)
+    response = call_global_agent_service(service_input)
+    assert_routed_to(response, "workflow_agent", context="test_error_field")
+    if response.get("response_yaml"):
+      print_response_details(response, errors=errors)
+      assert_no_special_chars(response["response_yaml"], context="test_error_field")
+
+    assert response is not None
+    assert isinstance(response, dict)
+
+def test_long_yaml():
+    print("==================TEST==================")
+    print("Description: Test that the service can handle a slighly longer YAML & conversation history. "
+          "Check that the answer isn't cut off or empty, and that all the job code is retained.")
+    existing_yaml = """
+name: Data-Integration-and-Reporting
+jobs:
+  Retrieve-Google-Sheets-Data:
+    id: job-retrieve-gsheets
+    name: Retrieve Google Sheets Data
+    adaptor: "@openfn/language-googlesheets@latest"
+    body: // PLACEHOLDER 1
+  Retrieve-NetSuite-Data:
+    id: job-retrieve-netsuite
+    name: Retrieve NetSuite Data
+    adaptor: "@openfn/language-http@latest"
+    body: // PLACEHOLDER 2
+  Retrieve-Ferntech-Data:
+    id: job-retrieve-ferntech
+    name: Retrieve Ferntech Data
+    adaptor: "@openfn/language-http@latest"
+    body: // PLACEHOLDER 3
+  Process-Combined-Data:
+    id: job-process-combined
+    name: Process Combined Data
+    adaptor: "@openfn/language-common@latest"
+    body: // PLACEHOLDER 4
+  Send-Email-Report:
+    id: job-send-email
+    name: Send Email Report
+    adaptor: "@openfn/language-gmail@latest"
+    body: // PLACEHOLDER 5a
+  write-to-sheet:
+    id: job-write-sheet
+    name: write to sheet
+    adaptor: "@openfn/language-googlesheets@3.0.13"
+    body: // PLACEHOLDER 5b
+  Summarise-with-claude:
+    id: job-summarise-claude
+    name: Summarise with claude
+    adaptor: "@openfn/language-claude@1.0.7"
+    body: // PLACEHOLDER 5c
+  Email-summary:
+    id: job-email-summary
+    name: Email summary
+    adaptor: "@openfn/language-gmail@1.3.0"
+    body: // PLACEHOLDER 6
+  Update-asana:
+    id: job-update-asana
+    name: Update asana
+    adaptor: "@openfn/language-asana@4.1.0"
+    body: // PLACEHOLDER 7
+triggers:
+  webhook:
+    id: trigger-webhook
+    type: webhook
+    enabled: false
+edges:
+  webhook->Retrieve-Google-Sheets-Data:
+    id: edge-webhook-gsheets
+    source_trigger: webhook
+    target_job: Retrieve-Google-Sheets-Data
+    condition_type: always
+    enabled: true
+  Retrieve-Google-Sheets-Data->Retrieve-NetSuite-Data:
+    id: edge-gsheets-netsuite
+    source_job: Retrieve-Google-Sheets-Data
+    target_job: Retrieve-NetSuite-Data
+    condition_type: on_job_success
+    enabled: true
+  Retrieve-NetSuite-Data->Retrieve-Ferntech-Data:
+    id: edge-netsuite-ferntech
+    source_job: Retrieve-NetSuite-Data
+    target_job: Retrieve-Ferntech-Data
+    condition_type: on_job_success
+    enabled: true
+  Retrieve-Ferntech-Data->Process-Combined-Data:
+    id: edge-ferntech-combined
+    source_job: Retrieve-Ferntech-Data
+    target_job: Process-Combined-Data
+    condition_type: on_job_success
+    enabled: true
+  Process-Combined-Data->Send-Email-Report:
+    id: edge-combined-email
+    source_job: Process-Combined-Data
+    target_job: Send-Email-Report
+    condition_type: on_job_success
+    enabled: true
+  Process-Combined-Data->write-to-sheet:
+    id: edge-combined-sheet
+    source_job: Process-Combined-Data
+    target_job: write-to-sheet
+    condition_type: on_job_success
+    enabled: true
+  Process-Combined-Data->Summarise-with-claude:
+    id: edge-combined-summarise
+    source_job: Process-Combined-Data
+    target_job: Summarise-with-claude
+    condition_type: on_job_success
+    enabled: true
+  Summarise-with-claude->Email-summary:
+    id: edge-summarise-email
+    source_job: Summarise-with-claude
+    target_job: Email-summary
+    condition_type: on_job_success
+    enabled: true
+  Email-summary->Update-asana:
+    id: edge-email-asana
+    source_job: Email-summary
+    target_job: Update-asana
+    condition_type: on_job_success
+    enabled: true
+"""
+    history = [
+        {"role": "user", "content": "I need to create a comprehensive data integration workflow that pulls data from Google Sheets, NetSuite, and Ferntech, then processes everything together and creates various reports and notifications."},
+        {"role": "assistant", "content": "Absolutely! Let's start by setting up the workflow to retrieve data from Google Sheets, NetSuite, and Ferntech. I'll create jobs for each data source and connect them in sequence.\n\n```yaml\nname: Data-Integration-Workflow\njobs:\n  Retrieve-Google-Sheets-Data:\n    name: Retrieve Google Sheets Data\n    adaptor: '@openfn/language-googlesheets@latest'\n    body: // PLACEHOLDER 1\n  Retrieve-NetSuite-Data:\n    name: Retrieve NetSuite Data\n    adaptor: '@openfn/language-http@latest'\n    body: // PLACEHOLDER 2\n  Retrieve-Ferntech-Data:\n    name: Retrieve Ferntech Data\n    adaptor: '@openfn/language-http@latest'\n    body: // PLACEHOLDER 3\ntriggers:\n  webhook:\n    type: webhook\n    enabled: false\nedges:\n  webhook->Retrieve-Google-Sheets-Data:\n    source_trigger: webhook\n    target_job: Retrieve-Google-Sheets-Data\n    condition_type: always\n    enabled: true\n  Retrieve-Google-Sheets-Data->Retrieve-NetSuite-Data:\n    source_job: Retrieve-Google-Sheets-Data\n    target_job: Retrieve-NetSuite-Data\n    condition_type: on_job_success\n    enabled: true\n  Retrieve-NetSuite-Data->Retrieve-Ferntech-Data:\n    source_job: Retrieve-NetSuite-Data\n    target_job: Retrieve-Ferntech-Data\n    condition_type: on_job_success\n    enabled: true\n```"},
+        {"role": "user", "content": "Once the data is retrieved, I want to process all the combined data together before generating any reports."},
+        {"role": "assistant", "content": "Great, I'll add a processing job that takes the output from the three data retrieval jobs and combines the data for further use.\n\n```yaml\nname: Data-Integration-Workflow\njobs:\n  Retrieve-Google-Sheets-Data:\n    name: Retrieve Google Sheets Data\n    adaptor: '@openfn/language-googlesheets@latest'\n    body: // PLACEHOLDER 1\n  Retrieve-NetSuite-Data:\n    name: Retrieve NetSuite Data\n    adaptor: '@openfn/language-http@latest'\n    body: // PLACEHOLDER 2\n  Retrieve-Ferntech-Data:\n    name: Retrieve Ferntech Data\n    adaptor: '@openfn/language-http@latest'\n    body: // PLACEHOLDER 3\n  Process-Combined-Data:\n    name: Process Combined Data\n    adaptor: '@openfn/language-common@latest'\n    body: // PLACEHOLDER 4\ntriggers:\n  webhook:\n    type: webhook\n    enabled: false\nedges:\n  webhook->Retrieve-Google-Sheets-Data:\n    source_trigger: webhook\n    target_job: Retrieve-Google-Sheets-Data\n    condition_type: always\n    enabled: true\n  Retrieve-Google-Sheets-Data->Retrieve-NetSuite-Data:\n    source_job: Retrieve-Google-Sheets-Data\n    target_job: Retrieve-NetSuite-Data\n    condition_type: on_job_success\n    enabled: true\n  Retrieve-NetSuite-Data->Retrieve-Ferntech-Data:\n    source_job: Retrieve-NetSuite-Data\n    target_job: Retrieve-Ferntech-Data\n    condition_type: on_job_success\n    enabled: true\n  Retrieve-Ferntech-Data->Process-Combined-Data:\n    source_job: Retrieve-Ferntech-Data\n    target_job: Process-Combined-Data\n    condition_type: on_job_success\n    enabled: true\n```"},
+        {"role": "user", "content": "After processing, I want to send an email report and also write the results back to a Google Sheet."},
+        {"role": "assistant", "content": "Understood. I'll add two jobs: one to send an email report and another to write the processed data to a Google Sheet. Both will run after the processing step.\n\n```yaml\nname: Data-Integration-and-Reporting\njobs:\n  Retrieve-Google-Sheets-Data:\n    name: Retrieve Google Sheets Data\n    adaptor: '@openfn/language-googlesheets@latest'\n    body: // PLACEHOLDER 1\n  Retrieve-NetSuite-Data:\n    name: Retrieve NetSuite Data\n    adaptor: '@openfn/language-http@latest'\n    body: // PLACEHOLDER 2\n  Retrieve-Ferntech-Data:\n    name: Retrieve Ferntech Data\n    adaptor: '@openfn/language-http@latest'\n    body: // PLACEHOLDER 3\n  Process-Combined-Data:\n    name: Process Combined Data\n    adaptor: '@openfn/language-common@latest'\n    body: // PLACEHOLDER 4\n  Send-Email-Report:\n    name: Send Email Report\n    adaptor: '@openfn/language-gmail@latest'\n    body: // PLACEHOLDER 5a\n  write-to-sheet:\n    name: write to sheet\n    adaptor: '@openfn/language-googlesheets@3.0.13'\n    body: // PLACEHOLDER 5b\ntriggers:\n  webhook:\n    type: webhook\n    enabled: false\nedges:\n  webhook->Retrieve-Google-Sheets-Data:\n    source_trigger: webhook\n    target_job: Retrieve-Google-Sheets-Data\n    condition_type: always\n    enabled: true\n  Retrieve-Google-Sheets-Data->Retrieve-NetSuite-Data:\n    source_job: Retrieve-Google-Sheets-Data\n    target_job: Retrieve-NetSuite-Data\n    condition_type: on_job_success\n    enabled: true\n  Retrieve-NetSuite-Data->Retrieve-Ferntech-Data:\n    source_job: Retrieve-NetSuite-Data\n    target_job: Retrieve-Ferntech-Data\n    condition_type: on_job_success\n    enabled: true\n  Retrieve-Ferntech-Data->Process-Combined-Data:\n    source_job: Retrieve-Ferntech-Data\n    target_job: Process-Combined-Data\n    condition_type: on_job_success\n    enabled: true\n  Process-Combined-Data->Send-Email-Report:\n    source_job: Process-Combined-Data\n    target_job: Send-Email-Report\n    condition_type: on_job_success\n    enabled: true\n  Process-Combined-Data->write-to-sheet:\n    source_job: Process-Combined-Data\n    target_job: write-to-sheet\n    condition_type: on_job_success\n    enabled: true\n```"},
+        {"role": "user", "content": "Can we also use Claude AI to summarize the processed data, then email that summary, and update our Asana project with the results?"},
+        {"role": "assistant", "content": "Excellent idea! I'll add a summarization job using Claude AI, followed by jobs to email the summary and update Asana. These will branch off after the processing step as well.\n\n```yaml\nname: Data-Integration-and-Reporting\njobs:\n  Retrieve-Google-Sheets-Data:\n    name: Retrieve Google Sheets Data\n    adaptor: '@openfn/language-googlesheets@latest'\n    body: // PLACEHOLDER 1\n  Retrieve-NetSuite-Data:\n    name: Retrieve NetSuite Data\n    adaptor: '@openfn/language-http@latest'\n    body: // PLACEHOLDER 2\n  Retrieve-Ferntech-Data:\n    name: Retrieve Ferntech Data\n    adaptor: '@openfn/language-http@latest'\n    body: // PLACEHOLDER 3\n  Process-Combined-Data:\n    name: Process Combined Data\n    adaptor: '@openfn/language-common@latest'\n    body: // PLACEHOLDER 4\n  Send-Email-Report:\n    name: Send Email Report\n    adaptor: '@openfn/language-gmail@latest'\n    body: // PLACEHOLDER 5a\n  write-to-sheet:\n    name: write to sheet\n    adaptor: '@openfn/language-googlesheets@3.0.13'\n    body: // PLACEHOLDER 5b\n  Summarise-with-claude:\n    name: Summarise with claude\n    adaptor: '@openfn/language-claude@1.0.7'\n    body: // PLACEHOLDER 5c\n  Email-summary:\n    name: Email summary\n    adaptor: '@openfn/language-gmail@1.3.0'\n    body: // PLACEHOLDER 6\n  Update-asana:\n    name: Update asana\n    adaptor: '@openfn/language-asana@4.1.0'\n    body: // PLACEHOLDER 7\ntriggers:\n  webhook:\n    type: webhook\n    enabled: false\nedges:\n  webhook->Retrieve-Google-Sheets-Data:\n    source_trigger: webhook\n    target_job: Retrieve-Google-Sheets-Data\n    condition_type: always\n    enabled: true\n  Retrieve-Google-Sheets-Data->Retrieve-NetSuite-Data:\n    source_job: Retrieve-Google-Sheets-Data\n    target_job: Retrieve-NetSuite-Data\n    condition_type: on_job_success\n    enabled: true\n  Retrieve-NetSuite-Data->Retrieve-Ferntech-Data:\n    source_job: Retrieve-NetSuite-Data\n    target_job: Retrieve-Ferntech-Data\n    condition_type: on_job_success\n    enabled: true\n  Retrieve-Ferntech-Data->Process-Combined-Data:\n    source_job: Retrieve-Ferntech-Data\n    target_job: Process-Combined-Data\n    condition_type: on_job_success\n    enabled: true\n  Process-Combined-Data->Send-Email-Report:\n    source_job: Process-Combined-Data\n    target_job: Send-Email-Report\n    condition_type: on_job_success\n    enabled: true\n  Process-Combined-Data->write-to-sheet:\n    source_job: Process-Combined-Data\n    target_job: write-to-sheet\n    condition_type: on_job_success\n    enabled: true\n  Process-Combined-Data->Summarise-with-claude:\n    source_job: Process-Combined-Data\n    target_job: Summarise-with-claude\n    condition_type: on_job_success\n    enabled: true\n  Summarise-with-claude->Email-summary:\n    source_job: Summarise-with-claude\n    target_job: Email-summary\n    condition_type: on_job_success\n    enabled: true\n  Email-summary->Update-asana:\n    source_job: Email-summary\n    target_job: Update-asana\n    condition_type: on_job_success\n    enabled: true\n```"},
+        {"role": "user", "content": "Can you make sure the workflow is robust to errors in any of the data retrieval steps?"},
+        {"role": "assistant", "content": "Good point! I'll add error handling so that if any data retrieval job fails, the workflow will log the error and stop further processing.\n\n```yaml\nname: Data-Integration-and-Reporting\njobs:\n  Retrieve-Google-Sheets-Data:\n    name: Retrieve Google Sheets Data\n    adaptor: '@openfn/language-googlesheets@latest'\n    body: // PLACEHOLDER 1\n  Retrieve-NetSuite-Data:\n    name: Retrieve NetSuite Data\n    adaptor: '@openfn/language-http@latest'\n    body: // PLACEHOLDER 2\n  Retrieve-Ferntech-Data:\n    name: Retrieve Ferntech Data\n    adaptor: '@openfn/language-http@latest'\n    body: // PLACEHOLDER 3\n  Process-Combined-Data:\n    name: Process Combined Data\n    adaptor: '@openfn/language-common@latest'\n    body: // PLACEHOLDER 4\n  Send-Email-Report:\n    name: Send Email Report\n    adaptor: '@openfn/language-gmail@latest'\n    body: // PLACEHOLDER 5a\n  write-to-sheet:\n    name: write to sheet\n    adaptor: '@openfn/language-googlesheets@3.0.13'\n    body: // PLACEHOLDER 5b\n  Summarise-with-claude:\n    name: Summarise with claude\n    adaptor: '@openfn/language-claude@1.0.7'\n    body: // PLACEHOLDER 5c\n  Email-summary:\n    name: Email summary\n    adaptor: '@openfn/language-gmail@1.3.0'\n    body: // PLACEHOLDER 6\n  Update-asana:\n    name: Update asana\n    adaptor: '@openfn/language-asana@4.1.0'\n    body: // PLACEHOLDER 7\n  error-handler:\n    name: Error Handler\n    adaptor: '@openfn/language-common@latest'\n    body: // Log error and stop workflow\ntriggers:\n  webhook:\n    type: webhook\n    enabled: false\nedges:\n  webhook->Retrieve-Google-Sheets-Data:\n    source_trigger: webhook\n    target_job: Retrieve-Google-Sheets-Data\n    condition_type: always\n    enabled: true\n  Retrieve-Google-Sheets-Data->Retrieve-NetSuite-Data:\n    source_job: Retrieve-Google-Sheets-Data\n    target_job: Retrieve-NetSuite-Data\n    condition_type: on_job_success\n    enabled: true\n  Retrieve-NetSuite-Data->Retrieve-Ferntech-Data:\n    source_job: Retrieve-NetSuite-Data\n    target_job: Retrieve-Ferntech-Data\n    condition_type: on_job_success\n    enabled: true\n  Retrieve-Ferntech-Data->Process-Combined-Data:\n    source_job: Retrieve-Ferntech-Data\n    target_job: Process-Combined-Data\n    condition_type: on_job_success\n    enabled: true\n  Process-Combined-Data->Send-Email-Report:\n    source_job: Process-Combined-Data\n    target_job: Send-Email-Report\n    condition_type: on_job_success\n    enabled: true\n  Process-Combined-Data->write-to-sheet:\n    source_job: Process-Combined-Data\n    target_job: write-to-sheet\n    condition_type: on_job_success\n    enabled: true\n  Process-Combined-Data->Summarise-with-claude:\n    source_job: Process-Combined-Data\n    target_job: Summarise-with-claude\n    condition_type: on_job_success\n    enabled: true\n  Summarise-with-claude->Email-summary:\n    source_job: Summarise-with-claude\n    target_job: Email-summary\n    condition_type: on_job_success\n    enabled: true\n  Email-summary->Update-asana:\n    source_job: Email-summary\n    target_job: Update-asana\n    condition_type: on_job_success\n    enabled: true\n  Retrieve-Google-Sheets-Data->error-handler:\n    source_job: Retrieve-Google-Sheets-Data\n    target_job: error-handler\n    condition_type: on_job_failure\n    enabled: true\n  Retrieve-NetSuite-Data->error-handler:\n    source_job: Retrieve-NetSuite-Data\n    target_job: error-handler\n    condition_type: on_job_failure\n    enabled: true\n  Retrieve-Ferntech-Data->error-handler:\n    source_job: Retrieve-Ferntech-Data\n    target_job: error-handler\n    condition_type: on_job_failure\n    enabled: true\n```"}
+    ]
+    content = "Perfect! One final addition - after updating Asana, I want to format the data for bulk emailing and then send out bulk emails using Mailgun."
+    service_input = make_service_input(existing_yaml, history, content=content)
+    response = call_global_agent_service(service_input)
+    assert_routed_to(response, "workflow_agent", context="test_long_yaml")
+    print_response_details(response, content=content)
+    assert response is not None
+    assert isinstance(response, dict)
+
+    assert_yaml_section_contains_all(existing_yaml, response.get("response_yaml", ""), "jobs", context="Jobs section")
+    assert_yaml_section_contains_all(existing_yaml, response.get("response_yaml", ""), "edges", context="Edges section")
+    assert_no_special_chars(response["response_yaml"], context="test_long_yaml")
+
+def test_navigation_job_to_workflow():
+    print("==================TEST==================")
+    print("Description: Testing cross-service navigation from job editor to workflow editor - model should infer context change")
+
+    # History shows user was on job editor discussing job code
+    history = [
+        {"role": "user", "content": "[pg:job_code/transform-data/http] Can you add error handling to this HTTP request?"},
+        {"role": "assistant", "content": "I'll add try-catch error handling to catch any request failures in your HTTP job."},
+        {"role": "user", "content": "[pg:job_code/transform-data/http] Also add retry logic with backoff"},
+        {"role": "assistant", "content": "I'll add exponential backoff retry logic to handle transient failures."}
+    ]
+
+    # Now user is on workflow editor - abrupt question about adding a job
+    content = "Add a step to send the results via email"
+
+    # Current context is workflow, not job code
+    existing_yaml = """name: data-pipeline
+jobs:
+  fetch-source-data:
+    id: job-fetch-id
+    name: Fetch Source Data
+    adaptor: '@openfn/language-http@6.5.4'
+    body: 'get("https://source.api/data");'
+  transform-data:
+    id: job-transform-id
+    name: Transform Data
+    adaptor: '@openfn/language-common@latest'
+    body: 'fn(state => { return { ...state, transformed: true }; });'
+  save-to-database:
+    id: job-save-id
+    name: Save to Database
+    adaptor: '@openfn/language-http@6.5.4'
+    body: 'post("https://db.api/save", state => state.data);'
+triggers:
+  webhook:
+    id: trigger-webhook-id
+    type: webhook
+    enabled: false
+edges:
+  webhook->fetch-source-data:
+    id: edge-webhook-fetch-id
+    source_trigger: webhook
+    target_job: fetch-source-data
+    condition_type: always
+    enabled: true
+  fetch-source-data->transform-data:
+    id: edge-fetch-transform-id
+    source_job: fetch-source-data
+    target_job: transform-data
+    condition_type: on_job_success
+    enabled: true
+  transform-data->save-to-database:
+    id: edge-transform-save-id
+    source_job: transform-data
+    target_job: save-to-database
+    condition_type: on_job_success
+    enabled: true
+"""
+
+    context = {
+        "page_name": "data-pipeline"
+    }
+
+    # Meta shows navigation happened
+    meta = {
+        "last_page": {
+            "type": "job_code",
+            "name": "transform-data",
+            "adaptor": "http"
+        }
+    }
+
+    service_input = make_service_input(existing_yaml, history, content=content, context=context, meta=meta)
+    response = call_global_agent_service(service_input)
+    assert_routed_to(response, "workflow_agent", context="test_navigation_job_to_workflow")
+    print_response_details(response, content=content)
+
+    # Assertions to verify model correctly inferred navigation and responded about workflow
+    assert response is not None
+    assert "response_yaml" in response
+    assert response["response_yaml"] is not None, "Model should have generated YAML for the workflow"
+
+    # Verify email job was added
+    yaml_obj = yaml.safe_load(response["response_yaml"])
+    assert "jobs" in yaml_obj
+
+    job_names = [job.get("name", "").lower() for job in yaml_obj["jobs"].values()]
+    job_adaptors = [job.get("adaptor", "").lower() for job in yaml_obj["jobs"].values()]
+
+    # Check that an email-related job was added
+    assert any("email" in name or "mail" in name or "send" in name for name in job_names), \
+        "Email job not found in workflow"
+
+    # Check that a new job was added (could be gmail, mailgun, or http for email API)
+    # This is flexible since the model may choose different adaptors for sending email
+    orig_yaml_obj = yaml.safe_load(existing_yaml)
+    orig_job_count = len(orig_yaml_obj["jobs"])
+    new_job_count = len(yaml_obj["jobs"])
+    assert new_job_count > orig_job_count, f"Expected new job to be added. Original: {orig_job_count}, New: {new_job_count}"
+
+    # Verify response talks about workflow, not job code
+    response_text = response["response"].lower()
+    assert not any(phrase in response_text for phrase in ["try", "catch", "retry", "backoff", "error handling in the code"]), \
+        "Response should be about workflow structure, not job code error handling"
+
+    print("\n✓ Navigation test passed: Model correctly inferred navigation from job editor to workflow editor")
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

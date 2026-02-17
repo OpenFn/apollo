@@ -46,7 +46,6 @@ class PlannerAgent:
             config_loader: Configuration loader instance
             api_key: Optional API key override
         """
-        self.config = config_loader.config
         self.config_loader = config_loader
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
 
@@ -55,12 +54,18 @@ class PlannerAgent:
 
         self.client = Anthropic(api_key=self.api_key)
         self.tools = TOOL_DEFINITIONS
-        self.max_tool_calls = self.config.get("max_tool_calls", 10)
+
+        # Get planner config
+        planner_config = config_loader.config.get("planner", {})
+        self.model = planner_config.get("model", "claude-sonnet-4-20250514")
+        self.max_tokens = planner_config.get("max_tokens", 8192)
+        self.temperature = planner_config.get("temperature", 1.0)
+        self.max_tool_calls = planner_config.get("max_tool_calls", 10)
 
         # Track subagent calls
         self.subagent_results = []
 
-        logger.info("PlannerAgent initialized with tool-calling capability")
+        logger.info(f"PlannerAgent initialized with model: {self.model}")
 
     def run(
         self,
@@ -113,8 +118,8 @@ class PlannerAgent:
         while tool_call_count < self.max_tool_calls:
             try:
                 response = self.client.beta.messages.create(
-                    model=self.config["model"],
-                    max_tokens=self.config["max_tokens"],
+                    model=self.model,
+                    max_tokens=self.max_tokens,
                     system=system_prompt,
                     messages=messages,
                     tools=self.tools,
@@ -275,7 +280,7 @@ class PlannerAgent:
             logger.warning(f"Loop exited without end_turn (reason: {response.stop_reason})")
 
         # Build result
-        result = SupervisorResult(
+        result = PlannerResult(
             response=final_text,
             response_yaml=final_yaml,
             suggested_code=final_code,
@@ -289,7 +294,7 @@ class PlannerAgent:
             }
         )
 
-        logger.info(f"Supervisor completed. Tokens: {total_usage['input_tokens']} in, {total_usage['output_tokens']} out")
+        logger.info(f"Planner completed. Tokens: {total_usage['input_tokens']} in, {total_usage['output_tokens']} out")
         return result
 
     def _find_tool_use(self, content):
@@ -332,8 +337,8 @@ class PlannerAgent:
         return None
 
     def _build_system_prompt(self) -> list:
-        """Build system prompt for supervisor with cache control."""
-        prompt_text = self.config_loader.get_prompt("supervisor_system_prompt")
+        """Build system prompt for planner with cache control."""
+        prompt_text = self.config_loader.get_prompt("planner_system_prompt")
 
         return [
             {
