@@ -1,10 +1,23 @@
 import os
 import json
 import anthropic
+from anthropic import (
+    APIConnectionError,
+    BadRequestError,
+    AuthenticationError,
+    PermissionDeniedError,
+    NotFoundError,
+    UnprocessableEntityError,
+    RateLimitError,
+    InternalServerError,
+)
 import sentry_sdk
+from util import ApolloError, create_logger
 from search_docsite.search_docsite import DocsiteSearch
 from .rag_config_loader import ConfigLoader
 from streaming_util import StreamManager
+
+logger = create_logger("job_chat.retrieve_docs")
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
 config_path = os.path.join(base_dir, "rag.yaml")
@@ -55,13 +68,20 @@ def retrieve_knowledge(content, history, code="", adaptor="", api_key=None):
             with sentry_sdk.start_span(description="generate_search_queries"):
                 search_queries, generate_queries_usage = generate_queries(content, client, user_context)
             with sentry_sdk.start_span(description="search_documentation"):
-                search_results = search_docs(
-                    search_queries, 
-                    top_k=config["top_k"], 
-                    threshold=config["threshold"]
-                )
-                search_results = list(set(search_results))
-                search_results_sections = list(set(result.metadata["doc_title"] for result in search_results))
+                try:
+                    search_results = search_docs(
+                        search_queries,
+                        top_k=config["top_k"],
+                        threshold=config["threshold"]
+                    )
+                    search_results = list(set(search_results))
+                    search_results_sections = list(set(result.metadata["doc_title"] for result in search_results))
+                except Exception as e:
+                    logger.error(f"Pinecone search failed: {e}")
+                    sentry_sdk.capture_exception(e)
+                    # Continue with empty results - chat can still work without docs
+                    search_results = []
+                    search_results_sections = []
         
         results = {
             "search_results": [s.to_json() for s in search_results],
@@ -99,10 +119,10 @@ def generate_queries(content, client, user_context=""):
     """Generate document search queries based on the user question."""
     formatted_user_prompt = config_loader.get_prompt(
         "search_docs_user_prompt",
-        user_context=user_context, 
+        user_context=user_context,
         user_question=content
     )
-    
+
     text, usage = call_llm(
         model=config["llm_retrieval"],
         temperature=config["temperature"],
@@ -110,12 +130,21 @@ def generate_queries(content, client, user_context=""):
         user_prompt=formatted_user_prompt,
         client=client
     )
-    
-    answer_parsed = json.loads(text)
+
+    try:
+        answer_parsed = json.loads(text)
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse LLM response as JSON: {e}. Response text: {text[:200]}")
+        raise ApolloError(
+            500,
+            "Failed to generate search queries - invalid response from AI service",
+            type="INVALID_LLM_RESPONSE",
+            details={"response_preview": text[:200]}
+        )
 
     if len(answer_parsed) >= 4:
         answer_parsed = answer_parsed[:4]
-    
+
     return (answer_parsed, usage)
 
 def search_docs(search_queries, top_k, threshold):
@@ -149,22 +178,72 @@ def format_context(adaptor, code, history):
     return formatted_text
 
 def call_llm(model, temperature, system_prompt, user_prompt, client):
-    """Helper method to make LLM calls."""
-    message = client.messages.create(
-        model=model,
-        max_tokens=1024,
-        temperature=temperature,
-        system=system_prompt,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": user_prompt
-                    }
-                ]
-            }
-        ]
-    )
-    return (message.content[0].text, message.usage.model_dump())
+    """Helper method to make LLM calls with error handling."""
+    try:
+        message = client.messages.create(
+            model=model,
+            max_tokens=1024,
+            temperature=temperature,
+            system=system_prompt,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": user_prompt
+                        }
+                    ]
+                }
+            ]
+        )
+
+        # Validate response has content
+        if not message.content or len(message.content) == 0:
+            raise ApolloError(500, "Empty response from AI service", type="EMPTY_LLM_RESPONSE")
+
+        response_text = message.content[0].text
+        if not response_text:
+            raise ApolloError(500, "Empty text in AI service response", type="EMPTY_LLM_RESPONSE")
+
+        return (response_text, message.usage.model_dump())
+
+    except APIConnectionError as e:
+        logger.error(f"API connection error during knowledge retrieval: {e}")
+        details = {"cause": str(e.__cause__)} if e.__cause__ else {}
+        raise ApolloError(
+            503,
+            "Unable to reach the AI service for documentation search",
+            type="CONNECTION_ERROR",
+            details=details,
+        )
+    except AuthenticationError as e:
+        logger.error(f"Authentication error during knowledge retrieval: {e}")
+        raise ApolloError(401, "Authentication failed with AI service", type="AUTH_ERROR")
+    except RateLimitError as e:
+        logger.error(f"Rate limit error during knowledge retrieval: {e}")
+        retry_after = int(e.response.headers.get('retry-after', 60)) if hasattr(e, 'response') else 60
+        raise ApolloError(
+            429,
+            "Rate limit exceeded for documentation search, please try again later",
+            type="RATE_LIMIT",
+            details={"retry_after": retry_after}
+        )
+    except BadRequestError as e:
+        logger.error(f"Bad request error during knowledge retrieval: {e}")
+        raise ApolloError(400, f"Invalid request to AI service: {str(e)}", type="BAD_REQUEST")
+    except PermissionDeniedError as e:
+        logger.error(f"Permission denied error during knowledge retrieval: {e}")
+        raise ApolloError(403, "Not authorized to perform this action", type="FORBIDDEN")
+    except NotFoundError as e:
+        logger.error(f"Not found error during knowledge retrieval: {e}")
+        raise ApolloError(404, "Resource not found", type="NOT_FOUND")
+    except UnprocessableEntityError as e:
+        logger.error(f"Unprocessable entity error during knowledge retrieval: {e}")
+        raise ApolloError(422, str(e), type="INVALID_REQUEST")
+    except InternalServerError as e:
+        logger.error(f"Internal server error from AI service during knowledge retrieval: {e}")
+        raise ApolloError(500, "The AI service encountered an error", type="PROVIDER_ERROR")
+    except Exception as e:
+        logger.error(f"Unexpected error during LLM call for knowledge retrieval: {str(e)}")
+        raise ApolloError(500, f"Unexpected error during documentation search: {str(e)}", type="UNKNOWN_ERROR")
