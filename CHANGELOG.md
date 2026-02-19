@@ -1,5 +1,13 @@
 # apollo
 
+## 0.19.6
+
+### Patch Changes
+
+- 7d42848: lint code
+- 8f39895: update protobuf
+- 203175d: add error handling to job_chat
+
 ## 0.19.5
 
 ### Patch Changes

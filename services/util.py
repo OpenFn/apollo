@@ -1,12 +1,15 @@
-import json
 import logging
 import os
 import sys
-import requests
-import psycopg2
 from dataclasses import dataclass
-from typing import Optional, Any, Dict
+from typing import Any
 
+import psycopg2
+import requests
+
+# Adaptor parsing constants
+SCOPED_ADAPTOR_MIN_PARTS = 3
+SHORTHAND_ADAPTOR_PARTS = 2
 
 class DictObj:
     """
@@ -22,13 +25,13 @@ class DictObj:
             else:
                 setattr(self, key, DictObj(val) if isinstance(val, dict) else val)
 
-    def get(self, key):
+    def get(self, key: str) -> Any:  # noqa: ANN401
         return self._dict.get(key)
 
-    def has(self, key):
+    def has(self, key: str) -> bool:
         return key in self._dict
 
-    def to_dict(self):
+    def to_dict(self) -> dict:
         return self._dict
 
 
@@ -38,7 +41,7 @@ class ApolloError(Exception):
     code: int
     message: str
     type: str = "APOLLO_ERROR"
-    details: Optional[dict[str, Any]] = None
+    details: dict[str, Any] | None = None
 
     def to_dict(self) -> dict:
         """Serialize the error to a dictionary format"""
@@ -53,21 +56,21 @@ class ApolloError(Exception):
 
 
 filename = None
-loggers = {}
+loggers: dict[str, logging.Logger] = {}
 apollo_port = 3000
 
 
-def set_log_output(f):
+def set_log_output(f: str | None) -> None:
     """Set the output file for logging."""
-    global filename
+    global filename  # noqa: PLW0603
 
     if f is not None:
-        print(f"[entry.py] writing logs to {f}")
+        print(f"[entry.py] writing logs to {f}")  # noqa: T201
 
     filename = f
 
 
-def create_logger(name):
+def create_logger(name: str) -> logging.Logger:
     """
     Create or retrieve a logger with the given name.
     Logs to stdout by default.
@@ -79,26 +82,25 @@ def create_logger(name):
     return loggers[name]
 
 
-def set_apollo_port(p):
+def set_apollo_port(p: int) -> None:
     """Set the port for Apollo services."""
-    global apollo_port
+    global apollo_port  # noqa: PLW0603
     apollo_port = p
 
 
-def apollo(name, payload):
+def apollo(name: str, payload: dict) -> dict:
     """
     Call out to an Apollo service through HTTP.
     :param name: Name of the service.
     :param payload: Payload to send in the POST request.
     :return: JSON response.
     """
-    global apollo_port
     url = f"http://127.0.0.1:{apollo_port}/services/{name}"
-    r = requests.post(url, json = payload)
+    r = requests.post(url, json=payload)
     return r.json()
 
 
-def get_db_connection():
+def get_db_connection() -> "psycopg2.extensions.connection":
     """Get database connection from POSTGRES_URL environment variable.
 
     Returns:
@@ -138,24 +140,24 @@ class AdaptorSpecifier:
 
         # Handle format: "@openfn/language-http@3.1.11"
         if adaptor_input.startswith("@"):
-            if len(adaptor_parts) >= 3:
+            if len(adaptor_parts) >= SCOPED_ADAPTOR_MIN_PARTS:
                 self.name = "@" + adaptor_parts[1]
                 self.version = adaptor_parts[2]
             else:
                 raise ApolloError(
                     400,
                     f"Version must be specified in adaptor string. Expected format: '@openfn/language-http@3.1.11', got: '{adaptor_input}'",
-                    type="BAD_REQUEST"
+                    type="BAD_REQUEST",
                 )
         # Handle format: "http@3.1.11"
-        elif len(adaptor_parts) == 2:
+        elif len(adaptor_parts) == SHORTHAND_ADAPTOR_PARTS:
             self.name = f"@openfn/language-{adaptor_parts[0]}"
             self.version = adaptor_parts[1]
         else:
             raise ApolloError(
                 400,
                 f"Version must be specified in adaptor string. Expected format: 'http@3.1.11' or '@openfn/language-http@3.1.11', got: '{adaptor_input}'",
-                type="BAD_REQUEST"
+                type="BAD_REQUEST",
             )
 
     @property
@@ -169,7 +171,7 @@ class AdaptorSpecifier:
         return self.name.split("/")[-1].replace("language-", "")
 
 
-def add_page_prefix(content: str, page: Optional[dict]) -> str:
+def add_page_prefix(content: str, page: dict | None) -> str:
     """
     Add [pg:...] prefix to message for page navigation tracking.
 
