@@ -28,11 +28,17 @@ class RouterDecision:
 
 
 @dataclass
+class Attachment:
+    """Output attachment."""
+    type: str
+    content: str
+
+
+@dataclass
 class RouterResult:
     """Result from router or passthrough."""
     response: str
-    response_yaml: Optional[str]
-    suggested_code: Optional[str]
+    attachments: List[Attachment]
     history: List[Dict]
     usage: Dict
     meta: Dict
@@ -75,9 +81,9 @@ class RouterAgent:
     def route_and_execute(
         self,
         content: str,
-        existing_yaml: Optional[str],
+        workflow_yaml: Optional[str],
         errors: Optional[str],
-        context: Optional[Dict],
+        job_code_context: Optional[Dict],
         history: List[Dict],
         read_only: bool,
         stream: bool
@@ -87,21 +93,21 @@ class RouterAgent:
 
         Args:
             content: User message
-            existing_yaml: YAML workflow (as string)
+            workflow_yaml: YAML workflow
             errors: Error context
-            context: Job code context (with expression, page_name, adaptor)
+            job_code_context: Job code context (with expression, page_name, adaptor)
             history: Conversation history
             read_only: Read-only mode flag
             stream: Streaming flag
 
         Returns:
-            RouterResult with response, YAML, code, history, usage, meta
+            RouterResult with response, attachments, history, usage, meta
         """
         logger.info("Router.route_and_execute() called")
 
         # Make routing decision
         try:
-            decision = self._make_routing_decision(content, existing_yaml, errors, context, history)
+            decision = self._make_routing_decision(content, workflow_yaml, errors, job_code_context, history)
             logger.info(f"Router decision: {decision.destination} (confidence: {decision.confidence})")
         except Exception as e:
             logger.warning(f"Routing decision failed: {e}. Defaulting to planner for safety.")
@@ -110,15 +116,15 @@ class RouterAgent:
         # Execute based on decision
         if decision.destination == "workflow_agent":
             result = self._route_to_workflow_chat(
-                content, existing_yaml, errors, history, read_only, stream, decision.confidence
+                content, workflow_yaml, errors, history, read_only, stream, decision.confidence
             )
         elif decision.destination == "job_code_agent":
             result = self._route_to_job_chat(
-                content, context, history, stream, decision.confidence
+                content, job_code_context, history, stream, decision.confidence
             )
         else:  # planner
             result = self._route_to_planner(
-                content, existing_yaml, errors, context, history, read_only, stream, decision.confidence
+                content, workflow_yaml, errors, job_code_context, history, read_only, stream, decision.confidence
             )
 
         return result
@@ -126,9 +132,9 @@ class RouterAgent:
     def _make_routing_decision(
         self,
         content: str,
-        existing_yaml: Optional[str],
+        workflow_yaml: Optional[str],
         errors: Optional[str],
-        context: Optional[Dict],
+        job_code_context: Optional[Dict],
         history: List[Dict]
     ) -> RouterDecision:
         """
@@ -136,16 +142,16 @@ class RouterAgent:
 
         Args:
             content: User message
-            existing_yaml: YAML workflow
+            workflow_yaml: YAML workflow
             errors: Error context
-            context: Job code context
+            job_code_context: Job code context
             history: Conversation history
 
         Returns:
             RouterDecision with destination and confidence
         """
         # Build routing message with context
-        routing_message = self._build_routing_message(content, existing_yaml, errors, context, history)
+        routing_message = self._build_routing_message(content, workflow_yaml, errors, job_code_context, history)
 
         # Get system prompt
         system_prompt = self.config_loader.get_prompt("router_system_prompt")
@@ -205,9 +211,9 @@ class RouterAgent:
     def _build_routing_message(
         self,
         content: str,
-        existing_yaml: Optional[str],
+        workflow_yaml: Optional[str],
         errors: Optional[str],
-        context: Optional[Dict],
+        job_code_context: Optional[Dict],
         history: List[Dict]
     ) -> str:
         """
@@ -215,9 +221,9 @@ class RouterAgent:
 
         Args:
             content: User message
-            existing_yaml: YAML workflow
+            workflow_yaml: YAML workflow
             errors: Error context
-            context: Job code context
+            job_code_context: Job code context
             history: Conversation history
 
         Returns:
@@ -234,16 +240,16 @@ class RouterAgent:
             parts.append("\nRecent conversation:")
             for turn in recent_history:
                 role = turn.get("role", "unknown")
-                msg = turn.get("content", "")[:200]  # Truncate long messages
+                msg = turn.get("content", "")[:200]
                 parts.append(f"  {role}: {msg}")
 
         # Attachments (full content for accurate routing)
-        if existing_yaml:
-            parts.append(f"\n[YAML attached, length: {len(existing_yaml)} chars]")
-            parts.append(f"YAML content:\n{existing_yaml}")
+        if workflow_yaml:
+            parts.append(f"\n[YAML attached, length: {len(workflow_yaml)} chars]")
+            parts.append(f"YAML content:\n{workflow_yaml}")
 
-        if context and context.get("expression"):
-            job_code = context["expression"]
+        if job_code_context and job_code_context.get("expression"):
+            job_code = job_code_context["expression"]
             parts.append(f"\n[Job code attached, length: {len(job_code)} chars]")
             parts.append(f"Job code:\n{job_code}")
 
@@ -251,106 +257,125 @@ class RouterAgent:
             parts.append(f"\nErrors: {errors}")
 
         # Page context
-        if context:
-            if context.get("page_name"):
-                parts.append(f"\nCurrent page: {context['page_name']}")
-            if context.get("adaptor"):
-                parts.append(f"Adaptor: {context['adaptor']}")
+        if job_code_context:
+            if job_code_context.get("page_name"):
+                parts.append(f"\nCurrent page: {job_code_context['page_name']}")
+            if job_code_context.get("adaptor"):
+                parts.append(f"Adaptor: {job_code_context['adaptor']}")
 
         return "\n".join(parts)
 
     def _route_to_workflow_chat(
         self,
         content: str,
-        existing_yaml: Optional[str],
+        workflow_yaml: Optional[str],
         errors: Optional[str],
         history: List[Dict],
         read_only: bool,
         stream: bool,
         confidence: int
     ) -> RouterResult:
-        """Route directly to workflow_chat (called when decision is 'workflow_agent')."""
+        """Route directly to workflow_chat."""
         from workflow_chat.workflow_chat import main as workflow_chat_main
 
         logger.info("Routing to workflow_chat")
 
+        # Strip attachments from history for API compatibility
+        clean_history = []
+        for turn in history:
+            clean_turn = {"role": turn["role"], "content": turn["content"]}
+            clean_history.append(clean_turn)
+
         payload = {
             "content": content,
-            "existing_yaml": existing_yaml,
+            "existing_yaml": workflow_yaml,
             "errors": errors,
-            "history": history,
+            "history": clean_history,
             "read_only": read_only,
             "stream": stream
         }
 
-        # Call service directly - let ApolloError propagate if service fails
         result = workflow_chat_main(payload)
-
-        # Aggregate token usage
         total_usage = sum_usage(self.routing_usage, result["usage"])
 
-        # Return as RouterResult with metadata
+        # Transform response_yaml to attachments
+        attachments = []
+        if result.get("response_yaml"):
+            attachments.append(Attachment(type="workflow_yaml", content=result["response_yaml"]))
+
+        # Add attachments to last history entry
+        updated_history = result["history"].copy()
+        if updated_history and updated_history[-1].get("role") == "assistant":
+            updated_history[-1]["attachments"] = [{"type": a.type, "content": a.content} for a in attachments]
+
         return RouterResult(
             response=result["response"],
-            response_yaml=result.get("response_yaml"),
-            suggested_code=None,
-            history=result["history"],
+            attachments=attachments,
+            history=updated_history,
             usage=total_usage,
             meta={
-                "router_decision": "workflow_agent",
-                "router_confidence": confidence,
-                "direct_passthrough": True
+                "agents": ["router", "workflow_agent"],
+                "router_confidence": confidence
             }
         )
 
     def _route_to_job_chat(
         self,
         content: str,
-        context: Optional[Dict],
+        job_code_context: Optional[Dict],
         history: List[Dict],
         stream: bool,
         confidence: int
     ) -> RouterResult:
-        """Route directly to job_chat (called when decision is 'job_code_agent')."""
+        """Route directly to job_chat."""
         from job_chat.job_chat import main as job_chat_main
 
         logger.info("Routing to job_chat")
 
+        # Strip attachments from history for API compatibility
+        clean_history = []
+        for turn in history:
+            clean_turn = {"role": turn["role"], "content": turn["content"]}
+            clean_history.append(clean_turn)
+
         payload = {
             "content": content,
-            "context": context or {},
+            "context": job_code_context or {},
             "suggest_code": True,
-            "history": history,
+            "history": clean_history,
             "stream": stream
         }
 
-        # Call service directly - let ApolloError propagate if service fails
         result = job_chat_main(payload)
-
-        # Aggregate token usage
         total_usage = sum_usage(self.routing_usage, result["usage"])
 
-        # Return as RouterResult with metadata
+        # Transform suggested_code to attachments
+        attachments = []
+        if result.get("suggested_code"):
+            attachments.append(Attachment(type="job_code", content=result["suggested_code"]))
+
+        # Add attachments to last history entry
+        updated_history = result["history"].copy()
+        if updated_history and updated_history[-1].get("role") == "assistant":
+            updated_history[-1]["attachments"] = [{"type": a.type, "content": a.content} for a in attachments]
+
         return RouterResult(
             response=result["response"],
-            response_yaml=None,
-            suggested_code=result.get("suggested_code"),
-            history=result["history"],
+            attachments=attachments,
+            history=updated_history,
             usage=total_usage,
             meta={
-                **result.get("meta", {}),
-                "router_decision": "job_code_agent",
-                "router_confidence": confidence,
-                "direct_passthrough": True
+                "agents": ["router", "job_code_agent"],
+                "router_confidence": confidence
             }
         )
 
     def _route_to_planner(
         self,
         content: str,
-        existing_yaml: Optional[str],
+        workflow_yaml: Optional[str],
         errors: Optional[str],
-        context: Optional[Dict],
+        job_code_context: Optional[Dict],
         history: List[Dict],
         read_only: bool,
         stream: bool,
@@ -361,30 +386,38 @@ class RouterAgent:
 
         logger.info("Routing to planner")
 
+        # Strip attachments from history for API compatibility
+        clean_history = []
+        for turn in history:
+            clean_turn = {"role": turn["role"], "content": turn["content"]}
+            clean_history.append(clean_turn)
+
         planner = PlannerAgent(self.config_loader, self.api_key)
         planner_result = planner.run(
             content=content,
-            existing_yaml=existing_yaml,
+            existing_yaml=workflow_yaml,
             errors=errors,
-            context=context,
-            history=history,
+            context=job_code_context,
+            history=clean_history,
             read_only=read_only,
             stream=stream
         )
 
-        # Aggregate token usage
         total_usage = sum_usage(self.routing_usage, planner_result.usage)
 
-        # Convert to RouterResult
+        # Merge router confidence into planner meta
+        meta = planner_result.meta.copy()
+        meta["router_confidence"] = confidence
+
+        # Add attachments to last history entry if it's an assistant message
+        updated_history = planner_result.history.copy() if planner_result.history else []
+        if updated_history and updated_history[-1].get("role") == "assistant":
+            updated_history[-1]["attachments"] = [{"type": a.type, "content": a.content} for a in planner_result.attachments]
+
         return RouterResult(
             response=planner_result.response,
-            response_yaml=planner_result.response_yaml,
-            suggested_code=planner_result.suggested_code,
-            history=planner_result.history,
+            attachments=planner_result.attachments,
+            history=updated_history,
             usage=total_usage,
-            meta={
-                **planner_result.meta,
-                "router_decision": "planner",
-                "router_confidence": confidence
-            }
+            meta=meta
         )

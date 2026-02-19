@@ -22,14 +22,12 @@ logger = create_logger(__name__)
 @dataclass
 class Payload:
     """Input payload for global agent."""
-    content: str                              # User message (required)
-    existing_yaml: Optional[str] = None       # YAML as STRING
-    errors: Optional[str] = None              # Error context
-    context: Optional[Dict] = None            # Job code context
-    history: Optional[List[Dict]] = None      # Chat history
-    api_key: Optional[str] = None             # Override API key
-    stream: Optional[bool] = False            # Streaming flag (not implemented yet)
-    read_only: Optional[bool] = False         # Read-only mode
+    content: str
+    context: Optional[Dict] = None
+    history: Optional[List[Dict]] = None
+    api_key: Optional[str] = None
+    stream: Optional[bool] = False
+    read_only: Optional[bool] = False
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
@@ -39,14 +37,24 @@ class Payload:
 
         return cls(
             content=data["content"],
-            existing_yaml=data.get("existing_yaml"),
-            errors=data.get("errors"),
             context=data.get("context"),
             history=data.get("history"),
             api_key=data.get("api_key"),
             stream=data.get("stream", False),
             read_only=data.get("read_only", False)
         )
+
+    def get_workflow_yaml(self) -> Optional[str]:
+        """Extract workflow_yaml from context."""
+        return self.context.get("workflow_yaml") if self.context else None
+
+    def get_errors(self) -> Optional[str]:
+        """Extract errors from context."""
+        return self.context.get("errors") if self.context else None
+
+    def get_job_code_context(self) -> Optional[Dict]:
+        """Extract job_code from context."""
+        return self.context.get("job_code") if self.context else None
 
 
 def main(data_dict: dict) -> dict:
@@ -73,19 +81,18 @@ def main(data_dict: dict) -> dict:
         # 4. Route and execute
         result = router.route_and_execute(
             content=data.content,
-            existing_yaml=data.existing_yaml,
-            errors=data.errors,
-            context=data.context,
+            workflow_yaml=data.get_workflow_yaml(),
+            errors=data.get_errors(),
+            job_code_context=data.get_job_code_context(),
             history=data.history or [],
             read_only=data.read_only,
             stream=data.stream
         )
 
-        # 5. Return structured response
+        # 5. Return structured response with attachments
         return {
             "response": result.response,
-            "response_yaml": result.response_yaml,
-            "suggested_code": result.suggested_code,
+            "attachments": [{"type": a.type, "content": a.content} for a in result.attachments],
             "history": result.history,
             "usage": result.usage,
             "meta": result.meta
