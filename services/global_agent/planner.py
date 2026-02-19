@@ -23,11 +23,17 @@ logger = create_logger(__name__)
 
 
 @dataclass
+class Attachment:
+    """Output attachment."""
+    type: str
+    content: str
+
+
+@dataclass
 class PlannerResult:
     """Result from planner run."""
     response: str
-    response_yaml: Optional[str]
-    suggested_code: Optional[str]
+    attachments: List[Attachment]
     history: List[Dict]
     usage: Dict
     meta: Dict
@@ -275,19 +281,28 @@ class PlannerAgent:
         # If we exited loop without end_turn, extract final response from last message
         if response.stop_reason != "end_turn":
             final_text = self._extract_text(response)
-            final_yaml = self._get_yaml_from_subagents()
-            final_code = self._get_code_from_subagents()
             logger.warning(f"Loop exited without end_turn (reason: {response.stop_reason})")
+
+        # Build attachments from subagent results
+        attachments = self._build_attachments_from_subagents()
+
+        # Build agents list for meta
+        agents_used = ["router", "planner"]
+        for result in self.subagent_results:
+            metadata = result.get("_call_metadata", {})
+            subagent_name = metadata.get("subagent")
+            if subagent_name and subagent_name not in agents_used:
+                agents_used.append(subagent_name)
 
         # Build result
         result = PlannerResult(
             response=final_text,
-            response_yaml=final_yaml,
-            suggested_code=final_code,
+            attachments=attachments,
             history=messages,
             usage=total_usage,
             meta={
-                "iteration": 2,
+                "agents": agents_used,
+                "planner_iterations": tool_call_count,
                 "tool_calls": tool_calls_meta,
                 "subagent_calls": self.subagent_results,
                 "total_tool_calls": tool_call_count
@@ -312,29 +327,20 @@ class PlannerAgent:
                 text += block.text
         return text
 
-    def _get_yaml_from_subagents(self) -> Optional[str]:
-        """
-        Get YAML from subagent results.
+    def _build_attachments_from_subagents(self) -> List[Attachment]:
+        """Build attachments list from subagent results."""
+        attachments = []
 
-        Returns the YAML from workflow_agent if it was called, else None.
-        """
         for result in self.subagent_results:
             metadata = result.get("_call_metadata", {})
-            if metadata.get("subagent") == "workflow_agent":
-                return result.get("response_yaml")
-        return None
+            subagent = metadata.get("subagent")
 
-    def _get_code_from_subagents(self) -> Optional[str]:
-        """
-        Get suggested code from subagent results.
+            if subagent == "workflow_agent" and result.get("response_yaml"):
+                attachments.append(Attachment(type="workflow_yaml", content=result["response_yaml"]))
+            elif subagent == "job_agent" and result.get("suggested_code"):
+                attachments.append(Attachment(type="job_code", content=result["suggested_code"]))
 
-        Returns the code from job_agent if it was called, else None.
-        """
-        for result in self.subagent_results:
-            metadata = result.get("_call_metadata", {})
-            if metadata.get("subagent") == "job_agent":
-                return result.get("suggested_code")
-        return None
+        return attachments
 
     def _build_system_prompt(self) -> list:
         """Build system prompt for planner with cache control."""
