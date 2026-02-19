@@ -32,7 +32,7 @@ prompts:
       {"query": "optional_second_query", "doc_type": "adaptor_docs"}
     ]
 
-    Return NOTHING but this JSON array.
+    Return NOTHING but this JSON array (no markdown).
 
   search_docs_user_prompt: |
     {user_context}The user question is as follows: "{user_question}"
