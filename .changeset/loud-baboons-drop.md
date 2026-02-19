@@ -1,5 +1,0 @@
----
-"apollo": patch
----
-
-lint code
