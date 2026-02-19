@@ -1,0 +1,5 @@
+---
+"apollo": patch
+---
+
+update protobuf
