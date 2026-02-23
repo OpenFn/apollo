@@ -1,5 +1,11 @@
 # apollo
 
+## 0.19.7
+
+### Patch Changes
+
+- fd43595: prefill doc query answers
+
 ## 0.19.6
 
 ### Patch Changes

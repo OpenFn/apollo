@@ -128,10 +128,13 @@ def generate_queries(content, client, user_context=""):
         temperature=config["temperature"],
         system_prompt=config_loader.prompts["prompts"]["search_docs_system_prompt"],
         user_prompt=formatted_user_prompt,
-        client=client
+        client=client,
+        prefill='[\n  {"query": "'
     )
 
     try:
+        # Prepend the prefill back to response
+        text = '[\n  {"query": "' + text
         answer_parsed = json.loads(text)
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse LLM response as JSON: {e}. Response text: {text[:200]}")
@@ -177,25 +180,34 @@ def format_context(adaptor, code, history):
     
     return formatted_text
 
-def call_llm(model, temperature, system_prompt, user_prompt, client):
+def call_llm(model, temperature, system_prompt, user_prompt, client, prefill=None):
     """Helper method to make LLM calls with error handling."""
     try:
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": user_prompt
+                    }
+                ]
+            }
+        ]
+
+        # Add prefill if provided
+        if prefill:
+            messages.append({
+                "role": "assistant",
+                "content": prefill
+            })
+
         message = client.messages.create(
             model=model,
             max_tokens=1024,
             temperature=temperature,
             system=system_prompt,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": user_prompt
-                        }
-                    ]
-                }
-            ]
+            messages=messages
         )
 
         # Validate response has content

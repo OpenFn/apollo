@@ -139,5 +139,53 @@ def test_generate_system_message_loads_adaptor_docs_when_missing():
         conn.close()
 
 
+def test_generate_queries_returns_valid_structure():
+    """
+    Test that generate_queries returns properly structured JSON array.
+
+    This verifies:
+    1. Answer prefilling prevents markdown wrapping
+    2. Response parses as valid JSON
+    3. Returns array with expected structure
+    """
+    print("==================TEST==================")
+    print("Description: Testing generate_queries returns valid JSON structure")
+
+    from job_chat.retrieve_docs import generate_queries, get_client, format_context
+
+    # Step 1: Prepare test inputs
+    print("\n1. Preparing test inputs...")
+    question = "How do I use the get function in the http adaptor?"
+    user_context = format_context(adaptor="http", code="", history="")
+    print(f"   Question: {question}")
+    print(f"   Context: {user_context}")
+
+    # Step 2: Call generate_queries
+    print("\n2. Calling generate_queries...")
+    client = get_client()
+    queries, usage = generate_queries(question, client, user_context)
+    print(f"   Generated {len(queries)} queries")
+
+    # Step 3: Validate structure
+    print("\n3. Validating response structure...")
+    assert isinstance(queries, list), "Should return a list"
+    print("   ✓ Response is a list")
+
+    assert len(queries) > 0, "Should generate at least one query"
+    print(f"   ✓ Generated {len(queries)} query(ies)")
+
+    # Step 4: Validate query objects
+    print("\n4. Validating query objects...")
+    for i, query in enumerate(queries):
+        assert "query" in query, f"Query {i} should have 'query' key"
+        assert "doc_type" in query, f"Query {i} should have 'doc_type' key"
+        assert isinstance(query["query"], str), f"Query {i} 'query' should be a string"
+        print(f"   ✓ Query {i}: {query['query'][:50]}...")
+
+    print(f"\n✅ TEST PASSED: generate_queries returns valid JSON structure")
+    print(f"   - Successfully parsed JSON (no markdown wrapping)")
+    print(f"   - Generated {len(queries)} properly structured queries")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])
