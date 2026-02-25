@@ -75,14 +75,16 @@ def call_workflow_agent(
 
 def call_job_agent(
     tool_input: Dict,
-    context: Dict = None
+    context: Dict = None,
+    workflow_yaml: Optional[str] = None
 ) -> Dict:
     """
     Call the job code agent and return its results.
 
     Args:
-        tool_input: Tool input from supervisor containing message
+        tool_input: Tool input from supervisor containing message and optional adaptor
         context: Job code context (current code being worked on)
+        workflow_yaml: Optional workflow YAML string for additional context
 
     Returns:
         Dictionary with job agent response (raw, not formatted)
@@ -93,10 +95,23 @@ def call_job_agent(
 
     logger.info(f"Calling job_agent")
 
+    # Build job context: start from provided context, then add adaptor and workflow_yaml
+    job_context = dict(context) if context else {}
+
+    # If planner LLM specified an adaptor for this job, inject it into context
+    adaptor = tool_input.get("adaptor")
+    if adaptor:
+        job_context["adaptor"] = adaptor
+        logger.info(f"job_agent: using adaptor from tool_input: {adaptor}")
+
+    # Pass workflow YAML as context so job_chat has workflow structure available
+    if workflow_yaml:
+        job_context["workflow_yaml"] = workflow_yaml
+
     # Build job agent payload
     job_payload = {
         "content": user_message,
-        "context": context or {},
+        "context": job_context,
         "suggest_code": True,
         "stream": False,
         "history": []  # Supervisor includes context in message

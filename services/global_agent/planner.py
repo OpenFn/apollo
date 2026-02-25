@@ -214,9 +214,12 @@ class PlannerAgent:
                         })
 
                     elif tool_use_block.name == "call_job_code_agent":
+                        # Pass any previously generated YAML so job_chat has workflow context
+                        generated_yaml = self._get_yaml_from_subagents()
                         subagent_result = call_job_agent(
                             tool_use_block.input,
-                            context=context or {}
+                            context=context or {},
+                            workflow_yaml=generated_yaml
                         )
 
                         # Aggregate subagent token usage into total
@@ -326,6 +329,22 @@ class PlannerAgent:
             if block.type == "text":
                 text += block.text
         return text
+
+    def _get_yaml_from_subagents(self) -> Optional[str]:
+        """Get the most recently generated workflow YAML from subagent results."""
+        for result in reversed(self.subagent_results):
+            metadata = result.get("_call_metadata", {})
+            if metadata.get("subagent") == "workflow_agent" and result.get("response_yaml"):
+                return result["response_yaml"]
+        return None
+
+    def _get_code_from_subagents(self) -> Optional[str]:
+        """Get the most recently generated job code from subagent results."""
+        for result in reversed(self.subagent_results):
+            metadata = result.get("_call_metadata", {})
+            if metadata.get("subagent") == "job_agent" and result.get("suggested_code"):
+                return result["suggested_code"]
+        return None
 
     def _build_attachments_from_subagents(self) -> List[Attachment]:
         """Build attachments list from subagent results."""

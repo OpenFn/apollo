@@ -1,6 +1,6 @@
 import pytest
 import json
-from .test_utils import call_global_agent_service, make_service_input, print_response_details, assert_routed_to
+from .test_utils import call_global_agent_service, make_service_input, print_response_details, assert_routed_to, get_suggested_code
 
 
 def test_basic_input():
@@ -34,7 +34,7 @@ post('https://destination.org/upload', state => state.transformed);''',
     print_response_details(response, "basic_input", content=content)
     assert response is not None
     assert "response" in response
-    assert "suggested_code" in response
+    assert get_suggested_code(response) is not None, "Expected suggested_code attachment in response"
 
 def test_contextualised_input():
     print("==================TEST==================")
@@ -94,11 +94,11 @@ post('https://destination.org/upload', state => state.transformed);''',
     print_response_details(response, "contextualised_input", content=content)
     assert response is not None
     assert "response" in response
-    assert "suggested_code" in response
     assert "meta" in response
     assert "usage" in response
-    assert response["suggested_code"] is not None, "JSON parsing failed - suggested_code is None"
-    assert response["suggested_code"] != context["expression"], "Suggested code should be different from the original code"
+    suggested_code = get_suggested_code(response)
+    assert suggested_code is not None, "Expected suggested_code attachment in response"
+    assert suggested_code != context["expression"], "Suggested code should be different from the original code"
 
 def test_duplicate_sections():
     print("==================TEST==================")
@@ -165,9 +165,9 @@ def test_duplicate_sections():
     print_response_details(response, "odk_duplicate_sections", content=content)
     assert response is not None
     assert "response" in response
-    assert "suggested_code" in response
-    assert response["suggested_code"] is not None, "JSON parsing failed - suggested_code is None"
-    assert response["suggested_code"] != context["expression"], "Suggested code should be different from the original code"
+    suggested_code = get_suggested_code(response)
+    assert suggested_code is not None, "Expected suggested_code attachment in response"
+    assert suggested_code != context["expression"], "Suggested code should be different from the original code"
 
 def test_duplicate_sections_additional():
     print("==================TEST==================")
@@ -207,9 +207,9 @@ post('https://api.example.com/endpoint', state => state.items);''',
     print_response_details(response, "duplicate_post_sections", content=content)
     assert response is not None
     assert "response" in response
-    assert "suggested_code" in response
-    assert response["suggested_code"] is not None, "JSON parsing failed - suggested_code is None"
-    assert response["suggested_code"] != context["expression"], "Suggested code should be different from the original code"
+    suggested_code = get_suggested_code(response)
+    assert suggested_code is not None, "Expected suggested_code attachment in response"
+    assert suggested_code != context["expression"], "Suggested code should be different from the original code"
 
 
 def test_navigation_workflow_to_job():
@@ -260,11 +260,11 @@ post('https://destination.api/patients', state => state.patients);''',
     # Assertions to verify model correctly inferred navigation and responded about job code
     assert response is not None
     assert "response" in response
-    assert "suggested_code" in response
-    assert response["suggested_code"] is not None, "Model should have generated code for the job"
+    suggested_code = get_suggested_code(response)
+    assert suggested_code is not None, "Model should have generated code for the job"
 
     # Verify logging was added to the code
-    assert "console.log" in response["suggested_code"], "Log statement not found in suggested code"
+    assert "console.log" in suggested_code, "Log statement not found in suggested code"
 
     # Verify response talks about job code, not workflow
     response_text = response["response"].lower()

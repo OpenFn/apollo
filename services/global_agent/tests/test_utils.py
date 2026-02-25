@@ -60,43 +60,44 @@ def make_service_input(
 ) -> Dict[str, Any]:
     """
     Create a properly formatted input payload for the global_agent service.
-    Supports both job_chat and workflow_chat parameter patterns.
-
-    Parameter order matches workflow_chat for compatibility with positional args.
 
     Args:
-        existing_yaml: Current YAML workflow (workflow_chat pattern)
+        existing_yaml: Current YAML workflow
         history: Chat history as a list of {role, content} objects
         content: The user's question or message
-        errors: Error message to handle (workflow_chat pattern)
+        errors: Error message to handle
         context: Context object containing expression, adaptor, input, output, log, page_name
-        meta: Additional metadata
-        read_only: Boolean for read-only mode (workflow_chat pattern)
-        api_key: Optional API key for the model (job_chat pattern)
-        suggest_code: Boolean flag to indicate whether to use new prompt format (job_chat pattern)
+        meta: Additional metadata (deprecated)
+        read_only: Boolean for read-only mode
+        api_key: Optional API key for the model
+        suggest_code: Boolean flag (deprecated, ignored)
         stream: Boolean flag to enable streaming mode
 
     Returns:
         A dictionary ready to be sent to the global_agent service
     """
     service_input = {
+        "content": content,
         "history": history or []
     }
 
-    if content is not None:
-        service_input["content"] = content
-
+    # Build context object in new format
+    ctx = {}
     if existing_yaml is not None:
-        service_input["existing_yaml"] = existing_yaml
-
-    if context is not None:
-        service_input["context"] = context
-
-    if meta is not None:
-        service_input["meta"] = meta
-
+        ctx["workflow_yaml"] = existing_yaml
     if errors is not None:
-        service_input["errors"] = errors
+        ctx["errors"] = errors
+
+    # Merge with provided context (which may contain job_code)
+    if context is not None:
+        # If context has job code fields, wrap them in job_code
+        if any(k in context for k in ["expression", "page_name", "adaptor"]):
+            ctx["job_code"] = context
+        else:
+            ctx.update(context)
+
+    if ctx:
+        service_input["context"] = ctx
 
     if read_only:
         service_input["read_only"] = read_only
@@ -104,13 +105,41 @@ def make_service_input(
     if api_key is not None:
         service_input["api_key"] = api_key
 
-    if suggest_code is not None:
-        service_input["suggest_code"] = suggest_code
-
     if stream:
         service_input["stream"] = stream
 
     return service_input
+
+
+def get_attachment(response: Dict[str, Any], attachment_type: str) -> Optional[str]:
+    """
+    Extract an attachment of a specific type from the response.
+
+    Args:
+        response: Global agent response dict
+        attachment_type: Type of attachment ("workflow_yaml", "job_code", etc.)
+
+    Returns:
+        The attachment content or None if not found
+    """
+    if "attachments" not in response:
+        return None
+
+    for attachment in response["attachments"]:
+        if attachment.get("type") == attachment_type:
+            return attachment.get("content")
+
+    return None
+
+
+def get_response_yaml(response: Dict[str, Any]) -> Optional[str]:
+    """Extract workflow YAML from attachments (backwards compatibility helper)."""
+    return get_attachment(response, "workflow_yaml")
+
+
+def get_suggested_code(response: Dict[str, Any]) -> Optional[str]:
+    """Extract job code from attachments (backwards compatibility helper)."""
+    return get_attachment(response, "job_code")
 
 
 def assert_routed_to(response: Dict[str, Any], expected_service: str, context: str = ""):
@@ -126,32 +155,31 @@ def assert_routed_to(response: Dict[str, Any], expected_service: str, context: s
     assert isinstance(response, dict), f"{context}: Response is not a dict: {type(response)}"
 
     if "meta" not in response:
-        # Print response keys to help debug
         print(f"\n{context}: WARNING - Response missing 'meta' field. Response keys: {response.keys()}")
         if "response" in response:
             print(f"Response text (first 200 chars): {response['response'][:200]}")
-        return  # Skip assertion if meta is missing (might be error case or edge case)
+        return
 
-    if "router_decision" not in response["meta"]:
-        print(f"\n{context}: WARNING - meta missing 'router_decision'. Meta keys: {response['meta'].keys()}")
-        return  # Skip assertion if router_decision is missing
+    meta = response["meta"]
+    if "agents" not in meta:
+        print(f"\n{context}: WARNING - meta missing 'agents'. Meta keys: {meta.keys()}")
+        return
 
-    actual = response["meta"]["router_decision"]
-    assert actual == expected_service, (
-        f"{context}: Expected route to '{expected_service}', got '{actual}'"
+    agents = meta["agents"]
+    assert expected_service in agents, (
+        f"{context}: Expected '{expected_service}' in agents list, got {agents}"
     )
 
 
 def print_response_details(response: Dict[str, Any], test_name: str = None, content: Optional[str] = None, errors: Optional[str] = None):
     """
     Print detailed response information for a global_agent service call.
-    Supports both job_chat and workflow_chat response patterns.
 
     Args:
         response: The service response object
         test_name: Name of the test (for debugging, optional)
         content: Original user query/content
-        errors: Original error field (workflow_chat pattern)
+        errors: Original error field
     """
     if test_name:
         print(f"\n===== TEST: {test_name} =====")
@@ -168,20 +196,20 @@ def print_response_details(response: Dict[str, Any], test_name: str = None, cont
         print("\nTEXT RESPONSE:")
         print(response["response"])
 
-    if "suggested_code" in response:
-        print("\nSUGGESTED CODE:")
-        print(response["suggested_code"])
+    if "attachments" in response:
+        for attachment in response["attachments"]:
+            att_type = attachment.get("type", "unknown")
+            att_content = attachment.get("content", "")
 
-    if "response_yaml" in response:
-        yaml_data = response["response_yaml"]
-        if yaml_data and isinstance(yaml_data, str) and yaml_data.strip():
-            print("\nGENERATED YAML:")
-            print(yaml_data)
-        elif yaml_data and yaml_data is not None:
-            print("\nGENERATED YAML:")
-            print(json.dumps(yaml_data, indent=2))
-        else:
-            print("\nGENERATED YAML: None (agent provided only text description)")
+            if att_type == "job_code":
+                print("\nSUGGESTED CODE:")
+                print(att_content)
+            elif att_type == "workflow_yaml":
+                print("\nGENERATED YAML:")
+                print(att_content)
+            else:
+                print(f"\nATTACHMENT ({att_type}):")
+                print(att_content)
 
     if "history" in response:
         print("\nUPDATED HISTORY LENGTH:")
@@ -191,11 +219,14 @@ def print_response_details(response: Dict[str, Any], test_name: str = None, cont
         print("\nTOKEN USAGE:")
         print(json.dumps(response["usage"], indent=2))
 
-    if "meta" in response and "router_decision" in response["meta"]:
-        print("\nROUTER DECISION:")
-        print(f"  Service: {response['meta']['router_decision']}")
+    if "meta" in response:
+        print("\nEXECUTION META:")
+        if "agents" in response["meta"]:
+            print(f"  Agents: {' -> '.join(response['meta']['agents'])}")
         if "router_confidence" in response["meta"]:
-            print(f"  Confidence: {response['meta']['router_confidence']}")
+            print(f"  Router Confidence: {response['meta']['router_confidence']}")
+        if "planner_iterations" in response["meta"]:
+            print(f"  Planner Iterations: {response['meta']['planner_iterations']}")
 
 
 # ===== YAML validation helpers from workflow_chat =====

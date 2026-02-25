@@ -79,6 +79,10 @@ The agent has access to adaptor documentation and will provide code examples."""
             "message": {
                 "type": "string",
                 "description": "Message for the job code agent with relevant context"
+            },
+            "adaptor": {
+                "type": "string",
+                "description": "The adaptor package for this job (e.g. '@openfn/language-commcare@latest'). Specify this when generating code for a specific adaptor so the correct documentation is used."
             }
         },
         "required": ["message"]

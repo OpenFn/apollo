@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 import difflib
 from typing import List
-from .test_utils import assert_yaml_equal_except, call_global_agent_service, make_service_input, print_response_details, assert_no_special_chars, assert_yaml_jobs_have_body, assert_yaml_has_ids, assert_routed_to
+from .test_utils import assert_yaml_equal_except, call_global_agent_service, make_service_input, print_response_details, assert_no_special_chars, assert_yaml_jobs_have_body, assert_yaml_has_ids, assert_routed_to, get_response_yaml
 
 def test_change_trigger():
     print("==================TEST==================")
@@ -57,8 +57,8 @@ edges:
     assert isinstance(response, dict)
 
     # Check that the YAML trigger is now a cron trigger, not webhook
-    yaml_str = response.get("response_yaml")
-    assert yaml_str is not None, "No YAML returned in response_yaml"
+    yaml_str = get_response_yaml(response)
+    assert yaml_str is not None, "No YAML returned in response attachments"
     parsed = yaml.safe_load(yaml_str)
     triggers = parsed.get("triggers", {})
     assert "cron" in triggers, f"Expected 'cron' trigger, got: {triggers.keys()}"
@@ -72,7 +72,7 @@ edges:
         allowed_paths=["triggers", "edges"],
         context="YAML changed outside triggers or edges section."
     )
-    assert_no_special_chars(response["response_yaml"], context="test_change_trigger")
+    assert_no_special_chars(yaml_str, context="test_change_trigger")
 
 
 def test_rename_two_jobs_commcare():
@@ -201,12 +201,12 @@ edges:
     assert response is not None
     assert isinstance(response, dict)
 
-    yaml_str = response.get("response_yaml")
-    assert yaml_str is not None, "No YAML returned in response_yaml"
+    yaml_str = get_response_yaml(response)
+    assert yaml_str is not None, "No YAML returned in response attachments"
     parsed = yaml.safe_load(yaml_str)
     expected = yaml.safe_load(target_yaml)
     assert parsed == expected
-    assert_no_special_chars(response["response_yaml"], context="test_rename_two_jobs_commcare")
+    assert_no_special_chars(yaml_str, context="test_rename_two_jobs_commcare")
 
 def test_special_characters():
     print("==================TEST==================")
@@ -255,12 +255,12 @@ edges:
     condition_type: always
     enabled: true
 """
-    service_input = {
-        "existing_yaml": existing_yaml,
-        "history": [],
-        "content": "Add a second job that stores the results in a database",
-        "read_only": True
-    }
+    service_input = make_service_input(
+        existing_yaml=existing_yaml,
+        history=[],
+        content="Add a second job that stores the results in a database",
+        read_only=True
+    )
     response = call_global_agent_service(service_input)
     assert_routed_to(response, "workflow_agent", context="test_readonly_mode")
     print_response_details(response, content="Add a second job that stores the results in a database")
@@ -268,8 +268,8 @@ edges:
     assert response is not None
     assert isinstance(response, dict)
 
-    # In read-only mode, yaml should be None
-    assert response.get("response_yaml") is None, "Read-only mode should return yaml=None"
+    # In read-only mode, no workflow_yaml attachment should be returned
+    assert get_response_yaml(response) is None, "Read-only mode should not return a workflow_yaml attachment"
 
     # Response text should not be empty
     response_text = response.get("response", "")
@@ -326,10 +326,10 @@ edges:
     updated_history = response["history"]
     assert len(updated_history) == 2  # user message + assistant response
 
-    # Verify the user message has the prefix
+    # Verify the user message has the workflow prefix
     user_message = updated_history[0]
     assert user_message["role"] == "user"
-    assert "[pg:workflow/data-pipeline]" in user_message["content"]
+    assert "[pg:workflow]" in user_message["content"]
     assert content in user_message["content"]
 
 

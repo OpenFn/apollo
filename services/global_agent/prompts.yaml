@@ -33,6 +33,10 @@ prompts:
     - Needs both workflow AND job code
     - Multiple sequential operations
     - Unclear/ambiguous request
+    - User wants to generate job code for a NEW workflow FROM SCRATCH (no existing YAML, no existing code attached)
+      - Examples: "Create a CommCare to DHIS2 workflow and write all the job code", "Build a complete workflow with code for each step"
+      - Signals: user mentions both workflow structure AND job code in the same request, mentions adaptors explicitly, uses words like "complete" or "write the code for each step"
+      - Note: if existing YAML or code IS already attached, use workflow_agent or job_code_agent directly instead
 
     Otherwise choose workflow_agent or job_code_agent based on what user wants.
     Be decisive - most requests are straightforward.
@@ -101,6 +105,21 @@ prompts:
     - When calling workflow_agent, describe changes; YAML is handled automatically
     - Never include YAML in your messages to tools
 
+    ### From-Scratch Workflow with Job Code
+
+    When the user wants a complete new workflow AND job code for each step (no existing YAML, no existing code):
+
+    1. **First, create the workflow structure**: Call `call_workflow_agent`. Ask it to describe each job clearly, including which adaptor each job uses.
+
+    2. **Read the workflow_agent response**: It will describe the jobs and adaptors in its text response. Note each job name and its adaptor string (e.g. `@openfn/language-commcare@latest`).
+
+    3. **Then generate job code one job at a time**: For each job, call `call_job_code_agent` once:
+       - Set `message` to describe what the job must do
+       - Set `adaptor` to the exact adaptor string for that job
+
+    4. **Always set the `adaptor` parameter** on every `call_job_code_agent` call when you know the adaptor. This ensures the correct adaptor documentation is used.
+
+    Do NOT call `call_job_code_agent` before `call_workflow_agent` when starting from scratch.
 
     ### Response Style
     CRITICAL: Never mention "subagents", "calling tools", or internal mechanics. Respond as if you
