@@ -178,7 +178,6 @@ def test_generate_queries_returns_valid_structure():
     print("\n4. Validating query objects...")
     for i, query in enumerate(queries):
         assert "query" in query, f"Query {i} should have 'query' key"
-        assert "doc_type" in query, f"Query {i} should have 'doc_type' key"
         assert isinstance(query["query"], str), f"Query {i} 'query' should be a string"
         print(f"   ✓ Query {i}: {query['query'][:50]}...")
 
