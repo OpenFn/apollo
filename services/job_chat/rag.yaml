@@ -1,6 +1,5 @@
 config_version: 1.0
-llm_search_decision: "claude-sonnet-4-5-20250929"
-llm_retrieval: "claude-sonnet-4-5-20250929"
+model: "claude-sonnet"
 threshold: 0.7
 top_k: 5
 temperature: 0
