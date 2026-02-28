@@ -22,6 +22,20 @@ def describe_type(value: Any) -> str:
     return type(value).__name__
 
 
+def parse_bool_flag(value: Any, *, default: bool) -> bool:
+    return value if isinstance(value, bool) else default
+
+
+def parse_retry_after_header(raw_retry_after: Optional[str], default: int = 60) -> int:
+    if raw_retry_after is None:
+        return default
+
+    try:
+        return int(float(raw_retry_after))
+    except (TypeError, ValueError):
+        return default
+
+
 def build_request_log_metadata(data_dict: Dict[str, Any]) -> Dict[str, Any]:
     payload_shape: Dict[str, str] = {}
     for key, value in data_dict.items():
@@ -49,10 +63,10 @@ def build_request_log_metadata(data_dict: Dict[str, Any]) -> Dict[str, Any]:
         "history_length": history_length,
         "context_keys": context_keys,
         "context_shape": context_shape,
-        "stream": bool(data_dict.get("stream", False)),
-        "suggest_code": bool(data_dict.get("suggest_code", False)),
-        "download_adaptor_docs": bool(data_dict.get("download_adaptor_docs", True)),
-        "refresh_rag": bool(data_dict.get("refresh_rag", False)),
+        "stream": parse_bool_flag(data_dict.get("stream"), default=False),
+        "suggest_code": parse_bool_flag(data_dict.get("suggest_code"), default=False),
+        "download_adaptor_docs": parse_bool_flag(data_dict.get("download_adaptor_docs"), default=True),
+        "refresh_rag": parse_bool_flag(data_dict.get("refresh_rag"), default=False),
     }
 
 

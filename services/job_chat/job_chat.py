@@ -22,6 +22,7 @@ from .logging_metadata import (
     build_completion_log,
     build_error_log,
     build_request_log_metadata,
+    parse_retry_after_header,
     to_json,
 )
 from streaming_util import StreamManager
@@ -567,7 +568,11 @@ def main(data_dict: dict) -> dict:
         raise ApolloError(401, "Authentication failed", type="AUTH_ERROR")
     except RateLimitError as e:
         log_error(429, "RATE_LIMIT", e)
-        retry_after = int(e.response.headers.get('retry-after', 60)) if hasattr(e, 'response') else 60
+        retry_after = 60
+        if hasattr(e, "response") and getattr(e, "response", None) is not None:
+            headers = getattr(e.response, "headers", None)
+            raw_retry_after = headers.get("retry-after") if headers is not None else None
+            retry_after = parse_retry_after_header(raw_retry_after, default=60)
         raise ApolloError(
             429, "Rate limit exceeded, please try again later", type="RATE_LIMIT", details={"retry_after": retry_after}
         )

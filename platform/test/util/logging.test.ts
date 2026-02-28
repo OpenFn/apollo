@@ -96,6 +96,58 @@ describe("summarizePayloadShape", () => {
     expect(JSON.stringify(shape)).not.toContain("secret answer");
   });
 
+  it("redacts sensitive keys by default", () => {
+    const shape = summarizePayloadShape({
+      api_key: "sk-ant-secret",
+      authorization: "Bearer abc",
+      context: {
+        token: "top-secret",
+      },
+    });
+
+    expect(shape).toEqual({
+      type: "object",
+      key_count: 3,
+      keys: ["api_key", "authorization", "context"],
+      fields: {
+        api_key: "redacted",
+        authorization: "redacted",
+        context: {
+          type: "object",
+          key_count: 1,
+          keys: ["token"],
+          fields: {
+            token: "redacted",
+          },
+        },
+      },
+    });
+    expect(JSON.stringify(shape)).not.toContain("sk-ant-secret");
+    expect(JSON.stringify(shape)).not.toContain("Bearer abc");
+  });
+
+  it("samples array item types with maxArrayItems cap", () => {
+    const shape = summarizePayloadShape(
+      {
+        history: ["a", 2, true, null, { role: "user" }],
+      },
+      { maxArrayItems: 2 }
+    );
+
+    expect(shape).toEqual({
+      type: "object",
+      key_count: 1,
+      keys: ["history"],
+      fields: {
+        history: {
+          type: "array",
+          length: 5,
+          item_types: ["number", "string"],
+        },
+      },
+    });
+  });
+
   it("builds structured lifecycle logs with a shared request id", () => {
     const requestId = "req-abc";
     const route = "/services/job_chat";

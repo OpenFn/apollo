@@ -6,7 +6,8 @@ type PrimitiveType =
   | "undefined"
   | "bigint"
   | "symbol"
-  | "function";
+  | "function"
+  | "redacted";
 
 type ValueType = PrimitiveType | "array" | "object";
 
@@ -30,11 +31,22 @@ export type PayloadShape = PrimitiveType | ObjectShape | ArrayShape;
 type SummarizePayloadOptions = {
   maxDepth?: number;
   maxKeys?: number;
+  maxArrayItems?: number;
+  sensitiveKeys?: Set<string> | string[];
 };
 
 const DEFAULT_OPTIONS: Required<SummarizePayloadOptions> = {
   maxDepth: 2,
   maxKeys: 25,
+  maxArrayItems: 25,
+  sensitiveKeys: [
+    "api_key",
+    "authorization",
+    "token",
+    "access_token",
+    "refresh_token",
+    "x-api-key",
+  ],
 };
 
 const getValueType = (value: unknown): ValueType => {
@@ -56,9 +68,16 @@ const getValueType = (value: unknown): ValueType => {
 
 const summarizeValue = (
   value: unknown,
+  currentKey: string | null,
   depth: number,
-  options: Required<SummarizePayloadOptions>
+  options: Omit<Required<SummarizePayloadOptions>, "sensitiveKeys"> & {
+    sensitiveKeys: Set<string>;
+  }
 ): PayloadShape => {
+  if (currentKey && options.sensitiveKeys.has(currentKey.toLowerCase())) {
+    return "redacted";
+  }
+
   const valueType = getValueType(value);
 
   if (valueType !== "object" && valueType !== "array") {
@@ -67,7 +86,8 @@ const summarizeValue = (
 
   if (valueType === "array") {
     const arrayValue = value as unknown[];
-    const itemTypes = [...new Set(arrayValue.map(getValueType))].sort() as ValueType[];
+    const sample = arrayValue.slice(0, options.maxArrayItems);
+    const itemTypes = [...new Set(sample.map(getValueType))].sort() as ValueType[];
 
     const result: ArrayShape = {
       type: "array",
@@ -76,13 +96,13 @@ const summarizeValue = (
     };
 
     if (depth <= options.maxDepth) {
-      const complexItem = arrayValue.find((item) => {
+      const complexItem = sample.find((item) => {
         const itemType = getValueType(item);
         return itemType === "object" || itemType === "array";
       });
 
       if (complexItem !== undefined) {
-        result.item_shape = summarizeValue(complexItem, depth + 1, options);
+        result.item_shape = summarizeValue(complexItem, null, depth + 1, options);
       }
     }
 
@@ -102,7 +122,7 @@ const summarizeValue = (
   if (depth <= options.maxDepth) {
     const fields: Record<string, PayloadShape> = {};
     for (const key of limitedKeys) {
-      fields[key] = summarizeValue(objectValue[key], depth + 1, options);
+      fields[key] = summarizeValue(objectValue[key], key, depth + 1, options);
     }
     result.fields = fields;
   }
@@ -118,11 +138,18 @@ export const summarizePayloadShape = (
   payload: unknown,
   options: SummarizePayloadOptions = {}
 ): PayloadShape => {
-  const resolvedOptions = {
+  const resolvedOptionsRaw = {
     ...DEFAULT_OPTIONS,
     ...options,
   };
-  return summarizeValue(payload, 0, resolvedOptions);
+  const sensitiveKeys = new Set(
+    [...resolvedOptionsRaw.sensitiveKeys].map((key) => key.toLowerCase())
+  );
+
+  return summarizeValue(payload, null, 0, {
+    ...resolvedOptionsRaw,
+    sensitiveKeys,
+  });
 };
 
 type RequestLogBase = {
