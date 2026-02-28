@@ -25,10 +25,8 @@ export const run = async (
     const inputPath = tmpfile.replace("{}", "input");
     const outputPath = tmpfile.replace("{}", "output");
 
-    console.log("Initing input file at", inputPath);
     await Bun.write(inputPath, JSON.stringify(args));
 
-    console.log("Initing output file at", outputPath);
     await Bun.write(outputPath, "");
 
     const proc = spawn(

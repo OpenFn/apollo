@@ -1,5 +1,6 @@
 import os
 import json
+import time
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 from anthropic import (
@@ -17,6 +18,12 @@ import sentry_sdk
 from util import ApolloError, create_logger, AdaptorSpecifier, add_page_prefix
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
+from .logging_metadata import (
+    build_completion_log,
+    build_error_log,
+    build_request_log_metadata,
+    to_json,
+)
 from streaming_util import StreamManager
 
 logger = create_logger("job_chat")
@@ -455,6 +462,23 @@ def main(data_dict: dict) -> dict:
     """
     Main entry point with improved error handling and input validation.
     """
+    request_started_at = time.time()
+    request_metadata = build_request_log_metadata(data_dict)
+    request_id = request_metadata.get("request_id")
+    logger.info(f"job_chat_request_start: {to_json(request_metadata)}")
+
+    def log_error(status_code: int, error_type: str, error: Exception) -> None:
+        error_payload = build_error_log(
+            request_id=request_id,
+            started_at=request_started_at,
+            status_code=status_code,
+            error_type=error_type,
+            error_class=error.__class__.__name__,
+        )
+        logger.error(
+            f"job_chat_request_error: {to_json(error_payload)}"
+        )
+
     try:
         sentry_sdk.set_context("request_data", {
             k: v for k, v in data_dict.items() if k != "api_key"
@@ -517,12 +541,20 @@ def main(data_dict: dict) -> dict:
         if result.diff:
             response_dict["diff"] = result.diff
 
+        completion_payload = build_completion_log(
+            request_id=request_id,
+            started_at=request_started_at,
+            status_code=200,
+        )
+        logger.info(f"job_chat_request_complete: {to_json(completion_payload)}")
         return response_dict
 
     except ValueError as e:
+        log_error(400, "BAD_REQUEST", e)
         raise ApolloError(400, str(e), type="BAD_REQUEST")
 
     except APIConnectionError as e:
+        log_error(503, "CONNECTION_ERROR", e)
         details = {"cause": str(e.__cause__)} if e.__cause__ else {}
         raise ApolloError(
             503,
@@ -531,25 +563,34 @@ def main(data_dict: dict) -> dict:
             details=details,
         )
     except AuthenticationError as e:
+        log_error(401, "AUTH_ERROR", e)
         raise ApolloError(401, "Authentication failed", type="AUTH_ERROR")
     except RateLimitError as e:
+        log_error(429, "RATE_LIMIT", e)
         retry_after = int(e.response.headers.get('retry-after', 60)) if hasattr(e, 'response') else 60
         raise ApolloError(
             429, "Rate limit exceeded, please try again later", type="RATE_LIMIT", details={"retry_after": retry_after}
         )
     except BadRequestError as e:
         if "prompt is too long" in str(e):
+            log_error(400, "PROMPT_TOO_LONG", e)
             error_message = "Input prompt exceeds maximum token limit (200,000 tokens). Please reduce the amount of text or context provided."
             raise ApolloError(400, error_message, type="PROMPT_TOO_LONG")
+        log_error(400, "BAD_REQUEST", e)
         raise ApolloError(400, str(e), type="BAD_REQUEST")
     except PermissionDeniedError as e:
+        log_error(403, "FORBIDDEN", e)
         raise ApolloError(403, "Not authorized to perform this action", type="FORBIDDEN")
     except NotFoundError as e:
+        log_error(404, "NOT_FOUND", e)
         raise ApolloError(404, "Resource not found", type="NOT_FOUND")
     except UnprocessableEntityError as e:
+        log_error(422, "INVALID_REQUEST", e)
         raise ApolloError(422, str(e), type="INVALID_REQUEST")
     except InternalServerError as e:
+        log_error(500, "PROVIDER_ERROR", e)
         raise ApolloError(500, "The Anthropic AI Service encountered an error", type="PROVIDER_ERROR")
     except Exception as e:
+        log_error(500, "INTERNAL_ERROR", e)
         logger.error(f"Unexpected error during chat generation: {str(e)}")
         raise ApolloError(500, str(e))

@@ -7,6 +7,13 @@ import describeModules, {
   type ModuleDescription,
 } from "../util/describe-modules";
 import { isApolloError } from "../util/errors";
+import {
+  attachRequestId,
+  buildServiceRequestCompleteLog,
+  buildServiceRequestErrorLog,
+  buildServiceRequestStartLog,
+  logStructured,
+} from "../util/logging";
 
 const callService = (
   m: ModuleDescription,
@@ -33,20 +40,73 @@ export default async (app: Elysia, port: number) => {
 
       // simple post
       app.post(name, async (ctx) => {
-        console.log(`POST to /services/${name}`);
+        const route = `/services/${name}`;
+        const requestId = crypto.randomUUID();
+        const startedAt = Date.now();
         const payload = ctx.body;
-        const result = await callService(m, port, payload as any);
+        const servicePayload = attachRequestId(payload, requestId);
 
-        if (isApolloError(result)) {
-          return new Response(JSON.stringify(result), {
-            status: result.code,
-            headers: {
-              "Content-Type": "application/json",
-            },
-          });
+        logStructured(
+          buildServiceRequestStartLog({
+            requestId,
+            service: name,
+            route,
+            payload,
+          })
+        );
+
+        try {
+          const result = await callService(m, port, servicePayload as any);
+          const durationMs = Date.now() - startedAt;
+
+          if (isApolloError(result)) {
+            logStructured(
+              buildServiceRequestCompleteLog({
+                requestId,
+                service: name,
+                route,
+                durationMs,
+                statusCode: result.code,
+                outcome: "apollo_error",
+              })
+            );
+
+            return new Response(JSON.stringify(result), {
+              status: result.code,
+              headers: {
+                "Content-Type": "application/json",
+              },
+            });
+          }
+
+          logStructured(
+            buildServiceRequestCompleteLog({
+              requestId,
+              service: name,
+              route,
+              durationMs,
+              statusCode: 200,
+              outcome: "success",
+            })
+          );
+
+          return result;
+        } catch (error) {
+          const durationMs = Date.now() - startedAt;
+          const errorType = error instanceof Error ? error.name : "UnknownError";
+
+          logStructured(
+            buildServiceRequestErrorLog({
+              requestId,
+              service: name,
+              route,
+              durationMs,
+              errorType,
+            })
+          );
+
+          throw error;
         }
-
-        return result;
       });
 
       // HTTP streaming
