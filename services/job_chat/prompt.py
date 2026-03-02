@@ -299,7 +299,7 @@ def generate_system_message(context_dict, search_results, download_adaptor_docs=
 
     if search_results:
         search_results = format_search_results(search_results)
-        message.append(f"<retrieved_documentation>Search results for the user query, which may or may not be relevant:\n\n{search_results}</retrieved_documentation>")
+        message.append(f"<retrieved_documentation>General OpenFn documentation search results. These cover platform concepts only — not adaptor-specific APIs, which are included separately. Treat with caution if not relevant to the user's situation.\n\n{search_results}</retrieved_documentation>")
         message.append({"type": "text", "text": ".", "cache_control": {"type": "ephemeral"}})
 
     if context.has("adaptor"):
