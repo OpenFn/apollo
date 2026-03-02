@@ -159,7 +159,7 @@ def search_docs(search_queries, top_k, threshold):
             q.get("query"), 
             top_k=top_k, 
             threshold=threshold, 
-            docs_type=q.get("doc_type")
+            docs_type="general_docs"
         )
         search_results.extend(query_search_result)
     
