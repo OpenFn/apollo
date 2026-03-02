@@ -1,5 +1,11 @@
 # apollo
 
+## 0.19.8
+
+### Patch Changes
+
+- de90b22: remove adaptor docs from job code rag
+
 ## 0.19.7
 
 ### Patch Changes
