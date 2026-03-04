@@ -6,7 +6,7 @@ Handles calling subagents and managing message/YAML passing.
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 # Import utilities from parent services directory
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -18,21 +18,14 @@ logger = create_logger(__name__)
 
 def call_workflow_agent(
     tool_input: Dict,
-    existing_yaml: Optional[str],
-    errors: Optional[str],
-    read_only: bool
+    workflow_yaml: Optional[str] = None
 ) -> Dict:
     """
     Call the workflow agent and return its results.
 
-    CRITICAL: YAML is passed as-is, never parsed or modified.
-
     Args:
-        tool_input: Tool input from supervisor containing mode, message
-        existing_yaml: YAML workflow as STRING (never parsed)
-        errors: Error context
-        history: Conversation history
-        read_only: Read-only mode flag
+        tool_input: Tool input from supervisor containing message
+        workflow_yaml: Full workflow YAML string
 
     Returns:
         Dictionary with workflow agent response (raw, not formatted)
@@ -41,28 +34,21 @@ def call_workflow_agent(
     if not user_message:
         raise ApolloError(400, "message is required")
 
-    logger.info(f"Calling workflow_agent")
+    logger.info("Calling workflow_agent")
 
-    # Build workflow agent payload
     workflow_payload = {
         "content": user_message,
-        "existing_yaml": existing_yaml,  # PASS AS STRING - DO NOT PARSE
-        "errors": errors,
-        "history": [],  # Supervisor includes context in message
-        "read_only": read_only
+        "existing_yaml": workflow_yaml,
+        "history": []  # Supervisor includes context in message
     }
 
-    # Call workflow agent 
     try:
         from workflow_chat.workflow_chat import main as workflow_chat_main
         result = workflow_chat_main(workflow_payload)
 
         logger.info("workflow_agent completed successfully")
 
-        # Add metadata about the call
-        result["_call_metadata"] = {
-            "subagent": "workflow_agent"
-        }
+        result["_call_metadata"] = {"subagent": "workflow_agent"}
 
         return result
 
@@ -75,7 +61,6 @@ def call_workflow_agent(
 
 def call_job_agent(
     tool_input: Dict,
-    context: Dict = None,
     workflow_yaml: Optional[str] = None
 ) -> Dict:
     """
@@ -83,8 +68,7 @@ def call_job_agent(
 
     Args:
         tool_input: Tool input from supervisor containing message and optional adaptor
-        context: Job code context (current code being worked on)
-        workflow_yaml: Optional workflow YAML string for additional context
+        workflow_yaml: Full workflow YAML string for additional context
 
     Returns:
         Dictionary with job agent response (raw, not formatted)
@@ -93,10 +77,9 @@ def call_job_agent(
     if not user_message:
         raise ApolloError(400, "message is required")
 
-    logger.info(f"Calling job_agent")
+    logger.info("Calling job_agent")
 
-    # Build job context: start from provided context, then add adaptor and workflow_yaml
-    job_context = dict(context) if context else {}
+    job_context = {}
 
     # If planner LLM specified an adaptor for this job, inject it into context
     adaptor = tool_input.get("adaptor")
@@ -104,11 +87,9 @@ def call_job_agent(
         job_context["adaptor"] = adaptor
         logger.info(f"job_agent: using adaptor from tool_input: {adaptor}")
 
-    # Pass workflow YAML as context so job_chat has workflow structure available
     if workflow_yaml:
         job_context["workflow_yaml"] = workflow_yaml
 
-    # Build job agent payload
     job_payload = {
         "content": user_message,
         "context": job_context,
@@ -117,17 +98,13 @@ def call_job_agent(
         "history": []  # Supervisor includes context in message
     }
 
-    # Call job agent
     try:
         from job_chat.job_chat import main as job_chat_main
         result = job_chat_main(job_payload)
 
         logger.info("job_agent completed successfully")
 
-        # Add metadata about the call
-        result["_call_metadata"] = {
-            "subagent": "job_agent"
-        }
+        result["_call_metadata"] = {"subagent": "job_agent"}
 
         return result
 
@@ -160,7 +137,6 @@ def format_subagent_result_for_llm(result: Dict) -> str:
         result.get('response', 'No response')
     ]
 
-    # Add reminder only if code/YAML was generated
     if subagent == "workflow_agent" and result.get('response_yaml'):
         parts.extend([
             "",

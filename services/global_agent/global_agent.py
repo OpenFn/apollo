@@ -23,11 +23,12 @@ logger = create_logger(__name__)
 class Payload:
     """Input payload for global agent."""
     content: str
-    context: Optional[Dict] = None
+    workflow_yaml: Optional[str] = None
+    page: Optional[str] = None
+    user: Optional[Dict] = None
     history: Optional[List[Dict]] = None
+    options: Optional[Dict] = None
     api_key: Optional[str] = None
-    stream: Optional[bool] = False
-    read_only: Optional[bool] = False
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
@@ -37,24 +38,17 @@ class Payload:
 
         return cls(
             content=data["content"],
-            context=data.get("context"),
+            workflow_yaml=data.get("workflow_yaml"),
+            page=data.get("page"),
+            user=data.get("user"),
             history=data.get("history"),
+            options=data.get("options"),
             api_key=data.get("api_key"),
-            stream=data.get("stream", False),
-            read_only=data.get("read_only", False)
         )
 
-    def get_workflow_yaml(self) -> Optional[str]:
-        """Extract workflow_yaml from context."""
-        return self.context.get("workflow_yaml") if self.context else None
-
-    def get_errors(self) -> Optional[str]:
-        """Extract errors from context."""
-        return self.context.get("errors") if self.context else None
-
-    def get_job_code_context(self) -> Optional[Dict]:
-        """Extract job_code from context."""
-        return self.context.get("job_code") if self.context else None
+    def get_stream(self) -> bool:
+        """Extract stream flag from options."""
+        return (self.options or {}).get("stream", False)
 
 
 def main(data_dict: dict) -> dict:
@@ -65,7 +59,7 @@ def main(data_dict: dict) -> dict:
         data_dict: Input payload as dictionary
 
     Returns:
-        Response dictionary with text, YAML, history, usage, meta
+        Response dictionary with response, workflow_yaml, history, usage, meta
     """
     try:
         # 1. Validate payload
@@ -81,18 +75,16 @@ def main(data_dict: dict) -> dict:
         # 4. Route and execute
         result = router.route_and_execute(
             content=data.content,
-            workflow_yaml=data.get_workflow_yaml(),
-            errors=data.get_errors(),
-            job_code_context=data.get_job_code_context(),
+            workflow_yaml=data.workflow_yaml,
+            page=data.page,
             history=data.history or [],
-            read_only=data.read_only,
-            stream=data.stream
+            stream=data.get_stream()
         )
 
-        # 5. Return structured response with attachments
+        # 5. Return structured response
         return {
             "response": result.response,
-            "attachments": [{"type": a.type, "content": a.content} for a in result.attachments],
+            "workflow_yaml": result.workflow_yaml,
             "history": result.history,
             "usage": result.usage,
             "meta": result.meta

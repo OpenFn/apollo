@@ -292,9 +292,17 @@ class AnthropicClient:
             text_answer = response_data.get("text_answer", "").strip()
             code_edits = response_data.get("code_edits", [])
             
-            if not code_edits or not original_code:
+            if not code_edits:
                 return text_answer, None, None
-            
+
+            if not original_code:
+                # From-scratch generation: no existing code to edit against.
+                # The LLM uses a "rewrite" action to provide the full new code.
+                for edit in code_edits:
+                    if edit.get("action") == "rewrite" and edit.get("new_code"):
+                        return text_answer, edit["new_code"], None
+                return text_answer, None, None
+
             suggested_code, diff = self.apply_code_edits(content=content, text_answer=text_answer, original_code=original_code, code_edits=code_edits)
             return text_answer, suggested_code, diff
             

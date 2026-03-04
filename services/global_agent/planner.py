@@ -23,17 +23,10 @@ logger = create_logger(__name__)
 
 
 @dataclass
-class Attachment:
-    """Output attachment."""
-    type: str
-    content: str
-
-
-@dataclass
 class PlannerResult:
     """Result from planner run."""
     response: str
-    attachments: List[Attachment]
+    workflow_yaml: Optional[str]
     history: List[Dict]
     usage: Dict
     meta: Dict
@@ -45,13 +38,6 @@ class PlannerAgent:
     """
 
     def __init__(self, config_loader: ConfigLoader, api_key: Optional[str] = None):
-        """
-        Initialize planner agent.
-
-        Args:
-            config_loader: Configuration loader instance
-            api_key: Optional API key override
-        """
         self.config_loader = config_loader
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
 
@@ -61,14 +47,12 @@ class PlannerAgent:
         self.client = Anthropic(api_key=self.api_key)
         self.tools = TOOL_DEFINITIONS
 
-        # Get planner config
         planner_config = config_loader.config.get("planner", {})
         self.model = planner_config.get("model", "claude-sonnet-4-20250514")
         self.max_tokens = planner_config.get("max_tokens", 8192)
         self.temperature = planner_config.get("temperature", 1.0)
         self.max_tool_calls = planner_config.get("max_tool_calls", 10)
 
-        # Track subagent calls
         self.subagent_results = []
 
         logger.info(f"PlannerAgent initialized with model: {self.model}")
@@ -76,11 +60,9 @@ class PlannerAgent:
     def run(
         self,
         content: str,
-        existing_yaml: Optional[str],
-        errors: Optional[str],
-        context: Optional[Dict],
+        workflow_yaml: Optional[str],
+        page: Optional[str],
         history: List[Dict],
-        read_only: bool,
         stream: bool
     ) -> PlannerResult:
         """
@@ -88,30 +70,21 @@ class PlannerAgent:
 
         Args:
             content: User message
-            existing_yaml: YAML workflow (as string, never parsed)
-            errors: Error context
-            context: Job code context
+            workflow_yaml: Full workflow YAML string (including job bodies)
+            page: Current page URL (e.g. workflows/name/step-name)
             history: Conversation history
-            read_only: Read-only mode flag
-            stream: Streaming flag
-            errors: Error context
-            history: Conversation history
-            read_only: Read-only mode flag
             stream: Streaming flag (not implemented)
 
         Returns:
-            PlannerResult with response, YAML, history, usage, meta
+            PlannerResult with response, workflow_yaml, history, usage, meta
         """
         logger.info("Planner.run() called")
 
-        # Build system prompt
         system_prompt = self._build_system_prompt()
 
-        # Build messages
         messages = history.copy() if history else []
         messages.append({"role": "user", "content": content})
 
-        # Tool-calling loop
         tool_call_count = 0
         tool_calls_meta = []
         total_usage = {
@@ -120,6 +93,8 @@ class PlannerAgent:
             "cache_creation_input_tokens": 0,
             "cache_read_input_tokens": 0
         }
+
+        final_text = ""
 
         while tool_call_count < self.max_tool_calls:
             try:
@@ -149,30 +124,21 @@ class PlannerAgent:
                     }
                 )
 
-                # Track usage across all fields
                 for field in ["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"]:
                     total_usage[field] += getattr(response.usage, field, 0)
 
                 logger.info(f"Claude API call {tool_call_count + 1}: stop_reason={response.stop_reason}")
 
-                # Check stop reason
                 if response.stop_reason == "end_turn":
-                    # Done - extract final response
                     final_text = self._extract_text(response)
-                    final_yaml = self._get_yaml_from_subagents()
-                    final_code = self._get_code_from_subagents()
-
-                    # Add final assistant message to messages
                     messages.append({
                         "role": "assistant",
                         "content": final_text
                     })
-
                     logger.info(f"Tool loop completed. Total calls: {tool_call_count}")
                     break
 
                 elif response.stop_reason == "tool_use":
-                    # Find tool use block
                     tool_use_block = self._find_tool_use(response.content)
 
                     if not tool_use_block:
@@ -181,7 +147,6 @@ class PlannerAgent:
 
                     logger.info(f"Executing tool: {tool_use_block.name}")
 
-                    # Execute tool
                     if tool_use_block.name == "search_documentation":
                         tool_result = search_documentation_tool(tool_use_block.input)
 
@@ -193,19 +158,13 @@ class PlannerAgent:
                     elif tool_use_block.name == "call_workflow_agent":
                         subagent_result = call_workflow_agent(
                             tool_use_block.input,
-                            existing_yaml=existing_yaml,
-                            errors=errors,
-                            read_only=read_only
+                            workflow_yaml=workflow_yaml
                         )
 
-                        # Aggregate subagent token usage into total
                         if "usage" in subagent_result:
                             total_usage = sum_usage(total_usage, subagent_result["usage"])
 
-                        # Store subagent result
                         self.subagent_results.append(subagent_result)
-
-                        # Format result for LLM
                         tool_result = format_subagent_result_for_llm(subagent_result)
 
                         tool_calls_meta.append({
@@ -218,18 +177,13 @@ class PlannerAgent:
                         generated_yaml = self._get_yaml_from_subagents()
                         subagent_result = call_job_agent(
                             tool_use_block.input,
-                            context=context or {},
                             workflow_yaml=generated_yaml
                         )
 
-                        # Aggregate subagent token usage into total
                         if "usage" in subagent_result:
                             total_usage = sum_usage(total_usage, subagent_result["usage"])
 
-                        # Store subagent result
                         self.subagent_results.append(subagent_result)
-
-                        # Format result for LLM
                         tool_result = format_subagent_result_for_llm(subagent_result)
 
                         tool_calls_meta.append({
@@ -241,15 +195,10 @@ class PlannerAgent:
                         logger.error(f"Unknown tool: {tool_use_block.name}")
                         tool_result = f"Error: Unknown tool {tool_use_block.name}"
 
-                    # Add tool use and result to conversation
-                    # Convert response.content to list of dicts for JSON serialization
                     content_blocks = []
                     for block in response.content:
                         if block.type == "text":
-                            content_blocks.append({
-                                "type": "text",
-                                "text": block.text
-                            })
+                            content_blocks.append({"type": "text", "text": block.text})
                         elif block.type == "tool_use":
                             content_blocks.append({
                                 "type": "tool_use",
@@ -258,10 +207,7 @@ class PlannerAgent:
                                 "input": block.input
                             })
 
-                    messages.append({
-                        "role": "assistant",
-                        "content": content_blocks
-                    })
+                    messages.append({"role": "assistant", "content": content_blocks})
                     messages.append({
                         "role": "user",
                         "content": [{
@@ -281,15 +227,10 @@ class PlannerAgent:
                 logger.exception("Error in tool-calling loop")
                 raise ApolloError(500, f"Tool execution error: {str(e)}")
 
-        # If we exited loop without end_turn, extract final response from last message
         if response.stop_reason != "end_turn":
             final_text = self._extract_text(response)
             logger.warning(f"Loop exited without end_turn (reason: {response.stop_reason})")
 
-        # Build attachments from subagent results
-        attachments = self._build_attachments_from_subagents()
-
-        # Build agents list for meta
         agents_used = ["router", "planner"]
         for result in self.subagent_results:
             metadata = result.get("_call_metadata", {})
@@ -297,10 +238,9 @@ class PlannerAgent:
             if subagent_name and subagent_name not in agents_used:
                 agents_used.append(subagent_name)
 
-        # Build result
-        result = PlannerResult(
+        return PlannerResult(
             response=final_text,
-            attachments=attachments,
+            workflow_yaml=self._build_final_yaml(),
             history=messages,
             usage=total_usage,
             meta={
@@ -311,9 +251,6 @@ class PlannerAgent:
                 "total_tool_calls": tool_call_count
             }
         )
-
-        logger.info(f"Planner completed. Tokens: {total_usage['input_tokens']} in, {total_usage['output_tokens']} out")
-        return result
 
     def _find_tool_use(self, content):
         """Find tool_use block in response content."""
@@ -338,28 +275,14 @@ class PlannerAgent:
                 return result["response_yaml"]
         return None
 
-    def _get_code_from_subagents(self) -> Optional[str]:
-        """Get the most recently generated job code from subagent results."""
-        for result in reversed(self.subagent_results):
-            metadata = result.get("_call_metadata", {})
-            if metadata.get("subagent") == "job_agent" and result.get("suggested_code"):
-                return result["suggested_code"]
-        return None
+    def _build_final_yaml(self) -> Optional[str]:
+        """
+        Build final workflow YAML from subagent results.
 
-    def _build_attachments_from_subagents(self) -> List[Attachment]:
-        """Build attachments list from subagent results."""
-        attachments = []
-
-        for result in self.subagent_results:
-            metadata = result.get("_call_metadata", {})
-            subagent = metadata.get("subagent")
-
-            if subagent == "workflow_agent" and result.get("response_yaml"):
-                attachments.append(Attachment(type="workflow_yaml", content=result["response_yaml"]))
-            elif subagent == "job_agent" and result.get("suggested_code"):
-                attachments.append(Attachment(type="job_code", content=result["suggested_code"]))
-
-        return attachments
+        Returns the most recently generated workflow YAML structure.
+        Note: stitching job code from job_agent calls into the YAML is deferred.
+        """
+        return self._get_yaml_from_subagents()
 
     def _build_system_prompt(self) -> list:
         """Build system prompt for planner with cache control."""

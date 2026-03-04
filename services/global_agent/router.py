@@ -4,8 +4,10 @@ Router Agent - Lightweight routing for global agent requests.
 Routes requests to workflow_chat, job_chat, or planner based on user intent.
 """
 import os
+import re
 import json
-from typing import List, Dict, Optional
+import yaml
+from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 from anthropic import Anthropic
 
@@ -28,17 +30,10 @@ class RouterDecision:
 
 
 @dataclass
-class Attachment:
-    """Output attachment."""
-    type: str
-    content: str
-
-
-@dataclass
 class RouterResult:
     """Result from router or passthrough."""
     response: str
-    attachments: List[Attachment]
+    workflow_yaml: Optional[str]
     history: List[Dict]
     usage: Dict
     meta: Dict
@@ -49,19 +44,12 @@ class RouterAgent:
     Lightweight routing agent using Claude Haiku.
 
     Routes requests to:
-    - workflow_chat (for workflow YAML)
-    - job_chat (for job code)
+    - workflow_chat (for workflow YAML structure)
+    - job_chat (for job code on a specific step)
     - planner (for complex multi-step tasks)
     """
 
     def __init__(self, config_loader: ConfigLoader, api_key: Optional[str] = None):
-        """
-        Initialize router agent.
-
-        Args:
-            config_loader: Configuration loader instance
-            api_key: Optional API key override
-        """
         self.config_loader = config_loader
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
 
@@ -70,7 +58,6 @@ class RouterAgent:
 
         self.client = Anthropic(api_key=self.api_key)
 
-        # Get router config
         router_config = config_loader.config.get("router", {})
         self.model = router_config.get("model", "claude-haiku-4-5-20251001")
         self.max_tokens = router_config.get("max_tokens", 500)
@@ -82,10 +69,8 @@ class RouterAgent:
         self,
         content: str,
         workflow_yaml: Optional[str],
-        errors: Optional[str],
-        job_code_context: Optional[Dict],
+        page: Optional[str],
         history: List[Dict],
-        read_only: bool,
         stream: bool
     ) -> RouterResult:
         """
@@ -93,39 +78,36 @@ class RouterAgent:
 
         Args:
             content: User message
-            workflow_yaml: YAML workflow
-            errors: Error context
-            job_code_context: Job code context (with expression, page_name, adaptor)
+            workflow_yaml: Full workflow YAML string (including job bodies)
+            page: Current page URL (e.g. workflows/name/step-name)
             history: Conversation history
-            read_only: Read-only mode flag
             stream: Streaming flag
 
         Returns:
-            RouterResult with response, attachments, history, usage, meta
+            RouterResult with response, workflow_yaml, history, usage, meta
         """
         logger.info("Router.route_and_execute() called")
 
-        # Make routing decision
+        self.routing_usage = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0
+        }
+
         try:
-            decision = self._make_routing_decision(content, workflow_yaml, errors, job_code_context, history)
+            decision = self._make_routing_decision(content, workflow_yaml, page, history)
             logger.info(f"Router decision: {decision.destination} (confidence: {decision.confidence})")
         except Exception as e:
             logger.warning(f"Routing decision failed: {e}. Defaulting to planner for safety.")
             decision = RouterDecision(destination="planner", confidence=1)
 
-        # Execute based on decision
         if decision.destination == "workflow_agent":
-            result = self._route_to_workflow_chat(
-                content, workflow_yaml, errors, history, read_only, stream, decision.confidence
-            )
+            result = self._route_to_workflow_chat(content, workflow_yaml, history, stream, decision.confidence)
         elif decision.destination == "job_code_agent":
-            result = self._route_to_job_chat(
-                content, job_code_context, history, stream, decision.confidence
-            )
-        else:  # planner
-            result = self._route_to_planner(
-                content, workflow_yaml, errors, job_code_context, history, read_only, stream, decision.confidence
-            )
+            result = self._route_to_job_chat(content, workflow_yaml, page, history, stream, decision.confidence)
+        else:
+            result = self._route_to_planner(content, workflow_yaml, page, history, stream, decision.confidence)
 
         return result
 
@@ -133,30 +115,13 @@ class RouterAgent:
         self,
         content: str,
         workflow_yaml: Optional[str],
-        errors: Optional[str],
-        job_code_context: Optional[Dict],
+        page: Optional[str],
         history: List[Dict]
     ) -> RouterDecision:
-        """
-        Make routing decision using Claude Haiku.
-
-        Args:
-            content: User message
-            workflow_yaml: YAML workflow
-            errors: Error context
-            job_code_context: Job code context
-            history: Conversation history
-
-        Returns:
-            RouterDecision with destination and confidence
-        """
-        # Build routing message with context
-        routing_message = self._build_routing_message(content, workflow_yaml, errors, job_code_context, history)
-
-        # Get system prompt
+        """Make routing decision using Claude Haiku."""
+        routing_message = self._build_routing_message(content, workflow_yaml, page, history)
         system_prompt = self.config_loader.get_prompt("router_system_prompt")
 
-        # Call Haiku with prefilled response
         response = self.client.messages.create(
             model=self.model,
             max_tokens=self.max_tokens,
@@ -164,11 +129,10 @@ class RouterAgent:
             system=[{"type": "text", "text": system_prompt}],
             messages=[
                 {"role": "user", "content": routing_message},
-                {"role": "assistant", "content": '{"destination": "'}  # Prefill to constrain format
+                {"role": "assistant", "content": '{"destination": "'}
             ]
         )
 
-        # Store routing usage for aggregation
         self.routing_usage = {
             "input_tokens": response.usage.input_tokens,
             "output_tokens": response.usage.output_tokens,
@@ -176,16 +140,13 @@ class RouterAgent:
             "cache_read_input_tokens": getattr(response.usage, "cache_read_input_tokens", 0)
         }
 
-        # Parse response - prepend the prefilled part back
         response_text = response.content[0].text if response.content else ""
         full_response = '{"destination": "' + response_text
 
         try:
-            # Find the closing brace to extract just the JSON object
-            # Handle case where LLM adds explanation after JSON
             brace_count = 1
             json_end = 0
-            for i, char in enumerate(full_response[1:], 1):  # Start after opening brace
+            for i, char in enumerate(full_response[1:], 1):
                 if char == '{':
                     brace_count += 1
                 elif char == '}':
@@ -194,11 +155,7 @@ class RouterAgent:
                         json_end = i + 1
                         break
 
-            if json_end > 0:
-                json_only = full_response[:json_end]
-            else:
-                json_only = full_response
-
+            json_only = full_response[:json_end] if json_end > 0 else full_response
             decision_data = json.loads(json_only)
             return RouterDecision(
                 destination=decision_data["destination"],
@@ -212,29 +169,17 @@ class RouterAgent:
         self,
         content: str,
         workflow_yaml: Optional[str],
-        errors: Optional[str],
-        job_code_context: Optional[Dict],
+        page: Optional[str],
         history: List[Dict]
     ) -> str:
-        """
-        Build message for routing decision with relevant context.
-
-        Args:
-            content: User message
-            workflow_yaml: YAML workflow
-            errors: Error context
-            job_code_context: Job code context
-            history: Conversation history
-
-        Returns:
-            Formatted routing message string
-        """
+        """Build message for routing decision."""
         parts = []
 
-        # Current user request
         parts.append(f"User request: {content}")
 
-        # Last 2 turns for context
+        if page:
+            parts.append(f"\nCurrent page: {page}")
+
         if history and len(history) >= 2:
             recent_history = history[-2:]
             parts.append("\nRecent conversation:")
@@ -243,25 +188,9 @@ class RouterAgent:
                 msg = turn.get("content", "")[:200]
                 parts.append(f"  {role}: {msg}")
 
-        # Attachments (full content for accurate routing)
         if workflow_yaml:
-            parts.append(f"\n[YAML attached, length: {len(workflow_yaml)} chars]")
+            parts.append(f"\n[Workflow YAML attached, length: {len(workflow_yaml)} chars]")
             parts.append(f"YAML content:\n{workflow_yaml}")
-
-        if job_code_context and job_code_context.get("expression"):
-            job_code = job_code_context["expression"]
-            parts.append(f"\n[Job code attached, length: {len(job_code)} chars]")
-            parts.append(f"Job code:\n{job_code}")
-
-        if errors:
-            parts.append(f"\nErrors: {errors}")
-
-        # Page context
-        if job_code_context:
-            if job_code_context.get("page_name"):
-                parts.append(f"\nCurrent page: {job_code_context['page_name']}")
-            if job_code_context.get("adaptor"):
-                parts.append(f"Adaptor: {job_code_context['adaptor']}")
 
         return "\n".join(parts)
 
@@ -269,9 +198,7 @@ class RouterAgent:
         self,
         content: str,
         workflow_yaml: Optional[str],
-        errors: Optional[str],
         history: List[Dict],
-        read_only: bool,
         stream: bool,
         confidence: int
     ) -> RouterResult:
@@ -280,38 +207,22 @@ class RouterAgent:
 
         logger.info("Routing to workflow_chat")
 
-        # Strip attachments from history for API compatibility
-        clean_history = []
-        for turn in history:
-            clean_turn = {"role": turn["role"], "content": turn["content"]}
-            clean_history.append(clean_turn)
+        clean_history = [{"role": t["role"], "content": t["content"]} for t in history]
 
         payload = {
             "content": content,
             "existing_yaml": workflow_yaml,
-            "errors": errors,
             "history": clean_history,
-            "read_only": read_only,
             "stream": stream
         }
 
         result = workflow_chat_main(payload)
         total_usage = sum_usage(self.routing_usage, result["usage"])
 
-        # Transform response_yaml to attachments
-        attachments = []
-        if result.get("response_yaml"):
-            attachments.append(Attachment(type="workflow_yaml", content=result["response_yaml"]))
-
-        # Add attachments to last history entry
-        updated_history = result["history"].copy()
-        if updated_history and updated_history[-1].get("role") == "assistant":
-            updated_history[-1]["attachments"] = [{"type": a.type, "content": a.content} for a in attachments]
-
         return RouterResult(
             response=result["response"],
-            attachments=attachments,
-            history=updated_history,
+            workflow_yaml=result.get("response_yaml"),
+            history=result["history"].copy(),
             usage=total_usage,
             meta={
                 "agents": ["router", "workflow_agent"],
@@ -322,25 +233,43 @@ class RouterAgent:
     def _route_to_job_chat(
         self,
         content: str,
-        job_code_context: Optional[Dict],
+        workflow_yaml: Optional[str],
+        page: Optional[str],
         history: List[Dict],
         stream: bool,
         confidence: int
     ) -> RouterResult:
-        """Route directly to job_chat."""
+        """
+        Route directly to job_chat.
+
+        Extracts the focused job's code and adaptor from the workflow YAML using
+        the step name parsed from the page URL, then stitches the suggested code
+        back into the workflow YAML before returning.
+        """
         from job_chat.job_chat import main as job_chat_main
 
         logger.info("Routing to job_chat")
 
-        # Strip attachments from history for API compatibility
-        clean_history = []
-        for turn in history:
-            clean_turn = {"role": turn["role"], "content": turn["content"]}
-            clean_history.append(clean_turn)
+        # Build job context from YAML using step name from page
+        job_context = {}
+        matched_job_key = None
+
+        step_name = self._get_step_name_from_page(page)
+        if workflow_yaml and step_name:
+            matched_job_key, job_data = self._find_job_in_yaml(workflow_yaml, step_name)
+            if job_data:
+                if job_data.get("body"):
+                    job_context["expression"] = job_data["body"]
+                if job_data.get("adaptor"):
+                    job_context["adaptor"] = job_data["adaptor"]
+                if job_data.get("name"):
+                    job_context["page_name"] = job_data["name"]
+
+        clean_history = [{"role": t["role"], "content": t["content"]} for t in history]
 
         payload = {
             "content": content,
-            "context": job_code_context or {},
+            "context": job_context,
             "suggest_code": True,
             "history": clean_history,
             "stream": stream
@@ -349,20 +278,17 @@ class RouterAgent:
         result = job_chat_main(payload)
         total_usage = sum_usage(self.routing_usage, result["usage"])
 
-        # Transform suggested_code to attachments
-        attachments = []
-        if result.get("suggested_code"):
-            attachments.append(Attachment(type="job_code", content=result["suggested_code"]))
-
-        # Add attachments to last history entry
-        updated_history = result["history"].copy()
-        if updated_history and updated_history[-1].get("role") == "assistant":
-            updated_history[-1]["attachments"] = [{"type": a.type, "content": a.content} for a in attachments]
+        # Stitch suggested_code back into workflow YAML
+        updated_yaml = workflow_yaml
+        if result.get("suggested_code") and workflow_yaml and matched_job_key:
+            updated_yaml = self._stitch_job_code(workflow_yaml, matched_job_key, result["suggested_code"])
+        elif result.get("suggested_code") and not matched_job_key:
+            logger.warning(f"suggested_code generated but no job matched for page '{page}' - YAML not updated")
 
         return RouterResult(
             response=result["response"],
-            attachments=attachments,
-            history=updated_history,
+            workflow_yaml=updated_yaml,
+            history=result["history"].copy(),
             usage=total_usage,
             meta={
                 "agents": ["router", "job_code_agent"],
@@ -374,10 +300,8 @@ class RouterAgent:
         self,
         content: str,
         workflow_yaml: Optional[str],
-        errors: Optional[str],
-        job_code_context: Optional[Dict],
+        page: Optional[str],
         history: List[Dict],
-        read_only: bool,
         stream: bool,
         confidence: int
     ) -> RouterResult:
@@ -386,38 +310,104 @@ class RouterAgent:
 
         logger.info("Routing to planner")
 
-        # Strip attachments from history for API compatibility
-        clean_history = []
-        for turn in history:
-            clean_turn = {"role": turn["role"], "content": turn["content"]}
-            clean_history.append(clean_turn)
+        clean_history = [{"role": t["role"], "content": t["content"]} for t in history]
 
         planner = PlannerAgent(self.config_loader, self.api_key)
         planner_result = planner.run(
             content=content,
-            existing_yaml=workflow_yaml,
-            errors=errors,
-            context=job_code_context,
+            workflow_yaml=workflow_yaml,
+            page=page,
             history=clean_history,
-            read_only=read_only,
             stream=stream
         )
 
         total_usage = sum_usage(self.routing_usage, planner_result.usage)
 
-        # Merge router confidence into planner meta
         meta = planner_result.meta.copy()
         meta["router_confidence"] = confidence
 
-        # Add attachments to last history entry if it's an assistant message
-        updated_history = planner_result.history.copy() if planner_result.history else []
-        if updated_history and updated_history[-1].get("role") == "assistant":
-            updated_history[-1]["attachments"] = [{"type": a.type, "content": a.content} for a in planner_result.attachments]
-
         return RouterResult(
             response=planner_result.response,
-            attachments=planner_result.attachments,
-            history=updated_history,
+            workflow_yaml=planner_result.workflow_yaml,
+            history=planner_result.history,
             usage=total_usage,
             meta=meta
         )
+
+    # --- Utility methods ---
+
+    def _get_step_name_from_page(self, page: Optional[str]) -> Optional[str]:
+        """
+        Extract step name from page URL.
+
+        Examples:
+          workflows/my-workflow/fetch-patients -> "fetch-patients"
+          workflows/my-workflow                -> None
+          workflows/my-workflow/settings       -> None
+        """
+        if not page:
+            return None
+
+        parts = page.strip("/").split("/")
+        # Expect: workflows / <workflow-name> / <step-name>
+        if len(parts) == 3 and parts[0] == "workflows" and parts[2] != "settings":
+            return parts[2]
+
+        return None
+
+    def _find_job_in_yaml(self, yaml_str: str, step_name: str) -> Tuple[Optional[str], Optional[Dict]]:
+        """
+        Find a job in the workflow YAML by step name from the page URL.
+
+        Tries direct key match first, then normalized name comparison against
+        both the job key and the job's name field.
+
+        Returns:
+            (job_key, job_data) or (None, None) if not found
+        """
+        try:
+            yaml_data = yaml.safe_load(yaml_str)
+        except Exception as e:
+            logger.warning(f"Failed to parse workflow YAML for job lookup: {e}")
+            return None, None
+
+        if not yaml_data or "jobs" not in yaml_data:
+            return None, None
+
+        jobs = yaml_data["jobs"]
+
+        # Direct key match
+        if step_name in jobs:
+            return step_name, jobs[step_name]
+
+        # Normalized match: compare URL step name against job key and name field
+        normalized_step = self._normalize_name(step_name)
+        for job_key, job_data in jobs.items():
+            if self._normalize_name(job_key) == normalized_step:
+                return job_key, job_data
+            job_name = job_data.get("name", "")
+            if self._normalize_name(job_name) == normalized_step:
+                return job_key, job_data
+
+        logger.warning(f"No job found in YAML matching step name '{step_name}'")
+        return None, None
+
+    def _stitch_job_code(self, yaml_str: str, job_key: str, new_code: str) -> str:
+        """
+        Replace a job's body in the workflow YAML with new code.
+
+        Returns the original YAML string unchanged if parsing or stitching fails.
+        """
+        try:
+            yaml_data = yaml.safe_load(yaml_str)
+            if yaml_data and "jobs" in yaml_data and job_key in yaml_data["jobs"]:
+                yaml_data["jobs"][job_key]["body"] = new_code
+                return yaml.dump(yaml_data, sort_keys=False)
+        except Exception as e:
+            logger.warning(f"Failed to stitch code into YAML for job '{job_key}': {e}")
+
+        return yaml_str
+
+    def _normalize_name(self, name: str) -> str:
+        """Normalize a name for fuzzy matching: lowercase, non-alphanumeric chars become hyphens."""
+        return re.sub(r'[^a-z0-9]', '-', name.lower()).strip('-')
