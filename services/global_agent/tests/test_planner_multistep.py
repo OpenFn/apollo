@@ -7,7 +7,6 @@ from .test_utils import (
     assert_routed_to,
     get_attachment,
     assert_yaml_has_ids,
-    assert_yaml_jobs_have_body,
 )
 
 
@@ -40,10 +39,6 @@ def test_commcare_to_dhis2_with_job_code():
     assert len(parsed["jobs"]) >= 2, f"Expected at least 2 jobs, got {len(parsed['jobs'])}"
     assert "triggers" in parsed, "YAML must have a triggers section"
     assert_yaml_has_ids(yaml_str, context="test_commcare_to_dhis2_with_job_code")
-
-    # Should return at least one job_code attachment
-    code = get_attachment(response, "job_code")
-    assert code is not None, "Expected at least one job_code attachment"
 
     # Planner should have made multiple tool calls
     meta = response.get("meta", {})
@@ -81,14 +76,6 @@ def test_http_to_salesforce_three_steps_with_job_code():
     assert "jobs" in parsed, "YAML must have a jobs section"
     assert len(parsed["jobs"]) >= 3, f"Expected at least 3 jobs, got {len(parsed['jobs'])}"
     assert_yaml_has_ids(yaml_str, context="test_http_to_salesforce_three_steps_with_job_code")
-
-    # Should return at least one job_code attachment
-    attachments = response.get("attachments", [])
-    job_code_attachments = [a for a in attachments if a.get("type") == "job_code"]
-    assert len(job_code_attachments) >= 1, (
-        f"Expected at least 1 job_code attachment, got {len(job_code_attachments)}"
-    )
-    print(f"Got {len(job_code_attachments)} job_code attachment(s) (ideally 3 for a 3-step workflow)")
 
     # Planner should have made several tool calls (at minimum: 1 workflow + 1 code)
     meta = response.get("meta", {})

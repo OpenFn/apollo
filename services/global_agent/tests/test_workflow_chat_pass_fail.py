@@ -226,58 +226,12 @@ def test_special_characters():
     assert response is not None
     assert isinstance(response, dict)
 
-    if response.get("response_yaml"):
-        assert_yaml_has_ids(response["response_yaml"], context="test_special_characters")
-        assert_yaml_jobs_have_body(response["response_yaml"], context="test_special_characters")
-        assert_no_special_chars(response["response_yaml"], context="test_special_characters")
+    yaml_str = get_response_yaml(response)
+    if yaml_str:
+        assert_yaml_has_ids(yaml_str, context="test_special_characters")
+        assert_yaml_jobs_have_body(yaml_str, context="test_special_characters")
+        assert_no_special_chars(yaml_str, context="test_special_characters")
 
-def test_readonly_mode():
-    print("==================TEST==================")
-    print("Description: Test that read-only mode returns inline YAML in text with yaml=null")
-    existing_yaml = """
-name: fridge-statistics-processing
-jobs:
-  parse-and-aggregate-fridge-data:
-    id: job-parse-id
-    name: Parse and Aggregate Fridge Data
-    adaptor: '@openfn/language-common@latest'
-    body: 'print("hello a")'
-triggers:
-  webhook:
-    id: trigger-webhook-id
-    type: webhook
-    enabled: false
-edges:
-  webhook->parse-and-aggregate-fridge-data:
-    id: edge-webhook-parse-id
-    source_trigger: webhook
-    target_job: parse-and-aggregate-fridge-data
-    condition_type: always
-    enabled: true
-"""
-    service_input = make_service_input(
-        existing_yaml=existing_yaml,
-        history=[],
-        content="Add a second job that stores the results in a database",
-        read_only=True
-    )
-    response = call_global_agent_service(service_input)
-    assert_routed_to(response, "workflow_agent", context="test_readonly_mode")
-    print_response_details(response, content="Add a second job that stores the results in a database")
-
-    assert response is not None
-    assert isinstance(response, dict)
-
-    # In read-only mode, no workflow_yaml attachment should be returned
-    assert get_response_yaml(response) is None, "Read-only mode should not return a workflow_yaml attachment"
-
-    # Response text should not be empty
-    response_text = response.get("response", "")
-    assert response_text is not None, "Response text should not be None"
-    assert len(response_text) > 0, "Response text should not be empty"
-
-    # Should contain inline YAML in triple-backticked code blocks
-    assert "```yaml" in response_text or "```" in response_text, "Response should contain triple-backticked YAML code block"
 
 def test_history_prefix_parsing():
     print("==================TEST==================")

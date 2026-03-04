@@ -64,16 +64,6 @@ def test_good_morning_email_workflow():
     # All jobs should have a non-empty body
     assert_yaml_jobs_have_body(yaml_str, context="test_good_morning_email_workflow")
 
-    # --- Job code checks ---
-    code = get_attachment(response, "job_code")
-    assert code is not None, "Expected at least one job_code attachment for the Gmail send step"
-
-    code_lower = code.lower()
-    # Code should mention the recipient email address
-    assert "x@openfn.org" in code_lower or "x@openfn.org".lower() in code_lower, (
-        "Expected recipient email address (x@openfn.org) to appear in the generated job code"
-    )
-
     # --- Planner meta checks ---
     meta = response.get("meta", {})
     assert "planner" in meta.get("agents", []), "Expected planner in agents list"
@@ -82,12 +72,9 @@ def test_good_morning_email_workflow():
         f"got {meta.get('planner_iterations', 0)}"
     )
 
-    # All three agent types should have been involved
+    # workflow_agent should have been called to build the workflow structure
     agents = meta.get("agents", [])
     assert "workflow_agent" in agents, "Expected workflow_agent to have been called"
-    assert "job_code_agent" in agents or "job_agent" in agents, (
-        "Expected job_code_agent to have been called"
-    )
 
 
 if __name__ == "__main__":

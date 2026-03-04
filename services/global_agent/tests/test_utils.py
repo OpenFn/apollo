@@ -56,90 +56,101 @@ def make_service_input(
     read_only: bool = False,
     api_key: str = None,
     suggest_code: bool = None,
-    stream: bool = False
+    stream: bool = False,
+    page: str = None,
 ) -> Dict[str, Any]:
     """
-    Create a properly formatted input payload for the global_agent service.
+    Build a global_agent input payload.
+
+    For workflow editing: pass existing_yaml with the full YAML.
+    For job code editing: pass context with expression/adaptor/page_name fields,
+    which are wrapped into a minimal workflow YAML automatically.
 
     Args:
-        existing_yaml: Current YAML workflow
+        existing_yaml: Full workflow YAML (used as-is for workflow tests)
         history: Chat history as a list of {role, content} objects
         content: The user's question or message
-        errors: Error message to handle
-        context: Context object containing expression, adaptor, input, output, log, page_name
-        meta: Additional metadata (deprecated)
-        read_only: Boolean for read-only mode
+        errors: Error message (used as content if content is not provided)
+        context: Job code context with expression, adaptor, page_name fields
+        meta: Ignored (no longer part of the payload)
+        read_only: Ignored (no longer part of the payload)
         api_key: Optional API key for the model
-        suggest_code: Boolean flag (deprecated, ignored)
-        stream: Boolean flag to enable streaming mode
+        suggest_code: Ignored (routing is automatic)
+        stream: Enable streaming mode
+        page: Explicit page URL override
 
     Returns:
         A dictionary ready to be sent to the global_agent service
     """
     service_input = {
-        "content": content,
+        "content": content or errors or "",
         "history": history or []
     }
 
-    # Build context object in new format
-    ctx = {}
-    if existing_yaml is not None:
-        ctx["workflow_yaml"] = existing_yaml
-    if errors is not None:
-        ctx["errors"] = errors
+    if existing_yaml is not None and str(existing_yaml).strip():
+        service_input["workflow_yaml"] = existing_yaml
+    elif context and any(k in context for k in ["expression", "adaptor"]):
+        # Wrap job context into a minimal workflow YAML so the router can extract it
+        job_key = "test-job"
+        job_entry = {}
+        if context.get("adaptor"):
+            job_entry["adaptor"] = context["adaptor"]
+        if context.get("page_name"):
+            job_entry["name"] = context["page_name"]
+        if context.get("expression") is not None:
+            job_entry["body"] = context["expression"]
 
-    # Merge with provided context (which may contain job_code)
-    if context is not None:
-        # If context has job code fields, wrap them in job_code
-        if any(k in context for k in ["expression", "page_name", "adaptor"]):
-            ctx["job_code"] = context
-        else:
-            ctx.update(context)
+        minimal_yaml = {"name": "test", "jobs": {job_key: job_entry}}
+        service_input["workflow_yaml"] = yaml.dump(minimal_yaml, sort_keys=False)
 
-    if ctx:
-        service_input["context"] = ctx
+        if page is None:
+            page = f"workflows/test/{job_key}"
 
-    if read_only:
-        service_input["read_only"] = read_only
+    if page is not None:
+        service_input["page"] = page
 
     if api_key is not None:
         service_input["api_key"] = api_key
 
     if stream:
-        service_input["stream"] = stream
+        service_input["options"] = {"stream": True}
 
     return service_input
 
 
-def get_attachment(response: Dict[str, Any], attachment_type: str) -> Optional[str]:
-    """
-    Extract an attachment of a specific type from the response.
-
-    Args:
-        response: Global agent response dict
-        attachment_type: Type of attachment ("workflow_yaml", "job_code", etc.)
-
-    Returns:
-        The attachment content or None if not found
-    """
-    if "attachments" not in response:
+def _extract_job_body(workflow_yaml: Optional[str], job_key: str) -> Optional[str]:
+    """Extract a job's body from a workflow YAML string by job key."""
+    if not workflow_yaml:
+        return None
+    try:
+        data = yaml.safe_load(workflow_yaml)
+        return data.get("jobs", {}).get(job_key, {}).get("body")
+    except Exception:
         return None
 
-    for attachment in response["attachments"]:
-        if attachment.get("type") == attachment_type:
-            return attachment.get("content")
 
+def get_attachment(response: Dict[str, Any], attachment_type: str) -> Optional[str]:
+    """
+    Extract an artifact from the response by type.
+
+    workflow_yaml: returned directly from response["workflow_yaml"]
+    job_code: extracted from the "test-job" body in workflow_yaml (set by make_service_input)
+    """
+    if attachment_type == "workflow_yaml":
+        return response.get("workflow_yaml")
+    elif attachment_type == "job_code":
+        return _extract_job_body(response.get("workflow_yaml"), "test-job")
     return None
 
 
 def get_response_yaml(response: Dict[str, Any]) -> Optional[str]:
-    """Extract workflow YAML from attachments (backwards compatibility helper)."""
-    return get_attachment(response, "workflow_yaml")
+    """Extract workflow YAML from response."""
+    return response.get("workflow_yaml")
 
 
 def get_suggested_code(response: Dict[str, Any]) -> Optional[str]:
-    """Extract job code from attachments (backwards compatibility helper)."""
-    return get_attachment(response, "job_code")
+    """Extract suggested job code from workflow YAML (test-job body)."""
+    return _extract_job_body(response.get("workflow_yaml"), "test-job")
 
 
 def assert_routed_to(response: Dict[str, Any], expected_service: str, context: str = ""):
@@ -179,7 +190,7 @@ def print_response_details(response: Dict[str, Any], test_name: str = None, cont
         response: The service response object
         test_name: Name of the test (for debugging, optional)
         content: Original user query/content
-        errors: Original error field
+        errors: Unused, kept for backwards compatibility
     """
     if test_name:
         print(f"\n===== TEST: {test_name} =====")
@@ -188,28 +199,13 @@ def print_response_details(response: Dict[str, Any], test_name: str = None, cont
         print("\nUSER CONTENT:")
         print(content)
 
-    if errors is not None:
-        print("\nERROR FIELD INPUT:")
-        print(errors)
-
     if "response" in response:
         print("\nTEXT RESPONSE:")
         print(response["response"])
 
-    if "attachments" in response:
-        for attachment in response["attachments"]:
-            att_type = attachment.get("type", "unknown")
-            att_content = attachment.get("content", "")
-
-            if att_type == "job_code":
-                print("\nSUGGESTED CODE:")
-                print(att_content)
-            elif att_type == "workflow_yaml":
-                print("\nGENERATED YAML:")
-                print(att_content)
-            else:
-                print(f"\nATTACHMENT ({att_type}):")
-                print(att_content)
+    if "workflow_yaml" in response and response["workflow_yaml"]:
+        print("\nWORKFLOW YAML:")
+        print(response["workflow_yaml"])
 
     if "history" in response:
         print("\nUPDATED HISTORY LENGTH:")
