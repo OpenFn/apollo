@@ -4,10 +4,8 @@ Router Agent - Lightweight routing for global agent requests.
 Routes requests to workflow_chat, job_chat, or planner based on user intent.
 """
 import os
-import re
 import json
-import yaml
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional
 from dataclasses import dataclass
 from anthropic import Anthropic
 
@@ -18,6 +16,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from util import create_logger, ApolloError, sum_usage
 from global_agent.config_loader import ConfigLoader
+from global_agent.yaml_utils import get_step_name_from_page, find_job_in_yaml, stitch_job_code
 
 logger = create_logger(__name__)
 
@@ -254,9 +253,11 @@ class RouterAgent:
         job_context = {}
         matched_job_key = None
 
-        step_name = self._get_step_name_from_page(page)
+        step_name = get_step_name_from_page(page)
         if workflow_yaml and step_name:
-            matched_job_key, job_data = self._find_job_in_yaml(workflow_yaml, step_name)
+            matched_job_key, job_data = find_job_in_yaml(workflow_yaml, step_name)
+            if matched_job_key is None:
+                logger.warning(f"No job found in YAML matching step name '{step_name}'")
             if job_data:
                 if job_data.get("body"):
                     job_context["expression"] = job_data["body"]
@@ -281,7 +282,7 @@ class RouterAgent:
         # Stitch suggested_code back into workflow YAML
         updated_yaml = workflow_yaml
         if result.get("suggested_code") and workflow_yaml and matched_job_key:
-            updated_yaml = self._stitch_job_code(workflow_yaml, matched_job_key, result["suggested_code"])
+            updated_yaml = stitch_job_code(workflow_yaml, matched_job_key, result["suggested_code"])
         elif result.get("suggested_code") and not matched_job_key:
             logger.warning(f"suggested_code generated but no job matched for page '{page}' - YAML not updated")
 
@@ -334,80 +335,3 @@ class RouterAgent:
             meta=meta
         )
 
-    # --- Utility methods ---
-
-    def _get_step_name_from_page(self, page: Optional[str]) -> Optional[str]:
-        """
-        Extract step name from page URL.
-
-        Examples:
-          workflows/my-workflow/fetch-patients -> "fetch-patients"
-          workflows/my-workflow                -> None
-          workflows/my-workflow/settings       -> None
-        """
-        if not page:
-            return None
-
-        parts = page.strip("/").split("/")
-        # Expect: workflows / <workflow-name> / <step-name>
-        if len(parts) == 3 and parts[0] == "workflows" and parts[2] != "settings":
-            return parts[2]
-
-        return None
-
-    def _find_job_in_yaml(self, yaml_str: str, step_name: str) -> Tuple[Optional[str], Optional[Dict]]:
-        """
-        Find a job in the workflow YAML by step name from the page URL.
-
-        Tries direct key match first, then normalized name comparison against
-        both the job key and the job's name field.
-
-        Returns:
-            (job_key, job_data) or (None, None) if not found
-        """
-        try:
-            yaml_data = yaml.safe_load(yaml_str)
-        except Exception as e:
-            logger.warning(f"Failed to parse workflow YAML for job lookup: {e}")
-            return None, None
-
-        if not yaml_data or "jobs" not in yaml_data:
-            return None, None
-
-        jobs = yaml_data["jobs"]
-
-        # Direct key match
-        if step_name in jobs:
-            return step_name, jobs[step_name]
-
-        # Normalized match: compare URL step name against job key and name field
-        normalized_step = self._normalize_name(step_name)
-        for job_key, job_data in jobs.items():
-            if self._normalize_name(job_key) == normalized_step:
-                return job_key, job_data
-            job_name = job_data.get("name", "")
-            if self._normalize_name(job_name) == normalized_step:
-                return job_key, job_data
-
-        logger.warning(f"No job found in YAML matching step name '{step_name}'")
-        return None, None
-
-    def _stitch_job_code(self, yaml_str: str, job_key: str, new_code: str) -> str:
-        """
-        Replace a job's body in the workflow YAML with new code.
-
-        Returns the original YAML string unchanged if parsing or stitching fails.
-        """
-        try:
-            yaml_data = yaml.safe_load(yaml_str)
-            if yaml_data and "jobs" in yaml_data and job_key in yaml_data["jobs"]:
-                yaml_data["jobs"][job_key]["body"] = new_code
-                return yaml.dump(yaml_data, sort_keys=False)
-        except Exception as e:
-            logger.warning(f"Failed to stitch code into YAML for job '{job_key}': {e}")
-
-        return yaml_str
-
-    def _normalize_name(self, name: str) -> str:
-        """Normalize a name for fuzzy matching: lowercase, non-alphanumeric chars become hyphens."""
-        return re.sub(r'[^a-z0-9]', '-', name.lower()).strip('-')

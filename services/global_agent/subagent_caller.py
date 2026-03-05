@@ -3,7 +3,6 @@ Subagent caller tool for the supervisor agent.
 
 Handles calling subagents and managing message/YAML passing.
 """
-import os
 import sys
 from pathlib import Path
 from typing import Dict, Optional
@@ -12,6 +11,7 @@ from typing import Dict, Optional
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from util import create_logger, ApolloError
+from global_agent.yaml_utils import find_job_in_yaml
 
 logger = create_logger(__name__)
 
@@ -81,13 +81,17 @@ def call_job_agent(
 
     job_context = {}
 
-    # If planner LLM specified an adaptor for this job, inject it into context
-    adaptor = tool_input.get("adaptor")
-    if adaptor:
-        job_context["adaptor"] = adaptor
-        logger.info(f"job_agent: using adaptor from tool_input: {adaptor}")
-
-    if workflow_yaml:
+    job_key = tool_input.get("job_key")
+    if job_key and workflow_yaml:
+        _, job_data = find_job_in_yaml(workflow_yaml, job_key)
+        if job_data:
+            if job_data.get("body"):
+                job_context["expression"] = job_data["body"]
+                logger.info(f"job_agent: extracted expression from job '{job_key}'")
+            if job_data.get("adaptor"):
+                job_context["adaptor"] = job_data["adaptor"]
+                logger.info(f"job_agent: extracted adaptor '{job_data['adaptor']}' from job '{job_key}'")
+    elif workflow_yaml:
         job_context["workflow_yaml"] = workflow_yaml
 
     job_payload = {
@@ -104,7 +108,7 @@ def call_job_agent(
 
         logger.info("job_agent completed successfully")
 
-        result["_call_metadata"] = {"subagent": "job_agent"}
+        result["_call_metadata"] = {"subagent": "job_agent", "job_key": job_key}
 
         return result
 
@@ -116,36 +120,5 @@ def call_job_agent(
 
 
 def format_subagent_result_for_llm(result: Dict) -> str:
-    """
-    Format subagent result for LLM to read.
-
-    Provides the supervisor with the subagent's response and indicates
-    when artifacts (YAML/code) are attached separately.
-
-    Args:
-        result: Raw subagent response
-
-    Returns:
-        Formatted string for LLM
-    """
-    metadata = result.get("_call_metadata", {})
-    subagent = metadata.get("subagent", "unknown")
-
-    parts = [
-        f"Subagent '{subagent}' completed.",
-        "",
-        result.get('response', 'No response')
-    ]
-
-    if subagent == "workflow_agent" and result.get('response_yaml'):
-        parts.extend([
-            "",
-            "Do NOT include workflow YAML in your response - YAML workflow already attached separately for the user."
-        ])
-    elif subagent == "job_agent" and result.get('suggested_code'):
-        parts.extend([
-            "",
-            "Do NOT include job code in your response - code already attached separately for the user."
-        ])
-
-    return "\n".join(parts)
+    """Return the subagent's prose response for the planner to read."""
+    return result.get('response', 'No response')

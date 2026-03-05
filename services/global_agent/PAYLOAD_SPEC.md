@@ -60,9 +60,9 @@ This document defines the input and output payload structure for the Global Agen
 {
   "response": "string",                  // Main text response
 
-  "workflow_yaml": "string|null",        // Updated full workflow YAML (null if no YAML change)
+  "workflow_yaml": "string|null",        // Full workflow YAML (null if no YAML change this turn)
 
-  "history": [                           // Updated conversation history
+  "history": [                           // Conversation history including this turn
     {
       "role": "user|assistant",
       "content": "string"

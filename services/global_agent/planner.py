@@ -1,14 +1,11 @@
 """
 Planner Agent - Coordinates tools and subagents for complex multi-step tasks.
-
-Iteration 2: Full tool-calling implementation
 """
 import os
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 from anthropic import Anthropic
 
-# Import utilities from parent services directory
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -16,6 +13,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from util import create_logger, ApolloError, sum_usage
 from global_agent.config_loader import ConfigLoader
 from global_agent.tools.tool_definitions import TOOL_DEFINITIONS
+from global_agent.yaml_utils import stitch_job_code, redact_job_bodies, find_job_in_yaml
 from tools.search_documentation.search_documentation import search_documentation_tool
 from global_agent.subagent_caller import call_workflow_agent, call_job_agent, format_subagent_result_for_llm
 
@@ -53,6 +51,7 @@ class PlannerAgent:
         self.temperature = planner_config.get("temperature", 1.0)
         self.max_tool_calls = planner_config.get("max_tool_calls", 10)
 
+        self.current_yaml: Optional[str] = None
         self.subagent_results = []
 
         logger.info(f"PlannerAgent initialized with model: {self.model}")
@@ -80,10 +79,19 @@ class PlannerAgent:
         """
         logger.info("Planner.run() called")
 
+        self.current_yaml = workflow_yaml
+
         system_prompt = self._build_system_prompt()
 
         messages = history.copy() if history else []
-        messages.append({"role": "user", "content": content})
+
+        # Give planner visibility into existing workflow structure (bodies redacted)
+        user_content = content
+        if self.current_yaml:
+            redacted = redact_job_bodies(self.current_yaml)
+            user_content = f"{content}\n\nExisting workflow structure (job code redacted):\n{redacted}"
+
+        messages.append({"role": "user", "content": user_content})
 
         tool_call_count = 0
         tool_calls_meta = []
@@ -158,14 +166,24 @@ class PlannerAgent:
                     elif tool_use_block.name == "call_workflow_agent":
                         subagent_result = call_workflow_agent(
                             tool_use_block.input,
-                            workflow_yaml=workflow_yaml
+                            workflow_yaml=self.current_yaml
                         )
 
                         if "usage" in subagent_result:
                             total_usage = sum_usage(total_usage, subagent_result["usage"])
 
+                        # Update live state eagerly
+                        if subagent_result.get("response_yaml"):
+                            self.current_yaml = subagent_result["response_yaml"]
+
                         self.subagent_results.append(subagent_result)
+
                         tool_result = format_subagent_result_for_llm(subagent_result)
+
+                        # Give planner a fresh structural view after each workflow change
+                        if self.current_yaml:
+                            redacted = redact_job_bodies(self.current_yaml)
+                            tool_result += f"\n\nUpdated workflow structure:\n{redacted}"
 
                         tool_calls_meta.append({
                             "tool": "call_workflow_agent",
@@ -173,21 +191,42 @@ class PlannerAgent:
                         })
 
                     elif tool_use_block.name == "call_job_code_agent":
-                        # Pass any previously generated YAML so job_chat has workflow context
-                        generated_yaml = self._get_yaml_from_subagents()
                         subagent_result = call_job_agent(
                             tool_use_block.input,
-                            workflow_yaml=generated_yaml
+                            workflow_yaml=self.current_yaml
                         )
 
                         if "usage" in subagent_result:
                             total_usage = sum_usage(total_usage, subagent_result["usage"])
+
+                        # Stitch code into live state immediately
+                        job_key = tool_use_block.input.get("job_key")
+                        suggested_code = subagent_result.get("suggested_code")
+                        if job_key and suggested_code and self.current_yaml:
+                            self.current_yaml = stitch_job_code(self.current_yaml, job_key, suggested_code)
+                            logger.info(f"Stitched code for job '{job_key}' into current_yaml")
 
                         self.subagent_results.append(subagent_result)
                         tool_result = format_subagent_result_for_llm(subagent_result)
 
                         tool_calls_meta.append({
                             "tool": "call_job_code_agent",
+                            "input": tool_use_block.input
+                        })
+
+                    elif tool_use_block.name == "inspect_job_code":
+                        job_key = tool_use_block.input.get("job_key")
+                        if not self.current_yaml:
+                            tool_result = "No workflow available to inspect."
+                        else:
+                            _, job_data = find_job_in_yaml(self.current_yaml, job_key)
+                            if job_data and job_data.get("body"):
+                                tool_result = f"Job code for '{job_key}':\n\n{job_data['body']}"
+                            else:
+                                tool_result = f"No code found for job '{job_key}'."
+
+                        tool_calls_meta.append({
+                            "tool": "inspect_job_code",
                             "input": tool_use_block.input
                         })
 
@@ -240,7 +279,7 @@ class PlannerAgent:
 
         return PlannerResult(
             response=final_text,
-            workflow_yaml=self._build_final_yaml(),
+            workflow_yaml=self.current_yaml,
             history=messages,
             usage=total_usage,
             meta={
@@ -266,23 +305,6 @@ class PlannerAgent:
             if block.type == "text":
                 text += block.text
         return text
-
-    def _get_yaml_from_subagents(self) -> Optional[str]:
-        """Get the most recently generated workflow YAML from subagent results."""
-        for result in reversed(self.subagent_results):
-            metadata = result.get("_call_metadata", {})
-            if metadata.get("subagent") == "workflow_agent" and result.get("response_yaml"):
-                return result["response_yaml"]
-        return None
-
-    def _build_final_yaml(self) -> Optional[str]:
-        """
-        Build final workflow YAML from subagent results.
-
-        Returns the most recently generated workflow YAML structure.
-        Note: stitching job code from job_agent calls into the YAML is deferred.
-        """
-        return self._get_yaml_from_subagents()
 
     def _build_system_prompt(self) -> list:
         """Build system prompt for planner with cache control."""

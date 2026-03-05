@@ -40,11 +40,8 @@ Use this tool when the user wants to:
 Write a clear message for the workflow_agent. Include any relevant conversation
 context that the agent needs to understand the request.
 
-CRITICAL: If there is a YAML workflow attached, it will be automatically passed
-to the workflow_agent. Do NOT include YAML in your message - it will be handled separately.
-
-IMPORTANT: When workflow_agent returns YAML, you MUST include it in your final
-response to the user. Never forget to return the YAML output.""",
+The current workflow YAML is automatically passed to the workflow_agent.
+Do NOT include YAML in your message.""",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -80,9 +77,9 @@ The agent has access to adaptor documentation and will provide code examples."""
                 "type": "string",
                 "description": "Message for the job code agent with relevant context"
             },
-            "adaptor": {
+            "job_key": {
                 "type": "string",
-                "description": "The adaptor package for this job (e.g. '@openfn/language-commcare@latest'). Specify this when generating code for a specific adaptor so the correct documentation is used."
+                "description": "The key of the job in the workflow YAML to write or edit code for (e.g. 'fetch-patients'). When provided, the existing job body is extracted from the workflow YAML and passed to the job code agent as the current code to edit."
             }
         },
         "required": ["message"]
@@ -90,9 +87,29 @@ The agent has access to adaptor documentation and will provide code examples."""
     "cache_control": {"type": "ephemeral"}
 }
 
+# Tool 4: Inspect job code
+INSPECT_JOB_CODE_TOOL = {
+    "name": "inspect_job_code",
+    "description": """Read the current code body of a specific job in the workflow (read-only).
+
+Use this when you need to see existing job code before writing code for another job,
+for example when the user asks to make one step similar to another.""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "job_key": {
+                "type": "string",
+                "description": "The job key to inspect (e.g. 'fetch-patients')"
+            }
+        },
+        "required": ["job_key"]
+    }
+}
+
 # Export all tool definitions
 TOOL_DEFINITIONS = [
     SEARCH_DOCUMENTATION_TOOL,
     CALL_WORKFLOW_AGENT_TOOL,
-    CALL_JOB_CODE_AGENT_TOOL
+    CALL_JOB_CODE_AGENT_TOOL,
+    INSPECT_JOB_CODE_TOOL
 ]
