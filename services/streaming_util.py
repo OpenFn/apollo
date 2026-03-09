@@ -171,6 +171,17 @@ class StreamManager:
             "delta": {"type": "text_delta", "text": text_chunk},
         })
 
+    def send_changes(self, changes_data: dict[str, Any]) -> None:
+        """
+        Send structured changes (code edits or workflow YAML) as a custom
+        SSE event so the client can render them before text streams.
+        """
+        if not self.stream_started:
+            self.start_stream()
+
+        self._close_open_blocks()
+        self._emit_event('changes', changes_data)
+
     def end_stream(self, stop_reason: str = "end_turn") -> None:
         """
         End the stream by closing all open blocks and sending final events.

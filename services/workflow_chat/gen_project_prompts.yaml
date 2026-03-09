@@ -156,8 +156,8 @@ prompts:
 
     The output should be:
     {{
-      "text": "Your reasoning (max ~4 sentences).",
-      "yaml": "name: Daily CommCare to Satusehat Encounter Sync\njobs:\n  Fetch-visits-from-CommCare:\n    name: Fetch visits from CommCare\n    adaptor: \"@openfn/language-commcare@latest\"\n    body: \"// Add operations here\"\n  Create-FHIR-Encounter-for-visitors-with-IHS-number:\n    name: Create FHIR Encounter for visitors with IHS number\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\n  Lookup-IHS-number-in-Satusehat:\n    name: Lookup IHS number in Satusehat\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\n  Create-FHIR-Encounter-after-IHS-lookup:\n    name: Create FHIR Encounter after IHS lookup\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\ntriggers:\n  cron:\n    type: cron\n    cron_expression: 0 0 * * *\n    enabled: false\nedges:\n  cron->Fetch-visits-from-CommCare:\n    source_trigger: cron\n    target_job: Fetch-visits-from-CommCare\n    condition_type: always\n    enabled: true\n  Fetch-visits-from-CommCare->Create-FHIR-Encounter-for-visitors-with-IHS-number:\n    source_job: Fetch-visits-from-CommCare\n    target_job: Create-FHIR-Encounter-for-visitors-with-IHS-number\n    condition_type: on_job_success\n    enabled: true\n  Fetch-visits-from-CommCare->Lookup-IHS-number-in-Satusehat:\n    source_job: Fetch-visits-from-CommCare\n    target_job: Lookup-IHS-number-in-Satusehat\n    condition_type: on_job_success\n    enabled: true\n  Lookup-IHS-number-in-Satusehat->Create-FHIR-Encounter-after-IHS-lookup:\n    source_job: Lookup-IHS-number-in-Satusehat\n    target_job: Create-FHIR-Encounter-after-IHS-lookup\n    condition_type: on_job_success\n    enabled: true"
+      "yaml": "name: Daily CommCare to Satusehat Encounter Sync\njobs:\n  Fetch-visits-from-CommCare:\n    name: Fetch visits from CommCare\n    adaptor: \"@openfn/language-commcare@latest\"\n    body: \"// Add operations here\"\n  Create-FHIR-Encounter-for-visitors-with-IHS-number:\n    name: Create FHIR Encounter for visitors with IHS number\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\n  Lookup-IHS-number-in-Satusehat:\n    name: Lookup IHS number in Satusehat\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\n  Create-FHIR-Encounter-after-IHS-lookup:\n    name: Create FHIR Encounter after IHS lookup\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\ntriggers:\n  cron:\n    type: cron\n    cron_expression: 0 0 * * *\n    enabled: false\nedges:\n  cron->Fetch-visits-from-CommCare:\n    source_trigger: cron\n    target_job: Fetch-visits-from-CommCare\n    condition_type: always\n    enabled: true\n  Fetch-visits-from-CommCare->Create-FHIR-Encounter-for-visitors-with-IHS-number:\n    source_job: Fetch-visits-from-CommCare\n    target_job: Create-FHIR-Encounter-for-visitors-with-IHS-number\n    condition_type: on_job_success\n    enabled: true\n  Fetch-visits-from-CommCare->Lookup-IHS-number-in-Satusehat:\n    source_job: Fetch-visits-from-CommCare\n    target_job: Lookup-IHS-number-in-Satusehat\n    condition_type: on_job_success\n    enabled: true\n  Lookup-IHS-number-in-Satusehat->Create-FHIR-Encounter-after-IHS-lookup:\n    source_job: Lookup-IHS-number-in-Satusehat\n    target_job: Create-FHIR-Encounter-after-IHS-lookup\n    condition_type: on_job_success\n    enabled: true",
+      "text": "Your reasoning (max ~4 sentences)."
     }}
 
     ## Do NOT fill in job code
@@ -167,8 +167,8 @@ prompts:
 
     ## Output Format
 
-    You must respond in JSON format with two fields: "text" and "yaml".
-    "text" for all explanation, and "yaml" for the YAML block.
+    You must respond in JSON format with two fields: "yaml" and "text".
+    "yaml" for the YAML block, and "text" for all explanation.
 
   unstructured_output_format: |
     ## Read-only Mode
@@ -189,9 +189,9 @@ prompts:
 
     ## Output Format
 
-    You must respond in JSON format with two fields: "text" and "yaml".
-    The "text" field contains your complete answer with any YAML in triple-backticked code blocks.
+    You must respond in JSON format with two fields: "yaml" and "text".
     The "yaml" field should always be null.
+    The "text" field contains your complete answer with any YAML in triple-backticked code blocks.
 
   normal_mode_intro: |
     Your task is to talk to a client with the goal of converting their description of a workflow into an OpenFn workflow YAML.
