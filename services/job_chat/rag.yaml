@@ -1,6 +1,6 @@
 config_version: 1.0
 model: "claude-sonnet"
-threshold: 0.7
+threshold: 0.8
 top_k: 5
 temperature: 0
 prompts_version: 1.0

@@ -178,13 +178,37 @@ def test_generate_queries_returns_valid_structure():
     print("\n4. Validating query objects...")
     for i, query in enumerate(queries):
         assert "query" in query, f"Query {i} should have 'query' key"
-        assert "doc_type" in query, f"Query {i} should have 'doc_type' key"
         assert isinstance(query["query"], str), f"Query {i} 'query' should be a string"
         print(f"   ✓ Query {i}: {query['query'][:50]}...")
 
     print(f"\n✅ TEST PASSED: generate_queries returns valid JSON structure")
     print(f"   - Successfully parsed JSON (no markdown wrapping)")
     print(f"   - Generated {len(queries)} properly structured queries")
+
+
+def test_search_docs_returns_general_docs_only():
+    """
+    Test that search_docs searches general_docs.
+    """
+    print("==================TEST==================")
+    print("Description: Testing search_docs filters to general_docs only")
+
+    from job_chat.retrieve_docs import search_docs
+
+    queries = [{"query": "http adaptor merge() function"}]
+    results = search_docs(queries, top_k=3, threshold=0.5)
+    print(results)
+
+    assert isinstance(results, list), "Should return a list"
+    assert len(results) > 0, "Should return at least one result"
+
+    for result in results:
+        metadata = result.metadata if hasattr(result, 'metadata') else result.get("metadata", {})
+        docs_type = metadata.get("docs_type")
+        assert docs_type != "adaptor_docs", f"Result should not be adaptor_docs, got: {docs_type}"
+        print(f"   ✓ docs_type: {docs_type}")
+
+    print(f"\n✅ TEST PASSED: search_docs returned {len(results)} general docs results")
 
 
 if __name__ == "__main__":
