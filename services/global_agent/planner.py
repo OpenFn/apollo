@@ -208,6 +208,10 @@ class PlannerAgent:
 
                         self.subagent_results.append(subagent_result)
                         tool_result = format_subagent_result_for_llm(subagent_result)
+                        if suggested_code:
+                            tool_result += "\n\n[Job code generated and stitched into the workflow.]"
+                        else:
+                            tool_result += "\n\n[No job code was generated.]"
 
                         tool_calls_meta.append({
                             "tool": "call_job_code_agent",

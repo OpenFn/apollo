@@ -34,7 +34,7 @@ def call_workflow_agent(
     if not user_message:
         raise ApolloError(400, "message is required")
 
-    logger.info("Calling workflow_agent")
+    logger.info(f"Calling workflow_agent: {user_message[:120]}")
 
     workflow_payload = {
         "content": user_message,
@@ -46,7 +46,8 @@ def call_workflow_agent(
         from workflow_chat.workflow_chat import main as workflow_chat_main
         result = workflow_chat_main(workflow_payload)
 
-        logger.info("workflow_agent completed successfully")
+        response_preview = result.get("response", "")[:120]
+        logger.info(f"workflow_agent response: {response_preview}")
 
         result["_call_metadata"] = {"subagent": "workflow_agent"}
 
@@ -77,11 +78,10 @@ def call_job_agent(
     if not user_message:
         raise ApolloError(400, "message is required")
 
-    logger.info("Calling job_agent")
-
     job_context = {}
 
     job_key = tool_input.get("job_key")
+    logger.info(f"Calling job_agent (job_key={job_key}): {user_message[:120]}")
     if job_key and workflow_yaml:
         _, job_data = find_job_in_yaml(workflow_yaml, job_key)
         if job_data:
@@ -106,7 +106,8 @@ def call_job_agent(
         from job_chat.job_chat import main as job_chat_main
         result = job_chat_main(job_payload)
 
-        logger.info("job_agent completed successfully")
+        response_preview = result.get("response", "")[:120]
+        logger.info(f"job_agent response: {response_preview}")
 
         result["_call_metadata"] = {"subagent": "job_agent", "job_key": job_key}
 

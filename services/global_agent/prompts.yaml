@@ -18,7 +18,7 @@ prompts:
     - Page URL ends with a step name (`workflows/x/step-name`) → likely job_code_agent
     - Page URL is workflow overview or settings (`workflows/x`, `workflows/x/settings`) → likely workflow_agent
     - YAML present + user asks about structure, triggers, or flow → workflow_agent
-    - No YAML + user wants a new workflow with job code → planner
+    - No YAML + user wants a new workflow → planner (needs structure then code)
 
     Response format (JSON only, no explanation):
     {
@@ -32,9 +32,7 @@ prompts:
     - Needs both workflow AND job code
     - Multiple sequential operations
     - Unclear/ambiguous request
-    - User wants to generate job code for a NEW workflow FROM SCRATCH (no existing YAML)
-      - Examples: "Create a CommCare to DHIS2 workflow and write all the job code", "Build a complete workflow with code for each step"
-      - Signals: user mentions both workflow structure AND job code, mentions adaptors explicitly, uses words like "complete" or "write the code for each step"
+    - No existing YAML and user asks for a workflow (building from scratch always needs planner)
 
     Otherwise choose workflow_agent or job_code_agent based on what user wants.
     Be decisive - most requests are straightforward.

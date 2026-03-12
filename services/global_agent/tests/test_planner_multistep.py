@@ -7,7 +7,47 @@ from .test_utils import (
     assert_routed_to,
     get_attachment,
     assert_yaml_has_ids,
+    assert_yaml_jobs_have_body,
 )
+
+
+def assert_agent_calls(meta, expected_agents, min_job_code_calls, context=""):
+    """
+    Assert that the planner called the expected sub-agents in the correct order.
+
+    Checks:
+    - workflow_agent and job_code_agent appear in meta["agents"]
+    - tool_calls show workflow_agent before any job_code_agent calls
+    - job_code_agent was called at least min_job_code_calls times
+    """
+    agents = meta.get("agents", [])
+    for agent in expected_agents:
+        assert agent in agents, (
+            f"{context}: Expected '{agent}' in agents list, got {agents}"
+        )
+
+    tool_calls = meta.get("tool_calls", [])
+    tool_names = [tc["tool"] for tc in tool_calls]
+
+    # workflow_agent must be called
+    assert "call_workflow_agent" in tool_names, (
+        f"{context}: Expected call_workflow_agent in tool_calls, got {tool_names}"
+    )
+
+    # job_code_agent must be called enough times
+    job_code_indices = [i for i, t in enumerate(tool_names) if t == "call_job_code_agent"]
+    assert len(job_code_indices) >= min_job_code_calls, (
+        f"{context}: Expected at least {min_job_code_calls} call_job_code_agent calls, "
+        f"got {len(job_code_indices)}. Tool calls: {tool_names}"
+    )
+
+    # workflow_agent must come before all job_code_agent calls
+    workflow_idx = tool_names.index("call_workflow_agent")
+    for j in job_code_indices:
+        assert j > workflow_idx, (
+            f"{context}: call_job_code_agent at index {j} came before "
+            f"call_workflow_agent at index {workflow_idx}. Tool calls: {tool_names}"
+        )
 
 
 def test_commcare_to_dhis2_with_job_code():
@@ -18,9 +58,7 @@ def test_commcare_to_dhis2_with_job_code():
         "workflow_agent then job_code_agent."
     )
     content = (
-        "Create a workflow that fetches patient cases from CommCare using "
-        "@openfn/language-commcare@latest and registers them in DHIS2 using "
-        "@openfn/language-dhis2@latest. Write the job code for both steps."
+        "Create a workflow that fetches patient cases from CommCare and registers them in DHIS2."
     )
     service_input = make_service_input(content=content, history=[])
     response = call_global_agent_service(service_input)
@@ -40,10 +78,17 @@ def test_commcare_to_dhis2_with_job_code():
     assert "triggers" in parsed, "YAML must have a triggers section"
     assert_yaml_has_ids(yaml_str, context="test_commcare_to_dhis2_with_job_code")
 
-    # Planner should have made multiple tool calls
+    # Verify correct agents called in correct order: planner -> workflow_agent -> job_code_agent x2
     meta = response.get("meta", {})
-    assert "planner" in meta.get("agents", []), "Expected planner in agents list"
-    assert meta.get("planner_iterations", 0) > 0, "Expected planner to make at least one tool call"
+    assert_agent_calls(
+        meta,
+        expected_agents=["planner", "workflow_agent", "job_agent"],
+        min_job_code_calls=2,
+        context="test_commcare_to_dhis2_with_job_code",
+    )
+
+    # Every job must have a non-empty body
+    assert_yaml_jobs_have_body(yaml_str, context="test_commcare_to_dhis2_with_job_code")
 
 
 def test_http_to_salesforce_three_steps_with_job_code():
@@ -54,11 +99,8 @@ def test_http_to_salesforce_three_steps_with_job_code():
         "to orchestrate workflow_agent then multiple job_code_agent calls."
     )
     content = (
-        "Build a complete OpenFn workflow from scratch with three steps: "
-        "1) fetch records from an HTTP endpoint using @openfn/language-http@latest, "
-        "2) transform the data using @openfn/language-common@latest, "
-        "3) upsert contacts to Salesforce using @openfn/language-salesforce@latest. "
-        "Generate the workflow YAML and job code for all three steps."
+        "Build a workflow that can fetch records from an HTTP endpoint, "
+        "transform the data, and upsert contacts to Salesforce."
     )
     service_input = make_service_input(content=content, history=[])
     response = call_global_agent_service(service_input)
@@ -77,13 +119,64 @@ def test_http_to_salesforce_three_steps_with_job_code():
     assert len(parsed["jobs"]) >= 3, f"Expected at least 3 jobs, got {len(parsed['jobs'])}"
     assert_yaml_has_ids(yaml_str, context="test_http_to_salesforce_three_steps_with_job_code")
 
-    # Planner should have made several tool calls (at minimum: 1 workflow + 1 code)
+    # Verify correct agents called in correct order: planner -> workflow_agent -> job_code_agent x3
     meta = response.get("meta", {})
-    assert "planner" in meta.get("agents", []), "Expected planner in agents list"
-    assert meta.get("planner_iterations", 0) >= 2, (
-        f"Expected at least 2 planner iterations (1 workflow + 1+ code), "
-        f"got {meta.get('planner_iterations', 0)}"
+    assert_agent_calls(
+        meta,
+        expected_agents=["planner", "workflow_agent", "job_agent"],
+        min_job_code_calls=3,
+        context="test_http_to_salesforce_three_steps_with_job_code",
     )
+
+    # Every job must have a non-empty body
+    assert_yaml_jobs_have_body(yaml_str, context="test_http_to_salesforce_three_steps_with_job_code")
+
+
+def test_vague_gmail_to_database():
+    """Vague request with no adaptors or structure specified - see how planner handles ambiguity."""
+    print("==================TEST==================")
+    print(
+        "Description: Vague request - 'fetch data from gmail and send to database'. "
+        "Not enough info to fully construct a workflow. Exploring planner behavior."
+    )
+    content = "I want to fetch my data from gmail and send it to my database"
+    service_input = make_service_input(content=content, history=[])
+    response = call_global_agent_service(service_input)
+    print_response_details(response, test_name="test_vague_gmail_to_database", content=content)
+
+    assert response is not None
+    assert isinstance(response, dict)
+    assert "response" in response, "Expected a text response"
+    assert len(response["response"]) > 0, "Expected non-empty response"
+
+    meta = response.get("meta", {})
+    print(f"\n  Agents used: {meta.get('agents', [])}")
+    print(f"  Tool calls: {[tc['tool'] for tc in meta.get('tool_calls', [])]}")
+
+
+def test_gsheets_transform_gmail_with_cron():
+    """More specific request with cron trigger, but still underspecified transform/gmail steps."""
+    print("==================TEST==================")
+    print(
+        "Description: Semi-specific request - cron trigger, google sheets, transform, gmail. "
+        "Has structure but underspecified details. Exploring planner behavior."
+    )
+    content = (
+        "Can you make a workflow that we trigger at midnight, fetch the data from "
+        "google sheets, transform it, and send it by gmail?"
+    )
+    service_input = make_service_input(content=content, history=[])
+    response = call_global_agent_service(service_input)
+    print_response_details(response, test_name="test_gsheets_transform_gmail_with_cron", content=content)
+
+    assert response is not None
+    assert isinstance(response, dict)
+    assert "response" in response, "Expected a text response"
+    assert len(response["response"]) > 0, "Expected non-empty response"
+
+    meta = response.get("meta", {})
+    print(f"\n  Agents used: {meta.get('agents', [])}")
+    print(f"  Tool calls: {[tc['tool'] for tc in meta.get('tool_calls', [])]}")
 
 
 if __name__ == "__main__":
