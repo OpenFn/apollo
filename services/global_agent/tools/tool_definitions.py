@@ -61,15 +61,11 @@ CALL_JOB_CODE_AGENT_TOOL = {
 
 OpenFn workflows define high-level orchestration (triggers, jobs, edges). Job code defines what
 each step actually does using adaptor functions. Use this tool for:
-- Writing job expressions using adaptor functions (e.g., create(), upsert(), get())
-- Understanding adaptor-specific syntax and parameters
+- Writing job expressions for individual workflow steps
 - Debugging job code errors
-- Getting code examples for specific adaptors
 
-Write a clear message for the job code agent. Include any relevant conversation
-context that the agent needs to understand the request.
-
-The agent has access to adaptor documentation and will provide code examples.""",
+Describe the goal of the job. The job code agent is the expert on adaptor
+functions and documentation — it will choose the right functions and implementation approach.""",
     "input_schema": {
         "type": "object",
         "properties": {

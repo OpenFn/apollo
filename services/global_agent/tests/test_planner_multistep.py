@@ -154,20 +154,53 @@ def test_vague_gmail_to_database():
     print(f"  Tool calls: {[tc['tool'] for tc in meta.get('tool_calls', [])]}")
 
 
-def test_gsheets_transform_gmail_with_cron():
-    """More specific request with cron trigger, but still underspecified transform/gmail steps."""
+def test_gsheets_transform_salesforce_with_cron():
+    """More specific request with cron trigger, but still underspecified transform/upsert steps.
+    Using Salesforce as destination to imply specific field mapping requirements the user hasn't specified."""
     print("==================TEST==================")
     print(
-        "Description: Semi-specific request - cron trigger, google sheets, transform, gmail. "
-        "Has structure but underspecified details. Exploring planner behavior."
+        "Description: Semi-specific request - cron trigger, google sheets, transform, salesforce upsert. "
+        "Salesforce upsert implies field mapping decisions the user hasn't specified. Exploring planner behavior."
     )
     content = (
-        "Can you make a workflow that we trigger at midnight, fetch the data from "
-        "google sheets, transform it, and send it by gmail?"
+        "Can you make a workflow that triggers at midnight, fetches data from "
+        "Google Sheets, transforms it, and upserts it into Salesforce?"
     )
     service_input = make_service_input(content=content, history=[])
     response = call_global_agent_service(service_input)
-    print_response_details(response, test_name="test_gsheets_transform_gmail_with_cron", content=content)
+    print_response_details(response, test_name="test_gsheets_transform_salesforce_with_cron", content=content)
+
+    assert response is not None
+    assert isinstance(response, dict)
+    assert "response" in response, "Expected a text response"
+    assert len(response["response"]) > 0, "Expected non-empty response"
+
+    meta = response.get("meta", {})
+    print(f"\n  Agents used: {meta.get('agents', [])}")
+    print(f"  Tool calls: {[tc['tool'] for tc in meta.get('tool_calls', [])]}")
+
+
+def test_commcare_to_dhis2_tracker_with_specific_functions():
+    """User provides specific function details - tests whether planner passes them faithfully to job code agent."""
+    print("==================TEST==================")
+    print(
+        "Description: User specifies exact DHIS2 tracker functions and common adaptor helpers. "
+        "Tests whether the planner passes function-level detail through to job code agent."
+    )
+    content = (
+        "Can you build a workflow that runs daily at 6am and syncs cases from CommCare to DHIS2 Tracker? "
+        "It should have 4 steps: "
+        "1. Fetch closed cases from CommCare from the last 24 hours. "
+        "2. Use each() to iterate over the cases and use fields() and field() to map each case "
+        "to a DHIS2 tracked entity instance — map case_id to trackedEntity, owner_name to a DHIS2 attribute, "
+        "and date_modified to enrollmentDate. "
+        "3. Import the mapped entities to DHIS2 using tracker.import() with strategy CREATE_AND_UPDATE "
+        "and the async option set to false. "
+        "4. Use fn() to log the import summary from state.data.stats to the console."
+    )
+    service_input = make_service_input(content=content, history=[])
+    response = call_global_agent_service(service_input)
+    print_response_details(response, test_name="test_commcare_to_dhis2_tracker_with_specific_functions", content=content)
 
     assert response is not None
     assert isinstance(response, dict)

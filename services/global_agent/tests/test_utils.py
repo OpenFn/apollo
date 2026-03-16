@@ -223,6 +223,17 @@ def print_response_details(response: Dict[str, Any], test_name: str = None, cont
             print(f"  Router Confidence: {response['meta']['router_confidence']}")
         if "planner_iterations" in response["meta"]:
             print(f"  Planner Iterations: {response['meta']['planner_iterations']}")
+        if "tool_calls" in response["meta"] and response["meta"]["tool_calls"]:
+            print("\nPLANNER TOOL CALLS:")
+            for i, call in enumerate(response["meta"]["tool_calls"], 1):
+                tool = call.get("tool", "unknown")
+                inp = call.get("input", {})
+                msg = inp.get("message", "")
+                job_key = inp.get("job_key", "")
+                print(f"\n  --- Step {i}: {tool} ---")
+                if job_key:
+                    print(f"  job_key: {job_key}")
+                print(f"  message:\n    {msg.strip().replace(chr(10), chr(10) + '    ')}")
 
 
 # ===== YAML validation helpers from workflow_chat =====
