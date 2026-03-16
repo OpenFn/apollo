@@ -129,28 +129,38 @@ def _extract_job_body(workflow_yaml: Optional[str], job_key: str) -> Optional[st
         return None
 
 
+def _find_attachment(response: Dict[str, Any], attachment_type: str) -> Optional[str]:
+    """Find an attachment by type in the response attachments list."""
+    for att in response.get("attachments", []):
+        if att.get("type") == attachment_type:
+            return att.get("content")
+    return None
+
+
 def get_attachment(response: Dict[str, Any], attachment_type: str) -> Optional[str]:
     """
     Extract an artifact from the response by type.
 
-    workflow_yaml: returned directly from response["workflow_yaml"]
-    job_code: extracted from the "test-job" body in workflow_yaml (set by make_service_input)
+    workflow_yaml: found in the attachments list with type "workflow_yaml"
+    job_code: extracted from the "test-job" body in the workflow_yaml attachment (set by make_service_input)
     """
     if attachment_type == "workflow_yaml":
-        return response.get("workflow_yaml")
+        return _find_attachment(response, "workflow_yaml")
     elif attachment_type == "job_code":
-        return _extract_job_body(response.get("workflow_yaml"), "test-job")
+        yaml_content = _find_attachment(response, "workflow_yaml")
+        return _extract_job_body(yaml_content, "test-job")
     return None
 
 
 def get_response_yaml(response: Dict[str, Any]) -> Optional[str]:
-    """Extract workflow YAML from response."""
-    return response.get("workflow_yaml")
+    """Extract workflow YAML from response attachments."""
+    return _find_attachment(response, "workflow_yaml")
 
 
 def get_suggested_code(response: Dict[str, Any]) -> Optional[str]:
-    """Extract suggested job code from workflow YAML (test-job body)."""
-    return _extract_job_body(response.get("workflow_yaml"), "test-job")
+    """Extract suggested job code from workflow YAML attachment (test-job body)."""
+    yaml_content = _find_attachment(response, "workflow_yaml")
+    return _extract_job_body(yaml_content, "test-job")
 
 
 def assert_routed_to(response: Dict[str, Any], expected_service: str, context: str = ""):
@@ -203,9 +213,10 @@ def print_response_details(response: Dict[str, Any], test_name: str = None, cont
         print("\nTEXT RESPONSE:")
         print(response["response"])
 
-    if "workflow_yaml" in response and response["workflow_yaml"]:
+    workflow_yaml = _find_attachment(response, "workflow_yaml") if "attachments" in response else None
+    if workflow_yaml:
         print("\nWORKFLOW YAML:")
-        print(response["workflow_yaml"])
+        print(workflow_yaml)
 
     if "history" in response:
         print("\nUPDATED HISTORY LENGTH:")

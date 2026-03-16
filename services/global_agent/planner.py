@@ -11,6 +11,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from util import create_logger, ApolloError, sum_usage
+from streaming_util import StreamManager
 from global_agent.config_loader import ConfigLoader
 from global_agent.tools.tool_definitions import TOOL_DEFINITIONS
 from global_agent.yaml_utils import stitch_job_code, redact_job_bodies, find_job_in_yaml
@@ -24,7 +25,7 @@ logger = create_logger(__name__)
 class PlannerResult:
     """Result from planner run."""
     response: str
-    workflow_yaml: Optional[str]
+    attachments: List[Dict]
     history: List[Dict]
     usage: Dict
     meta: Dict
@@ -75,9 +76,12 @@ class PlannerAgent:
             stream: Streaming flag (not implemented)
 
         Returns:
-            PlannerResult with response, workflow_yaml, history, usage, meta
+            PlannerResult with response, attachments, history, usage, meta
         """
         logger.info("Planner.run() called")
+
+        stream_manager = StreamManager(model=self.model, stream=stream)
+        stream_manager.send_thinking("Analyzing request...")
 
         self.current_yaml = workflow_yaml
 
@@ -138,6 +142,8 @@ class PlannerAgent:
                 logger.info(f"Claude API call {tool_call_count + 1}: stop_reason={response.stop_reason}")
 
                 if response.stop_reason == "end_turn":
+                    if tool_call_count > 0:
+                        stream_manager.send_thinking("Collating components...")
                     final_text = self._extract_text(response)
                     messages.append({
                         "role": "assistant",
@@ -281,9 +287,13 @@ class PlannerAgent:
             if subagent_name and subagent_name not in agents_used:
                 agents_used.append(subagent_name)
 
+        attachments = []
+        if self.current_yaml:
+            attachments.append({"type": "workflow_yaml", "content": self.current_yaml})
+
         return PlannerResult(
             response=final_text,
-            workflow_yaml=self.current_yaml,
+            attachments=attachments,
             history=messages,
             usage=total_usage,
             meta={

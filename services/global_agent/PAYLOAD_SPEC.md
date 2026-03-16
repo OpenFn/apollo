@@ -15,7 +15,9 @@ This document defines the input and output payload structure for the Global Agen
                                           //   workflows/my-workflow
                                           //   workflows/my-workflow/settings
 
-  "user": {} ,                            // User metadata (optional, reserved for future use)
+  "metadata": {                            // Optional metadata
+    "user": {}                            //   User info (reserved for future use)
+  },
 
   "history": [                            // Chat history (optional)
     {
@@ -43,7 +45,8 @@ This document defines the input and output payload structure for the Global Agen
   - `workflows/<name>` — user is viewing the workflow overview
   - `workflows/<name>/settings` — user is viewing workflow settings
 
-- **`user`** (object, optional): User metadata. Reserved for future use.
+- **`metadata`** (object, optional): Extensible metadata object.
+  - **`user`** (object, optional): User information. Reserved for future use.
 
 - **`history`** (array, optional): Conversation history. Each turn has `role` and `content`. History is managed and returned by each agent internally.
 
@@ -60,16 +63,21 @@ This document defines the input and output payload structure for the Global Agen
 {
   "response": "string",                  // Main text response
 
-  "workflow_yaml": "string|null",        // Full workflow YAML (null if no YAML change this turn)
+  "attachments": [                       // Artifacts produced this turn
+    {
+      "type": "workflow_yaml",           // Attachment type
+      "content": "string"               // The artifact content
+    }
+  ],
 
   "history": [                           // Conversation history including this turn
     {
       "role": "user|assistant",
-      "content": "string"
-    }
+      "content": "string | array"        // string for direct routes; array of content
+    }                                    // blocks (text, tool_use, tool_result) for planner path
   ],
 
-  "usage": {                             // Token usage
+  "usage": {                             // Token usage (aggregated across all agents)
     "input_tokens": 0,
     "output_tokens": 0,
     "cache_creation_input_tokens": 0,
@@ -79,7 +87,15 @@ This document defines the input and output payload structure for the Global Agen
   "meta": {                              // Execution metadata
     "agents": ["router", "workflow_agent"],
     "router_confidence": 5,
-    "planner_iterations": 2              // Only present for planner path
+
+    // Planner path only:
+    "planner_iterations": 2,
+    "tool_calls": [                      // Tools invoked by the planner
+      { "tool": "search_documentation", "input": { "query": "..." } },
+      { "tool": "call_workflow_agent", "input": { "message": "..." } }
+    ],
+    "subagent_calls": [],                // Raw sub-agent result dicts (for debugging)
+    "total_tool_calls": 2
   }
 }
 ```
@@ -88,20 +104,31 @@ This document defines the input and output payload structure for the Global Agen
 
 - **`response`** (string): The main text response from the agent.
 
-- **`workflow_yaml`** (string or null): The updated full workflow YAML. The frontend diffs this against the previously sent YAML to show the user what changed. `null` if the turn produced no YAML update (e.g. a read-only or purely informational response).
+- **`attachments`** (array): Artifacts produced during this turn. Each entry has a `type` and `content` field. An empty list `[]` means no artifacts were produced (e.g. a purely informational response). Currently supported types: `workflow_yaml`.
 
-- **`history`** (array): Updated conversation history including the latest exchange.
+- **`history`** (array): Updated conversation history including the latest exchange. On direct routes (workflow_agent, job_code_agent), each entry has `content` as a string. On the planner path, entries may have `content` as an array of content blocks (`text`, `tool_use`, `tool_result`) — this is the raw Anthropic messages format from the tool-calling loop.
 
-- **`usage`** (object): Token usage across all agents invoked.
+- **`usage`** (object): Token usage aggregated across all agents invoked (router + planner + sub-agents).
 
 - **`meta`** (object): Execution metadata.
-  - **`agents`** (array): Ordered list of agents invoked (e.g. `["router", "workflow_agent"]`).
+  - **`agents`** (array): Ordered list of agents invoked (e.g. `["router", "workflow_agent"]` or `["router", "planner", "workflow_agent", "job_agent"]`).
   - **`router_confidence`** (number): Router's confidence score (1–5).
   - **`planner_iterations`** (number): Number of tool-calling iterations (planner path only).
+  - **`tool_calls`** (array): List of `{tool, input}` objects for each tool the planner invoked (planner path only).
+  - **`subagent_calls`** (array): Raw sub-agent result dicts including `_call_metadata` (planner path only, useful for debugging).
+  - **`total_tool_calls`** (number): Total number of tool calls made by the planner (planner path only).
 
 ---
 
-## Page URL → Routing Behaviour
+## Page URL Format and Routing Behaviour
+
+The `page` field is a simplified path/breadcrumb representing where the user is in the app. It uses a **3-segment format** with no leading slash:
+
+```
+workflows/<workflow-name>/<step-name>
+```
+
+The step name should match a job key in the workflow YAML (exact match or normalized — lowercase, non-alphanumeric chars replaced with hyphens). The backend parses the URL by splitting on `/` and reading the 3rd segment as the step name.
 
 | Page URL | Router signal | What happens |
 |---|---|---|
@@ -131,7 +158,12 @@ This document defines the input and output payload structure for the Global Agen
 ```json
 {
   "response": "I've added error handling to the Fetch Data job...",
-  "workflow_yaml": "name: My Workflow\njobs:\n  fetch-data:\n    name: Fetch Data\n    adaptor: \"@openfn/language-http@6.0.0\"\n    body: |\n      get('/api/data').catch(err => { ... });\n",
+  "attachments": [
+    {
+      "type": "workflow_yaml",
+      "content": "name: My Workflow\njobs:\n  fetch-data:\n    name: Fetch Data\n    adaptor: \"@openfn/language-http@6.0.0\"\n    body: |\n      get('/api/data').catch(err => { ... });\n"
+    }
+  ],
   "history": [...],
   "usage": { "input_tokens": 890, "output_tokens": 234, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 450 },
   "meta": { "agents": ["router", "job_code_agent"], "router_confidence": 5 }
@@ -155,7 +187,12 @@ This document defines the input and output payload structure for the Global Agen
 ```json
 {
   "response": "I've added a new Load to DHIS2 job...",
-  "workflow_yaml": "name: My Workflow\njobs:\n  fetch-data:\n    ...\n  load-dhis2:\n    name: Load to DHIS2\n    adaptor: \"@openfn/language-dhis2@...\"\n    body: |\n      // Add operations here\n",
+  "attachments": [
+    {
+      "type": "workflow_yaml",
+      "content": "name: My Workflow\njobs:\n  fetch-data:\n    ...\n  load-dhis2:\n    name: Load to DHIS2\n    adaptor: \"@openfn/language-dhis2@...\"\n    body: |\n      // Add operations here\n"
+    }
+  ],
   "history": [...],
   "usage": { ... },
   "meta": { "agents": ["router", "workflow_agent"], "router_confidence": 5 }
@@ -166,11 +203,11 @@ This document defines the input and output payload structure for the Global Agen
 
 ## Design Principles
 
-1. **Single YAML source of truth**: `workflow_yaml` always contains the complete workflow including job bodies. The frontend diffs it to show changes.
+1. **Attachments carry artifacts**: The `attachments` array contains structured artifacts (currently `workflow_yaml`). The frontend reads the array to find and diff workflow YAML changes.
 2. **Page-driven routing**: The `page` URL tells the router what the user is focused on, avoiding ambiguous name matching.
 3. **Transparent execution**: `meta.agents` shows the full execution path.
 4. **Usage tracking**: Token usage is aggregated across all agents invoked in a single request.
 
-### Note on job code stitching (planner path)
+### Job code stitching (planner path)
 
-When the planner generates a complete new workflow (structure + job code for multiple steps), the current implementation returns the workflow structure only — job bodies will contain `// Add operations here` placeholders. Full code stitching from planner job_agent calls into the YAML is deferred.
+When the planner generates a new workflow, it first calls `call_workflow_agent` to create the structure, then calls `call_job_code_agent` for each job. After each job code call, the generated code is immediately stitched into the workflow YAML via `stitch_job_code()`. The final `workflow_yaml` attachment in the response contains the complete workflow with all job bodies populated.

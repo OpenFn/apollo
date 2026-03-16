@@ -61,16 +61,17 @@ def test_planner_relays_workflow_agent_clarification(mock_call_workflow):
 
     print(f"\n===== PLANNER RESPONSE =====")
     print(f"Response: {result.response}")
-    print(f"Workflow YAML: {result.workflow_yaml}")
+    print(f"Attachments: {result.attachments}")
     print(f"Tool calls: {result.meta.get('tool_calls', [])}")
 
     # The planner should have called the workflow agent
     assert mock_call_workflow.called, "Planner should have called workflow_agent"
 
     # The planner should NOT have produced a workflow YAML (since the subagent didn't)
-    assert not result.workflow_yaml, (
-        f"Expected no workflow YAML since subagent asked for clarification, "
-        f"but got: {result.workflow_yaml}"
+    yaml_attachments = [a for a in result.attachments if a.get("type") == "workflow_yaml"]
+    assert len(yaml_attachments) == 0, (
+        f"Expected no workflow_yaml attachment since subagent asked for clarification, "
+        f"but got: {yaml_attachments}"
     )
 
     # The planner's response should contain something about the database

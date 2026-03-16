@@ -25,7 +25,7 @@ class Payload:
     content: str
     workflow_yaml: Optional[str] = None
     page: Optional[str] = None
-    user: Optional[Dict] = None
+    metadata: Optional[Dict] = None
     history: Optional[List[Dict]] = None
     options: Optional[Dict] = None
     api_key: Optional[str] = None
@@ -40,7 +40,7 @@ class Payload:
             content=data["content"],
             workflow_yaml=data.get("workflow_yaml"),
             page=data.get("page"),
-            user=data.get("user"),
+            metadata=data.get("metadata"),
             history=data.get("history"),
             options=data.get("options"),
             api_key=data.get("api_key"),
@@ -59,7 +59,7 @@ def main(data_dict: dict) -> dict:
         data_dict: Input payload as dictionary
 
     Returns:
-        Response dictionary with response, workflow_yaml, history, usage, meta
+        Response dictionary with response, attachments, history, usage, meta
     """
     try:
         # 1. Validate payload
@@ -84,7 +84,7 @@ def main(data_dict: dict) -> dict:
         # 5. Return structured response
         return {
             "response": result.response,
-            "workflow_yaml": result.workflow_yaml,
+            "attachments": result.attachments,
             "history": result.history,
             "usage": result.usage,
             "meta": result.meta

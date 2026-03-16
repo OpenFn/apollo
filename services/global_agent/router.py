@@ -32,7 +32,7 @@ class RouterDecision:
 class RouterResult:
     """Result from router or passthrough."""
     response: str
-    workflow_yaml: Optional[str]
+    attachments: List[Dict]
     history: List[Dict]
     usage: Dict
     meta: Dict
@@ -83,7 +83,7 @@ class RouterAgent:
             stream: Streaming flag
 
         Returns:
-            RouterResult with response, workflow_yaml, history, usage, meta
+            RouterResult with response, attachments, history, usage, meta
         """
         logger.info("Router.route_and_execute() called")
 
@@ -218,9 +218,14 @@ class RouterAgent:
         result = workflow_chat_main(payload)
         total_usage = sum_usage(self.routing_usage, result["usage"])
 
+        attachments = []
+        response_yaml = result.get("response_yaml")
+        if response_yaml:
+            attachments.append({"type": "workflow_yaml", "content": response_yaml})
+
         return RouterResult(
             response=result["response"],
-            workflow_yaml=result.get("response_yaml"),
+            attachments=attachments,
             history=result["history"].copy(),
             usage=total_usage,
             meta={
@@ -286,9 +291,13 @@ class RouterAgent:
         elif result.get("suggested_code") and not matched_job_key:
             logger.warning(f"suggested_code generated but no job matched for page '{page}' - YAML not updated")
 
+        attachments = []
+        if updated_yaml:
+            attachments.append({"type": "workflow_yaml", "content": updated_yaml})
+
         return RouterResult(
             response=result["response"],
-            workflow_yaml=updated_yaml,
+            attachments=attachments,
             history=result["history"].copy(),
             usage=total_usage,
             meta={
@@ -329,7 +338,7 @@ class RouterAgent:
 
         return RouterResult(
             response=planner_result.response,
-            workflow_yaml=planner_result.workflow_yaml,
+            attachments=planner_result.attachments,
             history=planner_result.history,
             usage=total_usage,
             meta=meta
