@@ -26,11 +26,18 @@ This document defines the input and output payload structure for the Global Agen
     }
   ],
 
+  "attachments": [                        // Input attachments (optional)
+    {
+      "type": "string",                   //   e.g. "log", "input_dataclip", "output_dataclip", "run_input", "run_output"
+      "content": "string"                 //   The attachment content
+    }
+  ],
+
   "options": {                            // Runtime options (optional)
     "stream": false
   },
 
-  "api_key": "string (optional)"
+  "api_key": "string (REQUIRED in production, optional in development)"
 }
 ```
 
@@ -50,10 +57,17 @@ This document defines the input and output payload structure for the Global Agen
 
 - **`history`** (array, optional): Conversation history. Each turn has `role` and `content`. History is managed and returned by each agent internally.
 
+- **`attachments`** (array, optional): Input attachments providing additional context for the request. Each entry has a `type` and `content` field. Useful for passing logs, dataclips, run inputs/outputs, or other contextual data that the agent can use when processing the request. Currently supported types:
+  - `log` — execution logs from a run
+  - `input_dataclip` — input data for a step
+  - `output_dataclip` — output data from a step
+  - `run_input` — input payload for the whole run
+  - `run_output` — final output of a run
+
 - **`options`** (object, optional): Runtime options.
   - **`stream`** (boolean): Enable streaming response (default: false).
 
-- **`api_key`** (string, optional): Override API key for this request.
+- **`api_key`** (string, **required in production**, optional in development): API key for the Anthropic API. In production environments this field is required and requests without it will be rejected. In development, the server falls back to the `ANTHROPIC_API_KEY` environment variable if this field is omitted.
 
 ---
 
@@ -149,6 +163,12 @@ The step name should match a job key in the workflow YAML (exact match or normal
   "content": "Add error handling to this job",
   "workflow_yaml": "name: My Workflow\njobs:\n  fetch-data:\n    name: Fetch Data\n    adaptor: \"@openfn/language-http@6.0.0\"\n    body: |\n      get('/api/data');\n",
   "page": "workflows/my-workflow/fetch-data",
+  "attachments": [
+    {
+      "type": "log",
+      "content": "ERROR: Request failed with status 500\n  at get('/api/data')"
+    }
+  ],
   "history": [],
   "options": { "stream": false }
 }
@@ -203,7 +223,7 @@ The step name should match a job key in the workflow YAML (exact match or normal
 
 ## Design Principles
 
-1. **Attachments carry artifacts**: The `attachments` array contains structured artifacts (currently `workflow_yaml`). The frontend reads the array to find and diff workflow YAML changes.
+1. **Attachments carry artifacts**: Output `attachments` contain structured artifacts (currently `workflow_yaml`). The frontend reads the array to find and diff workflow YAML changes. Input `attachments` carry contextual data (logs, dataclips, etc.) that enrich the agent's understanding of the request.
 2. **Page-driven routing**: The `page` URL tells the router what the user is focused on, avoiding ambiguous name matching.
 3. **Transparent execution**: `meta.agents` shows the full execution path.
 4. **Usage tracking**: Token usage is aggregated across all agents invoked in a single request.

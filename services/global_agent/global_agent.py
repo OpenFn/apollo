@@ -29,6 +29,7 @@ class Payload:
     history: Optional[List[Dict]] = None
     options: Optional[Dict] = None
     api_key: Optional[str] = None
+    attachments: Optional[List[Dict]] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
@@ -44,6 +45,7 @@ class Payload:
             history=data.get("history"),
             options=data.get("options"),
             api_key=data.get("api_key"),
+            attachments=data.get("attachments"),
         )
 
     def get_stream(self) -> bool:
@@ -78,7 +80,8 @@ def main(data_dict: dict) -> dict:
             workflow_yaml=data.workflow_yaml,
             page=data.page,
             history=data.history or [],
-            stream=data.get_stream()
+            stream=data.get_stream(),
+            attachments=data.attachments or []
         )
 
         # 5. Return structured response

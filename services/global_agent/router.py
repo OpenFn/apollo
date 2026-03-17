@@ -70,7 +70,8 @@ class RouterAgent:
         workflow_yaml: Optional[str],
         page: Optional[str],
         history: List[Dict],
-        stream: bool
+        stream: bool,
+        attachments: Optional[List[Dict]] = None
     ) -> RouterResult:
         """
         Route request to appropriate handler and execute.
@@ -81,6 +82,7 @@ class RouterAgent:
             page: Current page URL (e.g. workflows/name/step-name)
             history: Conversation history
             stream: Streaming flag
+            attachments: Optional input attachments (e.g. logs, dataclips)
 
         Returns:
             RouterResult with response, attachments, history, usage, meta
@@ -93,6 +95,8 @@ class RouterAgent:
             "cache_creation_input_tokens": 0,
             "cache_read_input_tokens": 0
         }
+
+        self._input_attachments = attachments or []
 
         try:
             decision = self._make_routing_decision(content, workflow_yaml, page, history)
@@ -193,6 +197,18 @@ class RouterAgent:
 
         return "\n".join(parts)
 
+    def _format_attachments_for_content(self, content: str) -> str:
+        """Append input attachments to content string for subagent context."""
+        if not self._input_attachments:
+            return content
+
+        parts = [content]
+        for attachment in self._input_attachments:
+            att_type = attachment.get("type", "unknown")
+            att_content = attachment.get("content", "")
+            parts.append(f"\n\n[Attached {att_type}]\n{att_content}")
+        return "\n".join(parts)
+
     def _route_to_workflow_chat(
         self,
         content: str,
@@ -207,9 +223,10 @@ class RouterAgent:
         logger.info("Routing to workflow_chat")
 
         clean_history = [{"role": t["role"], "content": t["content"]} for t in history]
+        enriched_content = self._format_attachments_for_content(content)
 
         payload = {
-            "content": content,
+            "content": enriched_content,
             "existing_yaml": workflow_yaml,
             "history": clean_history,
             "stream": stream
@@ -272,9 +289,10 @@ class RouterAgent:
                     job_context["page_name"] = job_data["name"]
 
         clean_history = [{"role": t["role"], "content": t["content"]} for t in history]
+        enriched_content = self._format_attachments_for_content(content)
 
         payload = {
-            "content": content,
+            "content": enriched_content,
             "context": job_context,
             "suggest_code": True,
             "history": clean_history,
@@ -321,10 +339,11 @@ class RouterAgent:
         logger.info("Routing to planner")
 
         clean_history = [{"role": t["role"], "content": t["content"]} for t in history]
+        enriched_content = self._format_attachments_for_content(content)
 
         planner = PlannerAgent(self.config_loader, self.api_key)
         planner_result = planner.run(
-            content=content,
+            content=enriched_content,
             workflow_yaml=workflow_yaml,
             page=page,
             history=clean_history,
