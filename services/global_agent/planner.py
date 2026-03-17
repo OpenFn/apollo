@@ -13,7 +13,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from util import create_logger, ApolloError, sum_usage
 from streaming_util import StreamManager
 from global_agent.config_loader import ConfigLoader
-from models import resolve_model, CLAUDE_SONNET
+from models import resolve_model
 from global_agent.tools.tool_definitions import TOOL_DEFINITIONS
 from global_agent.yaml_utils import stitch_job_code, redact_job_bodies, find_job_in_yaml
 from tools.search_documentation.search_documentation import search_documentation_tool

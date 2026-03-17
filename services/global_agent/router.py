@@ -16,7 +16,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from util import create_logger, ApolloError, sum_usage
 from global_agent.config_loader import ConfigLoader
-from models import resolve_model, CLAUDE_HAIKU
+from models import resolve_model
 from global_agent.yaml_utils import get_step_name_from_page, find_job_in_yaml, stitch_job_code
 
 logger = create_logger(__name__)
