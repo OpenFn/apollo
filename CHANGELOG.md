@@ -1,5 +1,50 @@
 # apollo
 
+## 0.19.8
+
+### Patch Changes
+
+- de90b22: remove adaptor docs from job code rag
+
+## 0.19.7
+
+### Patch Changes
+
+- fd43595: prefill doc query answers
+
+## 0.19.6
+
+### Patch Changes
+
+- 7d42848: lint code
+- 8f39895: update protobuf
+- 203175d: add error handling to job_chat
+
+## 0.19.5
+
+### Patch Changes
+
+- Fix doc loading in production environments
+
+## 0.19.4
+
+### Patch Changes
+
+- bd2c51b: workflow_chat: don't refer to a seperate AI assistant when asked to
+  write job code
+
+## 0.19.3
+
+### Patch Changes
+
+- af07795: Update adaptor apis package
+
+## 0.19.2
+
+### Patch Changes
+
+- 27fda5b: Ensure db tables are checked before adaptors are uploaded
+
 ## 0.19.1
 
 ### Patch Changes
