@@ -153,96 +153,22 @@ class PlannerAgent:
                     break
 
                 elif response.stop_reason == "tool_use":
-                    tool_use_block = self._find_tool_use(response.content)
+                    tool_use_blocks = self._find_all_tool_uses(response.content)
 
-                    if not tool_use_block:
+                    if not tool_use_blocks:
                         logger.error("tool_use stop_reason but no tool_use block found")
                         break
 
-                    logger.info(f"Executing tool: {tool_use_block.name}")
+                    logger.info(f"Executing {len(tool_use_blocks)} tool(s): {[b.name for b in tool_use_blocks]}")
 
-                    if tool_use_block.name == "search_documentation":
-                        tool_result = search_documentation_tool(tool_use_block.input)
-
-                        tool_calls_meta.append({
-                            "tool": "search_documentation",
-                            "input": tool_use_block.input
+                    tool_results = []
+                    for tool_use_block in tool_use_blocks:
+                        tool_result = self._execute_tool(tool_use_block, total_usage, tool_calls_meta)
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": tool_use_block.id,
+                            "content": tool_result
                         })
-
-                    elif tool_use_block.name == "call_workflow_agent":
-                        subagent_result = call_workflow_agent(
-                            tool_use_block.input,
-                            workflow_yaml=self.current_yaml
-                        )
-
-                        if "usage" in subagent_result:
-                            total_usage = sum_usage(total_usage, subagent_result["usage"])
-
-                        # Update live state eagerly
-                        if subagent_result.get("response_yaml"):
-                            self.current_yaml = subagent_result["response_yaml"]
-
-                        self.subagent_results.append(subagent_result)
-
-                        tool_result = format_subagent_result_for_llm(subagent_result)
-
-                        # Give planner a fresh structural view after each workflow change
-                        if self.current_yaml:
-                            redacted = redact_job_bodies(self.current_yaml)
-                            tool_result += f"\n\nUpdated workflow structure:\n{redacted}"
-
-                        tool_calls_meta.append({
-                            "tool": "call_workflow_agent",
-                            "input": tool_use_block.input
-                        })
-
-                    elif tool_use_block.name == "call_job_code_agent":
-                        subagent_result = call_job_agent(
-                            tool_use_block.input,
-                            workflow_yaml=self.current_yaml
-                        )
-
-                        if "usage" in subagent_result:
-                            total_usage = sum_usage(total_usage, subagent_result["usage"])
-
-                        # Stitch code into live state immediately
-                        job_key = tool_use_block.input.get("job_key")
-                        suggested_code = subagent_result.get("suggested_code")
-                        if job_key and suggested_code and self.current_yaml:
-                            self.current_yaml = stitch_job_code(self.current_yaml, job_key, suggested_code)
-                            logger.info(f"Stitched code for job '{job_key}' into current_yaml")
-
-                        self.subagent_results.append(subagent_result)
-                        tool_result = format_subagent_result_for_llm(subagent_result)
-                        if suggested_code:
-                            tool_result += "\n\n[Job code generated and stitched into the workflow.]"
-                        else:
-                            tool_result += "\n\n[No job code was generated.]"
-
-                        tool_calls_meta.append({
-                            "tool": "call_job_code_agent",
-                            "input": tool_use_block.input
-                        })
-
-                    elif tool_use_block.name == "inspect_job_code":
-                        job_key = tool_use_block.input.get("job_key")
-                        if not self.current_yaml:
-                            tool_result = "No workflow available to inspect."
-                        else:
-                            _, job_data = find_job_in_yaml(self.current_yaml, job_key)
-                            if job_data and job_data.get("body"):
-                                tool_result = f"Job code for '{job_key}':\n\n{job_data['body']}"
-                            else:
-                                tool_result = f"No code found for job '{job_key}'."
-
-                        tool_calls_meta.append({
-                            "tool": "inspect_job_code",
-                            "input": tool_use_block.input
-                        })
-
-                    else:
-                        logger.error(f"Unknown tool: {tool_use_block.name}")
-                        tool_result = f"Error: Unknown tool {tool_use_block.name}"
 
                     content_blocks = []
                     for block in response.content:
@@ -257,16 +183,9 @@ class PlannerAgent:
                             })
 
                     messages.append({"role": "assistant", "content": content_blocks})
-                    messages.append({
-                        "role": "user",
-                        "content": [{
-                            "type": "tool_result",
-                            "tool_use_id": tool_use_block.id,
-                            "content": tool_result
-                        }]
-                    })
+                    messages.append({"role": "user", "content": tool_results})
 
-                    tool_call_count += 1
+                    tool_call_count += len(tool_use_blocks)
 
                 else:
                     logger.warning(f"Unexpected stop_reason: {response.stop_reason}")
@@ -305,12 +224,96 @@ class PlannerAgent:
             }
         )
 
-    def _find_tool_use(self, content):
-        """Find tool_use block in response content."""
-        for block in content:
-            if block.type == "tool_use":
-                return block
-        return None
+    def _find_all_tool_uses(self, content):
+        """Find all tool_use blocks in response content."""
+        return [block for block in content if block.type == "tool_use"]
+
+    def _execute_tool(self, tool_use_block, total_usage, tool_calls_meta) -> str:
+        """Execute a single tool call and return the result string."""
+        if tool_use_block.name == "search_documentation":
+            tool_result = search_documentation_tool(tool_use_block.input)
+
+            tool_calls_meta.append({
+                "tool": "search_documentation",
+                "input": tool_use_block.input
+            })
+
+        elif tool_use_block.name == "call_workflow_agent":
+            subagent_result = call_workflow_agent(
+                tool_use_block.input,
+                workflow_yaml=self.current_yaml
+            )
+
+            if "usage" in subagent_result:
+                total_usage.update(sum_usage(total_usage, subagent_result["usage"]))
+
+            # Update live state eagerly
+            if subagent_result.get("response_yaml"):
+                self.current_yaml = subagent_result["response_yaml"]
+
+            self.subagent_results.append(subagent_result)
+
+            tool_result = format_subagent_result_for_llm(subagent_result)
+
+            # Give planner a fresh structural view after each workflow change
+            if self.current_yaml:
+                redacted = redact_job_bodies(self.current_yaml)
+                tool_result += f"\n\nUpdated workflow structure:\n{redacted}"
+
+            tool_calls_meta.append({
+                "tool": "call_workflow_agent",
+                "input": tool_use_block.input
+            })
+
+        elif tool_use_block.name == "call_job_code_agent":
+            subagent_result = call_job_agent(
+                tool_use_block.input,
+                workflow_yaml=self.current_yaml
+            )
+
+            if "usage" in subagent_result:
+                total_usage.update(sum_usage(total_usage, subagent_result["usage"]))
+
+            # Stitch code into live state immediately
+            job_key = tool_use_block.input.get("job_key")
+            suggested_code = subagent_result.get("suggested_code")
+            if job_key and suggested_code and self.current_yaml:
+                self.current_yaml = stitch_job_code(self.current_yaml, job_key, suggested_code)
+                logger.info(f"Stitched code for job '{job_key}' into current_yaml")
+
+            self.subagent_results.append(subagent_result)
+            tool_result = format_subagent_result_for_llm(subagent_result)
+            if suggested_code:
+                tool_result += "\n\n[Job code generated and stitched into the workflow.]"
+            else:
+                tool_result += "\n\n[No job code was generated.]"
+
+            tool_calls_meta.append({
+                "tool": "call_job_code_agent",
+                "input": tool_use_block.input
+            })
+
+        elif tool_use_block.name == "inspect_job_code":
+            job_key = tool_use_block.input.get("job_key")
+            if not self.current_yaml:
+                tool_result = "No workflow available to inspect."
+            else:
+                _, job_data = find_job_in_yaml(self.current_yaml, job_key)
+                if job_data and job_data.get("body"):
+                    tool_result = f"Job code for '{job_key}':\n\n{job_data['body']}"
+                else:
+                    tool_result = f"No code found for job '{job_key}'."
+
+            tool_calls_meta.append({
+                "tool": "inspect_job_code",
+                "input": tool_use_block.input
+            })
+
+        else:
+            logger.error(f"Unknown tool: {tool_use_block.name}")
+            tool_result = f"Error: Unknown tool {tool_use_block.name}"
+
+        return tool_result
 
     def _extract_text(self, response):
         """Extract text from response content."""

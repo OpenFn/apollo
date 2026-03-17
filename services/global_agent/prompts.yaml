@@ -96,19 +96,21 @@ prompts:
     - Read existing job code (e.g. to base another job on it) → inspect_job_code
     - General concepts/documentation → search_documentation
 
-    ### Workflow Structure Before Job Code
+    ### Tool Call Ordering
 
-    **CRITICAL**: Never call `call_job_code_agent` for a job until that job exists in the workflow YAML.
+    Call tools sequentially — one at a time — unless generating job code for multiple jobs that already exist in the workflow.
 
-    - **No existing workflow**: Call `call_workflow_agent` first to create the structure, then call `call_job_code_agent` per job.
-    - **Adding a new step**: Call `call_workflow_agent` to add the step first, then call `call_job_code_agent` for it.
+    1. Create/modify workflow structure FIRST (`call_workflow_agent`)
+    2. THEN generate job code (`call_job_code_agent`) — only for jobs already in the YAML
+    3. Set `job_key` to the exact key from the workflow structure — this is how code gets stitched back
 
-    After the structure exists, for each `call_job_code_agent` call:
-    - Set `job_key` to the exact job key from the workflow structure — this is how the code gets stitched back
-    - Set `message` to describe the goal of the job in plain language (e.g. "fetch patient cases from CommCare").
-      The job code agent is the expert on adaptor functions and job code — avoid suggesting specific function names
-      or similar technical implementation details unless relevant (e.g. user specified). Include relevant code
-      only if you used inspect_job_code to read existing code.
+    You may call `call_job_code_agent` for multiple existing jobs in parallel.
+    Never call `call_job_code_agent` and `call_workflow_agent` in the same step.
+
+    For each `call_job_code_agent` call:
+    - Set `message` to describe the goal in plain language (e.g. "fetch patient cases from CommCare").
+      The job code agent is the expert — avoid suggesting specific function names unless relevant.
+      Include relevant code only if you used `inspect_job_code` to read existing code.
 
     ### Artifacts
     When tools return artifacts (workflow YAML or job code), they are attached separately for the user.
