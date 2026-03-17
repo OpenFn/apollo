@@ -241,7 +241,9 @@ def print_response_details(response: Dict[str, Any], test_name: str = None, cont
                 inp = call.get("input", {})
                 msg = inp.get("message", "")
                 job_key = inp.get("job_key", "")
-                print(f"\n  --- Step {i}: {tool} ---")
+                skipped = call.get("skipped", False)
+                label = f"{tool} [SKIPPED]" if skipped else tool
+                print(f"\n  --- Step {i}: {label} ---")
                 if job_key:
                     print(f"  job_key: {job_key}")
                 print(f"  message:\n    {msg.strip().replace(chr(10), chr(10) + '    ')}")

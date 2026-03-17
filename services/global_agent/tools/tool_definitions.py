@@ -58,14 +58,10 @@ Do NOT include YAML in your message.""",
 CALL_JOB_CODE_AGENT_TOOL = {
     "name": "call_job_code_agent",
     "description": """Get help with OpenFn job code (JavaScript expressions for individual steps).
+Requires a workflow YAML with the target job_key already defined — call call_workflow_agent first.
 
-OpenFn workflows define high-level orchestration (triggers, jobs, edges). Job code defines what
-each step actually does using adaptor functions. Use this tool for:
-- Writing job expressions for individual workflow steps
-- Debugging job code errors
-
-Describe the goal of the job. The job code agent is the expert on adaptor
-functions and documentation — it will choose the right functions and implementation approach.""",
+Use this tool for writing or debugging job expressions. Describe the goal; the job code agent
+is the expert on adaptor functions and will choose the right implementation.""",
     "input_schema": {
         "type": "object",
         "properties": {

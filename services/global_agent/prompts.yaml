@@ -98,11 +98,11 @@ prompts:
 
     ### Tool Call Ordering
 
-    Call tools sequentially — one at a time — unless generating job code for multiple jobs that already exist in the workflow.
+    Job code is stitched into the workflow YAML by job_key — the workflow must exist first.
 
     1. Create/modify workflow structure FIRST (`call_workflow_agent`)
     2. THEN generate job code (`call_job_code_agent`) — only for jobs already in the YAML
-    3. Set `job_key` to the exact key from the workflow structure — this is how code gets stitched back
+    3. Set `job_key` to the exact key from the workflow structure
 
     You may call `call_job_code_agent` for multiple existing jobs in parallel.
     Never call `call_job_code_agent` and `call_workflow_agent` in the same step.

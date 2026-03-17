@@ -50,7 +50,7 @@ class PlannerAgent:
         self.model = planner_config.get("model", "claude-sonnet-4-20250514")
         self.max_tokens = planner_config.get("max_tokens", 8192)
         self.temperature = planner_config.get("temperature", 1.0)
-        self.max_tool_calls = planner_config.get("max_tool_calls", 10)
+        self.max_tool_calls = planner_config.get("max_tool_calls", 20)
 
         self.current_yaml: Optional[str] = None
         self.subagent_results = []
@@ -123,11 +123,11 @@ class PlannerAgent:
                                 "type": "clear_tool_uses_20250919",
                                 "trigger": {
                                     "type": "tool_uses",
-                                    "value": 3
+                                    "value": 20
                                 },
                                 "keep": {
                                     "type": "tool_uses",
-                                    "value": 2
+                                    "value": 10
                                 },
                                 "exclude_tools": ["search_documentation"],
                                 "clear_tool_inputs": True
@@ -266,6 +266,20 @@ class PlannerAgent:
             })
 
         elif tool_use_block.name == "call_job_code_agent":
+            job_key = tool_use_block.input.get("job_key")
+
+            # Guard: workflow must exist and contain the target job
+            if not self.current_yaml:
+                tool_result = "ERROR: No workflow exists yet. Call call_workflow_agent first to create the workflow, then call call_job_code_agent."
+                tool_calls_meta.append({"tool": "call_job_code_agent", "input": tool_use_block.input, "skipped": True})
+                return tool_result
+            if job_key:
+                _, job_data = find_job_in_yaml(self.current_yaml, job_key)
+                if not job_data:
+                    tool_result = f"ERROR: Job key '{job_key}' not found in workflow YAML. Create the workflow with this job first."
+                    tool_calls_meta.append({"tool": "call_job_code_agent", "input": tool_use_block.input, "skipped": True})
+                    return tool_result
+
             subagent_result = call_job_agent(
                 tool_use_block.input,
                 workflow_yaml=self.current_yaml
@@ -275,7 +289,6 @@ class PlannerAgent:
                 total_usage.update(sum_usage(total_usage, subagent_result["usage"]))
 
             # Stitch code into live state immediately
-            job_key = tool_use_block.input.get("job_key")
             suggested_code = subagent_result.get("suggested_code")
             if job_key and suggested_code and self.current_yaml:
                 self.current_yaml = stitch_job_code(self.current_yaml, job_key, suggested_code)
