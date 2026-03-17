@@ -6,6 +6,13 @@ import unicodedata
 from typing import List, Optional, Dict, Any
 import yaml
 from dataclasses import dataclass
+from models import resolve_model
+
+_dir = os.path.dirname(os.path.abspath(__file__))
+with open(os.path.join(_dir, "gen_project_config.yaml")) as _f:
+    _service_config = yaml.safe_load(_f)
+
+_MODEL = resolve_model(_service_config.get("model", "claude-sonnet"))
 from anthropic import (
     Anthropic,
     APIConnectionError,
@@ -78,7 +85,7 @@ class Payload:
 
 @dataclass
 class ChatConfig:
-    model: str = "claude-sonnet-4-5-20250929"
+    model: str = _MODEL
     max_tokens: int = 8192
     api_key: Optional[str] = None
 
