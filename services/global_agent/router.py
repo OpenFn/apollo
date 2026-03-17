@@ -16,6 +16,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from util import create_logger, ApolloError, sum_usage
 from global_agent.config_loader import ConfigLoader
+from models import resolve_model, CLAUDE_HAIKU
 from global_agent.yaml_utils import get_step_name_from_page, find_job_in_yaml, stitch_job_code
 
 logger = create_logger(__name__)
@@ -58,7 +59,7 @@ class RouterAgent:
         self.client = Anthropic(api_key=self.api_key)
 
         router_config = config_loader.config.get("router", {})
-        self.model = router_config.get("model", "claude-haiku-4-5-20251001")
+        self.model = resolve_model(router_config.get("model", "claude-haiku"))
         self.max_tokens = router_config.get("max_tokens", 500)
         self.temperature = router_config.get("temperature", 0.0)
 

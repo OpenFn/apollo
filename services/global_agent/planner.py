@@ -13,6 +13,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from util import create_logger, ApolloError, sum_usage
 from streaming_util import StreamManager
 from global_agent.config_loader import ConfigLoader
+from models import resolve_model, CLAUDE_SONNET
 from global_agent.tools.tool_definitions import TOOL_DEFINITIONS
 from global_agent.yaml_utils import stitch_job_code, redact_job_bodies, find_job_in_yaml
 from tools.search_documentation.search_documentation import search_documentation_tool
@@ -47,7 +48,7 @@ class PlannerAgent:
         self.tools = TOOL_DEFINITIONS
 
         planner_config = config_loader.config.get("planner", {})
-        self.model = planner_config.get("model", "claude-sonnet-4-20250514")
+        self.model = resolve_model(planner_config.get("model", "claude-sonnet"))
         self.max_tokens = planner_config.get("max_tokens", 8192)
         self.temperature = planner_config.get("temperature", 1.0)
         self.max_tool_calls = planner_config.get("max_tool_calls", 20)
