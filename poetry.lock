@@ -149,13 +149,13 @@ files = [
 
 [[package]]
 name = "anthropic"
-version = "0.79.0"
+version = "0.85.0"
 description = "The official Python library for the anthropic API"
 optional = false
 python-versions = ">=3.9"
 files = [
-    {file = "anthropic-0.79.0-py3-none-any.whl", hash = "sha256:04cbd473b6bbda4ca2e41dd670fe2f829a911530f01697d0a1e37321eb75f3cf"},
-    {file = "anthropic-0.79.0.tar.gz", hash = "sha256:8707aafb3b1176ed6c13e2b1c9fb3efddce90d17aee5d8b83a86c70dcdcca871"},
+    {file = "anthropic-0.85.0-py3-none-any.whl", hash = "sha256:b4f54d632877ed7b7b29c6d9ba7299d5e21c4c92ae8de38947e9d862bff74adf"},
+    {file = "anthropic-0.85.0.tar.gz", hash = "sha256:d45b2f38a1efb1a5d15515a426b272179a0d18783efa2bb4c3925fa773eb50b9"},
 ]
 
 [package.dependencies]
@@ -171,6 +171,7 @@ typing-extensions = ">=4.10,<5"
 [package.extras]
 aiohttp = ["aiohttp", "httpx-aiohttp (>=0.1.9)"]
 bedrock = ["boto3 (>=1.28.57)", "botocore (>=1.31.57)"]
+mcp = ["mcp (>=1.0)"]
 vertex = ["google-auth[requests] (>=2,<3)"]
 
 [[package]]
@@ -4992,4 +4993,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.0"
 python-versions = "3.11.*"
-content-hash = "25ade08b567912682cc1e5c00cc4fc34a86c3f4f8ba28ce020447c71019f1c57"
+content-hash = "2fb88714c356812fa849c9cf108c30b128f02f41f9f3b8b673255349bed7500c"
