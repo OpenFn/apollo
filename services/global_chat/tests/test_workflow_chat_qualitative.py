@@ -7,7 +7,7 @@ import tempfile
 import subprocess
 import yaml
 from pathlib import Path
-from .test_utils import call_global_agent_service, make_service_input, print_response_details, assert_routed_to, assert_yaml_section_contains_all, assert_yaml_has_ids, assert_yaml_jobs_have_body, assert_no_special_chars, get_response_yaml
+from .test_utils import call_global_chat_service, make_service_input, print_response_details, assert_routed_to, assert_yaml_section_contains_all, assert_yaml_has_ids, assert_yaml_jobs_have_body, assert_no_special_chars, get_response_yaml
 
 # ---- TESTS ----
 def test_basic_input():
@@ -18,7 +18,7 @@ def test_basic_input():
     history = []
     content = "Whenever fridge statistics are send to you, parse and aggregate the data and upload to a collection in redis."
     service_input = make_service_input(existing_yaml, history, content=content)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     assert_routed_to(response, "workflow_agent", context="test_basic_input")
     print_response_details(response, content=content)
 
@@ -103,7 +103,7 @@ edges:
     content = "Actually, let's add data deduplication before validation to prevent duplicate patient records"
     
     service_input = make_service_input(existing_yaml, history, content=content)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     assert_routed_to(response, "workflow_agent", context="test_input_second_turn")
     print_response_details(response, content=content)
     
@@ -157,7 +157,7 @@ edges:
     ]
     content = "Can you explain that better"
     service_input = make_service_input(existing_yaml, history, content=content)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     assert_routed_to(response, "workflow_agent", context="test_conversational_turn")
     print_response_details(response, content=content)
     assert response is not None
@@ -178,7 +178,7 @@ def test_simple_lang_bug():
     history = []
     content = "are you there?"
     service_input = make_service_input(existing_yaml, history, content=content)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     print_response_details(response, content=content)
     assert response is not None
     assert isinstance(response, dict)
@@ -236,7 +236,7 @@ edges:
     ]
     content = "Actually I also want an email notification at the same time as the data is being parsed."
     service_input = make_service_input(existing_yaml, history, content=content)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     assert_routed_to(response, "workflow_agent", context="test_single_trigger_node")
     response_yaml = get_response_yaml(response)
     if response_yaml:
@@ -288,7 +288,7 @@ edges:
     ]
     content = "Can you also fill in the job code for all the steps"
     service_input = make_service_input(existing_yaml, history, content=content)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     # Request mentions "job code" explicitly — may route to job_code_agent or planner
     response_yaml = get_response_yaml(response)
     if response_yaml:
@@ -342,7 +342,7 @@ edges:
     # This test uses errors, so no content field
 
     service_input = make_service_input(existing_yaml, history, errors=errors)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     assert_routed_to(response, "workflow_agent", context="test_error_field")
     response_yaml = get_response_yaml(response)
     if response_yaml:
@@ -479,7 +479,7 @@ edges:
     ]
     content = "Perfect! One final addition - after updating Asana, I want to format the data for bulk emailing and then send out bulk emails using Mailgun."
     service_input = make_service_input(existing_yaml, history, content=content)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     assert_routed_to(response, "workflow_agent", context="test_long_yaml")
     print_response_details(response, content=content)
     assert response is not None
@@ -563,7 +563,7 @@ edges:
     }
 
     service_input = make_service_input(existing_yaml, history, content=content, context=context, meta=meta)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     assert_routed_to(response, "workflow_agent", context="test_navigation_job_to_workflow")
     print_response_details(response, content=content)
 

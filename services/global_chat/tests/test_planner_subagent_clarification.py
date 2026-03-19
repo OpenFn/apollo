@@ -14,8 +14,8 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from global_agent.config_loader import ConfigLoader
-from global_agent.planner import PlannerAgent
+from global_chat.config_loader import ConfigLoader
+from global_chat.planner import PlannerAgent
 
 
 def make_workflow_agent_clarification_response(clarification_text: str) -> dict:
@@ -33,7 +33,7 @@ def make_workflow_agent_clarification_response(clarification_text: str) -> dict:
     }
 
 
-@patch("global_agent.planner.call_workflow_agent")
+@patch("global_chat.planner.call_workflow_agent")
 def test_planner_relays_workflow_agent_clarification(mock_call_workflow):
     """
     When the workflow agent responds with a clarification question (no YAML),
@@ -83,7 +83,7 @@ def test_planner_relays_workflow_agent_clarification(mock_call_workflow):
     )
 
 
-@patch("global_agent.planner.call_workflow_agent")
+@patch("global_chat.planner.call_workflow_agent")
 def test_planner_does_not_retry_after_clarification(mock_call_workflow):
     """
     When the workflow agent asks for clarification, the planner should NOT

@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 
-def call_global_agent_service(service_input: Dict[str, Any]) -> Dict[str, Any]:
+def call_global_chat_service(service_input: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Call the global_agent service with the given input and return the response.
+    Call the global_chat service with the given input and return the response.
 
     Args:
         service_input: Dictionary with content, history, context, and optional fields
@@ -27,14 +27,16 @@ def call_global_agent_service(service_input: Dict[str, Any]) -> Dict[str, Any]:
         cmd = [
             sys.executable,
             str(Path(__file__).parent.parent.parent / "entry.py"),
-            "global_agent",
+            "global_chat",
             "--input", temp_input_path,
             "--output", temp_output_path
         ]
+        print(cmd)
         result = subprocess.run(cmd, capture_output=True, text=True, cwd=Path(__file__).parent.parent)
         if result.returncode != 0:
             raise Exception(f"Service call failed: {result.stderr}")
         with open(temp_output_path, 'r') as f:
+            print (f)
             response = json.load(f)
         return response
     finally:
@@ -60,7 +62,7 @@ def make_service_input(
     page: str = None,
 ) -> Dict[str, Any]:
     """
-    Build a global_agent input payload.
+    Build a global_chat input payload.
 
     For workflow editing: pass existing_yaml with the full YAML.
     For job code editing: pass context with expression/adaptor/page_name fields,
@@ -80,7 +82,7 @@ def make_service_input(
         page: Explicit page URL override
 
     Returns:
-        A dictionary ready to be sent to the global_agent service
+        A dictionary ready to be sent to the global_chat service
     """
     service_input = {
         "content": content or errors or "",
@@ -165,7 +167,7 @@ def get_suggested_code(response: Dict[str, Any]) -> Optional[str]:
 
 def assert_routed_to(response: Dict[str, Any], expected_service: str, context: str = ""):
     """
-    Assert that global_agent routed to the expected service.
+    Assert that global_chat routed to the expected service.
 
     Args:
         response: Global agent response dict
@@ -194,7 +196,7 @@ def assert_routed_to(response: Dict[str, Any], expected_service: str, context: s
 
 def print_response_details(response: Dict[str, Any], test_name: str = None, content: Optional[str] = None, errors: Optional[str] = None):
     """
-    Print detailed response information for a global_agent service call.
+    Print detailed response information for a global_chat service call.
 
     Args:
         response: The service response object

@@ -1,6 +1,6 @@
 import pytest
 import json
-from .test_utils import call_global_agent_service, make_service_input, print_response_details, assert_routed_to, get_suggested_code
+from .test_utils import call_global_chat_service, make_service_input, print_response_details, assert_routed_to, get_suggested_code
 
 
 
@@ -46,7 +46,7 @@ post('https://destination.org/upload', state => state.processedData);'''
 
     meta = {}
     service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     assert_routed_to(response, "job_code_agent", context="test_rename_variable")
     print_response_details(response, "rename_variable", content=content)
 
@@ -91,7 +91,7 @@ post('https://api.example.com/save', state => ({
 
     meta = {}
     service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     assert_routed_to(response, "job_code_agent", context="test_convert_get_to_delete")
     print_response_details(response, "convert_get_to_delete", content=content)
 
@@ -194,7 +194,7 @@ post(
 
     meta = {}
     service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     assert_routed_to(response, "job_code_agent", context="test_rename_function")
     print_response_details(response, "rename_function", content=content)
 
@@ -318,7 +318,7 @@ post('https://notifications.example.com/endpooint/status', state => ({
 
     meta = {}
     service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     assert_routed_to(response, "job_code_agent", context="test_change_multiple_instances")
     print_response_details(response, "change_url_path", content=content)
 
@@ -370,7 +370,7 @@ post('/webhook', state => state.data);'''
 
     meta = {}
     service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     assert_routed_to(response, "job_code_agent", context="test_change_variable_names_only")
     print_response_details(response, "change_variable_names", content=content)
 
@@ -421,7 +421,7 @@ post('/webhook', state => state.data);'''
 
     meta = {}
     service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True, stream=True)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     assert_routed_to(response, "job_code_agent", context="test_change_variable_names_only_streaming")
     print_response_details(response, "change_variable_names_streaming", content=content)
 
@@ -457,7 +457,7 @@ post('https://destination.org/upload', state => state.transformed);''',
 
     meta = {}
     service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     assert_routed_to(response, "job_code_agent", context="test_history_prefix_parsing")
     print_response_details(response, "history_prefix_parsing", content=content)
 
@@ -516,7 +516,7 @@ def test_rag_retriggered_on_navigation():
     }
 
     service_input = make_service_input(history=history, content=content, context=context, meta=input_meta, suggest_code=True)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     assert_routed_to(response, "job_code_agent", context="test_rag_retriggered_on_navigation")
     print_response_details(response, "rag_retriggered_on_navigation", content=content)
 
@@ -532,7 +532,7 @@ def test_rag_retriggered_on_navigation():
     response_meta = response["meta"]
     print(json.dumps(response_meta, indent=2))
 
-    # rag is an internal job_chat detail, not propagated through global_agent meta
+    # rag is an internal job_chat detail, not propagated through global_chat meta
     # just verify meta exists with routing info
     assert "agents" in response_meta
 
@@ -567,7 +567,7 @@ fn(state => {
 
     meta = {}
     service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=False)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     assert_routed_to(response, "job_code_agent", context="test_adaptor_context_switching")
     print_response_details(response, "adaptor_context_switching", content=content)
 

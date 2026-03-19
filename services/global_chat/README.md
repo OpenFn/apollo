@@ -1,4 +1,4 @@
-# global_agent Service
+# global_chat Service
 
 The Global Agent is a supervisor/orchestrator service that routes user requests
 to the appropriate subagents and coordinates complex multi-step OpenFn
@@ -11,13 +11,13 @@ job code), or a `PlannerAgent` that orchestrates both in sequence.
 ## Usage
 
 ```bash
-bun py global_agent --input tmp/payload.json
+bun py global_chat --input tmp/payload.json
 ```
 
 Or via curl:
 
 ```bash
-curl -X POST https://apollo-staging.openfn.org/services/global_agent --json @tmp/payload.json
+curl -X POST https://apollo-staging.openfn.org/services/global_chat --json @tmp/payload.json
 ```
 
 ### Example Input
@@ -162,11 +162,11 @@ maximum of tool calls, default 10).
 Run the multi-step planner tests with:
 
 ```bash
-poetry run pytest global_agent/tests/test_planner_multistep.py -v -s
+poetry run pytest global_chat/tests/test_planner_multistep.py -v -s
 ```
 
 Run all tests for the service:
 
 ```bash
-poetry run pytest global_agent/tests/ -v -s
+poetry run pytest global_chat/tests/ -v -s
 ```

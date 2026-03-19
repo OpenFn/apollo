@@ -13,8 +13,8 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from util import ApolloError, create_logger
-from global_agent.config_loader import ConfigLoader
-from global_agent.router import RouterAgent
+from global_chat.config_loader import ConfigLoader
+from global_chat.router import RouterAgent
 
 logger = create_logger(__name__)
 
@@ -94,8 +94,8 @@ def main(data_dict: dict) -> dict:
         }
 
     except ApolloError as e:
-        logger.error(f"ApolloError in global_agent: {e}")
+        logger.error(f"ApolloError in global_chat: {e}")
         raise e
     except Exception as e:
-        logger.exception("Unexpected error in global_agent")
+        logger.exception("Unexpected error in global_chat")
         raise ApolloError(500, str(e))

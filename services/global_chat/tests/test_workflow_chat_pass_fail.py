@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 import difflib
 from typing import List
-from .test_utils import assert_yaml_equal_except, call_global_agent_service, make_service_input, print_response_details, assert_no_special_chars, assert_yaml_jobs_have_body, assert_yaml_has_ids, assert_routed_to, get_response_yaml
+from .test_utils import assert_yaml_equal_except, call_global_chat_service, make_service_input, print_response_details, assert_no_special_chars, assert_yaml_jobs_have_body, assert_yaml_has_ids, assert_routed_to, get_response_yaml
 
 def test_change_trigger():
     print("==================TEST==================")
@@ -50,7 +50,7 @@ edges:
     ]
     content = "Actually I want to schedule it for midnight every day."
     service_input = make_service_input(existing_yaml=existing_yaml, history=history, content=content)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     assert_routed_to(response, "workflow_agent", context="test_change_trigger")
     print_response_details(response, content=content)
     assert response is not None
@@ -195,7 +195,7 @@ edges:
     enabled: true
 """
     service_input = make_service_input(existing_yaml=existing_yaml, history=history, content=content)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     assert_routed_to(response, "workflow_agent", context="test_rename_two_jobs_commcare")
     print_response_details(response, content=content)
     assert response is not None
@@ -220,7 +220,7 @@ def test_special_characters():
     ]
     content = "data about water systems and water sales"
     service_input = make_service_input(existing_yaml=existing_yaml, history=history, content=content)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     assert_routed_to(response, "workflow_agent", context="test_special_characters")
     print_response_details(response, content=content)
     assert response is not None
@@ -268,7 +268,7 @@ edges:
     }
 
     service_input = make_service_input(existing_yaml=existing_yaml, history=history, content=content, context=context)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     assert_routed_to(response, "workflow_agent", context="test_history_prefix_parsing")
     print_response_details(response, content=content)
 

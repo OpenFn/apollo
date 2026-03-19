@@ -2,4 +2,6 @@
 "apollo": minor
 ---
 
-add global agent for one-shot generation
+add global_chat service for one-shot generation
+
+Includes planner agent and router

@@ -15,9 +15,9 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from util import create_logger, ApolloError, sum_usage
-from global_agent.config_loader import ConfigLoader
+from global_chat.config_loader import ConfigLoader
 from models import resolve_model
-from global_agent.yaml_utils import get_step_name_from_page, find_job_in_yaml, stitch_job_code
+from global_chat.yaml_utils import get_step_name_from_page, find_job_in_yaml, stitch_job_code
 
 logger = create_logger(__name__)
 
@@ -335,7 +335,7 @@ class RouterAgent:
         confidence: int
     ) -> RouterResult:
         """Delegate to PlannerAgent for complex orchestration."""
-        from global_agent.planner import PlannerAgent
+        from global_chat.planner import PlannerAgent
 
         logger.info("Routing to planner")
 

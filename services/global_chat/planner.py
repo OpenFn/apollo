@@ -12,12 +12,12 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from util import create_logger, ApolloError, sum_usage
 from streaming_util import StreamManager
-from global_agent.config_loader import ConfigLoader
+from global_chat.config_loader import ConfigLoader
 from models import resolve_model
-from global_agent.tools.tool_definitions import TOOL_DEFINITIONS
-from global_agent.yaml_utils import stitch_job_code, redact_job_bodies, find_job_in_yaml
+from global_chat.tools.tool_definitions import TOOL_DEFINITIONS
+from global_chat.yaml_utils import stitch_job_code, redact_job_bodies, find_job_in_yaml
 from tools.search_documentation.search_documentation import search_documentation_tool
-from global_agent.subagent_caller import call_workflow_agent, call_job_agent, format_subagent_result_for_llm
+from global_chat.subagent_caller import call_workflow_agent, call_job_agent, format_subagent_result_for_llm
 
 logger = create_logger(__name__)
 

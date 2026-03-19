@@ -1,7 +1,7 @@
 import pytest
 import yaml
 from .test_utils import (
-    call_global_agent_service,
+    call_global_chat_service,
     make_service_input,
     print_response_details,
     assert_routed_to,
@@ -24,7 +24,7 @@ def test_good_morning_email_workflow():
         "Every day at 9am send myself a good morning email (x@openfn.org) via gmail."
     )
     service_input = make_service_input(content=content, history=[])
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     print_response_details(response, test_name="test_good_morning_email_workflow", content=content)
 
     assert response is not None

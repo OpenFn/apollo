@@ -1,7 +1,7 @@
 import pytest
 import yaml
 from .test_utils import (
-    call_global_agent_service,
+    call_global_chat_service,
     make_service_input,
     print_response_details,
     assert_routed_to,
@@ -61,7 +61,7 @@ def test_commcare_to_dhis2_with_job_code():
         "Create a workflow that fetches patient cases from CommCare and registers them in DHIS2."
     )
     service_input = make_service_input(content=content, history=[])
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     print_response_details(response, test_name="test_commcare_to_dhis2_with_job_code", content=content)
 
     assert response is not None
@@ -103,7 +103,7 @@ def test_http_to_salesforce_three_steps_with_job_code():
         "transform the data, and upsert contacts to Salesforce."
     )
     service_input = make_service_input(content=content, history=[])
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     print_response_details(response, test_name="test_http_to_salesforce_three_steps_with_job_code", content=content)
 
     assert response is not None
@@ -141,7 +141,7 @@ def test_vague_gmail_to_database():
     )
     content = "I want to fetch my data from gmail and send it to my database"
     service_input = make_service_input(content=content, history=[])
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     print_response_details(response, test_name="test_vague_gmail_to_database", content=content)
 
     assert response is not None
@@ -167,7 +167,7 @@ def test_gsheets_transform_salesforce_with_cron():
         "Google Sheets, transforms it, and upserts it into Salesforce?"
     )
     service_input = make_service_input(content=content, history=[])
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     print_response_details(response, test_name="test_gsheets_transform_salesforce_with_cron", content=content)
 
     assert response is not None
@@ -199,7 +199,7 @@ def test_commcare_to_dhis2_tracker_with_specific_functions():
         "4. Use fn() to log the import summary from state.data.stats to the console."
     )
     service_input = make_service_input(content=content, history=[])
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     print_response_details(response, test_name="test_commcare_to_dhis2_tracker_with_specific_functions", content=content)
 
     assert response is not None

@@ -1,6 +1,6 @@
 import pytest
 import json
-from .test_utils import call_global_agent_service, make_service_input, print_response_details, assert_routed_to, get_suggested_code
+from .test_utils import call_global_chat_service, make_service_input, print_response_details, assert_routed_to, get_suggested_code
 
 
 def test_basic_input():
@@ -29,7 +29,7 @@ post('https://destination.org/upload', state => state.transformed);''',
     }
     meta = {}
     service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     assert_routed_to(response, "job_code_agent", context="test_basic_input")
     print_response_details(response, "basic_input", content=content)
     assert response is not None
@@ -89,7 +89,7 @@ post('https://destination.org/upload', state => state.transformed);''',
     }
 
     service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     assert_routed_to(response, "job_code_agent", context="test_contextualised_input")
     print_response_details(response, "contextualised_input", content=content)
     assert response is not None
@@ -160,7 +160,7 @@ def test_duplicate_sections():
     }
     meta = {}
     service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     assert_routed_to(response, "job_code_agent", context="test_duplicate_sections")
     print_response_details(response, "odk_duplicate_sections", content=content)
     assert response is not None
@@ -202,7 +202,7 @@ post('https://api.example.com/endpoint', state => state.items);''',
     }
     meta = {}
     service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     assert_routed_to(response, "job_code_agent", context="test_duplicate_sections_additional")
     print_response_details(response, "duplicate_post_sections", content=content)
     assert response is not None
@@ -253,7 +253,7 @@ post('https://destination.api/patients', state => state.patients);''',
     }
 
     service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=True)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     assert_routed_to(response, "job_code_agent", context="test_navigation_workflow_to_job")
     print_response_details(response, "navigation_workflow_to_job", content=content)
 
@@ -302,7 +302,7 @@ fn(state => {
 
     meta = {}
     service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=False)
-    response = call_global_agent_service(service_input)
+    response = call_global_chat_service(service_input)
     assert_routed_to(response, "job_code_agent", context="test_adaptor_context_switching")
     print_response_details(response, "adaptor_context_switching", content=content)
 

@@ -11,7 +11,7 @@ from typing import Dict, Optional
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from util import create_logger, ApolloError
-from global_agent.yaml_utils import find_job_in_yaml
+from global_chat.yaml_utils import find_job_in_yaml
 
 logger = create_logger(__name__)
 
