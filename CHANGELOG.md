@@ -1,5 +1,17 @@
 # apollo
 
+## 0.20.0
+
+### Minor Changes
+
+- da1c1c9: add global_chat service for one-shot generation
+
+  Includes planner agent and router
+
+### Patch Changes
+
+- Dependency updates
+
 ## 0.19.8
 
 ### Patch Changes
