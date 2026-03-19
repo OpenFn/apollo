@@ -1,5 +1,6 @@
 import os
 import json
+import yaml
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 from anthropic import (
@@ -18,6 +19,13 @@ from util import ApolloError, create_logger, AdaptorSpecifier, add_page_prefix
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
 from streaming_util import StreamManager
+from models import resolve_model
+
+_dir = os.path.dirname(os.path.abspath(__file__))
+with open(os.path.join(_dir, "rag.yaml")) as _f:
+    _service_config = yaml.safe_load(_f)
+
+_MODEL = resolve_model(_service_config.get("model", "claude-sonnet"))
 
 logger = create_logger("job_chat")
 
@@ -75,7 +83,7 @@ class Payload:
 
 @dataclass
 class ChatConfig:
-    model: str = "claude-sonnet-4-5-20250929"
+    model: str = _MODEL
     max_tokens: int = 16384
     api_key: Optional[str] = None
 
