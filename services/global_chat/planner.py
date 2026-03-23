@@ -242,7 +242,8 @@ class PlannerAgent:
         elif tool_use_block.name == "call_workflow_agent":
             subagent_result = call_workflow_agent(
                 tool_use_block.input,
-                workflow_yaml=self.current_yaml
+                workflow_yaml=self.current_yaml,
+                api_key=self.api_key
             )
 
             if "usage" in subagent_result:
@@ -283,7 +284,8 @@ class PlannerAgent:
 
             subagent_result = call_job_agent(
                 tool_use_block.input,
-                workflow_yaml=self.current_yaml
+                workflow_yaml=self.current_yaml,
+                api_key=self.api_key
             )
 
             if "usage" in subagent_result:

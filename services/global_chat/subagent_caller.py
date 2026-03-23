@@ -18,7 +18,8 @@ logger = create_logger(__name__)
 
 def call_workflow_agent(
     tool_input: Dict,
-    workflow_yaml: Optional[str] = None
+    workflow_yaml: Optional[str] = None,
+    api_key: Optional[str] = None
 ) -> Dict:
     """
     Call the workflow agent and return its results.
@@ -39,7 +40,8 @@ def call_workflow_agent(
     workflow_payload = {
         "content": user_message,
         "existing_yaml": workflow_yaml,
-        "history": []  # Supervisor includes context in message
+        "history": [],  # Supervisor includes context in message
+        "api_key": api_key
     }
 
     try:
@@ -62,7 +64,8 @@ def call_workflow_agent(
 
 def call_job_agent(
     tool_input: Dict,
-    workflow_yaml: Optional[str] = None
+    workflow_yaml: Optional[str] = None,
+    api_key: Optional[str] = None
 ) -> Dict:
     """
     Call the job code agent and return its results.
@@ -99,7 +102,8 @@ def call_job_agent(
         "context": job_context,
         "suggest_code": True,
         "stream": False,
-        "history": []  # Supervisor includes context in message
+        "history": [],  # Supervisor includes context in message
+        "api_key": api_key
     }
 
     try:
