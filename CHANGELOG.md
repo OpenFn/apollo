@@ -1,5 +1,11 @@
 # apollo
 
+## 0.20.1
+
+### Patch Changes
+
+- b4215f5: pass global agent api key to subagents
+
 ## 0.20.0
 
 ### Minor Changes
