@@ -230,7 +230,8 @@ class RouterAgent:
             "content": enriched_content,
             "existing_yaml": workflow_yaml,
             "history": clean_history,
-            "stream": stream
+            "stream": stream,
+            "api_key": self.api_key
         }
 
         result = workflow_chat_main(payload)
@@ -297,7 +298,8 @@ class RouterAgent:
             "context": job_context,
             "suggest_code": True,
             "history": clean_history,
-            "stream": stream
+            "stream": stream,
+            "api_key": self.api_key
         }
 
         result = job_chat_main(payload)
