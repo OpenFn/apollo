@@ -181,7 +181,8 @@ class AnthropicClient:
                                 text_started,
                                 sent_length,
                                 stream_manager,
-                                original_code
+                                original_code,
+                                content
                             )
                     message = stream_obj.get_final_message()
 
@@ -253,35 +254,6 @@ class AnthropicClient:
                 diff=diff
             )
 
-    @staticmethod
-    def _resolve_code_edits(original_code, code_edits):
-        """Apply code edits to original code without error correction.
-
-        Best-effort resolution for streaming preview — skips edits that
-        fail to apply rather than making a second LLM call.
-        """
-        if not original_code or not code_edits:
-            return None
-
-        current_code = original_code
-        applied = False
-
-        for edit in code_edits:
-            action = edit.get("action")
-            if action == "rewrite":
-                new_code = edit.get("new_code")
-                if new_code:
-                    current_code = new_code
-                    applied = True
-            elif action == "replace":
-                old_code = edit.get("old_code")
-                new_code = edit.get("new_code")
-                if old_code and new_code is not None and old_code in current_code:
-                    current_code = current_code.replace(old_code, new_code, 1)
-                    applied = True
-
-        return current_code if applied else None
-
     def process_stream_event(
         self,
         event,
@@ -290,7 +262,8 @@ class AnthropicClient:
         text_started,
         sent_length,
         stream_manager,
-        original_code=None
+        original_code=None,
+        content=None
     ):
         """
         Process a single stream event from the Anthropic API.
@@ -308,13 +281,21 @@ class AnthropicClient:
                     delimiter = ',\n  "text_answer": "'
 
                     if delimiter in accumulated_response:
-                        # Extract code_edits JSON and resolve into final code
+                        # Extract code_edits JSON and apply with full error correction
                         code_edits_raw = '[' + accumulated_response.split(delimiter)[0]
                         try:
                             code_edits = json.loads(code_edits_raw)
-                            resolved_code = self._resolve_code_edits(original_code, code_edits)
-                            if resolved_code:
-                                stream_manager.send_changes({"code": resolved_code})
+                            if original_code and code_edits:
+                                suggested_code, diff = self.apply_code_edits(
+                                    content=content or "",
+                                    text_answer="",
+                                    original_code=original_code,
+                                    code_edits=code_edits
+                                )
+                                if suggested_code:
+                                    stream_manager.send_changes({"code": suggested_code})
+                                else:
+                                    stream_manager.send_changes({"code_edits": code_edits})
                             else:
                                 stream_manager.send_changes({"code_edits": code_edits})
                         except json.JSONDecodeError:
