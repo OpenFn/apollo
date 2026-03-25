@@ -513,7 +513,7 @@ class AnthropicClient:
                         # yaml_raw is the string content between the prefilled opening " and delimiter "
                         yaml_raw = accumulated_response.split(delimiter)[0]
                         yaml_value = self._unescape_json_string(yaml_raw)
-                        if yaml_value:
+                        if yaml_value and yaml_value != "null":
                             stream_manager.send_changes({"yaml": yaml_value})
 
                         # Mark where text content starts
