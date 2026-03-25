@@ -9,6 +9,7 @@ import pandas as pd
 from vocab_mapper.prompts import *
 from vocab_mapper.dataset_tools import format_google_sheets_input, format_google_sheets_output
 from util import create_logger, ApolloError
+from models import CLAUDE_SONNET
 
 logger = create_logger("vocab_mapper")
 logging.getLogger('pinecone_plugin_interface.logging').setLevel(logging.WARNING)
@@ -36,7 +37,7 @@ class VocabMapper:
     def _call_llm(self, system_prompt: str, user_prompt: str) -> str:
         """Helper method to make LLM calls."""
         message = self.client.messages.create(
-            model="claude-sonnet-4-5-20250929",
+            model=CLAUDE_SONNET,
             max_tokens=500,
             temperature=0,
             system=system_prompt,

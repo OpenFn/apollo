@@ -10,6 +10,8 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from models import CLAUDE_SONNET
+
 
 @dataclass
 class ContentBlock:
@@ -32,7 +34,7 @@ class StreamManager:
         manager.end_stream()
     """
 
-    def __init__(self, model: str = "claude-3-7-sonnet-20250219", stream: bool = True):
+    def __init__(self, model: str = CLAUDE_SONNET, stream: bool = True):
         """
         Initialize the stream manager.
 

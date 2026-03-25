@@ -6,6 +6,7 @@ from doc_agent_chat.doc_search import DocSearch
 from doc_agent_chat.prompt import build_system_prompt
 from doc_agent_chat.tools import TOOL_DEFINITIONS, search_documents, format_search_results_as_documents
 from doc_agent_chat.config_loader import ConfigLoader
+from models import resolve_model
 
 logger = create_logger("agent")
 
@@ -22,7 +23,7 @@ class Agent:
             raise ValueError("API key must be provided")
 
         self.client = Anthropic(api_key=self.api_key)
-        self.model = config.get("model", "claude-sonnet-4-5-20250929")
+        self.model = resolve_model(config.get("model", "claude-sonnet"))
         self.max_tokens = config.get("max_tokens", 16384)
         self.max_tool_calls = config.get("max_tool_calls", 10)
         self.search_top_k = config.get("search_top_k", 5)

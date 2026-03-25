@@ -1,3 +1,9 @@
+import sys
+from pathlib import Path
+
+services_dir = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(services_dir))
+
 import pytest
 from workflow_chat.workflow_chat import AnthropicClient, ChatConfig
 from workflow_chat.gen_project_prompt import build_prompt
