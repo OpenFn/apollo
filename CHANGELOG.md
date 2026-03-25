@@ -1,5 +1,11 @@
 # apollo
 
+## 0.20.2
+
+### Patch Changes
+
+- Update adaptor API dependency, fixing an issue in the global agent
+
 ## 0.20.1
 
 ### Patch Changes
