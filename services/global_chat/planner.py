@@ -13,6 +13,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent))
 
+from langfuse import observe
 from util import create_logger, ApolloError, sum_usage
 from streaming_util import (
     StreamManager,
@@ -67,6 +68,7 @@ class PlannerAgent:
 
         logger.info(f"PlannerAgent initialized with model: {self.model}")
 
+    @observe(name="planner")
     def run(
         self, content: str, workflow_yaml: Optional[str], page: Optional[str], history: List[Dict], stream: bool
     ) -> PlannerResult:

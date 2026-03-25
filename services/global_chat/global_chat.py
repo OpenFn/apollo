@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
+from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
 from util import ApolloError, create_logger
 from global_chat.config_loader import ConfigLoader
 from global_chat.router import RouterAgent
@@ -53,6 +54,7 @@ class Payload:
         return (self.options or {}).get("stream", False)
 
 
+@observe(name="global_chat")
 def main(data_dict: dict) -> dict:
     """
     Main entry point for global agent service.
@@ -68,30 +70,39 @@ def main(data_dict: dict) -> dict:
         data = Payload.from_dict(data_dict)
         logger.info(f"Global agent called with content: {data.content[:100]}...")
 
-        # 2. Load configuration
-        config_loader = ConfigLoader("config.yaml")
+        # Set Langfuse trace metadata (only user-facing content, not api_key)
+        langfuse = get_langfuse_client()
+        langfuse.update_current_span(input=data.content)
+        session_id = data.metadata.get("session_id") if data.metadata else None
 
-        # 3. Initialize router
-        router = RouterAgent(config_loader, data.api_key)
+        with propagate_attributes(
+            session_id=session_id,
+            tags=["global_chat"],
+        ):
+            # 2. Load configuration
+            config_loader = ConfigLoader("config.yaml")
 
-        # 4. Route and execute
-        result = router.route_and_execute(
-            content=data.content,
-            workflow_yaml=data.workflow_yaml,
-            page=data.page,
-            history=data.history or [],
-            stream=data.get_stream(),
-            attachments=data.attachments or []
-        )
+            # 3. Initialize router
+            router = RouterAgent(config_loader, data.api_key)
 
-        # 5. Return structured response
-        return {
-            "response": result.response,
-            "attachments": result.attachments,
-            "history": result.history,
-            "usage": result.usage,
-            "meta": result.meta
-        }
+            # 4. Route and execute
+            result = router.route_and_execute(
+                content=data.content,
+                workflow_yaml=data.workflow_yaml,
+                page=data.page,
+                history=data.history or [],
+                stream=data.get_stream(),
+                attachments=data.attachments or []
+            )
+
+            # 5. Return structured response
+            return {
+                "response": result.response,
+                "attachments": result.attachments,
+                "history": result.history,
+                "usage": result.usage,
+                "meta": result.meta
+            }
 
     except ApolloError as e:
         logger.error(f"ApolloError in global_chat: {e}")

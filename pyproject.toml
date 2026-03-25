@@ -20,6 +20,8 @@ nltk = "^3.9.3"
 pytest = "^8.4.1"
 sentry-sdk = "^2.35.0"
 psycopg2-binary = "^2.9.10"
+langfuse = "^4.0.1"
+opentelemetry-instrumentation-anthropic = "^0.53.3"
 
 [tool.poetry.group.dev]
 optional = false
