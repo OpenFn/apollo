@@ -1,5 +1,11 @@
 # apollo
 
+## 0.21.0
+
+### Minor Changes
+
+- chat agents: Reverse the order of text and attachments in streaming responses
+
 ## 0.20.2
 
 ### Patch Changes
