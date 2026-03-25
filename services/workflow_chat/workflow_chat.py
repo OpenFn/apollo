@@ -357,14 +357,17 @@ class AnthropicClient:
                 # Parse YAML string into Python object
                 output_yaml = yaml.safe_load(output_yaml)
 
-                with sentry_sdk.start_span(description="validate_adaptors"):
-                    self.validate_adaptors(output_yaml)
-                with sentry_sdk.start_span(description="sanitize_job_names"):
-                    self.sanitize_job_names(output_yaml)
-                with sentry_sdk.start_span(description="restore_components"):
-                    self.restore_components(output_yaml, preserved_values)
-                # Convert back to YAML string with preserved order
-                output_yaml = yaml.dump(output_yaml, sort_keys=False)
+                if not isinstance(output_yaml, dict):
+                    output_yaml = ""
+                else:
+                    with sentry_sdk.start_span(description="validate_adaptors"):
+                        self.validate_adaptors(output_yaml)
+                    with sentry_sdk.start_span(description="sanitize_job_names"):
+                        self.sanitize_job_names(output_yaml)
+                    with sentry_sdk.start_span(description="restore_components"):
+                        self.restore_components(output_yaml, preserved_values)
+                    # Convert back to YAML string with preserved order
+                    output_yaml = yaml.dump(output_yaml, sort_keys=False)
             else:
                 output_yaml = ""
                 
