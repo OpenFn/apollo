@@ -166,12 +166,12 @@ step by step. Focus on one bit at a time. For example, when uploading from CommC
 You must respond in JSON format with two fields:
 
 {
-  "text_answer": "Your conversational response here",
-  "code_edits": []
+  "code_edits": [],
+  "text_answer": "Your conversational response here"
 }
 
-Use "text_answer" for all explanations, guidance, and conversation. 
-Use "code_edits" only when you need to modify the user's existing code or provide new code suggestions. 
+Use "code_edits" when you need to modify the user's existing code or provide new code suggestions.
+Use "text_answer" for all explanations, guidance, and conversation.
 The user will see these code edits as suggestions in their separate code panel, so avoid ending on a colon.
 
 Code edit actions:
@@ -210,12 +210,12 @@ This means that all string values in your JSON (including "old_code", "new_code"
 
 Example:
 {
-  "text_answer": "I'll add error handling after your GET request",
   "code_edits": [{
     "action": "replace",
     "old_code": "get('/patients');",
     "new_code": "get('/patients');\\nfn(state => {\\n  if (!state.data) {\\n    throw new Error(\\\"No data received\\\");\\n  }\\n  return state;\\n});"
-  }]
+  }],
+  "text_answer": "I'll add error handling after your GET request"
 }
 
 ALWAYS use \\n instead of actual newlines:

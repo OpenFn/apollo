@@ -105,6 +105,19 @@ class AnthropicClient:
             raise ValueError("API key must be provided")
         self.client = Anthropic(api_key=self.api_key)
 
+    @staticmethod
+    def _unescape_json_string(text):
+        """Unescape JSON string escape sequences (e.g. \\n -> newline, \\" -> quote).
+
+        When suggest_code is true, Claude generates text inside a JSON string value,
+        so newlines and quotes arrive escaped. This converts them back to actual
+        characters so streamed markdown renders properly.
+        """
+        try:
+            return json.loads(f'"{text}"')
+        except (json.JSONDecodeError, ValueError):
+            return text
+
     def generate(
         self,
         content: str,
@@ -140,7 +153,7 @@ class AnthropicClient:
                         download_adaptor_docs=download_adaptor_docs,
                         refresh_rag=refresh_rag
                     )
-                    prompt.append({"role": "assistant", "content": '{\n  "text_answer": "'})
+                    prompt.append({"role": "assistant", "content": '{\n  "code_edits": ['})
 
                 else:
                     system_message, prompt, retrieved_knowledge = build_old_prompt(
@@ -156,9 +169,11 @@ class AnthropicClient:
             with sentry_sdk.start_span(description="anthropic_api_call"):
                 if stream:
                     logger.info("Making streaming API call")
-                    text_complete = False
+                    text_started = False
                     sent_length = 0
                     accumulated_response = ""
+
+                    original_code = context.get("expression") if context and isinstance(context, dict) else None
 
                     with self.client.messages.stream(
                         max_tokens=self.config.max_tokens,
@@ -167,21 +182,23 @@ class AnthropicClient:
                         system=system_message
                     ) as stream_obj:
                         for event in stream_obj:
-                            accumulated_response, text_complete, sent_length = self.process_stream_event(
+                            accumulated_response, text_started, sent_length = self.process_stream_event(
                                 event,
                                 accumulated_response,
                                 suggest_code,
-                                text_complete,
+                                text_started,
                                 sent_length,
-                                stream_manager
+                                stream_manager,
+                                original_code,
+                                content
                             )
                     message = stream_obj.get_final_message()
 
-                    # Flush any remaining buffered content when suggest_code is true
-                    if suggest_code and not text_complete:
+                    # Flush any remaining buffered text
+                    if suggest_code and text_started:
                         if sent_length < len(accumulated_response):
                             remaining = accumulated_response[sent_length:]
-                            stream_manager.send_text(remaining)
+                            stream_manager.send_text(self._unescape_json_string(remaining))
 
                 else:
                     logger.info("Making non-streaming API call")
@@ -205,7 +222,7 @@ class AnthropicClient:
             response = "\n\n".join(response_parts)
 
             if suggest_code is True:
-                response = '{\n  "text_answer": "' + response # Add back the prefilled opening brace
+                response = '{\n  "code_edits": [' + response # Add back the prefilled opening
 
             if suggest_code is True:
                 # Parse JSON response and apply code edits
@@ -250,48 +267,69 @@ class AnthropicClient:
         event,
         accumulated_response,
         suggest_code,
-        text_complete,
+        text_started,
         sent_length,
-        stream_manager
+        stream_manager,
+        original_code=None,
+        content=None
     ):
         """
         Process a single stream event from the Anthropic API.
+
+        With suggest_code, code_edits are generated first (buffered silently),
+        then a changes event is sent, and text_answer streams to the client.
         """
         if event.type == "content_block_delta":
             if event.delta.type == "text_delta":
                 text_chunk = event.delta.text
                 accumulated_response += text_chunk
 
-                if suggest_code and not text_complete:
-                    delimiter = '",\n  "code_edits"'
+                if suggest_code and not text_started:
+                    # Code edits phase: buffer silently until text_answer starts
+                    delimiter = ',\n  "text_answer": "'
 
-                    # Stream chunks until we hit the end pattern (which might be split across chunks)
                     if delimiter in accumulated_response:
-                        # Get only the text part and send any remaining unsent text
-                        text_only = accumulated_response.split(delimiter)[0]
-                        remaining_text = text_only[sent_length:]
-                        if remaining_text:
-                            stream_manager.send_text(remaining_text)
+                        # Extract code_edits JSON and apply with full error correction
+                        code_edits_raw = '[' + accumulated_response.split(delimiter)[0]
+                        try:
+                            code_edits = json.loads(code_edits_raw)
+                            if original_code and code_edits:
+                                suggested_code, diff = self.apply_code_edits(
+                                    content=content or "",
+                                    text_answer="",
+                                    original_code=original_code,
+                                    code_edits=code_edits
+                                )
+                                if suggested_code:
+                                    stream_manager.send_changes({"code": suggested_code})
+                                else:
+                                    stream_manager.send_changes({"code_edits": code_edits})
+                            else:
+                                stream_manager.send_changes({"code_edits": code_edits})
+                        except json.JSONDecodeError:
+                            logger.warning(f"Failed to parse code_edits: {code_edits_raw[:200]}")
 
-                        # Send "Writing code..." thinking block
-                        stream_manager.send_thinking("Writing code...")
+                        # Mark where text content starts in the accumulated buffer
+                        text_offset = accumulated_response.find(delimiter) + len(delimiter)
+                        sent_length = text_offset
+                        text_started = True
 
-                        text_complete = True
-                    else:
-                        # Buffer to avoid sending partial delimiter
-                        # Only send content that we know won't be part of the delimiter
-                        buffer_size = len(delimiter) - 1
-                        safe_to_send_until = len(accumulated_response) - buffer_size
+                if suggest_code and text_started:
+                    # Text phase: stream with buffer to handle split escape sequences
+                    # Use 2-char buffer since longest escape is 2 chars (e.g. \n, \")
+                    buffer_size = 2
+                    safe_to_send_until = len(accumulated_response) - buffer_size
 
-                        if safe_to_send_until > sent_length:
-                            safe_text = accumulated_response[sent_length:safe_to_send_until]
-                            stream_manager.send_text(safe_text)
-                            sent_length = safe_to_send_until
+                    if safe_to_send_until > sent_length:
+                        safe_text = accumulated_response[sent_length:safe_to_send_until]
+                        stream_manager.send_text(self._unescape_json_string(safe_text))
+                        sent_length = safe_to_send_until
+
                 elif not suggest_code:
                     # Normal streaming for non-code suggestions
                     stream_manager.send_text(text_chunk)
 
-        return accumulated_response, text_complete, sent_length
+        return accumulated_response, text_started, sent_length
 
     def parse_and_apply_edits(self, response: str, content: str, original_code: Optional[str] = None) -> tuple[str, Optional[str], Optional[Dict[str, Any]]]:
         """Parse JSON response and apply code edits to original code."""
