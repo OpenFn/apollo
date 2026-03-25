@@ -10,12 +10,14 @@ from typing import Dict, Optional
 # Import utilities from parent services directory
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
+from langfuse import observe
 from util import create_logger, ApolloError
 from global_chat.yaml_utils import find_job_in_yaml
 
 logger = create_logger(__name__)
 
 
+@observe(name="call_workflow_agent")
 def call_workflow_agent(
     tool_input: Dict,
     workflow_yaml: Optional[str] = None,
@@ -62,6 +64,7 @@ def call_workflow_agent(
         raise ApolloError(500, f"workflow_agent failed: {str(e)}")
 
 
+@observe(name="call_job_agent")
 def call_job_agent(
     tool_input: Dict,
     workflow_yaml: Optional[str] = None,

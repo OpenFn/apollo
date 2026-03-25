@@ -15,6 +15,7 @@ from anthropic import (
     InternalServerError,
 )
 import sentry_sdk
+from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
 from util import ApolloError, create_logger, AdaptorSpecifier, add_page_prefix
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
@@ -105,6 +106,7 @@ class AnthropicClient:
             raise ValueError("API key must be provided")
         self.client = Anthropic(api_key=self.api_key)
 
+    @observe(name="job_chat_generate")
     def generate(
         self,
         content: str,
@@ -399,6 +401,7 @@ class AnthropicClient:
 
         return (corrected_code, success, warning)
         
+    @observe(name="job_chat_error_correction")
     def try_error_correction(self, content: str, error_message: str, old_code: str, new_code: str, full_code: str, text_explanation: str) -> tuple[str, bool, Optional[str]]:
         """Try to correct the edit once, return (code, success)."""
         logger.info(f"Code edit error: {error_message}. Attempting correction...")
@@ -459,6 +462,7 @@ class AnthropicClient:
 
 
 
+@observe(name="job_chat")
 def main(data_dict: dict) -> dict:
     """
     Main entry point with improved error handling and input validation.
@@ -469,6 +473,12 @@ def main(data_dict: dict) -> dict:
             })
 
         data = Payload.from_dict(data_dict)
+
+        # Set Langfuse trace metadata (only user content, not api_key)
+        langfuse = get_langfuse_client()
+        langfuse.update_current_span(input=data.content)
+        input_meta = data_dict.get("meta") or {}
+        session_id = input_meta.get("session_id") if isinstance(input_meta, dict) else None
 
         if data.context is None:
             data.context = {}
@@ -490,8 +500,7 @@ def main(data_dict: dict) -> dict:
                 logger.warning(f"Failed to parse adaptor string '{adaptor_string}': {e}")
 
         # Extract rag_data from meta if present
-        input_meta = data_dict.get("meta", {})
-        rag_data = input_meta.get("rag")
+        rag_data = input_meta.get("rag") if isinstance(input_meta, dict) else None
 
         # Detect navigation by comparing current page prefix with last turn's prefix
         current_prefix = add_page_prefix("", current_page).strip()
@@ -501,31 +510,31 @@ def main(data_dict: dict) -> dict:
 
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
-        result = client.generate(
-            content=data.content,
-            history=data_dict.get("history", []),
-            context=data.context,
-            rag=rag_data,
-            suggest_code=data.suggest_code,
-            stream=data.stream,
-            download_adaptor_docs=data.download_adaptor_docs,
-            refresh_rag=should_refresh_rag,
-            current_page=current_page
-        )
+        with propagate_attributes(session_id=session_id, tags=["job_chat"]):
+            result = client.generate(
+                content=data.content,
+                history=data_dict.get("history", []),
+                context=data.context,
+                rag=rag_data,
+                suggest_code=data.suggest_code,
+                stream=data.stream,
+                download_adaptor_docs=data.download_adaptor_docs,
+                refresh_rag=should_refresh_rag,
+                current_page=current_page
+            )
 
+            response_dict = {
+                "response": result.response,
+                "suggested_code": result.suggested_code,
+                "history": result.history,
+                "usage": result.usage,
+                "meta": {"rag": result.rag}
+            }
 
-        response_dict = {
-            "response": result.response,
-            "suggested_code": result.suggested_code,
-            "history": result.history,
-            "usage": result.usage,
-            "meta": {"rag": result.rag}
-        }
+            if result.diff:
+                response_dict["diff"] = result.diff
 
-        if result.diff:
-            response_dict["diff"] = result.diff
-
-        return response_dict
+            return response_dict
 
     except ValueError as e:
         raise ApolloError(400, str(e), type="BAD_REQUEST")

@@ -1,6 +1,7 @@
 import json
 import time
 import sentry_sdk
+from langfuse import observe
 from util import create_logger, ApolloError, AdaptorSpecifier, get_db_connection
 from .retrieve_docs import retrieve_knowledge
 from search_adaptor_docs.search_adaptor_docs import fetch_signatures
@@ -393,6 +394,7 @@ def format_search_results(search_results):
         for result in search_results
     ])
 
+@observe(name="job_chat_build_prompt")
 def build_prompt(content, history, context, rag=None, api_key=None, stream_manager=None, download_adaptor_docs=True, refresh_rag=False):
     retrieved_knowledge = {
         "search_results": [],

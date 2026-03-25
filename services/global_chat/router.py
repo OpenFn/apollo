@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
+from langfuse import observe
 from util import create_logger, ApolloError, sum_usage
 from global_chat.config_loader import ConfigLoader
 from models import resolve_model
@@ -65,6 +66,7 @@ class RouterAgent:
 
         logger.info(f"RouterAgent initialized with model: {self.model}")
 
+    @observe(name="router")
     def route_and_execute(
         self,
         content: str,
@@ -115,6 +117,7 @@ class RouterAgent:
 
         return result
 
+    @observe(name="routing_decision")
     def _make_routing_decision(
         self,
         content: str,

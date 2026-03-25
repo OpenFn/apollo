@@ -9,10 +9,17 @@ from util import set_apollo_port, ApolloError
 
 load_dotenv()
 
+# Langfuse: init after load_dotenv so env vars are available, before any Anthropic client is created
+from opentelemetry.instrumentation.anthropic import AnthropicInstrumentor
+AnthropicInstrumentor().instrument()
+
+from langfuse import get_client as get_langfuse_client
+langfuse = get_langfuse_client()
+
 env = os.getenv('ENVIRONMENT', 'unknown')
 trace_rates = {
     'development': 1,
-    'staging': 0.05, 
+    'staging': 0.05,
     'production': 0.03,
     'unknown': 0.0,
     }
@@ -67,6 +74,8 @@ def call(
     except Exception as e:
         sentry_sdk.capture_exception(e)
         result = ApolloError(code=500, message=str(e), type="INTERNAL_ERROR").to_dict()
+
+    langfuse.flush()
 
     if output_path:
         with open(output_path, "w") as f:
