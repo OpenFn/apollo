@@ -27,6 +27,7 @@ class RouterDecision:
     """Decision from router about where to send the request."""
     destination: str  # "workflow_agent" | "job_code_agent" | "planner"
     confidence: int   # 1-5, where 5 is highest confidence
+    job_key: Optional[str] = None  # Target job key when routing to job_code_agent
 
 
 @dataclass
@@ -101,7 +102,7 @@ class RouterAgent:
 
         try:
             decision = self._make_routing_decision(content, workflow_yaml, page, history)
-            logger.info(f"Router decision: {decision.destination} (confidence: {decision.confidence})")
+            logger.info(f"Router decision: {decision.destination} (confidence: {decision.confidence}, job_key: {decision.job_key})")
         except Exception as e:
             logger.warning(f"Routing decision failed: {e}. Defaulting to planner for safety.")
             decision = RouterDecision(destination="planner", confidence=1)
@@ -109,7 +110,7 @@ class RouterAgent:
         if decision.destination == "workflow_agent":
             result = self._route_to_workflow_chat(content, workflow_yaml, history, stream, decision.confidence)
         elif decision.destination == "job_code_agent":
-            result = self._route_to_job_chat(content, workflow_yaml, page, history, stream, decision.confidence)
+            result = self._route_to_job_chat(content, workflow_yaml, page, history, stream, decision.confidence, decision.job_key)
         else:
             result = self._route_to_planner(content, workflow_yaml, page, history, stream, decision.confidence)
 
@@ -163,7 +164,8 @@ class RouterAgent:
             decision_data = json.loads(json_only)
             return RouterDecision(
                 destination=decision_data["destination"],
-                confidence=decision_data.get("confidence", 3)
+                confidence=decision_data.get("confidence", 3),
+                job_key=decision_data.get("job_key")
             )
         except (json.JSONDecodeError, KeyError) as e:
             logger.error(f"Failed to parse routing decision: {e}. Response: {full_response}")
@@ -260,24 +262,27 @@ class RouterAgent:
         page: Optional[str],
         history: List[Dict],
         stream: bool,
-        confidence: int
+        confidence: int,
+        router_job_key: Optional[str] = None
     ) -> RouterResult:
         """
         Route directly to job_chat.
 
         Extracts the focused job's code and adaptor from the workflow YAML using
-        the step name parsed from the page URL, then stitches the suggested code
-        back into the workflow YAML before returning.
+        the step name parsed from the page URL (or the router's job_key as
+        fallback), then stitches the suggested code back into the workflow YAML
+        before returning.
         """
         from job_chat.job_chat import main as job_chat_main
 
         logger.info("Routing to job_chat")
 
-        # Build job context from YAML using step name from page
+        # Build job context from YAML using step name from page,
+        # falling back to the router's job_key decision
         job_context = {}
         matched_job_key = None
 
-        step_name = get_step_name_from_page(page)
+        step_name = get_step_name_from_page(page) or router_job_key
         if workflow_yaml and step_name:
             matched_job_key, job_data = find_job_in_yaml(workflow_yaml, step_name)
             if matched_job_key is None:
