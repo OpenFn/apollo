@@ -159,8 +159,12 @@ class AnthropicClient:
                     read_only=read_only
                 )
 
-            # Add prefilled opening brace for JSON response (yaml first, text second)
-            prompt.append({"role": "assistant", "content": '{\n  "yaml": "'})
+            # Add prefilled opening brace for JSON response
+            if read_only:
+                # In read-only mode, close yaml as empty and start text directly
+                prompt.append({"role": "assistant", "content": '{\n  "yaml": "", "text": "'})
+            else:
+                prompt.append({"role": "assistant", "content": '{\n  "yaml": "'})
 
             accumulated_usage = {
                 "cache_creation_input_tokens": 0,
@@ -176,7 +180,7 @@ class AnthropicClient:
                         logger.info("Making streaming API call")
                         stream_manager.send_thinking("Thinking...")
 
-                        text_started = False
+                        text_started = read_only  # In read-only mode, text starts immediately (no yaml phase)
                         sent_length = 0
                         accumulated_response = ""
 
@@ -225,7 +229,10 @@ class AnthropicClient:
                 response = "\n\n".join(response_parts)
 
                 # Add back the prefilled opening
-                response = '{\n  "yaml": "' + response
+                if read_only:
+                    response = '{\n  "yaml": "", "text": "' + response
+                else:
+                    response = '{\n  "yaml": "' + response
 
                 with sentry_sdk.start_span(description="parse_and_format_yaml"):
 
