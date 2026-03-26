@@ -318,6 +318,8 @@ class RouterAgent:
             logger.warning(f"suggested_code generated but no job matched for page '{page}' - YAML not updated")
 
         attachments = []
+        if result.get("suggested_code"):
+            attachments.append({"type": "job_code", "content": result["suggested_code"]})
         if updated_yaml:
             attachments.append({"type": "workflow_yaml", "content": updated_yaml})
 
