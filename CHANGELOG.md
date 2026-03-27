@@ -6,11 +6,6 @@
 
 - 11e8cea: fix empty yaml key handling after streaming order reversal
 - 5d387ca: fix model use in rag
-
-## 0.21.1
-
-### Patch Changes
-
 - workflow_chat: Fix streaming sending "null" as YAML changes event for
   informational responses (#427)
 
