@@ -1,5 +1,14 @@
 # apollo
 
+## 0.21.1
+
+### Patch Changes
+
+- 11e8cea: fix empty yaml key handling after streaming order reversal
+- 5d387ca: fix model use in rag
+- workflow_chat: Fix streaming sending "null" as YAML changes event for
+  informational responses (#427)
+
 ## 0.21.0
 
 ### Minor Changes
