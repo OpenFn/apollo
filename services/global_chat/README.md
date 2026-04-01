@@ -56,6 +56,10 @@ Request to build a new multi-step workflow from scratch:
 - `options` (optional): Runtime options object (e.g. `{stream: false}`)
 - `api_key` (optional): Anthropic API key; falls back to `ANTHROPIC_API_KEY` env
   var
+- `user` (optional): User identity object with `id` (string) and `employee`
+  (boolean) fields — used for Langfuse trace attribution
+- `metrics_opt_in` (optional): Set to `true` to enable Langfuse tracing for this
+  session. Currently force-enabled for all global_chat sessions.
 
 ### Example Output
 
