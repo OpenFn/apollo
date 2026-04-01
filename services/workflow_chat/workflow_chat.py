@@ -114,6 +114,18 @@ class AnthropicClient:
             raise ValueError("API key must be provided")
         self.client = Anthropic(api_key=self.api_key)
 
+    @staticmethod
+    def _unescape_json_string(text):
+        """Unescape JSON string escape sequences (e.g. \\n -> newline, \\" -> quote).
+
+        When generating inside a JSON string value, newlines and quotes arrive
+        escaped. This converts them back so streamed markdown renders properly.
+        """
+        try:
+            return json.loads(f'"{text}"')
+        except (json.JSONDecodeError, ValueError):
+            return text
+          
     @observe(name="workflow_chat_generate")
     def generate(
         self,
@@ -157,7 +169,11 @@ class AnthropicClient:
                 )
 
             # Add prefilled opening brace for JSON response
-            prompt.append({"role": "assistant", "content": '{\n  "text": "'})
+            if read_only:
+                # In read-only mode, close yaml as empty and start text directly
+                prompt.append({"role": "assistant", "content": '{\n  "yaml": "", "text": "'})
+            else:
+                prompt.append({"role": "assistant", "content": '{\n  "yaml": "'})
 
             accumulated_usage = {
                 "cache_creation_input_tokens": 0,
@@ -173,7 +189,7 @@ class AnthropicClient:
                         logger.info("Making streaming API call")
                         stream_manager.send_thinking("Thinking...")
 
-                        text_complete = False
+                        text_started = read_only  # In read-only mode, text starts immediately (no yaml phase)
                         sent_length = 0
                         accumulated_response = ""
 
@@ -184,20 +200,20 @@ class AnthropicClient:
                             system=system_message
                         ) as stream_obj:
                             for event in stream_obj:
-                                accumulated_response, text_complete, sent_length = self.process_stream_event(
+                                accumulated_response, text_started, sent_length = self.process_stream_event(
                                     event,
                                     accumulated_response,
-                                    text_complete,
+                                    text_started,
                                     sent_length,
                                     stream_manager
                                 )
                         message = stream_obj.get_final_message()
 
-                        # Flush any remaining buffered content
-                        if not text_complete:
+                        # Flush any remaining buffered text
+                        if text_started:
                             if sent_length < len(accumulated_response):
                                 remaining = accumulated_response[sent_length:]
-                                stream_manager.send_text(remaining)
+                                stream_manager.send_text(self._unescape_json_string(remaining))
 
                     else:
                         logger.info("Making non-streaming API call")
@@ -221,8 +237,11 @@ class AnthropicClient:
 
                 response = "\n\n".join(response_parts)
 
-                # Add back the prefilled opening brace
-                response = '{\n  "text": "' + response
+                # Add back the prefilled opening
+                if read_only:
+                    response = '{\n  "yaml": "", "text": "' + response
+                else:
+                    response = '{\n  "yaml": "' + response
 
                 with sentry_sdk.start_span(description="parse_and_format_yaml"):
 
@@ -354,14 +373,17 @@ class AnthropicClient:
                 # Parse YAML string into Python object
                 output_yaml = yaml.safe_load(output_yaml)
 
-                with sentry_sdk.start_span(description="validate_adaptors"):
-                    self.validate_adaptors(output_yaml)
-                with sentry_sdk.start_span(description="sanitize_job_names"):
-                    self.sanitize_job_names(output_yaml)
-                with sentry_sdk.start_span(description="restore_components"):
-                    self.restore_components(output_yaml, preserved_values)
-                # Convert back to YAML string with preserved order
-                output_yaml = yaml.dump(output_yaml, sort_keys=False)
+                if not isinstance(output_yaml, dict):
+                    output_yaml = ""
+                else:
+                    with sentry_sdk.start_span(description="validate_adaptors"):
+                        self.validate_adaptors(output_yaml)
+                    with sentry_sdk.start_span(description="sanitize_job_names"):
+                        self.sanitize_job_names(output_yaml)
+                    with sentry_sdk.start_span(description="restore_components"):
+                        self.restore_components(output_yaml, preserved_values)
+                    # Convert back to YAML string with preserved order
+                    output_yaml = yaml.dump(output_yaml, sort_keys=False)
             else:
                 output_yaml = ""
                 
@@ -489,38 +511,46 @@ class AnthropicClient:
                 else:
                     edge_data["id"] = str(uuid.uuid4())
 
-    def process_stream_event(self, event, accumulated_response, text_complete, sent_length, stream_manager):
+    def process_stream_event(self, event, accumulated_response, text_started, sent_length, stream_manager):
         """
         Process a single stream event from the Anthropic API.
+
+        YAML is generated first (buffered silently), then a changes event
+        is sent, and the text explanation streams to the client.
         """
         if event.type == "content_block_delta":
             if event.delta.type == "text_delta":
                 text_chunk = event.delta.text
                 accumulated_response += text_chunk
 
-                if not text_complete:
-                    delimiter = '",\n  "yaml":'
+                if not text_started:
+                    # YAML phase: buffer silently until text starts
+                    delimiter = '",\n  "text": "'
 
-                    # Stream chunks until we hit the YAML part
                     if delimiter in accumulated_response:
-                        # Get only the text part and send any remaining unsent text
-                        text_only = accumulated_response.split(delimiter)[0]
-                        remaining_text = text_only[sent_length:]
-                        if remaining_text:
-                            stream_manager.send_text(remaining_text)
+                        # Extract YAML content and send as changes event
+                        # yaml_raw is the string content between the prefilled opening " and delimiter "
+                        yaml_raw = accumulated_response.split(delimiter)[0]
+                        yaml_value = self._unescape_json_string(yaml_raw)
+                        if yaml_value and yaml_value != "null":
+                            stream_manager.send_changes({"yaml": yaml_value})
 
-                        text_complete = True
-                    else:
-                        # Buffer to avoid sending partial delimiter
-                        # Only send content that we know won't be part of the delimiter
-                        buffer_size = len(delimiter) - 1
-                        safe_to_send_until = len(accumulated_response) - buffer_size
+                        # Mark where text content starts
+                        text_offset = accumulated_response.find(delimiter) + len(delimiter)
+                        sent_length = text_offset
+                        text_started = True
 
-                        if safe_to_send_until > sent_length:
-                            safe_text = accumulated_response[sent_length:safe_to_send_until]
-                            stream_manager.send_text(safe_text)
-                            sent_length = safe_to_send_until
-        return accumulated_response, text_complete, sent_length
+                if text_started:
+                    # Text phase: stream with buffer for split escape sequences
+                    buffer_size = 2
+                    safe_to_send_until = len(accumulated_response) - buffer_size
+
+                    if safe_to_send_until > sent_length:
+                        safe_text = accumulated_response[sent_length:safe_to_send_until]
+                        stream_manager.send_text(self._unescape_json_string(safe_text))
+                        sent_length = safe_to_send_until
+
+        return accumulated_response, text_started, sent_length
 
 
 @observe(name="workflow_chat", capture_input=False)

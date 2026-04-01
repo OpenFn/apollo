@@ -1,5 +1,26 @@
 # apollo
 
+## 0.21.1
+
+### Patch Changes
+
+- 11e8cea: fix empty yaml key handling after streaming order reversal
+- 5d387ca: fix model use in rag
+- workflow_chat: Fix streaming sending "null" as YAML changes event for
+  informational responses (#427)
+
+## 0.21.0
+
+### Minor Changes
+
+- chat agents: Reverse the order of text and attachments in streaming responses
+
+## 0.20.2
+
+### Patch Changes
+
+- Update adaptor API dependency, fixing an issue in the global agent
+
 ## 0.20.1
 
 ### Patch Changes

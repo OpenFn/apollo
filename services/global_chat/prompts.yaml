@@ -23,7 +23,8 @@ prompts:
     Response format (JSON only, no explanation):
     {
       "destination": "workflow_agent"|"job_code_agent"|"planner",
-      "confidence": 1-5
+      "confidence": 1-5,
+      "job_key": "job-key-from-yaml" // REQUIRED when destination is job_code_agent. Must match a job key from the workflow YAML.
     }
 
     IMPORTANT: Return ONLY the JSON object above. Do not add any explanation or reasoning.

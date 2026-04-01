@@ -14,6 +14,7 @@ from anthropic import (
 import sentry_sdk
 from langfuse import observe
 from util import ApolloError, create_logger
+from models import resolve_model
 from search_docsite.search_docsite import DocsiteSearch
 from .rag_config_loader import ConfigLoader
 from streaming_util import StreamManager
@@ -108,7 +109,7 @@ def needs_docs(content, client, user_context=""):
     )
     
     response_text, usage = call_llm(
-        model=config["llm_search_decision"],
+        model=resolve_model(config["llm_search_decision"]),
         temperature=config["temperature"],
         system_prompt=config_loader.prompts["prompts"]["needs_docs_system_prompt"],
         user_prompt=formatted_user_prompt,
@@ -126,7 +127,7 @@ def generate_queries(content, client, user_context=""):
     )
 
     text, usage = call_llm(
-        model=config["llm_retrieval"],
+        model=resolve_model(config["llm_retrieval"]),
         temperature=config["temperature"],
         system_prompt=config_loader.prompts["prompts"]["search_docs_system_prompt"],
         user_prompt=formatted_user_prompt,

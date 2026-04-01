@@ -118,7 +118,7 @@ This document defines the input and output payload structure for the Global Agen
 
 - **`response`** (string): The main text response from the agent.
 
-- **`attachments`** (array): Artifacts produced during this turn. Each entry has a `type` and `content` field. An empty list `[]` means no artifacts were produced (e.g. a purely informational response). Currently supported types: `workflow_yaml`.
+- **`attachments`** (array): Artifacts produced during this turn. Each entry has a `type` and `content` field. An empty list `[]` means no artifacts were produced (e.g. a purely informational response). Currently supported types: `workflow_yaml`, `job_code`. When both are present, `job_code` contains the suggested code for a specific job and `workflow_yaml` contains the full YAML with the code stitched in.
 
 - **`history`** (array): Updated conversation history including the latest exchange. On direct routes (workflow_agent, job_code_agent), each entry has `content` as a string. On the planner path, entries may have `content` as an array of content blocks (`text`, `tool_use`, `tool_result`) — this is the raw Anthropic messages format from the tool-calling loop.
 

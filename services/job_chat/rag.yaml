@@ -1,5 +1,7 @@
 config_version: 1.0
 model: "claude-sonnet"
+llm_search_decision: "claude-sonnet"
+llm_retrieval: "claude-sonnet"
 threshold: 0.8
 top_k: 5
 temperature: 0
