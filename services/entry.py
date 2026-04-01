@@ -13,8 +13,19 @@ load_dotenv()
 from opentelemetry.instrumentation.anthropic import AnthropicInstrumentor
 AnthropicInstrumentor().instrument()
 
-from langfuse import get_client as get_langfuse_client
-langfuse = get_langfuse_client()
+from langfuse import Langfuse
+from langfuse.span_filter import is_default_export_span
+
+
+def _should_export_span(span):
+    """Drop spans marked as tracing-disabled (user has not opted in)."""
+    attrs = getattr(span, "attributes", None) or {}
+    if attrs.get("langfuse.trace.metadata.tracing_disabled") == "true":
+        return False
+    return is_default_export_span(span)
+
+
+langfuse = Langfuse(should_export_span=_should_export_span)
 
 env = os.getenv('ENVIRONMENT', 'unknown')
 trace_rates = {

@@ -14,6 +14,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
 from util import ApolloError, create_logger
+from langfuse_util import should_track, build_tags
 from global_chat.config_loader import ConfigLoader
 from global_chat.router import RouterAgent
 
@@ -31,6 +32,8 @@ class Payload:
     options: Optional[Dict] = None
     api_key: Optional[str] = None
     attachments: Optional[List[Dict]] = None
+    user: Optional[Dict] = None
+    metrics_opt_in: Optional[bool] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
@@ -47,6 +50,8 @@ class Payload:
             options=data.get("options"),
             api_key=data.get("api_key"),
             attachments=data.get("attachments"),
+            user=data.get("user"),
+            metrics_opt_in=data.get("metrics_opt_in"),
         )
 
     def get_stream(self) -> bool:
@@ -54,7 +59,7 @@ class Payload:
         return (self.options or {}).get("stream", False)
 
 
-@observe(name="global_chat")
+@observe(name="global_chat", capture_input=False)
 def main(data_dict: dict) -> dict:
     """
     Main entry point for global agent service.
@@ -70,14 +75,20 @@ def main(data_dict: dict) -> dict:
         data = Payload.from_dict(data_dict)
         logger.info(f"Global agent called with content: {data.content[:100]}...")
 
-        # Set Langfuse trace metadata (only user-facing content, not api_key)
-        langfuse = get_langfuse_client()
-        langfuse.update_current_span(input=data.content)
         session_id = data.metadata.get("session_id") if data.metadata else None
+        user_info = data.user or {}
+        # TEMPORARY: force tracking for all global_chat sessions — remove when relying on metrics_opt_in
+        tracking = should_track(data_dict, force=True)
+
+        if tracking:
+            langfuse = get_langfuse_client()
+            langfuse.update_current_span(input=data.content)
 
         with propagate_attributes(
             session_id=session_id,
-            tags=["global_chat"],
+            user_id=user_info.get("id") if tracking else None,
+            tags=build_tags("global_chat", user_info) if tracking else None,
+            metadata=None if tracking else {"tracing_disabled": "true"},
         ):
             # 2. Load configuration
             config_loader = ConfigLoader("config.yaml")
