@@ -17,6 +17,7 @@ from anthropic import (
 )
 import sentry_sdk
 from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
+from langfuse_util import should_track, build_tags
 from util import ApolloError, create_logger, AdaptorSpecifier, add_page_prefix
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
@@ -90,6 +91,8 @@ class Payload:
     stream: Optional[bool] = False
     download_adaptor_docs: Optional[bool] = True
     refresh_rag: Optional[bool] = False
+    user: Optional[dict] = None
+    metrics_opt_in: Optional[bool] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
@@ -107,7 +110,9 @@ class Payload:
             suggest_code=data.get("suggest_code"),
             stream=data.get("stream", False),
             download_adaptor_docs=data.get("download_adaptor_docs", True),
-            refresh_rag=data.get("refresh_rag", False)
+            refresh_rag=data.get("refresh_rag", False),
+            user=data.get("user"),
+            metrics_opt_in=data.get("metrics_opt_in"),
         )
 
 
@@ -575,7 +580,7 @@ class AnthropicClient:
 
 
 
-@observe(name="job_chat")
+@observe(name="job_chat", capture_input=False)
 def main(data_dict: dict) -> dict:
     """
     Main entry point with improved error handling and input validation.
@@ -587,11 +592,14 @@ def main(data_dict: dict) -> dict:
 
         data = Payload.from_dict(data_dict)
 
-        # Set Langfuse trace metadata (only user content, not api_key)
-        langfuse = get_langfuse_client()
-        langfuse.update_current_span(input=data.content)
         input_meta = data_dict.get("meta") or {}
         session_id = input_meta.get("session_id") if isinstance(input_meta, dict) else None
+        user_info = data.user or {}
+        tracking = should_track(data_dict)
+
+        if tracking:
+            langfuse = get_langfuse_client()
+            langfuse.update_current_span(input=data.content)
 
         if data.context is None:
             data.context = {}
@@ -623,7 +631,12 @@ def main(data_dict: dict) -> dict:
 
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
-        with propagate_attributes(session_id=session_id, tags=["job_chat"]):
+        with propagate_attributes(
+            session_id=session_id,
+            user_id=user_info.get("id") if tracking else None,
+            tags=build_tags("job_chat", user_info) if tracking else None,
+            metadata=None if tracking else {"tracing_disabled": "true"},
+        ):
             result = client.generate(
                 content=data.content,
                 history=data_dict.get("history", []),
