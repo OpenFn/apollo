@@ -150,4 +150,29 @@ def test_langfuse_workflow_chat_opt_out():
         f"found {len(traces)}. The should_export_span filter may not be working."
     )
 
-    print(f"\n Opt-out verified: zero traces for session: {opt_out_session}")
+    print(f"\n Opt-out verified (absent): zero traces for session: {opt_out_session}")
+
+
+def test_langfuse_workflow_chat_opt_out_explicit_false():
+    """workflow_chat with metrics_opt_in=False should produce zero traces."""
+    session = f"test-workflow-chat-optout-false-{uuid.uuid4().hex[:8]}"
+
+    input_data = make_service_input(
+        existing_yaml="",
+        history=[],
+        content="Create a simple webhook to HTTP workflow",
+    )
+    input_data["meta"] = {"session_id": session}
+    input_data["metrics_opt_in"] = False
+
+    response = call_workflow_chat_service(input_data)
+    assert "response" in response, f"Opt-out (explicit false) test failed: {response}"
+
+    time.sleep(5)
+    traces = _fetch_traces(session, retries=1, delay=0)
+    assert len(traces) == 0, (
+        f"Expected zero traces for session {session} with metrics_opt_in=False, "
+        f"found {len(traces)}."
+    )
+
+    print(f"\n Opt-out verified (explicit false): zero traces for session: {session}")

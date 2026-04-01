@@ -27,7 +27,7 @@ class Payload:
     content: str
     workflow_yaml: Optional[str] = None
     page: Optional[str] = None
-    metadata: Optional[Dict] = None
+    meta: Optional[Dict] = None
     history: Optional[List[Dict]] = None
     options: Optional[Dict] = None
     api_key: Optional[str] = None
@@ -45,7 +45,7 @@ class Payload:
             content=data["content"],
             workflow_yaml=data.get("workflow_yaml"),
             page=data.get("page"),
-            metadata=data.get("metadata"),
+            meta=data.get("meta"),
             history=data.get("history"),
             options=data.get("options"),
             api_key=data.get("api_key"),
@@ -75,7 +75,7 @@ def main(data_dict: dict) -> dict:
         data = Payload.from_dict(data_dict)
         logger.info(f"Global agent called with content: {data.content[:100]}...")
 
-        session_id = data.metadata.get("session_id") if data.metadata else None
+        session_id = data.meta.get("session_id") if data.meta else None
         user_info = data.user or {}
         # TEMPORARY: force tracking for all global_chat sessions — remove when relying on metrics_opt_in
         tracking = should_track(data_dict, force=True)

@@ -172,4 +172,30 @@ def test_langfuse_job_chat_opt_out():
         f"found {len(traces)}. The should_export_span filter may not be working."
     )
 
-    print(f"\n Opt-out verified: zero traces for session: {opt_out_session}")
+    print(f"\n Opt-out verified (absent): zero traces for session: {opt_out_session}")
+
+
+def test_langfuse_job_chat_opt_out_explicit_false():
+    """job_chat with metrics_opt_in=False should produce zero traces."""
+    session = f"test-job-chat-optout-false-{uuid.uuid4().hex[:8]}"
+
+    input_data = make_service_input(
+        history=[],
+        content="How do I use the HTTP adaptor?",
+        context=CONTEXT,
+        suggest_code=False,
+    )
+    input_data["meta"] = {"session_id": session}
+    input_data["metrics_opt_in"] = False
+
+    response = call_job_chat_service(input_data)
+    assert "response" in response, f"Opt-out (explicit false) test failed: {response}"
+
+    time.sleep(5)
+    traces = _fetch_traces(session, retries=1, delay=0)
+    assert len(traces) == 0, (
+        f"Expected zero traces for session {session} with metrics_opt_in=False, "
+        f"found {len(traces)}."
+    )
+
+    print(f"\n Opt-out verified (explicit false): zero traces for session: {session}")
