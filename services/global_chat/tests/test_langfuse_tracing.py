@@ -52,7 +52,7 @@ def test_langfuse_multi_turn_global_chat():
     input_1 = {
         "content": content_1,
         "history": [],
-        "metadata": {"session_id": SESSION_ID},
+        "meta": {"session_id": SESSION_ID},
         "user": {"id": USER_ID, "employee": True},
         "metrics_opt_in": True,
     }
@@ -73,7 +73,7 @@ def test_langfuse_multi_turn_global_chat():
     input_2 = {
         "content": content_2,
         "history": history_1,
-        "metadata": {"session_id": SESSION_ID},
+        "meta": {"session_id": SESSION_ID},
         "user": {"id": USER_ID, "employee": True},
         "metrics_opt_in": True,
     }
@@ -112,7 +112,7 @@ def test_langfuse_global_chat_force_tracking():
     input_data = {
         "content": "What adaptors are available?",
         "history": [],
-        "metadata": {"session_id": force_session},
+        "meta": {"session_id": force_session},
         # No metrics_opt_in — should still trace because global_chat uses force=True
     }
 
@@ -126,3 +126,26 @@ def test_langfuse_global_chat_force_tracking():
     )
 
     print(f"\n Force-tracking verified for session: {force_session}")
+
+
+def test_langfuse_global_chat_force_tracking_explicit_false():
+    """global_chat should trace even with metrics_opt_in=False (force=True)."""
+    session = f"test-global-chat-force-false-{uuid.uuid4().hex[:8]}"
+
+    input_data = {
+        "content": "What adaptors are available?",
+        "history": [],
+        "meta": {"session_id": session},
+        "metrics_opt_in": False,
+    }
+
+    response = call_global_chat_service(input_data)
+    assert "response" in response, f"Force-tracking (explicit false) test failed: {response}"
+
+    traces = _fetch_traces(session)
+    assert len(traces) >= 1, (
+        f"Expected traces for session {session} even with metrics_opt_in=False. "
+        f"global_chat should force-enable tracking regardless."
+    )
+
+    print(f"\n Force-tracking (explicit false) verified for session: {session}")

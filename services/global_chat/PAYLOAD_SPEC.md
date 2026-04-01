@@ -15,8 +15,8 @@ This document defines the input and output payload structure for the Global Agen
                                           //   workflows/my-workflow
                                           //   workflows/my-workflow/settings
 
-  "metadata": {                            // Optional metadata
-    "user": {}                            //   User info (reserved for future use)
+  "meta": {                                // Optional metadata
+    "session_id": "string"               //   Session ID for multi-turn grouping
   },
 
   "history": [                            // Chat history (optional)
@@ -52,8 +52,8 @@ This document defines the input and output payload structure for the Global Agen
   - `workflows/<name>` — user is viewing the workflow overview
   - `workflows/<name>/settings` — user is viewing workflow settings
 
-- **`metadata`** (object, optional): Extensible metadata object.
-  - **`user`** (object, optional): User information. Reserved for future use.
+- **`meta`** (object, optional): Extensible metadata object.
+  - **`session_id`** (string, optional): Session ID for grouping multi-turn conversations.
 
 - **`history`** (array, optional): Conversation history. Each turn has `role` and `content`. History is managed and returned by each agent internally.
 
