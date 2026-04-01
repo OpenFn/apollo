@@ -90,11 +90,16 @@ The input payload is a JSON object with the following structure
   "stream": false,
   "download_adaptor_docs": true,
   "refresh_rag": false,
-  "api_key": "<Anthropic API key>"
+  "api_key": "<Anthropic API key>",
+  "user": { "id": "user-abc-123", "employee": true },
+  "metrics_opt_in": true
 }
 ```
 
 All context is optional, as is history.
+
+- `user` (optional): User identity object with `id` (string) and `employee` (boolean) fields — used for Langfuse trace attribution
+- `metrics_opt_in` (optional): Set to `true` to enable Langfuse tracing for this session
 
 The `download_adaptor_docs` flag (defaults to `true`) controls whether adaptor docs are automatically loaded before building prompts. Set to `false` to skip auto-loading.
 
