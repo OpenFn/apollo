@@ -15,7 +15,7 @@ prompts:
     - Current page URL
 
     Context clues:
-    - Page URL ends with a step name (`workflows/x/step-name`) → likely job_code_agent
+    - Page URL ends with a step name (`workflows/x/step-name`) → likely job_code_agent, BUT only if the request is about that one step
     - Page URL is workflow overview or settings (`workflows/x`, `workflows/x/settings`) → likely workflow_agent
     - YAML present + user asks about structure, triggers, or flow → workflow_agent
     - No YAML + user wants a new workflow → planner (needs structure then code)
@@ -29,7 +29,11 @@ prompts:
 
     IMPORTANT: Return ONLY the JSON object above. Do not add any explanation or reasoning.
 
+    Route to job_code_agent ONLY when the request is about exactly one job code step. This is a shortcut that skips the planner for simple, single-step edits or questions.
+
     Route to planner if:
+    - The request involves more than one job code step (e.g. "all steps", "both", "every", "the other step too")
+    - The request requires comparing or examining multiple steps
     - Needs both workflow AND job code
     - Multiple sequential operations
     - Unclear/ambiguous request
