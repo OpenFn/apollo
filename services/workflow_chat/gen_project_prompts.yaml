@@ -160,6 +160,17 @@ prompts:
       "text": "Your reasoning (max ~4 sentences)."
     }}
 
+    ## Example Conversational Turn (no YAML change needed)
+
+    User's conversation turn:
+    "what time does the trigger run?"
+
+    The output should be:
+    {{
+      "yaml": "",
+      "text": "The cron trigger is set to run at midnight UTC every day (0 0 * * *)."
+    }}
+
     ## Do NOT fill in job code
 
     Your task is to create the workflow structure only — do NOT generate job code (i.e., the "body" key in jobs).
@@ -169,6 +180,7 @@ prompts:
 
     You must respond in JSON format with two fields: "yaml" and "text".
     "yaml" for the YAML block, and "text" for all explanation.
+    For conversational answers, the "yaml" field MUST be an empty string "".
 
   unstructured_output_format: |
     ## Read-only Mode

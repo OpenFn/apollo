@@ -356,28 +356,33 @@ class AnthropicClient:
 
             # Extract text and yaml from the JSON
             output_text = response_data.get("text", "").strip()
-            output_yaml = response_data.get("yaml", "")
+            raw_yaml = response_data.get("yaml", "")
 
-            if output_yaml and output_yaml.strip():
+            if raw_yaml and raw_yaml.strip():
                 if stream_manager:
                     stream_manager.send_thinking("Formatting workflow...", signature="proxy_formatting_signature")
-                # Parse YAML string into Python object
-                output_yaml = yaml.safe_load(output_yaml)
+                # Parse YAML string into Python object (separate try/except
+                # so bad yaml can't leak through to the response)
+                try:
+                    parsed_yaml = yaml.safe_load(raw_yaml)
 
-                if not isinstance(output_yaml, dict):
+                    if isinstance(parsed_yaml, dict) and "jobs" in parsed_yaml:
+                        with sentry_sdk.start_span(description="validate_adaptors"):
+                            self.validate_adaptors(parsed_yaml)
+                        with sentry_sdk.start_span(description="sanitize_job_names"):
+                            self.sanitize_job_names(parsed_yaml)
+                        with sentry_sdk.start_span(description="restore_components"):
+                            self.restore_components(parsed_yaml, preserved_values)
+                        # Convert back to YAML string with preserved order
+                        output_yaml = yaml.dump(parsed_yaml, sort_keys=False)
+                    else:
+                        output_yaml = ""
+                except Exception as e:
+                    logger.warning(f"YAML parsing failed, discarding yaml content: {e}")
                     output_yaml = ""
-                else:
-                    with sentry_sdk.start_span(description="validate_adaptors"):
-                        self.validate_adaptors(output_yaml)
-                    with sentry_sdk.start_span(description="sanitize_job_names"):
-                        self.sanitize_job_names(output_yaml)
-                    with sentry_sdk.start_span(description="restore_components"):
-                        self.restore_components(output_yaml, preserved_values)
-                    # Convert back to YAML string with preserved order
-                    output_yaml = yaml.dump(output_yaml, sort_keys=False)
             else:
                 output_yaml = ""
-                
+
         except Exception as e:
             logger.error(f"Error during JSON parsing: {str(e)}")
 
@@ -524,7 +529,13 @@ class AnthropicClient:
                         yaml_raw = accumulated_response.split(delimiter)[0]
                         yaml_value = self._unescape_json_string(yaml_raw)
                         if yaml_value and yaml_value != "null":
-                            stream_manager.send_changes({"yaml": yaml_value})
+                            # Only send changes if the content is actually valid YAML (a dict)
+                            try:
+                                parsed = yaml.safe_load(yaml_value)
+                                if isinstance(parsed, dict):
+                                    stream_manager.send_changes({"yaml": yaml_value})
+                            except Exception:
+                                pass  # Invalid YAML (backticks, text, etc.), skip changes event
 
                         # Mark where text content starts
                         text_offset = accumulated_response.find(delimiter) + len(delimiter)

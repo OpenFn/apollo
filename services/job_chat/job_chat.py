@@ -304,7 +304,7 @@ class AnthropicClient:
                                     stream_manager.send_changes({"code": suggested_code})
                                 else:
                                     stream_manager.send_changes({"code_edits": code_edits})
-                            else:
+                            elif code_edits:
                                 stream_manager.send_changes({"code_edits": code_edits})
                         except json.JSONDecodeError:
                             logger.warning(f"Failed to parse code_edits: {code_edits_raw[:200]}")
