@@ -11,6 +11,7 @@ export default async (port: number | string = 3000) => {
 
   app.use(html());
 
+  app.derive(() => ({ start: Date.now() }));
   app.onAfterHandle(logRequest);
 
   await setupHealthcheck(app);
