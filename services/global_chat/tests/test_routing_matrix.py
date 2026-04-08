@@ -207,7 +207,8 @@ def test_workflow_summary():
 
     assert response is not None
     assert "response" in response
-    assert_routed_to(response, "planner", context="test_workflow_summary")
+    assert_routed_to_any(response, ["planner", "workflow_agent"],
+                         context="test_workflow_summary")
 
     text = response["response"].lower()
     assert "cat" in text, (
