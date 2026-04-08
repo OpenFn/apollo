@@ -161,10 +161,10 @@ class AnthropicClient:
 
             # Add prefilled opening brace for JSON response
             if read_only:
-                # In read-only mode, close yaml as empty and start text directly
-                prompt.append({"role": "assistant", "content": '{\n  "yaml": "", "text": "'})
+                # In read-only mode, close yaml as null and start text directly
+                prompt.append({"role": "assistant", "content": '{\n  "yaml": null, "text": "'})
             else:
-                prompt.append({"role": "assistant", "content": '{\n  "yaml": "'})
+                prompt.append({"role": "assistant", "content": '{\n  "yaml":'})
 
             accumulated_usage = {
                 "cache_creation_input_tokens": 0,
@@ -230,9 +230,9 @@ class AnthropicClient:
 
                 # Add back the prefilled opening
                 if read_only:
-                    response = '{\n  "yaml": "", "text": "' + response
+                    response = '{\n  "yaml": null, "text": "' + response
                 else:
-                    response = '{\n  "yaml": "' + response
+                    response = '{\n  "yaml":' + response
 
                 with sentry_sdk.start_span(description="parse_and_format_yaml"):
 
@@ -356,7 +356,7 @@ class AnthropicClient:
 
             # Extract text and yaml from the JSON
             output_text = response_data.get("text", "").strip()
-            raw_yaml = response_data.get("yaml", "")
+            raw_yaml = response_data.get("yaml") or ""
 
             if raw_yaml and raw_yaml.strip():
                 if stream_manager:
@@ -366,7 +366,7 @@ class AnthropicClient:
                 try:
                     parsed_yaml = yaml.safe_load(raw_yaml)
 
-                    if isinstance(parsed_yaml, dict) and "jobs" in parsed_yaml:
+                    if isinstance(parsed_yaml, dict):
                         with sentry_sdk.start_span(description="validate_adaptors"):
                             self.validate_adaptors(parsed_yaml)
                         with sentry_sdk.start_span(description="sanitize_job_names"):
@@ -521,21 +521,24 @@ class AnthropicClient:
 
                 if not text_started:
                     # YAML phase: buffer silently until text starts
-                    delimiter = '",\n  "text": "'
+                    delimiter = ',\n  "text": "'
 
                     if delimiter in accumulated_response:
-                        # Extract YAML content and send as changes event
-                        # yaml_raw is the string content between the prefilled opening " and delimiter "
-                        yaml_raw = accumulated_response.split(delimiter)[0]
-                        yaml_value = self._unescape_json_string(yaml_raw)
-                        if yaml_value and yaml_value != "null":
+                        # Extract YAML value (either null or a JSON string)
+                        yaml_raw = accumulated_response.split(delimiter)[0].strip()
+                        try:
+                            yaml_value = json.loads(yaml_raw)  # None for null, string for "..."
+                        except (json.JSONDecodeError, ValueError):
+                            yaml_value = None
+
+                        if yaml_value:
                             # Only send changes if the content is actually valid YAML (a dict)
                             try:
                                 parsed = yaml.safe_load(yaml_value)
                                 if isinstance(parsed, dict):
                                     stream_manager.send_changes({"yaml": yaml_value})
                             except Exception:
-                                pass  # Invalid YAML (backticks, text, etc.), skip changes event
+                                pass  # Invalid YAML, skip changes event
 
                         # Mark where text content starts
                         text_offset = accumulated_response.find(delimiter) + len(delimiter)
