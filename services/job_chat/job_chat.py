@@ -208,7 +208,8 @@ class AnthropicClient:
                         max_tokens=self.config.max_tokens,
                         messages=prompt,
                         model=self.config.model,
-                        system=system_message
+                        system=system_message,
+                        thinking={"type": "adaptive"}
                     )
                     if output_config:
                         stream_kwargs["output_config"] = output_config
@@ -238,7 +239,8 @@ class AnthropicClient:
                 else:
                     logger.info("Making non-streaming API call")
                     create_kwargs = dict(
-                        max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
+                        max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message,
+                        thinking={"type": "adaptive"}
                     )
                     if output_config:
                         create_kwargs["output_config"] = output_config
@@ -254,8 +256,6 @@ class AnthropicClient:
             for content_block in message.content:
                 if content_block.type == "text":
                     response_parts.append(content_block.text)
-                else:
-                    logger.warning(f"Unhandled content type: {content_block.type}")
 
             response = "\n\n".join(response_parts)
 
@@ -493,16 +493,26 @@ class AnthropicClient:
                 full_code=full_code,
                 text_explanation=text_explanation
             )
-            prompt.append({"role": "assistant", "content": '{\n  "explanation": "'})
+            correction_schema = {
+                "type": "object",
+                "properties": {
+                    "explanation": {"type": "string"},
+                    "corrected_old_code": {"type": "string"},
+                    "corrected_new_code": {"type": "string"}
+                },
+                "required": ["explanation", "corrected_old_code", "corrected_new_code"],
+                "additionalProperties": False
+            }
             message = self.client.messages.create(
                 max_tokens=16384,
                 messages=prompt,
                 model=self.config.model,
-                system=system_message
+                system=system_message,
+                output_config={"format": {"type": "json_schema", "schema": correction_schema}},
+                thinking={"type": "adaptive"}
             )
 
             response = "\n\n".join([block.text for block in message.content if block.type == "text"])
-            response = '{\n  "explanation": "' + response  # Add back the prefilled opening brace
             correction_data = json.loads(response)
 
             corrected_old = correction_data.get("corrected_old_code")

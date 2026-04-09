@@ -102,7 +102,7 @@ class Payload:
 @dataclass
 class ChatConfig:
     model: str = _MODEL
-    max_tokens: int = 8192
+    max_tokens: int = 16384
     api_key: Optional[str] = None
 
 
@@ -206,7 +206,8 @@ class AnthropicClient:
                             messages=prompt,
                             model=self.config.model,
                             system=system_message,
-                            output_config=output_config
+                            output_config=output_config,
+                            thinking={"type": "adaptive"}
                         ) as stream_obj:
                             for event in stream_obj:
                                 accumulated_response, text_started, sent_length = self.process_stream_event(
@@ -230,7 +231,8 @@ class AnthropicClient:
                         logger.info("Making non-streaming API call")
                         message = self.client.messages.create(
                             max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message,
-                            output_config=output_config
+                            output_config=output_config,
+                            thinking={"type": "adaptive"}
                         )
 
                 # Track usage from this attempt
@@ -244,8 +246,6 @@ class AnthropicClient:
                 for content_block in message.content:
                     if content_block.type == "text":
                         response_parts.append(content_block.text)
-                    else:
-                        logger.warning(f"Unhandled content type: {content_block.type}")
 
                 response = "\n\n".join(response_parts)
 
