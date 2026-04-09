@@ -531,9 +531,7 @@ class AnthropicClient:
         is sent, and the text explanation streams to the client.
         """
         if event.type == "content_block_delta":
-            if event.delta.type == "thinking_delta":
-                stream_manager.send_thinking(event.delta.thinking)
-            elif event.delta.type == "text_delta":
+            if event.delta.type == "text_delta":
                 text_chunk = event.delta.text
                 accumulated_response += text_chunk
 
