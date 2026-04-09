@@ -127,15 +127,31 @@ class RouterAgent:
         routing_message = self._build_routing_message(content, workflow_yaml, page, history)
         system_prompt = self.config_loader.get_prompt("router_system_prompt")
 
+        routing_schema = {
+            "type": "object",
+            "properties": {
+                "destination": {"type": "string"},
+                "confidence": {"type": "integer"},
+                "job_key": {
+                    "anyOf": [
+                        {"type": "string"},
+                        {"type": "null"}
+                    ]
+                }
+            },
+            "required": ["destination", "confidence", "job_key"],
+            "additionalProperties": False
+        }
+
         response = self.client.messages.create(
             model=self.model,
             max_tokens=self.max_tokens,
             temperature=self.temperature,
             system=[{"type": "text", "text": system_prompt}],
             messages=[
-                {"role": "user", "content": routing_message},
-                {"role": "assistant", "content": '{"destination": "'}
-            ]
+                {"role": "user", "content": routing_message}
+            ],
+            output_config={"format": {"type": "json_schema", "schema": routing_schema}}
         )
 
         self.routing_usage = {
@@ -145,30 +161,17 @@ class RouterAgent:
             "cache_read_input_tokens": getattr(response.usage, "cache_read_input_tokens", 0)
         }
 
-        response_text = response.content[0].text if response.content else ""
-        full_response = '{"destination": "' + response_text
+        response_text = response.content[0].text if response.content else "{}"
 
         try:
-            brace_count = 1
-            json_end = 0
-            for i, char in enumerate(full_response[1:], 1):
-                if char == '{':
-                    brace_count += 1
-                elif char == '}':
-                    brace_count -= 1
-                    if brace_count == 0:
-                        json_end = i + 1
-                        break
-
-            json_only = full_response[:json_end] if json_end > 0 else full_response
-            decision_data = json.loads(json_only)
+            decision_data = json.loads(response_text)
             return RouterDecision(
                 destination=decision_data["destination"],
                 confidence=decision_data.get("confidence", 3),
                 job_key=decision_data.get("job_key")
             )
         except (json.JSONDecodeError, KeyError) as e:
-            logger.error(f"Failed to parse routing decision: {e}. Response: {full_response}")
+            logger.error(f"Failed to parse routing decision: {e}. Response: {response_text}")
             raise
 
     def _build_routing_message(

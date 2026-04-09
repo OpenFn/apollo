@@ -117,6 +117,7 @@ class PlannerAgent:
                     system=system_prompt,
                     messages=messages,
                     tools=self.tools,
+                    thinking={"type": "adaptive"},
                     betas=["context-management-2025-06-27"],
                     context_management={
                         "edits": [
