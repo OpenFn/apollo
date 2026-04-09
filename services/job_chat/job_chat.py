@@ -189,11 +189,14 @@ class AnthropicClient:
                         refresh_rag=refresh_rag
                         )
 
-            # Structured outputs for suggest_code mode
-            output_config = (
-                {"format": {"type": "json_schema", "schema": _CODE_OUTPUT_SCHEMA}}
-                if suggest_code else None
-            )
+            # Structured outputs for suggest_code mode, effort for all modes
+            if suggest_code:
+                output_config = {
+                    "format": {"type": "json_schema", "schema": _CODE_OUTPUT_SCHEMA},
+                    "effort": "medium"
+                }
+            else:
+                output_config = {"effort": "medium"}
 
             with sentry_sdk.start_span(description="anthropic_api_call"):
                 if stream:
@@ -209,10 +212,9 @@ class AnthropicClient:
                         messages=prompt,
                         model=self.config.model,
                         system=system_message,
-                        thinking={"type": "adaptive"}
+                        thinking={"type": "adaptive"},
+                        output_config=output_config
                     )
-                    if output_config:
-                        stream_kwargs["output_config"] = output_config
 
                     with self.client.messages.stream(**stream_kwargs) as stream_obj:
                         for event in stream_obj:
@@ -240,10 +242,9 @@ class AnthropicClient:
                     logger.info("Making non-streaming API call")
                     create_kwargs = dict(
                         max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message,
-                        thinking={"type": "adaptive"}
+                        thinking={"type": "adaptive"},
+                        output_config=output_config
                     )
-                    if output_config:
-                        create_kwargs["output_config"] = output_config
                     message = self.client.messages.create(**create_kwargs)
 
             if hasattr(message, "usage"):
@@ -315,7 +316,9 @@ class AnthropicClient:
         then a changes event is sent, and text_answer streams to the client.
         """
         if event.type == "content_block_delta":
-            if event.delta.type == "text_delta":
+            if event.delta.type == "thinking_delta":
+                stream_manager.send_thinking(event.delta.thinking)
+            elif event.delta.type == "text_delta":
                 text_chunk = event.delta.text
                 accumulated_response += text_chunk
 
@@ -508,7 +511,10 @@ class AnthropicClient:
                 messages=prompt,
                 model=self.config.model,
                 system=system_message,
-                output_config={"format": {"type": "json_schema", "schema": correction_schema}},
+                output_config={
+                    "format": {"type": "json_schema", "schema": correction_schema},
+                    "effort": "medium"
+                },
                 thinking={"type": "adaptive"}
             )
 
