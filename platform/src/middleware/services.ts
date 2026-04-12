@@ -33,7 +33,7 @@ export default async (app: Elysia, port: number) => {
 
       // simple post
       app.post(name, async (ctx) => {
-        console.log(`POST to /services/${name}`);
+        console.log(`Calling /services/${name}`);
         const payload = ctx.body;
         const result = await callService(m, port, payload as any);
 
@@ -51,7 +51,7 @@ export default async (app: Elysia, port: number) => {
 
       // HTTP streaming
       app.post(`${name}/stream`, async (ctx) => {
-        console.log(`HTTP stream connnected to ${name}`);
+        console.log(`HTTP stream connected to ${name}`);
         const payload = ctx.body;
 
         const stream = new ReadableStream({
