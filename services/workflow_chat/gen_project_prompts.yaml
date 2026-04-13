@@ -160,6 +160,17 @@ prompts:
       "text": "Your reasoning (max ~4 sentences)."
     }}
 
+    ## Example Conversational Turn (no YAML change needed)
+
+    User's conversation turn:
+    "what time does the trigger run?"
+
+    The output should be:
+    {{
+      "yaml": null,
+      "text": "The cron trigger is set to run at midnight UTC every day (0 0 * * *)."
+    }}
+
     ## Do NOT fill in job code
 
     Your task is to create the workflow structure only — do NOT generate job code (i.e., the "body" key in jobs).
@@ -168,7 +179,8 @@ prompts:
     ## Output Format
 
     You must respond in JSON format with two fields: "yaml" and "text".
-    "yaml" for the YAML block, and "text" for all explanation.
+    "yaml" for the YAML string, or null if no YAML changes are needed. Don't generate YAML unnecessarily.
+    "text" for all explanation.
 
   unstructured_output_format: |
     ## Read-only Mode
@@ -183,14 +195,14 @@ prompts:
 
     The output should be:
     {{
-      "yaml": "",
+      "yaml": null,
       "text": "I'd structure this as a daily cron-triggered workflow with four jobs. First, fetch visits from CommCare. Then branch based on whether visitors have IHS numbers: create encounters directly for those who do, or lookup the number first for those who don't. Here's the structure:\n\n```yaml\nname: Daily CommCare to Satusehat Encounter Sync\njobs:\n  Fetch-visits-from-CommCare:\n    name: Fetch visits from CommCare\n    adaptor: \"@openfn/language-commcare@latest\"\n    body: \"// Add operations here\"\n  Create-FHIR-Encounter-for-visitors-with-IHS-number:\n    name: Create FHIR Encounter for visitors with IHS number\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\n  Lookup-IHS-number-in-Satusehat:\n    name: Lookup IHS number in Satusehat\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\n  Create-FHIR-Encounter-after-IHS-lookup:\n    name: Create FHIR Encounter after IHS lookup\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\ntriggers:\n  cron:\n    type: cron\n    cron_expression: 0 0 * * *\n    enabled: false\nedges:\n  cron->Fetch-visits-from-CommCare:\n    source_trigger: cron\n    target_job: Fetch-visits-from-CommCare\n    condition_type: always\n    enabled: true\n  Fetch-visits-from-CommCare->Create-FHIR-Encounter-for-visitors-with-IHS-number:\n    source_job: Fetch-visits-from-CommCare\n    target_job: Create-FHIR-Encounter-for-visitors-with-IHS-number\n    condition_type: on_job_success\n    enabled: true\n  Fetch-visits-from-CommCare->Lookup-IHS-number-in-Satusehat:\n    source_job: Fetch-visits-from-CommCare\n    target_job: Lookup-IHS-number-in-Satusehat\n    condition_type: on_job_success\n    enabled: true\n  Lookup-IHS-number-in-Satusehat->Create-FHIR-Encounter-after-IHS-lookup:\n    source_job: Lookup-IHS-number-in-Satusehat\n    target_job: Create-FHIR-Encounter-after-IHS-lookup\n    condition_type: on_job_success\n    enabled: true\n```"
     }}
 
     ## Output Format
 
     You must respond in JSON format with two fields: "yaml" and "text".
-    The "yaml" field should always be an empty string.
+    The "yaml" field should always be null.
     The "text" field contains your complete answer with any YAML in triple-backticked code blocks.
 
   normal_mode_intro: |
@@ -211,7 +223,7 @@ prompts:
 
   normal_mode_answering_instructions: |
     You can either
-    A) answer with JUST a conversational turn responding to the user (2-4 sentences) in the "text" key and leave the "yaml" key as an empty string,
+    A) answer with JUST a conversational turn responding to the user (2-4 sentences) in the "text" key and set the "yaml" key to null,
 
     or
 
@@ -233,13 +245,13 @@ prompts:
 
   readonly_mode_answering_instructions: |
     You can either
-    A) answer with JUST a conversational turn responding to the user (2-4 sentences) in the "text" key and leave the "yaml" key as an empty string,
+    A) answer with JUST a conversational turn responding to the user (2-4 sentences) in the "text" key and set the "yaml" key to null,
 
     or
 
     B) answer with your explanation in the "text" key, including any workflow structure inline using triple-backticked YAML code blocks.
     In this case, provide a few sentences (max. as many sentences as there are jobs in the workflow) to explain your reasoning, followed by the YAML in a code block.
     If relevant, you can note aspects of the workflow that should be reviewed (e.g. to consider alternative approaches).
-    Always leave the "yaml" key as an empty string.
+    Always set the "yaml" key to null.
 
     The user's latest message and prior conversation are provided below. Generate your response accordingly.

@@ -117,6 +117,8 @@ class PlannerAgent:
                     system=system_prompt,
                     messages=messages,
                     tools=self.tools,
+                    thinking={"type": "adaptive"},
+                    output_config={"effort": "high"},
                     betas=["context-management-2025-06-27"],
                     context_management={
                         "edits": [
@@ -141,6 +143,11 @@ class PlannerAgent:
                     total_usage[field] += getattr(response.usage, field, 0)
 
                 logger.info(f"Claude API call {tool_call_count + 1}: stop_reason={response.stop_reason}")
+
+                # Forward any thinking blocks to the client
+                for block in response.content:
+                    if block.type == "thinking":
+                        stream_manager.send_thinking(block.thinking)
 
                 if response.stop_reason == "end_turn":
                     if tool_call_count > 0:
@@ -173,7 +180,13 @@ class PlannerAgent:
 
                     content_blocks = []
                     for block in response.content:
-                        if block.type == "text":
+                        if block.type == "thinking":
+                            content_blocks.append({
+                                "type": "thinking",
+                                "thinking": block.thinking,
+                                "signature": block.signature
+                            })
+                        elif block.type == "text":
                             content_blocks.append({"type": "text", "text": block.text})
                         elif block.type == "tool_use":
                             content_blocks.append({
