@@ -111,7 +111,7 @@ class PlannerAgent:
         try:
             while tool_call_count < self.max_tool_calls:
                 try:
-                    response, buffered_text = self._call_api(system_prompt, messages, stream, stream_manager)
+                    response, buffered_text = self._call_api(system_prompt, messages, stream)
 
                     for field in [
                         "input_tokens",
@@ -122,13 +122,6 @@ class PlannerAgent:
                         total_usage[field] += getattr(response.usage, field, 0)
 
                     logger.info(f"Claude API call {tool_call_count + 1}: stop_reason={response.stop_reason}")
-
-                    # Forward thinking blocks to client (non-streaming only;
-                    # when streaming, thinking is already sent in real-time)
-                    if not stream:
-                        for block in response.content:
-                            if block.type == "thinking":
-                                stream_manager.send_thinking(block.thinking)
 
                     if response.stop_reason == "end_turn":
                         # Send final YAML before text, matching workflow_chat/job_chat pattern
@@ -152,10 +145,11 @@ class PlannerAgent:
                             break
 
                         logger.info(f"Executing {len(tool_use_blocks)} tool(s): {[b.name for b in tool_use_blocks]}")
-                        stream_manager.send_thinking("Working...")
 
                         tool_results = []
                         for tool_use_block in tool_use_blocks:
+                            status = self._tool_status_message(tool_use_block)
+                            stream_manager.send_thinking(status)
                             tool_result = self._execute_tool(tool_use_block, total_usage, tool_calls_meta)
                             tool_results.append(
                                 {"type": "tool_result", "tool_use_id": tool_use_block.id, "content": tool_result}
@@ -220,12 +214,16 @@ class PlannerAgent:
             },
         )
 
-    def _call_api(self, system_prompt, messages, stream, stream_manager=None):
-        """Make Claude API call. When streaming, buffers text deltas and streams thinking in real-time."""
+    def _call_api(self, system_prompt, messages, stream):
+        """Make Claude API call. When streaming, buffers text deltas for the caller to flush.
+
+        Adaptive thinking is enabled for better reasoning but thinking content
+        is not streamed to the client — it exposes internal details like tool
+        names and agent architecture. User-facing progress comes from the
+        task-specific status messages sent before each tool execution.
+        """
         if stream:
             buffered_text = []
-            active_thinking_index = None
-            thinking_signature = None
 
             with self.client.messages.stream(
                 model=self.model,
@@ -236,26 +234,9 @@ class PlannerAgent:
                 thinking={"type": "adaptive"},
             ) as stream_obj:
                 for event in stream_obj:
-                    if event.type == "content_block_start":
-                        if event.content_block.type == "thinking":
-                            active_thinking_index = event.index
-                            thinking_signature = None
-                            if stream_manager:
-                                stream_manager.start_thinking_block()
-                    elif event.type == "content_block_delta":
-                        if event.delta.type == "thinking_delta":
-                            if stream_manager:
-                                stream_manager.send_thinking_delta(event.delta.thinking)
-                        elif event.delta.type == "signature_delta":
-                            thinking_signature = (thinking_signature or "") + event.delta.signature
-                        elif event.delta.type == "text_delta":
+                    if event.type == "content_block_delta":
+                        if event.delta.type == "text_delta":
                             buffered_text.append(event.delta.text)
-                    elif event.type == "content_block_stop":
-                        if event.index == active_thinking_index:
-                            if stream_manager:
-                                stream_manager.close_thinking_block(thinking_signature)
-                            active_thinking_index = None
-                            thinking_signature = None
                 return stream_obj.get_final_message(), buffered_text
         else:
             response = self.client.beta.messages.create(
@@ -374,6 +355,59 @@ class PlannerAgent:
             tool_result = f"Error: Unknown tool {tool_use_block.name}"
 
         return tool_result
+
+    def _tool_status_message(self, tool_use_block) -> str:
+        """Generate a user-facing status message for a tool call."""
+        name = tool_use_block.name
+        inputs = tool_use_block.input or {}
+
+        if name == "search_documentation":
+            query = inputs.get("query", "")
+            if query:
+                return f"Searching documentation for \"{query}\"..."
+            return "Searching documentation..."
+
+        if name == "call_workflow_agent":
+            if self.current_yaml:
+                return "Editing workflow..."
+            return "Building workflow outline..."
+
+        if name == "call_job_code_agent":
+            job_key = inputs.get("job_key")
+            display_name = self._display_name_for_job(job_key)
+            if display_name:
+                return f"Writing code for \"{display_name}\" step..."
+            return "Writing job code..."
+
+        if name == "inspect_job_code":
+            job_key = inputs.get("job_key")
+            display_name = self._display_name_for_job(job_key)
+            if display_name:
+                return f"Reading code for \"{display_name}\" step..."
+            return "Reading job code..."
+
+        return f"Running {name}..."
+
+    def _display_name_for_job(self, job_key: str | None) -> str | None:
+        """Look up a human-readable display name for a job key.
+
+        Checks the workflow YAML for a name field first, then falls back
+        to title-casing the key (e.g. "fetch-patients" -> "Fetch Patients").
+        """
+        if not job_key:
+            return None
+
+        if self.current_yaml:
+            _, job_data = find_job_in_yaml(self.current_yaml, job_key)
+            if job_data and job_data.get("name"):
+                return self._format_display_name(job_data["name"])
+
+        return self._format_display_name(job_key)
+
+    @staticmethod
+    def _format_display_name(name: str) -> str:
+        """Format a job key or name into readable title case."""
+        return name.replace("-", " ").replace("_", " ").title()
 
     def _extract_text(self, response):
         """Extract text from response content."""
