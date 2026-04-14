@@ -12,6 +12,53 @@ from typing import Any
 
 from models import CLAUDE_SONNET
 
+# Shared status message pools for user-facing progress indicators.
+# Services compose from these to build context-specific pools.
+
+STATUS_REVIEWING_WORKFLOW = [
+    "Reviewing the workflow...",
+    "Reading your workflow...",
+    "Looking over the current setup...",
+    "Reviewing the current steps...",
+    "Analyzing the workflow...",
+    "Looking at what you have so far...",
+]
+
+STATUS_NEW_WORKFLOW = [
+    "Mapping out the steps...",
+    "Gathering requirements...",
+    "Thinking about the design...",
+]
+
+STATUS_PLANNING = [
+    "Checking what's needed...",
+    "Working out the details...",
+    "Figuring out the approach...",
+    "Planning things out...",
+]
+
+STATUS_DESIGNING_WORKFLOW = [
+    "Designing the workflow...",
+    "Planning the workflow...",
+    "Working out the structure...",
+]
+
+STATUS_REVIEWING_CODE = [
+    "Reviewing the code...",
+    "Reading the current code...",
+    "Looking over the job code...",
+    "Checking the existing code...",
+    "Reviewing what you have so far...",
+]
+
+STATUS_NEW_CODE = [
+    "Preparing to write code...",
+    "Getting ready to write code...",
+    "Setting things up...",
+    "Getting started on the code...",
+    "Preparing the job code...",
+]
+
 
 @dataclass
 class ContentBlock:

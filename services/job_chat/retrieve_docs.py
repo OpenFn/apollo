@@ -37,7 +37,7 @@ def get_client(api_key=None):
     return anthropic.Anthropic(api_key=key)
 
 
-def retrieve_knowledge(content, history, code="", adaptor="", api_key=None):
+def retrieve_knowledge(content, history, code="", adaptor="", api_key=None, stream_manager=None):
     """
     Retrieve relevant documentation sections based on user's question.
     
@@ -66,6 +66,8 @@ def retrieve_knowledge(content, history, code="", adaptor="", api_key=None):
         generate_queries_usage = {}
 
         if docs_decision.lower().startswith("true"):
+            if stream_manager:
+                stream_manager.send_thinking("Searching documentation...")
             with sentry_sdk.start_span(description="generate_search_queries"):
                 search_queries, generate_queries_usage = generate_queries(content, client, user_context)
             with sentry_sdk.start_span(description="search_documentation"):

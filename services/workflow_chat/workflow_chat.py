@@ -1,5 +1,6 @@
 import json
 import os
+import random
 import re
 import uuid
 import unicodedata
@@ -44,7 +45,12 @@ import sentry_sdk
 from util import ApolloError, create_logger, add_page_prefix
 from .gen_project_prompt import build_prompt
 from workflow_chat.available_adaptors import get_available_adaptors
-from streaming_util import StreamManager
+from streaming_util import (
+    StreamManager,
+    STATUS_REVIEWING_WORKFLOW,
+    STATUS_NEW_WORKFLOW,
+    STATUS_DESIGNING_WORKFLOW,
+)
 
 logger = create_logger("workflow_chat")
 
@@ -196,7 +202,11 @@ class AnthropicClient:
                 with sentry_sdk.start_span(description="anthropic_api_call"):
                     if stream:
                         logger.info("Making streaming API call")
-                        stream_manager.send_thinking("Thinking...")
+                        if existing_yaml and existing_yaml.strip():
+                            status = random.choice(STATUS_REVIEWING_WORKFLOW)
+                        else:
+                            status = random.choice(STATUS_NEW_WORKFLOW + STATUS_DESIGNING_WORKFLOW)
+                        stream_manager.send_thinking(status)
 
                         text_started = False
                         sent_length = 0

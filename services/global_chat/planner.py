@@ -3,7 +3,9 @@ Planner Agent - Coordinates tools and subagents for complex multi-step tasks.
 """
 
 import os
+import random
 from typing import List, Dict, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from anthropic import Anthropic
 
@@ -13,7 +15,12 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from util import create_logger, ApolloError, sum_usage
-from streaming_util import StreamManager
+from streaming_util import (
+    StreamManager,
+    STATUS_REVIEWING_WORKFLOW,
+    STATUS_NEW_WORKFLOW,
+    STATUS_PLANNING,
+)
 from global_chat.config_loader import ConfigLoader
 from models import resolve_model
 from global_chat.tools.tool_definitions import TOOL_DEFINITIONS
@@ -80,7 +87,11 @@ class PlannerAgent:
         logger.info("Planner.run() called")
 
         stream_manager = StreamManager(model=self.model, stream=stream)
-        stream_manager.send_thinking("Analyzing request...")
+        if self.current_yaml:
+            status = random.choice(STATUS_REVIEWING_WORKFLOW + STATUS_PLANNING)
+        else:
+            status = random.choice(STATUS_NEW_WORKFLOW + STATUS_PLANNING)
+        stream_manager.send_thinking(status)
 
         self.current_yaml = workflow_yaml
         self.yaml_modified = False
@@ -146,14 +157,23 @@ class PlannerAgent:
 
                         logger.info(f"Executing {len(tool_use_blocks)} tool(s): {[b.name for b in tool_use_blocks]}")
 
+                        job_code_blocks = [b for b in tool_use_blocks if b.name == "call_job_code_agent"]
+                        other_blocks = [b for b in tool_use_blocks if b.name != "call_job_code_agent"]
+
                         tool_results = []
-                        for tool_use_block in tool_use_blocks:
-                            status = self._tool_status_message(tool_use_block)
-                            stream_manager.send_thinking(status)
+
+                        for tool_use_block in other_blocks:
+                            stream_manager.send_thinking(self._tool_status_message(tool_use_block))
                             tool_result = self._execute_tool(tool_use_block, total_usage, tool_calls_meta)
                             tool_results.append(
                                 {"type": "tool_result", "tool_use_id": tool_use_block.id, "content": tool_result}
                             )
+
+                        if job_code_blocks:
+                            job_results = self._execute_job_code_tools_parallel(
+                                job_code_blocks, stream_manager, total_usage, tool_calls_meta
+                            )
+                            tool_results.extend(job_results)
 
                         content_blocks = []
                         for block in response.content:
@@ -355,6 +375,96 @@ class PlannerAgent:
             tool_result = f"Error: Unknown tool {tool_use_block.name}"
 
         return tool_result
+
+    def _execute_job_code_tools_parallel(self, blocks, stream_manager, total_usage, tool_calls_meta):
+        """Execute multiple call_job_code_agent tools with parallel API calls.
+
+        Sends all status messages up front, runs the slow subagent calls
+        concurrently, then stitches results into the YAML sequentially.
+        """
+        # Send a combined status message for all job code steps
+        names = [self._display_name_for_job(b.input.get("job_key")) for b in blocks]
+        names = [n for n in names if n]
+        if len(names) == 1:
+            status = f"Writing code for \"{names[0]}\" step..."
+        elif len(names) == 2:
+            status = f"Writing code for \"{names[0]}\" and \"{names[1]}\" steps..."
+        elif names:
+            joined = ", ".join(f"\"{n}\"" for n in names[:-1])
+            status = f"Writing code for {joined}, and \"{names[-1]}\" steps..."
+        else:
+            status = "Writing job code..."
+        stream_manager.send_thinking(status)
+
+        # Validate and prepare — skip invalid ones before launching threads
+        to_run = []
+        skipped = {}
+        for block in blocks:
+            job_key = block.input.get("job_key")
+            if not self.current_yaml:
+                skipped[block.id] = "ERROR: No workflow exists yet. Call call_workflow_agent first to create the workflow, then call call_job_code_agent."
+                tool_calls_meta.append({"tool": "call_job_code_agent", "input": block.input, "skipped": True})
+            elif job_key:
+                _, job_data = find_job_in_yaml(self.current_yaml, job_key)
+                if not job_data:
+                    skipped[block.id] = f"ERROR: Job key '{job_key}' not found in workflow YAML. Create the workflow with this job first."
+                    tool_calls_meta.append({"tool": "call_job_code_agent", "input": block.input, "skipped": True})
+                else:
+                    to_run.append(block)
+            else:
+                to_run.append(block)
+
+        # Run subagent API calls in parallel (the slow part)
+        parallel_results = {}
+        if len(to_run) > 1:
+            with ThreadPoolExecutor(max_workers=len(to_run)) as executor:
+                futures = {
+                    executor.submit(
+                        call_job_agent, block.input, self.current_yaml, self.api_key
+                    ): block
+                    for block in to_run
+                }
+                for future in as_completed(futures):
+                    block = futures[future]
+                    parallel_results[block.id] = future.result()
+        elif to_run:
+            block = to_run[0]
+            parallel_results[block.id] = call_job_agent(block.input, self.current_yaml, self.api_key)
+
+        # Stitch results and update state sequentially
+        tool_results = []
+        for block in blocks:
+            if block.id in skipped:
+                tool_results.append(
+                    {"type": "tool_result", "tool_use_id": block.id, "content": skipped[block.id]}
+                )
+                continue
+
+            subagent_result = parallel_results[block.id]
+            job_key = block.input.get("job_key")
+
+            if "usage" in subagent_result:
+                total_usage.update(sum_usage(total_usage, subagent_result["usage"]))
+
+            suggested_code = subagent_result.get("suggested_code")
+            if job_key and suggested_code and self.current_yaml:
+                self.current_yaml = stitch_job_code(self.current_yaml, job_key, suggested_code)
+                self.yaml_modified = True
+                logger.info(f"Stitched code for job '{job_key}' into current_yaml")
+
+            self.subagent_results.append(subagent_result)
+            tool_result = format_subagent_result_for_llm(subagent_result)
+            if suggested_code:
+                tool_result += "\n\n[Job code generated and stitched into the workflow.]"
+            else:
+                tool_result += "\n\n[No job code was generated.]"
+
+            tool_calls_meta.append({"tool": "call_job_code_agent", "input": block.input})
+            tool_results.append(
+                {"type": "tool_result", "tool_use_id": block.id, "content": tool_result}
+            )
+
+        return tool_results
 
     def _tool_status_message(self, tool_use_block) -> str:
         """Generate a user-facing status message for a tool call."""
