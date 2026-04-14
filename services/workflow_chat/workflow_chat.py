@@ -13,6 +13,22 @@ with open(os.path.join(_dir, "gen_project_config.yaml")) as _f:
     _service_config = yaml.safe_load(_f)
 
 _MODEL = resolve_model(_service_config.get("model", "claude-sonnet"))
+
+# JSON schema for structured outputs — guarantees valid JSON from the API
+_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "yaml": {
+            "anyOf": [
+                {"type": "string"},
+                {"type": "null"}
+            ]
+        },
+        "text": {"type": "string"}
+    },
+    "required": ["yaml", "text"],
+    "additionalProperties": False
+}
 from anthropic import (
     Anthropic,
     APIConnectionError,
@@ -86,7 +102,7 @@ class Payload:
 @dataclass
 class ChatConfig:
     model: str = _MODEL
-    max_tokens: int = 8192
+    max_tokens: int = 16384
     api_key: Optional[str] = None
 
 
@@ -159,12 +175,14 @@ class AnthropicClient:
                     read_only=read_only
                 )
 
-            # Add prefilled opening brace for JSON response
-            if read_only:
-                # In read-only mode, close yaml as empty and start text directly
-                prompt.append({"role": "assistant", "content": '{\n  "yaml": "", "text": "'})
-            else:
-                prompt.append({"role": "assistant", "content": '{\n  "yaml": "'})
+            # Structured outputs config — guarantees valid JSON matching schema
+            output_config = {
+                "format": {
+                    "type": "json_schema",
+                    "schema": _OUTPUT_SCHEMA
+                },
+                "effort": "medium"
+            }
 
             accumulated_usage = {
                 "cache_creation_input_tokens": 0,
@@ -180,7 +198,7 @@ class AnthropicClient:
                         logger.info("Making streaming API call")
                         stream_manager.send_thinking("Thinking...")
 
-                        text_started = read_only  # In read-only mode, text starts immediately (no yaml phase)
+                        text_started = False
                         sent_length = 0
                         accumulated_response = ""
 
@@ -188,7 +206,9 @@ class AnthropicClient:
                             max_tokens=self.config.max_tokens,
                             messages=prompt,
                             model=self.config.model,
-                            system=system_message
+                            system=system_message,
+                            output_config=output_config,
+                            thinking={"type": "adaptive"}
                         ) as stream_obj:
                             for event in stream_obj:
                                 accumulated_response, text_started, sent_length = self.process_stream_event(
@@ -200,16 +220,20 @@ class AnthropicClient:
                                 )
                         message = stream_obj.get_final_message()
 
-                        # Flush any remaining buffered text
+                        # Flush any remaining buffered text, stripping JSON closing chars
                         if text_started:
                             if sent_length < len(accumulated_response):
                                 remaining = accumulated_response[sent_length:]
-                                stream_manager.send_text(self._unescape_json_string(remaining))
+                                remaining = re.sub(r'"\s*}\s*$', '', remaining)
+                                if remaining:
+                                    stream_manager.send_text(self._unescape_json_string(remaining))
 
                     else:
                         logger.info("Making non-streaming API call")
                         message = self.client.messages.create(
-                            max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
+                            max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message,
+                            output_config=output_config,
+                            thinking={"type": "adaptive"}
                         )
 
                 # Track usage from this attempt
@@ -223,16 +247,8 @@ class AnthropicClient:
                 for content_block in message.content:
                     if content_block.type == "text":
                         response_parts.append(content_block.text)
-                    else:
-                        logger.warning(f"Unhandled content type: {content_block.type}")
 
                 response = "\n\n".join(response_parts)
-
-                # Add back the prefilled opening
-                if read_only:
-                    response = '{\n  "yaml": "", "text": "' + response
-                else:
-                    response = '{\n  "yaml": "' + response
 
                 with sentry_sdk.start_span(description="parse_and_format_yaml"):
 
@@ -356,28 +372,33 @@ class AnthropicClient:
 
             # Extract text and yaml from the JSON
             output_text = response_data.get("text", "").strip()
-            output_yaml = response_data.get("yaml", "")
+            raw_yaml = response_data.get("yaml") or ""
 
-            if output_yaml and output_yaml.strip():
+            if raw_yaml and raw_yaml.strip():
                 if stream_manager:
                     stream_manager.send_thinking("Formatting workflow...", signature="proxy_formatting_signature")
-                # Parse YAML string into Python object
-                output_yaml = yaml.safe_load(output_yaml)
+                # Parse YAML string into Python object (separate try/except
+                # so bad yaml can't leak through to the response)
+                try:
+                    parsed_yaml = yaml.safe_load(raw_yaml)
 
-                if not isinstance(output_yaml, dict):
+                    if isinstance(parsed_yaml, dict):
+                        with sentry_sdk.start_span(description="validate_adaptors"):
+                            self.validate_adaptors(parsed_yaml)
+                        with sentry_sdk.start_span(description="sanitize_job_names"):
+                            self.sanitize_job_names(parsed_yaml)
+                        with sentry_sdk.start_span(description="restore_components"):
+                            self.restore_components(parsed_yaml, preserved_values)
+                        # Convert back to YAML string with preserved order
+                        output_yaml = yaml.dump(parsed_yaml, sort_keys=False)
+                    else:
+                        output_yaml = ""
+                except Exception as e:
+                    logger.warning(f"YAML parsing failed, discarding yaml content: {e}")
                     output_yaml = ""
-                else:
-                    with sentry_sdk.start_span(description="validate_adaptors"):
-                        self.validate_adaptors(output_yaml)
-                    with sentry_sdk.start_span(description="sanitize_job_names"):
-                        self.sanitize_job_names(output_yaml)
-                    with sentry_sdk.start_span(description="restore_components"):
-                        self.restore_components(output_yaml, preserved_values)
-                    # Convert back to YAML string with preserved order
-                    output_yaml = yaml.dump(output_yaml, sort_keys=False)
             else:
                 output_yaml = ""
-                
+
         except Exception as e:
             logger.error(f"Error during JSON parsing: {str(e)}")
 
@@ -515,16 +536,29 @@ class AnthropicClient:
                 accumulated_response += text_chunk
 
                 if not text_started:
-                    # YAML phase: buffer silently until text starts
-                    delimiter = '",\n  "text": "'
+                    # YAML phase: buffer silently until text starts.
+                    # Use '"text": "' as delimiter — safe because inside
+                    # a JSON string quotes are escaped as \", so this can
+                    # only appear as the actual field separator.
+                    delimiter = '"text": "'
 
                     if delimiter in accumulated_response:
-                        # Extract YAML content and send as changes event
-                        # yaml_raw is the string content between the prefilled opening " and delimiter "
-                        yaml_raw = accumulated_response.split(delimiter)[0]
-                        yaml_value = self._unescape_json_string(yaml_raw)
-                        if yaml_value and yaml_value != "null":
-                            stream_manager.send_changes({"yaml": yaml_value})
+                        # Extract YAML value (either null or a JSON string)
+                        yaml_part = accumulated_response.split(delimiter)[0]
+                        yaml_raw = yaml_part.strip().rstrip(",").strip()
+                        try:
+                            yaml_value = json.loads(yaml_raw)  # None for null, string for "..."
+                        except (json.JSONDecodeError, ValueError):
+                            yaml_value = None
+
+                        if yaml_value:
+                            # Only send changes if the content is actually valid YAML (a dict)
+                            try:
+                                parsed = yaml.safe_load(yaml_value)
+                                if isinstance(parsed, dict):
+                                    stream_manager.send_changes({"yaml": yaml_value})
+                            except Exception:
+                                pass  # Invalid YAML, skip changes event
 
                         # Mark where text content starts
                         text_offset = accumulated_response.find(delimiter) + len(delimiter)

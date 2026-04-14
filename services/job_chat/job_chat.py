@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import yaml
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
@@ -28,6 +29,29 @@ with open(os.path.join(_dir, "rag.yaml")) as _f:
 _MODEL = resolve_model(_service_config.get("model", "claude-sonnet"))
 
 logger = create_logger("job_chat")
+
+# JSON schema for structured outputs when suggest_code is True
+_CODE_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "code_edits": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string"},
+                    "old_code": {"type": "string"},
+                    "new_code": {"type": "string"}
+                },
+                "required": ["action", "new_code"],
+                "additionalProperties": False
+            }
+        },
+        "text_answer": {"type": "string"}
+    },
+    "required": ["code_edits", "text_answer"],
+    "additionalProperties": False
+}
 
 
 # Helper function for page navigation
@@ -153,7 +177,6 @@ class AnthropicClient:
                         download_adaptor_docs=download_adaptor_docs,
                         refresh_rag=refresh_rag
                     )
-                    prompt.append({"role": "assistant", "content": '{\n  "code_edits": ['})
 
                 else:
                     system_message, prompt, retrieved_knowledge = build_old_prompt(
@@ -166,6 +189,15 @@ class AnthropicClient:
                         refresh_rag=refresh_rag
                         )
 
+            # Structured outputs for suggest_code mode, effort for all modes
+            if suggest_code:
+                output_config = {
+                    "format": {"type": "json_schema", "schema": _CODE_OUTPUT_SCHEMA},
+                    "effort": "medium"
+                }
+            else:
+                output_config = {"effort": "medium"}
+
             with sentry_sdk.start_span(description="anthropic_api_call"):
                 if stream:
                     logger.info("Making streaming API call")
@@ -175,12 +207,16 @@ class AnthropicClient:
 
                     original_code = context.get("expression") if context and isinstance(context, dict) else None
 
-                    with self.client.messages.stream(
+                    stream_kwargs = dict(
                         max_tokens=self.config.max_tokens,
                         messages=prompt,
                         model=self.config.model,
-                        system=system_message
-                    ) as stream_obj:
+                        system=system_message,
+                        thinking={"type": "adaptive"},
+                        output_config=output_config
+                    )
+
+                    with self.client.messages.stream(**stream_kwargs) as stream_obj:
                         for event in stream_obj:
                             accumulated_response, text_started, sent_length = self.process_stream_event(
                                 event,
@@ -194,17 +230,22 @@ class AnthropicClient:
                             )
                     message = stream_obj.get_final_message()
 
-                    # Flush any remaining buffered text
+                    # Flush any remaining buffered text, stripping JSON closing chars
                     if suggest_code and text_started:
                         if sent_length < len(accumulated_response):
                             remaining = accumulated_response[sent_length:]
-                            stream_manager.send_text(self._unescape_json_string(remaining))
+                            remaining = re.sub(r'"\s*}\s*$', '', remaining)
+                            if remaining:
+                                stream_manager.send_text(self._unescape_json_string(remaining))
 
                 else:
                     logger.info("Making non-streaming API call")
-                    message = self.client.messages.create(
-                        max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message
+                    create_kwargs = dict(
+                        max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message,
+                        thinking={"type": "adaptive"},
+                        output_config=output_config
                     )
+                    message = self.client.messages.create(**create_kwargs)
 
             if hasattr(message, "usage"):
                 if message.usage.cache_creation_input_tokens:
@@ -216,13 +257,8 @@ class AnthropicClient:
             for content_block in message.content:
                 if content_block.type == "text":
                     response_parts.append(content_block.text)
-                else:
-                    logger.warning(f"Unhandled content type: {content_block.type}")
 
             response = "\n\n".join(response_parts)
-
-            if suggest_code is True:
-                response = '{\n  "code_edits": [' + response # Add back the prefilled opening
 
             if suggest_code is True:
                 # Parse JSON response and apply code edits
@@ -286,13 +322,21 @@ class AnthropicClient:
 
                 if suggest_code and not text_started:
                     # Code edits phase: buffer silently until text_answer starts
-                    delimiter = ',\n  "text_answer": "'
+                    delimiter = '"text_answer": "'
 
                     if delimiter in accumulated_response:
-                        # Extract code_edits JSON and apply with full error correction
-                        code_edits_raw = '[' + accumulated_response.split(delimiter)[0]
+                        # Extract code_edits from the JSON before the delimiter
+                        edits_part = accumulated_response.split(delimiter)[0]
+                        # Find the code_edits array value
                         try:
-                            code_edits = json.loads(code_edits_raw)
+                            # Build partial JSON to extract code_edits
+                            partial = edits_part.rstrip().rstrip(",")
+                            # Close the partial JSON to make it parseable
+                            if not partial.rstrip().endswith("}"):
+                                partial = partial + "}"
+                            partial_data = json.loads(partial)
+                            code_edits = partial_data.get("code_edits", [])
+
                             if original_code and code_edits:
                                 suggested_code, diff = self.apply_code_edits(
                                     content=content or "",
@@ -304,10 +348,10 @@ class AnthropicClient:
                                     stream_manager.send_changes({"code": suggested_code})
                                 else:
                                     stream_manager.send_changes({"code_edits": code_edits})
-                            else:
+                            elif code_edits:
                                 stream_manager.send_changes({"code_edits": code_edits})
-                        except json.JSONDecodeError:
-                            logger.warning(f"Failed to parse code_edits: {code_edits_raw[:200]}")
+                        except (json.JSONDecodeError, ValueError):
+                            logger.warning(f"Failed to parse code_edits during streaming")
 
                         # Mark where text content starts in the accumulated buffer
                         text_offset = accumulated_response.find(delimiter) + len(delimiter)
@@ -450,16 +494,29 @@ class AnthropicClient:
                 full_code=full_code,
                 text_explanation=text_explanation
             )
-            prompt.append({"role": "assistant", "content": '{\n  "explanation": "'})
+            correction_schema = {
+                "type": "object",
+                "properties": {
+                    "explanation": {"type": "string"},
+                    "corrected_old_code": {"type": "string"},
+                    "corrected_new_code": {"type": "string"}
+                },
+                "required": ["explanation", "corrected_old_code", "corrected_new_code"],
+                "additionalProperties": False
+            }
             message = self.client.messages.create(
                 max_tokens=16384,
                 messages=prompt,
                 model=self.config.model,
-                system=system_message
+                system=system_message,
+                output_config={
+                    "format": {"type": "json_schema", "schema": correction_schema},
+                    "effort": "medium"
+                },
+                thinking={"type": "adaptive"}
             )
 
             response = "\n\n".join([block.text for block in message.content if block.type == "text"])
-            response = '{\n  "explanation": "' + response  # Add back the prefilled opening brace
             correction_data = json.loads(response)
 
             corrected_old = correction_data.get("corrected_old_code")

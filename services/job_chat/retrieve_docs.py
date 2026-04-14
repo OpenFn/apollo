@@ -124,19 +124,34 @@ def generate_queries(content, client, user_context=""):
         user_question=content
     )
 
+    queries_schema = {
+        "type": "object",
+        "properties": {
+            "queries": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                    "additionalProperties": False
+                }
+            }
+        },
+        "required": ["queries"],
+        "additionalProperties": False
+    }
+
     text, usage = call_llm(
         model=resolve_model(config["llm_retrieval"]),
         temperature=config["temperature"],
         system_prompt=config_loader.prompts["prompts"]["search_docs_system_prompt"],
         user_prompt=formatted_user_prompt,
         client=client,
-        prefill='[\n  {"query": "'
+        output_schema=queries_schema
     )
 
     try:
-        # Prepend the prefill back to response
-        text = '[\n  {"query": "' + text
-        answer_parsed = json.loads(text)
+        answer_parsed = json.loads(text).get("queries", [])
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse LLM response as JSON: {e}. Response text: {text[:200]}")
         raise ApolloError(
@@ -181,7 +196,7 @@ def format_context(adaptor, code, history):
     
     return formatted_text
 
-def call_llm(model, temperature, system_prompt, user_prompt, client, prefill=None):
+def call_llm(model, temperature, system_prompt, user_prompt, client, output_schema=None):
     """Helper method to make LLM calls with error handling."""
     try:
         messages = [
@@ -196,20 +211,19 @@ def call_llm(model, temperature, system_prompt, user_prompt, client, prefill=Non
             }
         ]
 
-        # Add prefill if provided
-        if prefill:
-            messages.append({
-                "role": "assistant",
-                "content": prefill
-            })
-
-        message = client.messages.create(
+        kwargs = dict(
             model=model,
             max_tokens=1024,
             temperature=temperature,
             system=system_prompt,
             messages=messages
         )
+        if output_schema:
+            kwargs["output_config"] = {
+                "format": {"type": "json_schema", "schema": output_schema}
+            }
+
+        message = client.messages.create(**kwargs)
 
         # Validate response has content
         if not message.content or len(message.content) == 0:

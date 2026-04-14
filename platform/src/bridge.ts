@@ -13,7 +13,7 @@ import { rm } from "node:fs/promises";
 export const run = async (
   scriptName: string,
   port: number, // needed for self-calling services in pythonland
-  args: JSON,
+  args: any = {},
   onLog?: (str: string) => void,
   onEvent?: (type: string, payload: any /* string or json tbh */) => void
 ) => {
@@ -25,10 +25,10 @@ export const run = async (
     const inputPath = tmpfile.replace("{}", "input");
     const outputPath = tmpfile.replace("{}", "output");
 
-    console.log("Initing input file at", inputPath);
+    // console.log("Initing input file at", inputPath);
     await Bun.write(inputPath, JSON.stringify(args));
 
-    console.log("Initing output file at", outputPath);
+    // console.log("Initing output file at", outputPath);
     await Bun.write(outputPath, "");
 
     const proc = spawn(
