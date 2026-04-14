@@ -138,6 +138,56 @@ class StreamManager:
 
         self._close_block(block)
 
+    def start_thinking_block(self) -> None:
+        """
+        Start a new thinking block for incremental streaming.
+        Use with send_thinking_delta() and close_thinking_block() to
+        stream thinking content as it arrives from the API.
+        """
+        if self.stream_ended:
+            raise RuntimeError("Stream already ended")
+
+        if not self.stream_started:
+            self.start_stream()
+
+        self._close_open_blocks()
+
+        index = self._next_index()
+        block = ContentBlock(index=index, block_type="thinking")
+        self.blocks.append(block)
+
+        self._emit_event('content_block_start', {
+            "type": "content_block_start",
+            "index": index,
+            "content_block": {"type": "thinking", "thinking": ""},
+        })
+
+    def send_thinking_delta(self, thinking_text: str) -> None:
+        """Send an incremental thinking delta to the current open thinking block."""
+        block = self._get_current_thinking_block()
+        if block is None:
+            return
+
+        self._emit_event('content_block_delta', {
+            "type": "content_block_delta",
+            "index": block.index,
+            "delta": {"type": "thinking_delta", "thinking": thinking_text},
+        })
+
+    def close_thinking_block(self, signature: str | None = "signature_filler") -> None:
+        """Close the current thinking block with a signature."""
+        block = self._get_current_thinking_block()
+        if block is None:
+            return
+
+        self._emit_event('content_block_delta', {
+            "type": "content_block_delta",
+            "index": block.index,
+            "delta": {"type": "signature_delta", "signature": signature or "signature_filler"},
+        })
+
+        self._close_block(block)
+
     def send_text(self, text_chunk: str) -> None:
         """
         Send a text chunk. Automatically manages text content block lifecycle.
@@ -217,6 +267,13 @@ class StreamManager:
         """Get the currently open text block, if any."""
         for block in reversed(self.blocks):
             if block.is_open and block.block_type == "text":
+                return block
+        return None
+
+    def _get_current_thinking_block(self) -> ContentBlock | None:
+        """Get the currently open thinking block, if any."""
+        for block in reversed(self.blocks):
+            if block.is_open and block.block_type == "thinking":
                 return block
         return None
 
