@@ -1,5 +1,12 @@
 # apollo
 
+## 0.21.2
+
+### Patch Changes
+
+- 7b91dc7: Add HTTP logs to the server
+- 7b91dc7: echo: fix an issue which prevented the service from running
+
 ## 0.21.1
 
 ### Patch Changes
