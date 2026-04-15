@@ -86,10 +86,18 @@ SSE to clients.
 
 ### Key Python Services
 
-- `job_chat/` - AI chatbot for OpenFn job assistance with RAG
-- `workflow_chat/` - AI assistant for OpenFn workflow creation
+- `global_chat/` - Orchestrator service and single entry point for OpenFn AI
+  chat. Routes requests via a RouterAgent (Haiku) to specialized subagents, or
+  escalates to a PlannerAgent (Sonnet) that coordinates multi-step tasks using
+  tool calls. Depends on `job_chat`, `workflow_chat`, and `search_docsite`.
+- `job_chat/` - AI chat service for OpenFn job code assistance. Supports
+  conversational help and a code suggestions mode with auto-patching. Uses RAG
+  via `search_docsite` and injects adaptor API docs. Streams responses.
+- `workflow_chat/` - AI chat service for generating and editing OpenFn workflow
+  YAML. Preserves job code and IDs during edits, validates adaptors, and retries
+  on parse failures. Streams responses.
 - `search_docsite/` - Searches OpenFn docs using Pinecone vector store (used by
-  job_chat for dynamic context)
+  job_chat and global_chat for dynamic context)
 - `embed_docsite/` - Indexes OpenFn documentation for search
 - `embeddings/` - Vector embeddings with Pinecone (production index:
   "apollo-mappings")
