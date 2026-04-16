@@ -1,6 +1,6 @@
 ---
 name: streaming-narrative-reviewer
-description: Reviews streaming status narratives across chat services for confusing or missing sequences. Run when changing streaming behavior or service routing.
+description: Reviews streaming status narratives in chat services.
 tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
