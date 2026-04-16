@@ -3,7 +3,6 @@ Planner Agent - Coordinates tools and subagents for complex multi-step tasks.
 """
 
 import os
-import random
 from typing import List, Dict, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -88,10 +87,9 @@ class PlannerAgent:
 
         stream_manager = StreamManager(model=self.model, stream=stream)
         if self.current_yaml:
-            status = random.choice(STATUS_REVIEWING_WORKFLOW + STATUS_PLANNING)
+            stream_manager.send_thinking(STATUS_REVIEWING_WORKFLOW + STATUS_PLANNING)
         else:
-            status = random.choice(STATUS_NEW_WORKFLOW + STATUS_PLANNING)
-        stream_manager.send_thinking(status)
+            stream_manager.send_thinking(STATUS_NEW_WORKFLOW + STATUS_PLANNING)
 
         self.current_yaml = workflow_yaml
         self.yaml_modified = False
@@ -385,13 +383,9 @@ class PlannerAgent:
         # Send a combined status message for all job code steps
         names = [self._display_name_for_job(b.input.get("job_key")) for b in blocks]
         names = [n for n in names if n]
-        if len(names) == 1:
-            status = f"Writing code for \"{names[0]}\" step..."
-        elif len(names) == 2:
-            status = f"Writing code for \"{names[0]}\" and \"{names[1]}\" steps..."
-        elif names:
-            joined = ", ".join(f"\"{n}\"" for n in names[:-1])
-            status = f"Writing code for {joined}, and \"{names[-1]}\" steps..."
+        if names:
+            joined = ", ".join(f"\"{n}\"" for n in names)
+            status = f"Writing code for {joined}..."
         else:
             status = "Writing job code..."
         stream_manager.send_thinking(status)
@@ -486,14 +480,14 @@ class PlannerAgent:
             job_key = inputs.get("job_key")
             display_name = self._display_name_for_job(job_key)
             if display_name:
-                return f"Writing code for \"{display_name}\" step..."
+                return f"Writing code for \"{display_name}\"..."
             return "Writing job code..."
 
         if name == "inspect_job_code":
             job_key = inputs.get("job_key")
             display_name = self._display_name_for_job(job_key)
             if display_name:
-                return f"Reading code for \"{display_name}\" step..."
+                return f"Reading code for \"{display_name}\"..."
             return "Reading job code..."
 
         return f"Running {name}..."

@@ -1,6 +1,5 @@
 import json
 import os
-import random
 import re
 import uuid
 import unicodedata
@@ -203,10 +202,9 @@ class AnthropicClient:
                     if stream:
                         logger.info("Making streaming API call")
                         if existing_yaml and existing_yaml.strip():
-                            status = random.choice(STATUS_REVIEWING_WORKFLOW)
+                            stream_manager.send_thinking(STATUS_REVIEWING_WORKFLOW)
                         else:
-                            status = random.choice(STATUS_NEW_WORKFLOW + STATUS_DESIGNING_WORKFLOW)
-                        stream_manager.send_thinking(status)
+                            stream_manager.send_thinking(STATUS_NEW_WORKFLOW + STATUS_DESIGNING_WORKFLOW)
 
                         text_started = False
                         sent_length = 0

@@ -1,6 +1,5 @@
 import os
 import json
-import random
 import re
 import yaml
 from typing import List, Optional, Dict, Any
@@ -24,6 +23,7 @@ from streaming_util import (
     StreamManager,
     STATUS_REVIEWING_CODE,
     STATUS_NEW_CODE,
+    STATUS_WORKING,
 )
 from models import resolve_model
 
@@ -169,10 +169,9 @@ class AnthropicClient:
 
             stream_manager = StreamManager(model=self.config.model, stream=stream)
             if context and context.get("expression"):
-                status = random.choice(STATUS_REVIEWING_CODE)
+                stream_manager.send_thinking(STATUS_REVIEWING_CODE)
             else:
-                status = random.choice(STATUS_NEW_CODE)
-            stream_manager.send_thinking(status)
+                stream_manager.send_thinking(STATUS_NEW_CODE)
 
             with sentry_sdk.start_span(description="build_prompt"):
                 if suggest_code is True:
@@ -227,6 +226,8 @@ class AnthropicClient:
 
                     with self.client.messages.stream(**stream_kwargs) as stream_obj:
                         for event in stream_obj:
+                            if event.type == "message_start":
+                                stream_manager.send_thinking(STATUS_WORKING)
                             accumulated_response, text_started, sent_length = self.process_stream_event(
                                 event,
                                 accumulated_response,

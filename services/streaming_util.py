@@ -6,6 +6,7 @@ to simplify streaming implementations across services.
 """
 
 import json
+import random
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -49,6 +50,15 @@ STATUS_REVIEWING_CODE = [
     "Looking over the job code...",
     "Checking the existing code...",
     "Reviewing what you have so far...",
+    "Digging into the code...",
+    "Having a look at your code...",
+    "Looking at what you have...",
+    "Looking things over...",
+    "Taking a look...",
+    "Getting the context...",
+    "Having a look...",
+    "Getting up to speed...",
+    "Taking stock...",
 ]
 
 STATUS_NEW_CODE = [
@@ -57,6 +67,16 @@ STATUS_NEW_CODE = [
     "Setting things up...",
     "Getting started on the code...",
     "Preparing the job code...",
+]
+
+STATUS_WORKING = [
+    "Working on it...",
+    "Working through it...",
+    "Putting it together...",
+    "Piecing it together...",
+    "Pulling it together...",
+    "Working on a response...",
+    "Sorting it out...",
 ]
 
 
@@ -138,7 +158,7 @@ class StreamManager:
 
     def send_thinking(
         self,
-        thinking_text: str,
+        thinking_text: str | list[str],
         signature: str | None = "signature_filler",
     ) -> None:
         """
@@ -146,7 +166,9 @@ class StreamManager:
         Creates a new content block, sends the thinking, and closes it.
 
         Args:
-            thinking_text: The thinking content to send
+            thinking_text: The thinking content to send. If a list is passed,
+                one entry is picked at random — convenient for rotating
+                through status message pools.
             signature: Optional signature to include with the thinking
         """
         if self.stream_ended:
@@ -154,6 +176,9 @@ class StreamManager:
 
         if not self.stream_started:
             self.start_stream()
+
+        if isinstance(thinking_text, list):
+            thinking_text = random.choice(thinking_text)
 
         self._close_open_blocks()
 
