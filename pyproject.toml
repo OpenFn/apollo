@@ -9,17 +9,11 @@ package-mode = false
 
 [tool.poetry.dependencies]
 python = "3.11.*"
-spacy = "^3.7.4"
-en-core-web-sm = { path = "models/en_core_web_sm-3.7.1-py3-none-any.whl" }
 openai = "^1.23.3"
-transformers = "^4.53.0"
 black = "^26.3.1"
 python-dotenv = "^1.0.1"
 anthropic = "^0.85.0"
-pymilvus = "^2.4.6"
 
-# These dependencies should only be needed for fine tuning
-# use poetry install --with ft
 langchain-pinecone = "0.2.2"
 langchain-community = "^0.3.27"
 langchain-openai = "^0.3.1"
@@ -30,12 +24,6 @@ pytest = "^8.4.1"
 aiohttp = ">=3.10,<3.11"
 sentry-sdk = "^2.35.0"
 psycopg2-binary = "^2.9.10"
-
-[tool.poetry.group.ft]
-optional = true
-
-[tool.poetry.group.ft.dependencies]
-torch = "^2.8.0"
 
 [tool.poetry.group.dev]
 optional = false

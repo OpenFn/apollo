@@ -1,1 +1,0 @@
-Create an OpenFn function that allows me to get locations from the /location endpoint

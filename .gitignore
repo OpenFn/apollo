@@ -78,3 +78,7 @@ adaptors_cache.json
 .context
 
 .adaptors
+
+# Claude Code personal settings
+.claude/settings.local.json
+CLAUDE.local.md
