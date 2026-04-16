@@ -27,6 +27,7 @@ optional = false
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.4"
+ruff = "^0.15.10"
 
 [build-system]
 requires = ["poetry-core"]
