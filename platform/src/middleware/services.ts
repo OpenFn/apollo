@@ -33,7 +33,8 @@ export default async (app: Elysia, port: number) => {
 
       // simple post
       app.post(name, async (ctx) => {
-        console.log(`Calling /services/${name}`);
+        console.log(ctx);
+        console.log(`POST /services/${name}: ${ctx.uuid}`);
         const payload = ctx.body;
         const result = await callService(m, port, payload as any);
 
@@ -51,7 +52,7 @@ export default async (app: Elysia, port: number) => {
 
       // HTTP streaming
       app.post(`${name}/stream`, async (ctx) => {
-        console.log(`HTTP stream connected to ${name}`);
+        console.log(`STREAM /services/${name}: ${ctx.uuid}`);
         const payload = ctx.body;
 
         const stream = new ReadableStream({
@@ -103,6 +104,7 @@ export default async (app: Elysia, port: number) => {
                   error instanceof Error ? error.message : "Unknown error",
               });
             } finally {
+              console.log(`${ctx.uuid} completed in ${new Date() - ctx.start}`);
               isClosed = true;
               controller.close();
             }
