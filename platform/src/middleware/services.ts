@@ -30,6 +30,7 @@ export default async (app: Elysia, port: number) => {
     modules.forEach((m) => {
       const { name, readme } = m;
       console.log(" - mounted /services/" + name);
+      payload.session_id = ctx.uuid;
 
       // simple post
       app.post(name, async (ctx) => {
@@ -54,6 +55,7 @@ export default async (app: Elysia, port: number) => {
       app.post(`${name}/stream`, async (ctx) => {
         console.log(`STREAM /services/${name}: ${ctx.uuid}`);
         const payload = ctx.body;
+        payload.session_id = ctx.uuid;
 
         const stream = new ReadableStream({
           async start(controller) {
