@@ -5,13 +5,14 @@ import setupHealthcheck from "./middleware/healthcheck";
 import setupServices from "./middleware/services";
 import { html } from "@elysiajs/html";
 import logRequest from "./util/log-request";
+import { randomUUID } from "node:crypto";
 
 export default async (port: number | string = 3000) => {
   const app = new Elysia();
 
   app.use(html());
 
-  app.derive(() => ({ start: Date.now() }));
+  app.derive(() => ({ start: Date.now(), uuid: randomUUID() }));
   app.onAfterHandle(logRequest);
 
   await setupHealthcheck(app);
