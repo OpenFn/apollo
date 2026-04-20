@@ -340,13 +340,9 @@ class AnthropicClient:
                         edits_part = accumulated_response[:match.start()]
                         # Find the code_edits array value
                         try:
-                            # Build partial JSON to extract code_edits
-                            partial = edits_part.rstrip().rstrip(",")
-                            # Close the partial JSON to make it parseable
-                            if not partial.rstrip().endswith("}"):
-                                partial = partial + "}"
-                            partial_data = json.loads(partial)
-                            code_edits = partial_data.get("code_edits", [])
+                            # Close the partial object and extract code_edits
+                            partial = edits_part.rstrip().rstrip(",") + "}"
+                            code_edits = json.loads(partial).get("code_edits", [])
 
                             if original_code and code_edits:
                                 suggested_code, diff = self.apply_code_edits(
