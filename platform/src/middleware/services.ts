@@ -30,13 +30,12 @@ export default async (app: Elysia, port: number) => {
     modules.forEach((m) => {
       const { name, readme } = m;
       console.log(" - mounted /services/" + name);
-      payload.session_id = ctx.uuid;
 
       // simple post
       app.post(name, async (ctx) => {
-        console.log(ctx);
         console.log(`POST /services/${name}: ${ctx.uuid}`);
         const payload = ctx.body;
+        payload.session_id = ctx.uuid;
         const result = await callService(m, port, payload as any);
 
         if (isApolloError(result)) {
@@ -53,7 +52,7 @@ export default async (app: Elysia, port: number) => {
 
       // HTTP streaming
       app.post(`${name}/stream`, async (ctx) => {
-        console.log(`STREAM /services/${name}: ${ctx.uuid}`);
+        console.log(`STREAM START /services/${name}: ${ctx.uuid}`);
         const payload = ctx.body;
         payload.session_id = ctx.uuid;
 
@@ -106,7 +105,11 @@ export default async (app: Elysia, port: number) => {
                   error instanceof Error ? error.message : "Unknown error",
               });
             } finally {
-              console.log(`${ctx.uuid} completed in ${new Date() - ctx.start}`);
+              console.log(
+                `STREAM COMPLETE ${ctx.uuid} in ${
+                  (new Date() - ctx.start) / 1000
+                }s`
+              );
               isClosed = true;
               controller.close();
             }
