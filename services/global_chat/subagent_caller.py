@@ -3,6 +3,7 @@ Subagent caller tool for the supervisor agent.
 
 Handles calling subagents and managing message/YAML passing.
 """
+
 import sys
 from pathlib import Path
 from typing import Dict, Optional
@@ -16,11 +17,7 @@ from global_chat.yaml_utils import find_job_in_yaml
 logger = create_logger(__name__)
 
 
-def call_workflow_agent(
-    tool_input: Dict,
-    workflow_yaml: Optional[str] = None,
-    api_key: Optional[str] = None
-) -> Dict:
+def call_workflow_agent(tool_input: Dict, workflow_yaml: Optional[str] = None, api_key: Optional[str] = None) -> Dict:
     """
     Call the workflow agent and return its results.
 
@@ -41,11 +38,13 @@ def call_workflow_agent(
         "content": user_message,
         "existing_yaml": workflow_yaml,
         "history": [],  # Supervisor includes context in message
-        "api_key": api_key
+        "stream": False,  # Never stream subagent calls from planner
+        "api_key": api_key,
     }
 
     try:
         from workflow_chat.workflow_chat import main as workflow_chat_main
+
         result = workflow_chat_main(workflow_payload)
 
         response_preview = result.get("response", "")[:120]
@@ -62,11 +61,7 @@ def call_workflow_agent(
         raise ApolloError(500, f"workflow_agent failed: {str(e)}")
 
 
-def call_job_agent(
-    tool_input: Dict,
-    workflow_yaml: Optional[str] = None,
-    api_key: Optional[str] = None
-) -> Dict:
+def call_job_agent(tool_input: Dict, workflow_yaml: Optional[str] = None, api_key: Optional[str] = None) -> Dict:
     """
     Call the job code agent and return its results.
 
@@ -103,11 +98,12 @@ def call_job_agent(
         "suggest_code": True,
         "stream": False,
         "history": [],  # Supervisor includes context in message
-        "api_key": api_key
+        "api_key": api_key,
     }
 
     try:
         from job_chat.job_chat import main as job_chat_main
+
         result = job_chat_main(job_payload)
 
         response_preview = result.get("response", "")[:120]
@@ -126,4 +122,4 @@ def call_job_agent(
 
 def format_subagent_result_for_llm(result: Dict) -> str:
     """Return the subagent's prose response for the planner to read."""
-    return result.get('response', 'No response')
+    return result.get("response", "No response")

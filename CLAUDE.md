@@ -3,6 +3,9 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with
 code in this repository.
 
+**Never chain Bash commands with `&&`, `;`, or `cd ... &&`. Use separate Bash
+calls instead.**
+
 ## Commands
 
 ### Development

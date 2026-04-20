@@ -1,17 +1,25 @@
 """
 Planner Agent - Coordinates tools and subagents for complex multi-step tasks.
 """
+
 import os
 from typing import List, Dict, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from anthropic import Anthropic
 
 import sys
 from pathlib import Path
+
 sys.path.append(str(Path(__file__).parent.parent))
 
 from util import create_logger, ApolloError, sum_usage
-from streaming_util import StreamManager
+from streaming_util import (
+    StreamManager,
+    STATUS_REVIEWING_WORKFLOW,
+    STATUS_NEW_WORKFLOW,
+    STATUS_PLANNING,
+)
 from global_chat.config_loader import ConfigLoader
 from models import resolve_model
 from global_chat.tools.tool_definitions import TOOL_DEFINITIONS
@@ -25,6 +33,7 @@ logger = create_logger(__name__)
 @dataclass
 class PlannerResult:
     """Result from planner run."""
+
     response: str
     attachments: List[Dict]
     history: List[Dict]
@@ -59,12 +68,7 @@ class PlannerAgent:
         logger.info(f"PlannerAgent initialized with model: {self.model}")
 
     def run(
-        self,
-        content: str,
-        workflow_yaml: Optional[str],
-        page: Optional[str],
-        history: List[Dict],
-        stream: bool
+        self, content: str, workflow_yaml: Optional[str], page: Optional[str], history: List[Dict], stream: bool
     ) -> PlannerResult:
         """
         Run the planner agent with tool-calling loop.
@@ -74,7 +78,7 @@ class PlannerAgent:
             workflow_yaml: Full workflow YAML string (including job bodies)
             page: Current page URL (e.g. workflows/name/step-name)
             history: Conversation history
-            stream: Streaming flag (not implemented)
+            stream: Whether to stream text via SSE events
 
         Returns:
             PlannerResult with response, attachments, history, usage, meta
@@ -82,9 +86,13 @@ class PlannerAgent:
         logger.info("Planner.run() called")
 
         stream_manager = StreamManager(model=self.model, stream=stream)
-        stream_manager.send_thinking("Analyzing request...")
+        if self.current_yaml:
+            stream_manager.send_thinking(STATUS_REVIEWING_WORKFLOW + STATUS_PLANNING)
+        else:
+            stream_manager.send_thinking(STATUS_NEW_WORKFLOW + STATUS_PLANNING)
 
         self.current_yaml = workflow_yaml
+        self.yaml_modified = False
 
         system_prompt = self._build_system_prompt()
 
@@ -104,114 +112,100 @@ class PlannerAgent:
             "input_tokens": 0,
             "output_tokens": 0,
             "cache_creation_input_tokens": 0,
-            "cache_read_input_tokens": 0
+            "cache_read_input_tokens": 0,
         }
 
         final_text = ""
 
-        while tool_call_count < self.max_tool_calls:
-            try:
-                response = self.client.beta.messages.create(
-                    model=self.model,
-                    max_tokens=self.max_tokens,
-                    system=system_prompt,
-                    messages=messages,
-                    tools=self.tools,
-                    thinking={"type": "adaptive"},
-                    output_config={"effort": "high"},
-                    betas=["context-management-2025-06-27"],
-                    context_management={
-                        "edits": [
-                            {
-                                "type": "clear_tool_uses_20250919",
-                                "trigger": {
-                                    "type": "tool_uses",
-                                    "value": 20
-                                },
-                                "keep": {
-                                    "type": "tool_uses",
-                                    "value": 10
-                                },
-                                "exclude_tools": ["search_documentation"],
-                                "clear_tool_inputs": True
-                            }
-                        ]
-                    }
-                )
+        try:
+            while tool_call_count < self.max_tool_calls:
+                try:
+                    response, buffered_text = self._call_api(system_prompt, messages, stream)
 
-                for field in ["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"]:
-                    total_usage[field] += getattr(response.usage, field, 0)
+                    for field in [
+                        "input_tokens",
+                        "output_tokens",
+                        "cache_creation_input_tokens",
+                        "cache_read_input_tokens",
+                    ]:
+                        total_usage[field] += getattr(response.usage, field, 0)
 
-                logger.info(f"Claude API call {tool_call_count + 1}: stop_reason={response.stop_reason}")
+                    logger.info(f"Claude API call {tool_call_count + 1}: stop_reason={response.stop_reason}")
 
-                # Forward any thinking blocks to the client
-                for block in response.content:
-                    if block.type == "thinking":
-                        stream_manager.send_thinking(block.thinking)
+                    if response.stop_reason == "end_turn":
+                        # Send final YAML before text, matching workflow_chat/job_chat pattern
+                        if self.yaml_modified and self.current_yaml:
+                            stream_manager.send_changes({"yaml": self.current_yaml})
 
-                if response.stop_reason == "end_turn":
-                    if tool_call_count > 0:
-                        stream_manager.send_thinking("Collating components...")
-                    final_text = self._extract_text(response)
-                    messages.append({
-                        "role": "assistant",
-                        "content": final_text
-                    })
-                    logger.info(f"Tool loop completed. Total calls: {tool_call_count}")
-                    break
+                        # Flush buffered text chunks
+                        for chunk in buffered_text:
+                            stream_manager.send_text(chunk)
 
-                elif response.stop_reason == "tool_use":
-                    tool_use_blocks = self._find_all_tool_uses(response.content)
-
-                    if not tool_use_blocks:
-                        logger.error("tool_use stop_reason but no tool_use block found")
+                        final_text = self._extract_text(response)
+                        messages.append({"role": "assistant", "content": final_text})
+                        logger.info(f"Tool loop completed. Total calls: {tool_call_count}")
                         break
 
-                    logger.info(f"Executing {len(tool_use_blocks)} tool(s): {[b.name for b in tool_use_blocks]}")
+                    elif response.stop_reason == "tool_use":
+                        tool_use_blocks = self._find_all_tool_uses(response.content)
 
-                    tool_results = []
-                    for tool_use_block in tool_use_blocks:
-                        tool_result = self._execute_tool(tool_use_block, total_usage, tool_calls_meta)
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": tool_use_block.id,
-                            "content": tool_result
-                        })
+                        if not tool_use_blocks:
+                            logger.error("tool_use stop_reason but no tool_use block found")
+                            break
 
-                    content_blocks = []
-                    for block in response.content:
-                        if block.type == "thinking":
-                            content_blocks.append({
-                                "type": "thinking",
-                                "thinking": block.thinking,
-                                "signature": block.signature
-                            })
-                        elif block.type == "text":
-                            content_blocks.append({"type": "text", "text": block.text})
-                        elif block.type == "tool_use":
-                            content_blocks.append({
-                                "type": "tool_use",
-                                "id": block.id,
-                                "name": block.name,
-                                "input": block.input
-                            })
+                        logger.info(f"Executing {len(tool_use_blocks)} tool(s): {[b.name for b in tool_use_blocks]}")
 
-                    messages.append({"role": "assistant", "content": content_blocks})
-                    messages.append({"role": "user", "content": tool_results})
+                        job_code_blocks = [b for b in tool_use_blocks if b.name == "call_job_code_agent"]
+                        other_blocks = [b for b in tool_use_blocks if b.name != "call_job_code_agent"]
 
-                    tool_call_count += len(tool_use_blocks)
+                        tool_results = []
 
-                else:
-                    logger.warning(f"Unexpected stop_reason: {response.stop_reason}")
-                    break
+                        for tool_use_block in other_blocks:
+                            stream_manager.send_thinking(self._tool_status_message(tool_use_block))
+                            tool_result = self._execute_tool(tool_use_block, total_usage, tool_calls_meta)
+                            tool_results.append(
+                                {"type": "tool_result", "tool_use_id": tool_use_block.id, "content": tool_result}
+                            )
 
-            except Exception as e:
-                logger.exception("Error in tool-calling loop")
-                raise ApolloError(500, f"Tool execution error: {str(e)}")
+                        if job_code_blocks:
+                            job_results = self._execute_job_code_tools_parallel(
+                                job_code_blocks, stream_manager, total_usage, tool_calls_meta
+                            )
+                            tool_results.extend(job_results)
 
-        if response.stop_reason != "end_turn":
-            final_text = self._extract_text(response)
-            logger.warning(f"Loop exited without end_turn (reason: {response.stop_reason})")
+                        content_blocks = []
+                        for block in response.content:
+                            if block.type == "thinking":
+                                content_blocks.append({
+                                    "type": "thinking",
+                                    "thinking": block.thinking,
+                                    "signature": block.signature,
+                                })
+                            elif block.type == "text":
+                                content_blocks.append({"type": "text", "text": block.text})
+                            elif block.type == "tool_use":
+                                content_blocks.append(
+                                    {"type": "tool_use", "id": block.id, "name": block.name, "input": block.input}
+                                )
+
+                        messages.append({"role": "assistant", "content": content_blocks})
+                        messages.append({"role": "user", "content": tool_results})
+
+                        tool_call_count += len(tool_use_blocks)
+
+                    else:
+                        logger.warning(f"Unexpected stop_reason: {response.stop_reason}")
+                        break
+
+                except Exception as e:
+                    logger.exception("Error in tool-calling loop")
+                    raise ApolloError(500, f"Tool execution error: {str(e)}")
+
+            if response.stop_reason != "end_turn":
+                final_text = self._extract_text(response)
+                logger.warning(f"Loop exited without end_turn (reason: {response.stop_reason})")
+        finally:
+            stream_manager.end_stream()
 
         agents_used = ["router", "planner"]
         for result in self.subagent_results:
@@ -221,7 +215,7 @@ class PlannerAgent:
                 agents_used.append(subagent_name)
 
         attachments = []
-        if self.current_yaml:
+        if self.yaml_modified and self.current_yaml:
             attachments.append({"type": "workflow_yaml", "content": self.current_yaml})
 
         return PlannerResult(
@@ -234,9 +228,57 @@ class PlannerAgent:
                 "planner_iterations": tool_call_count,
                 "tool_calls": tool_calls_meta,
                 "subagent_calls": self.subagent_results,
-                "total_tool_calls": tool_call_count
-            }
+                "total_tool_calls": tool_call_count,
+            },
         )
+
+    def _call_api(self, system_prompt, messages, stream):
+        """Make Claude API call. When streaming, buffers text deltas for the caller to flush.
+
+        Adaptive thinking is enabled for better reasoning but thinking content
+        is not streamed to the client — it exposes internal details like tool
+        names and agent architecture. User-facing progress comes from the
+        task-specific status messages sent before each tool execution.
+        """
+        if stream:
+            buffered_text = []
+
+            with self.client.messages.stream(
+                model=self.model,
+                max_tokens=self.max_tokens,
+                system=system_prompt,
+                messages=messages,
+                tools=self.tools,
+                thinking={"type": "adaptive"},
+            ) as stream_obj:
+                for event in stream_obj:
+                    if event.type == "content_block_delta":
+                        if event.delta.type == "text_delta":
+                            buffered_text.append(event.delta.text)
+                return stream_obj.get_final_message(), buffered_text
+        else:
+            response = self.client.beta.messages.create(
+                model=self.model,
+                max_tokens=self.max_tokens,
+                system=system_prompt,
+                messages=messages,
+                tools=self.tools,
+                thinking={"type": "adaptive"},
+                output_config={"effort": "high"},
+                betas=["context-management-2025-06-27"],
+                context_management={
+                    "edits": [
+                        {
+                            "type": "clear_tool_uses_20250919",
+                            "trigger": {"type": "tool_uses", "value": 20},
+                            "keep": {"type": "tool_uses", "value": 10},
+                            "exclude_tools": ["search_documentation"],
+                            "clear_tool_inputs": True,
+                        }
+                    ]
+                },
+            )
+            return response, []
 
     def _find_all_tool_uses(self, content):
         """Find all tool_use blocks in response content."""
@@ -247,16 +289,11 @@ class PlannerAgent:
         if tool_use_block.name == "search_documentation":
             tool_result = search_documentation_tool(tool_use_block.input)
 
-            tool_calls_meta.append({
-                "tool": "search_documentation",
-                "input": tool_use_block.input
-            })
+            tool_calls_meta.append({"tool": "search_documentation", "input": tool_use_block.input})
 
         elif tool_use_block.name == "call_workflow_agent":
             subagent_result = call_workflow_agent(
-                tool_use_block.input,
-                workflow_yaml=self.current_yaml,
-                api_key=self.api_key
+                tool_use_block.input, workflow_yaml=self.current_yaml, api_key=self.api_key
             )
 
             if "usage" in subagent_result:
@@ -265,6 +302,7 @@ class PlannerAgent:
             # Update live state eagerly
             if subagent_result.get("response_yaml"):
                 self.current_yaml = subagent_result["response_yaml"]
+                self.yaml_modified = True
 
             self.subagent_results.append(subagent_result)
 
@@ -275,10 +313,7 @@ class PlannerAgent:
                 redacted = redact_job_bodies(self.current_yaml)
                 tool_result += f"\n\nUpdated workflow structure:\n{redacted}"
 
-            tool_calls_meta.append({
-                "tool": "call_workflow_agent",
-                "input": tool_use_block.input
-            })
+            tool_calls_meta.append({"tool": "call_workflow_agent", "input": tool_use_block.input})
 
         elif tool_use_block.name == "call_job_code_agent":
             job_key = tool_use_block.input.get("job_key")
@@ -292,13 +327,13 @@ class PlannerAgent:
                 _, job_data = find_job_in_yaml(self.current_yaml, job_key)
                 if not job_data:
                     tool_result = f"ERROR: Job key '{job_key}' not found in workflow YAML. Create the workflow with this job first."
-                    tool_calls_meta.append({"tool": "call_job_code_agent", "input": tool_use_block.input, "skipped": True})
+                    tool_calls_meta.append(
+                        {"tool": "call_job_code_agent", "input": tool_use_block.input, "skipped": True}
+                    )
                     return tool_result
 
             subagent_result = call_job_agent(
-                tool_use_block.input,
-                workflow_yaml=self.current_yaml,
-                api_key=self.api_key
+                tool_use_block.input, workflow_yaml=self.current_yaml, api_key=self.api_key
             )
 
             if "usage" in subagent_result:
@@ -308,6 +343,7 @@ class PlannerAgent:
             suggested_code = subagent_result.get("suggested_code")
             if job_key and suggested_code and self.current_yaml:
                 self.current_yaml = stitch_job_code(self.current_yaml, job_key, suggested_code)
+                self.yaml_modified = True
                 logger.info(f"Stitched code for job '{job_key}' into current_yaml")
 
             self.subagent_results.append(subagent_result)
@@ -317,10 +353,7 @@ class PlannerAgent:
             else:
                 tool_result += "\n\n[No job code was generated.]"
 
-            tool_calls_meta.append({
-                "tool": "call_job_code_agent",
-                "input": tool_use_block.input
-            })
+            tool_calls_meta.append({"tool": "call_job_code_agent", "input": tool_use_block.input})
 
         elif tool_use_block.name == "inspect_job_code":
             job_key = tool_use_block.input.get("job_key")
@@ -333,16 +366,152 @@ class PlannerAgent:
                 else:
                     tool_result = f"No code found for job '{job_key}'."
 
-            tool_calls_meta.append({
-                "tool": "inspect_job_code",
-                "input": tool_use_block.input
-            })
+            tool_calls_meta.append({"tool": "inspect_job_code", "input": tool_use_block.input})
 
         else:
             logger.error(f"Unknown tool: {tool_use_block.name}")
             tool_result = f"Error: Unknown tool {tool_use_block.name}"
 
         return tool_result
+
+    def _execute_job_code_tools_parallel(self, blocks, stream_manager, total_usage, tool_calls_meta):
+        """Execute multiple call_job_code_agent tools with parallel API calls.
+
+        Sends all status messages up front, runs the slow subagent calls
+        concurrently, then stitches results into the YAML sequentially.
+        """
+        # Send a combined status message for all job code steps
+        names = [self._display_name_for_job(b.input.get("job_key")) for b in blocks]
+        names = [n for n in names if n]
+        if names:
+            joined = ", ".join(f"\"{n}\"" for n in names)
+            status = f"Writing code for {joined}..."
+        else:
+            status = "Writing job code..."
+        stream_manager.send_thinking(status)
+
+        # Validate and prepare — skip invalid ones before launching threads
+        to_run = []
+        skipped = {}
+        for block in blocks:
+            job_key = block.input.get("job_key")
+            if not self.current_yaml:
+                skipped[block.id] = "ERROR: No workflow exists yet. Call call_workflow_agent first to create the workflow, then call call_job_code_agent."
+                tool_calls_meta.append({"tool": "call_job_code_agent", "input": block.input, "skipped": True})
+            elif job_key:
+                _, job_data = find_job_in_yaml(self.current_yaml, job_key)
+                if not job_data:
+                    skipped[block.id] = f"ERROR: Job key '{job_key}' not found in workflow YAML. Create the workflow with this job first."
+                    tool_calls_meta.append({"tool": "call_job_code_agent", "input": block.input, "skipped": True})
+                else:
+                    to_run.append(block)
+            else:
+                to_run.append(block)
+
+        # Run subagent API calls in parallel (the slow part)
+        parallel_results = {}
+        if len(to_run) > 1:
+            with ThreadPoolExecutor(max_workers=len(to_run)) as executor:
+                futures = {
+                    executor.submit(
+                        call_job_agent, block.input, self.current_yaml, self.api_key
+                    ): block
+                    for block in to_run
+                }
+                for future in as_completed(futures):
+                    block = futures[future]
+                    parallel_results[block.id] = future.result()
+        elif to_run:
+            block = to_run[0]
+            parallel_results[block.id] = call_job_agent(block.input, self.current_yaml, self.api_key)
+
+        # Stitch results and update state sequentially
+        tool_results = []
+        for block in blocks:
+            if block.id in skipped:
+                tool_results.append(
+                    {"type": "tool_result", "tool_use_id": block.id, "content": skipped[block.id]}
+                )
+                continue
+
+            subagent_result = parallel_results[block.id]
+            job_key = block.input.get("job_key")
+
+            if "usage" in subagent_result:
+                total_usage.update(sum_usage(total_usage, subagent_result["usage"]))
+
+            suggested_code = subagent_result.get("suggested_code")
+            if job_key and suggested_code and self.current_yaml:
+                self.current_yaml = stitch_job_code(self.current_yaml, job_key, suggested_code)
+                self.yaml_modified = True
+                logger.info(f"Stitched code for job '{job_key}' into current_yaml")
+
+            self.subagent_results.append(subagent_result)
+            tool_result = format_subagent_result_for_llm(subagent_result)
+            if suggested_code:
+                tool_result += "\n\n[Job code generated and stitched into the workflow.]"
+            else:
+                tool_result += "\n\n[No job code was generated.]"
+
+            tool_calls_meta.append({"tool": "call_job_code_agent", "input": block.input})
+            tool_results.append(
+                {"type": "tool_result", "tool_use_id": block.id, "content": tool_result}
+            )
+
+        return tool_results
+
+    def _tool_status_message(self, tool_use_block) -> str:
+        """Generate a user-facing status message for a tool call."""
+        name = tool_use_block.name
+        inputs = tool_use_block.input or {}
+
+        if name == "search_documentation":
+            query = inputs.get("query", "")
+            if query:
+                return f"Searching documentation for \"{query}\"..."
+            return "Searching documentation..."
+
+        if name == "call_workflow_agent":
+            if self.current_yaml:
+                return "Editing workflow..."
+            return "Building workflow outline..."
+
+        if name == "call_job_code_agent":
+            job_key = inputs.get("job_key")
+            display_name = self._display_name_for_job(job_key)
+            if display_name:
+                return f"Writing code for \"{display_name}\"..."
+            return "Writing job code..."
+
+        if name == "inspect_job_code":
+            job_key = inputs.get("job_key")
+            display_name = self._display_name_for_job(job_key)
+            if display_name:
+                return f"Reading code for \"{display_name}\"..."
+            return "Reading job code..."
+
+        return f"Running {name}..."
+
+    def _display_name_for_job(self, job_key: str | None) -> str | None:
+        """Look up a human-readable display name for a job key.
+
+        Checks the workflow YAML for a name field first, then falls back
+        to title-casing the key (e.g. "fetch-patients" -> "Fetch Patients").
+        """
+        if not job_key:
+            return None
+
+        if self.current_yaml:
+            _, job_data = find_job_in_yaml(self.current_yaml, job_key)
+            if job_data and job_data.get("name"):
+                return self._format_display_name(job_data["name"])
+
+        return self._format_display_name(job_key)
+
+    @staticmethod
+    def _format_display_name(name: str) -> str:
+        """Format a job key or name into readable title case."""
+        return name.replace("-", " ").replace("_", " ").title()
 
     def _extract_text(self, response):
         """Extract text from response content."""
@@ -356,10 +525,4 @@ class PlannerAgent:
         """Build system prompt for planner with cache control."""
         prompt_text = self.config_loader.get_prompt("planner_system_prompt")
 
-        return [
-            {
-                "type": "text",
-                "text": prompt_text,
-                "cache_control": {"type": "ephemeral"}
-            }
-        ]
+        return [{"type": "text", "text": prompt_text, "cache_control": {"type": "ephemeral"}}]
