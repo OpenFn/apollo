@@ -1,5 +1,22 @@
 # apollo
 
+## 1.0.0
+
+### Major Changes
+
+- 5cc87a5: Remove unused services:
+
+  - adaptor_gen
+  - code_generator
+  - gen_job
+  - inference
+  - signature_generator
+
+### Patch Changes
+
+- 5e83de5: - Add streaming support to global_chat
+  - Tweak streaming output in job_chat and workflow_chat
+
 ## 0.21.2
 
 ### Patch Changes

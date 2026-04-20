@@ -1,1 +1,0 @@
-Create an OpenFn function that allows me to create a new patient instance via the /Patient endpoint. Add patient name, age and gender.

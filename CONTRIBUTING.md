@@ -140,22 +140,6 @@ To add models as python packages:
 - Add the file to poetry (you should be able to do
   `poetry add models/<my-model>.whl`)
 
-## Code Style
-
---TODO--
-
-Code should be formated with black
-
-I need to:
-
-1. install a linter which can fail in CI (or locally) if there are formatting
-   issues
-2. encourage here a format-on-save approach
-3. make it really easy to install and configure Black?
-
-Update: actually, for JS we use prettier. Why not just use prettier for both
-languages?! We just need to ensure the setup is minimal
-
 ## Releasing
 
 When your contribution is ready, please open a Pull Request at

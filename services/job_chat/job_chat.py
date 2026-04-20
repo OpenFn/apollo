@@ -19,7 +19,12 @@ import sentry_sdk
 from util import ApolloError, create_logger, AdaptorSpecifier, add_page_prefix
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
-from streaming_util import StreamManager
+from streaming_util import (
+    StreamManager,
+    STATUS_REVIEWING_CODE,
+    STATUS_NEW_CODE,
+    STATUS_WORKING,
+)
 from models import resolve_model
 
 _dir = os.path.dirname(os.path.abspath(__file__))
@@ -163,7 +168,10 @@ class AnthropicClient:
             history = history.copy() if history else []
 
             stream_manager = StreamManager(model=self.config.model, stream=stream)
-            stream_manager.send_thinking("Thinking...")
+            if context and context.get("expression"):
+                stream_manager.send_thinking(STATUS_REVIEWING_CODE)
+            else:
+                stream_manager.send_thinking(STATUS_NEW_CODE)
 
             with sentry_sdk.start_span(description="build_prompt"):
                 if suggest_code is True:
@@ -221,6 +229,8 @@ class AnthropicClient:
 
                     with self.client.messages.stream(**stream_kwargs) as stream_obj:
                         for event in stream_obj:
+                            if event.type == "message_start":
+                                stream_manager.send_thinking(STATUS_WORKING)
                             accumulated_response, text_started, sent_length = self.process_stream_event(
                                 event,
                                 accumulated_response,
