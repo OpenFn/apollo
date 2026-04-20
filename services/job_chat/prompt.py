@@ -314,9 +314,6 @@ def generate_system_message(context_dict, search_results, download_adaptor_docs=
                 try:
                     adaptor = AdaptorSpecifier(context.adaptor)
 
-                    if stream_manager:
-                        stream_manager.send_thinking("Loading adaptor documentation...")
-
                     signatures = fetch_signatures(adaptor, conn, auto_load=download_adaptor_docs)
 
                     if signatures:
@@ -410,14 +407,14 @@ def build_prompt(content, history, context, rag=None, api_key=None, stream_manag
     if rag and not refresh_rag:
         retrieved_knowledge = rag
     else:
-      stream_manager.send_thinking("Searching documentation...")
       try:
           retrieved_knowledge = retrieve_knowledge(
               content=content,
               history=history,
               code=context.get("expression", ""),
               adaptor=context.get("adaptor", ""),
-              api_key=api_key
+              api_key=api_key,
+              stream_manager=stream_manager,
           )
       except Exception as e:
           logger.error(f"Error retrieving knowledge: {str(e)}")

@@ -6,11 +6,78 @@ to simplify streaming implementations across services.
 """
 
 import json
+import random
 import uuid
 from dataclasses import dataclass
 from typing import Any
 
 from models import CLAUDE_SONNET
+
+# Shared status message pools for user-facing progress indicators.
+# Services compose from these to build context-specific pools.
+
+STATUS_REVIEWING_WORKFLOW = [
+    "Reviewing the workflow...",
+    "Reading your workflow...",
+    "Looking over the current setup...",
+    "Reviewing the current steps...",
+    "Analyzing the workflow...",
+    "Looking at what you have so far...",
+]
+
+STATUS_NEW_WORKFLOW = [
+    "Mapping out the steps...",
+    "Gathering requirements...",
+    "Thinking about the design...",
+]
+
+STATUS_PLANNING = [
+    "Checking what's needed...",
+    "Working out the details...",
+    "Figuring out the approach...",
+    "Planning things out...",
+]
+
+STATUS_DESIGNING_WORKFLOW = [
+    "Designing the workflow...",
+    "Planning the workflow...",
+    "Working out the structure...",
+]
+
+STATUS_REVIEWING_CODE = [
+    "Reviewing the code...",
+    "Reading the current code...",
+    "Looking over the job code...",
+    "Checking the existing code...",
+    "Reviewing what you have so far...",
+    "Digging into the code...",
+    "Having a look at your code...",
+    "Looking at what you have...",
+    "Looking things over...",
+    "Taking a look...",
+    "Getting the context...",
+    "Having a look...",
+    "Getting up to speed...",
+    "Taking stock...",
+]
+
+STATUS_NEW_CODE = [
+    "Preparing to write code...",
+    "Getting ready to write code...",
+    "Setting things up...",
+    "Getting started on the code...",
+    "Preparing the job code...",
+]
+
+STATUS_WORKING = [
+    "Working on it...",
+    "Working through it...",
+    "Putting it together...",
+    "Piecing it together...",
+    "Pulling it together...",
+    "Working on a response...",
+    "Sorting it out...",
+]
 
 
 @dataclass
@@ -91,7 +158,7 @@ class StreamManager:
 
     def send_thinking(
         self,
-        thinking_text: str,
+        thinking_text: str | list[str],
         signature: str | None = "signature_filler",
     ) -> None:
         """
@@ -99,7 +166,9 @@ class StreamManager:
         Creates a new content block, sends the thinking, and closes it.
 
         Args:
-            thinking_text: The thinking content to send
+            thinking_text: The thinking content to send. If a list is passed,
+                one entry is picked at random — convenient for rotating
+                through status message pools.
             signature: Optional signature to include with the thinking
         """
         if self.stream_ended:
@@ -107,6 +176,9 @@ class StreamManager:
 
         if not self.stream_started:
             self.start_stream()
+
+        if isinstance(thinking_text, list):
+            thinking_text = random.choice(thinking_text)
 
         self._close_open_blocks()
 
@@ -134,6 +206,56 @@ class StreamManager:
             "type": "content_block_delta",
             "index": index,
             "delta": {"type": "signature_delta", "signature": signature},
+        })
+
+        self._close_block(block)
+
+    def start_thinking_block(self) -> None:
+        """
+        Start a new thinking block for incremental streaming.
+        Use with send_thinking_delta() and close_thinking_block() to
+        stream thinking content as it arrives from the API.
+        """
+        if self.stream_ended:
+            raise RuntimeError("Stream already ended")
+
+        if not self.stream_started:
+            self.start_stream()
+
+        self._close_open_blocks()
+
+        index = self._next_index()
+        block = ContentBlock(index=index, block_type="thinking")
+        self.blocks.append(block)
+
+        self._emit_event('content_block_start', {
+            "type": "content_block_start",
+            "index": index,
+            "content_block": {"type": "thinking", "thinking": ""},
+        })
+
+    def send_thinking_delta(self, thinking_text: str) -> None:
+        """Send an incremental thinking delta to the current open thinking block."""
+        block = self._get_current_thinking_block()
+        if block is None:
+            return
+
+        self._emit_event('content_block_delta', {
+            "type": "content_block_delta",
+            "index": block.index,
+            "delta": {"type": "thinking_delta", "thinking": thinking_text},
+        })
+
+    def close_thinking_block(self, signature: str | None = "signature_filler") -> None:
+        """Close the current thinking block with a signature."""
+        block = self._get_current_thinking_block()
+        if block is None:
+            return
+
+        self._emit_event('content_block_delta', {
+            "type": "content_block_delta",
+            "index": block.index,
+            "delta": {"type": "signature_delta", "signature": signature or "signature_filler"},
         })
 
         self._close_block(block)
@@ -217,6 +339,13 @@ class StreamManager:
         """Get the currently open text block, if any."""
         for block in reversed(self.blocks):
             if block.is_open and block.block_type == "text":
+                return block
+        return None
+
+    def _get_current_thinking_block(self) -> ContentBlock | None:
+        """Get the currently open thinking block, if any."""
+        for block in reversed(self.blocks):
+            if block.is_open and block.block_type == "thinking":
                 return block
         return None
 

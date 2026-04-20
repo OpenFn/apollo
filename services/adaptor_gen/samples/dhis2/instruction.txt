@@ -1,1 +1,0 @@
-Create an OpenFn function that allows me to create new trackedEntityInstances via the /trackedEntityInstances endpoint
