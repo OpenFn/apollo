@@ -24,11 +24,6 @@ calls instead.**
   models)
 - `poetry add <module>` - Add a new Python dependency
 
-### Code Quality
-
-- `black services/` - Format Python code (line length: 120)
-- `ruff check services/` - Lint Python code with comprehensive rule set
-
 ## Architecture
 
 Hybrid TypeScript/Python platform providing AI and data services for the OpenFn
@@ -50,8 +45,8 @@ TypeScript) service modules.
 Each service lives in `services/<name>/` with an index file
 `services/<name>/<name>.py` (or `.ts`) exporting a `main()` function.
 
-- **Python**: `main(data: dict) -> dict` — invoked via `services/entry.py`
-  which handles imports, dotenv, Sentry, and argparse
+- **Python**: `main(data_dict: dict) -> dict` — see `.claude/rules/python-services.md`
+  for details on entry.py, imports, and code quality
 - **TypeScript**: `export default (port, payload, onLog?) => Promise<any>`
 
 Every mounted service gets three endpoints automatically:
@@ -60,13 +55,6 @@ Every mounted service gets three endpoints automatically:
 - `POST /services/<name>/stream` - SSE streaming (events: `log`, `complete`,
   `error`, plus custom event types)
 - `WS /services/<name>` - WebSocket with `start`/`log`/`complete` events
-
-### Python Import Patterns
-
-- **Same service**: Use relative imports (`from .util import my_function`)
-- **Cross-service**: Use absolute module names relative to `services/`
-  (`from inference import inference`)
-- All imports resolve relative to `services/entry.py`
 
 ### Key Shared Utilities (`services/util.py`)
 
@@ -89,10 +77,18 @@ SSE to clients.
 
 ### Key Python Services
 
-- `job_chat/` - AI chatbot for OpenFn job assistance with RAG
-- `workflow_chat/` - AI assistant for OpenFn workflow creation
+- `global_chat/` - Orchestrator service and single entry point for OpenFn AI
+  chat. Routes requests via a RouterAgent (Haiku) to specialized subagents, or
+  escalates to a PlannerAgent (Sonnet) that coordinates multi-step tasks using
+  tool calls. Depends on `job_chat`, `workflow_chat`, and `search_docsite`.
+- `job_chat/` - AI chat service for OpenFn job code assistance. Supports
+  conversational help and a code suggestions mode with auto-patching. Uses RAG
+  via `search_docsite` and injects adaptor API docs. Streams responses.
+- `workflow_chat/` - AI chat service for generating and editing OpenFn workflow
+  YAML. Preserves job code and IDs during edits, validates adaptors, and retries
+  on parse failures. Streams responses.
 - `search_docsite/` - Searches OpenFn docs using Pinecone vector store (used by
-  job_chat for dynamic context)
+  job_chat and global_chat for dynamic context)
 - `embed_docsite/` - Indexes OpenFn documentation for search
 - `embeddings/` - Vector embeddings with Pinecone (production index:
   "apollo-mappings")

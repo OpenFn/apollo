@@ -196,16 +196,6 @@ To run it on port 3000
 docker run -p 3000:3000 openfn-apollo
 ```
 
-## Finetuning and poetry dependency groups
-
-`poetry install` will only install the main dependencies - the stuff used in the
-docker image.
-
-Dependencies for finetuning (which include huge models) are in a special
-optional `ft` group in the `pyproject.toml`.
-
-To install these, do `poetry install --with ft`
-
 ## Contributing
 
 See the Contribution Guide for more details about how and where to contribute to
