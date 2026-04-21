@@ -212,6 +212,9 @@ class AnthropicClient:
                     text_started = False
                     sent_length = 0
                     accumulated_response = ""
+                    self._stream_applied = False
+                    self._stream_suggested_code = None
+                    self._stream_diff = None
 
                     original_code = context.get("expression") if context and isinstance(context, dict) else None
 
@@ -271,13 +274,19 @@ class AnthropicClient:
             response = "\n\n".join(response_parts)
 
             if suggest_code is True:
-                # Parse JSON response and apply code edits
-                job_code = None
-                if context and isinstance(context, dict):
-                    job_code = context.get("expression")
+                job_code = context.get("expression") if isinstance(context, dict) else None
 
-                with sentry_sdk.start_span(description="parse_and_apply_edits"):
-                    text_response, suggested_code, diff = self.parse_and_apply_edits(response=response, content=content, original_code=job_code)
+                if getattr(self, "_stream_applied", False):
+                    # Streaming already applied edits — reuse instead of redoing the work
+                    try:
+                        text_response = json.loads(response).get("text_answer", "").strip()
+                    except (json.JSONDecodeError, ValueError):
+                        text_response = response
+                    suggested_code = self._stream_suggested_code
+                    diff = self._stream_diff
+                else:
+                    with sentry_sdk.start_span(description="parse_and_apply_edits"):
+                        text_response, suggested_code, diff = self.parse_and_apply_edits(response=response, content=content, original_code=job_code)
 
             else:
                 text_response = response
@@ -351,6 +360,9 @@ class AnthropicClient:
                                     original_code=original_code,
                                     code_edits=code_edits
                                 )
+                                self._stream_applied = True
+                                self._stream_suggested_code = suggested_code
+                                self._stream_diff = diff
                                 if suggested_code:
                                     stream_manager.send_changes({"code": suggested_code})
                                 else:
