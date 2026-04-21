@@ -1,5 +1,12 @@
 # apollo
 
+## 1.0.1
+
+### Patch Changes
+
+- 5a03c71: Fix issue where chat is returned before content in streamed responses
+- 58e99dd: job_chat: cache code edit results to avoid duplication
+
 ## 1.0.0
 
 ### Major Changes
