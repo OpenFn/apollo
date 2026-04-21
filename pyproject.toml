@@ -10,7 +10,7 @@ package-mode = false
 [tool.poetry.dependencies]
 python = "3.11.*"
 openai = "^1.23.3"
-python-dotenv = "^1.0.1"
+python-dotenv = "^1.2.2"
 anthropic = "^0.85.0"
 
 langchain-pinecone = "0.2.2"
