@@ -545,18 +545,16 @@ class AnthropicClient:
 
                 if not text_started:
                     # YAML phase: buffer silently until text starts.
-                    # Use '"text": "' as delimiter — safe because inside
-                    # a JSON string quotes are escaped as \", so this can
-                    # only appear as the actual field separator.
-                    delimiter = '"text": "'
+                    # Tolerant of whitespace variants the model may emit.
+                    match = re.search(r'"text"\s*:\s*"', accumulated_response)
 
-                    if delimiter in accumulated_response:
-                        # Extract YAML value (either null or a JSON string)
-                        yaml_part = accumulated_response.split(delimiter)[0]
-                        yaml_raw = yaml_part.strip().rstrip(",").strip()
+                    if match:
+                        # Close the partial object and extract the yaml field
+                        yaml_part = accumulated_response[:match.start()]
+                        yaml_raw = yaml_part.rstrip().rstrip(",") + "}"
                         try:
-                            yaml_value = json.loads(yaml_raw)  # None for null, string for "..."
-                        except (json.JSONDecodeError, ValueError):
+                            yaml_value = json.loads(yaml_raw).get("yaml")
+                        except (json.JSONDecodeError, ValueError, AttributeError):
                             yaml_value = None
 
                         if yaml_value:
@@ -569,8 +567,7 @@ class AnthropicClient:
                                 pass  # Invalid YAML, skip changes event
 
                         # Mark where text content starts
-                        text_offset = accumulated_response.find(delimiter) + len(delimiter)
-                        sent_length = text_offset
+                        sent_length = match.end()
                         text_started = True
 
                 if text_started:

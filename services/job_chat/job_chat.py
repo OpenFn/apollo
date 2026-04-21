@@ -275,7 +275,7 @@ class AnthropicClient:
                 job_code = None
                 if context and isinstance(context, dict):
                     job_code = context.get("expression")
-                
+
                 with sentry_sdk.start_span(description="parse_and_apply_edits"):
                     text_response, suggested_code, diff = self.parse_and_apply_edits(response=response, content=content, original_code=job_code)
 
@@ -331,21 +331,18 @@ class AnthropicClient:
                 accumulated_response += text_chunk
 
                 if suggest_code and not text_started:
-                    # Code edits phase: buffer silently until text_answer starts
-                    delimiter = '"text_answer": "'
+                    # Code edits phase: buffer silently until text_answer starts.
+                    # Tolerant of whitespace variants the model may emit.
+                    match = re.search(r'"text_answer"\s*:\s*"', accumulated_response)
 
-                    if delimiter in accumulated_response:
+                    if match:
                         # Extract code_edits from the JSON before the delimiter
-                        edits_part = accumulated_response.split(delimiter)[0]
+                        edits_part = accumulated_response[:match.start()]
                         # Find the code_edits array value
                         try:
-                            # Build partial JSON to extract code_edits
-                            partial = edits_part.rstrip().rstrip(",")
-                            # Close the partial JSON to make it parseable
-                            if not partial.rstrip().endswith("}"):
-                                partial = partial + "}"
-                            partial_data = json.loads(partial)
-                            code_edits = partial_data.get("code_edits", [])
+                            # Close the partial object and extract code_edits
+                            partial = edits_part.rstrip().rstrip(",") + "}"
+                            code_edits = json.loads(partial).get("code_edits", [])
 
                             if original_code and code_edits:
                                 suggested_code, diff = self.apply_code_edits(
@@ -364,8 +361,7 @@ class AnthropicClient:
                             logger.warning(f"Failed to parse code_edits during streaming")
 
                         # Mark where text content starts in the accumulated buffer
-                        text_offset = accumulated_response.find(delimiter) + len(delimiter)
-                        sent_length = text_offset
+                        sent_length = match.end()
                         text_started = True
 
                 if suggest_code and text_started:
