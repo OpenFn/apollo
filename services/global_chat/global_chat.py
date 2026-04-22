@@ -77,8 +77,7 @@ def main(data_dict: dict) -> dict:
 
         session_id = data.meta.get("session_id") if data.meta else None
         user_info = data.user or {}
-        # TEMPORARY: force tracking for all global_chat sessions — remove when relying on metrics_opt_in
-        tracking = should_track(data_dict, force=True)
+        tracking = should_track(data_dict)
 
         if tracking:
             langfuse = get_langfuse_client()
@@ -103,7 +102,9 @@ def main(data_dict: dict) -> dict:
                 page=data.page,
                 history=data.history or [],
                 stream=data.get_stream(),
-                attachments=data.attachments or []
+                attachments=data.attachments or [],
+                user=data.user,
+                metrics_opt_in=data.metrics_opt_in,
             )
 
             # 5. Return structured response

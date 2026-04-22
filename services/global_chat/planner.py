@@ -66,7 +66,9 @@ class PlannerAgent:
         workflow_yaml: Optional[str],
         page: Optional[str],
         history: List[Dict],
-        stream: bool
+        stream: bool,
+        user: Optional[Dict] = None,
+        metrics_opt_in: Optional[bool] = None,
     ) -> PlannerResult:
         """
         Run the planner agent with tool-calling loop.
@@ -87,6 +89,8 @@ class PlannerAgent:
         stream_manager.send_thinking("Analyzing request...")
 
         self.current_yaml = workflow_yaml
+        self._user = user
+        self._metrics_opt_in = metrics_opt_in
 
         system_prompt = self._build_system_prompt()
 
@@ -245,7 +249,9 @@ class PlannerAgent:
             subagent_result = call_workflow_agent(
                 tool_use_block.input,
                 workflow_yaml=self.current_yaml,
-                api_key=self.api_key
+                api_key=self.api_key,
+                user=self._user,
+                metrics_opt_in=self._metrics_opt_in,
             )
 
             if "usage" in subagent_result:
@@ -287,7 +293,9 @@ class PlannerAgent:
             subagent_result = call_job_agent(
                 tool_use_block.input,
                 workflow_yaml=self.current_yaml,
-                api_key=self.api_key
+                api_key=self.api_key,
+                user=self._user,
+                metrics_opt_in=self._metrics_opt_in,
             )
 
             if "usage" in subagent_result:
