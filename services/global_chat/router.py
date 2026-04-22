@@ -80,6 +80,8 @@ class RouterAgent:
         history: List[Dict],
         stream: bool,
         attachments: Optional[List[Dict]] = None,
+        user: Optional[Dict] = None,
+        metrics_opt_in: Optional[bool] = None,
     ) -> RouterResult:
         """
         Route request to appropriate handler and execute.
@@ -105,6 +107,8 @@ class RouterAgent:
         }
 
         self._input_attachments = attachments or []
+        self._user = user
+        self._metrics_opt_in = metrics_opt_in
 
         try:
             decision = self._make_routing_decision(content, workflow_yaml, page, history)
@@ -235,6 +239,8 @@ class RouterAgent:
             "history": clean_history,
             "stream": stream,
             "api_key": self.api_key,
+            "user": self._user,
+            "metrics_opt_in": self._metrics_opt_in,
         }
 
         result = workflow_chat_main(payload)
@@ -303,6 +309,8 @@ class RouterAgent:
             "history": clean_history,
             "stream": stream,
             "api_key": self.api_key,
+            "user": self._user,
+            "metrics_opt_in": self._metrics_opt_in,
         }
 
         result = job_chat_main(payload)
@@ -351,7 +359,13 @@ class RouterAgent:
 
         planner = PlannerAgent(self.config_loader, self.api_key)
         planner_result = planner.run(
-            content=enriched_content, workflow_yaml=workflow_yaml, page=page, history=clean_history, stream=stream
+            content=enriched_content,
+            workflow_yaml=workflow_yaml,
+            page=page,
+            history=clean_history,
+            stream=stream,
+            user=self._user,
+            metrics_opt_in=self._metrics_opt_in,
         )
 
         total_usage = sum_usage(self.routing_usage, planner_result.usage)

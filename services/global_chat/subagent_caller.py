@@ -22,7 +22,9 @@ logger = create_logger(__name__)
 def call_workflow_agent(
     tool_input: Dict,
     workflow_yaml: Optional[str] = None,
-    api_key: Optional[str] = None
+    api_key: Optional[str] = None,
+    user: Optional[Dict] = None,
+    metrics_opt_in: Optional[bool] = None,
 ) -> Dict:
     """
     Call the workflow agent and return its results.
@@ -46,6 +48,8 @@ def call_workflow_agent(
         "history": [],  # Supervisor includes context in message
         "stream": False,  # Never stream subagent calls from planner
         "api_key": api_key,
+        "user": user,
+        "metrics_opt_in": metrics_opt_in,
     }
 
     try:
@@ -71,7 +75,9 @@ def call_workflow_agent(
 def call_job_agent(
     tool_input: Dict,
     workflow_yaml: Optional[str] = None,
-    api_key: Optional[str] = None
+    api_key: Optional[str] = None,
+    user: Optional[Dict] = None,
+    metrics_opt_in: Optional[bool] = None,
 ) -> Dict:
     """
     Call the job code agent and return its results.
@@ -110,6 +116,8 @@ def call_job_agent(
         "stream": False,
         "history": [],  # Supervisor includes context in message
         "api_key": api_key,
+        "user": user,
+        "metrics_opt_in": metrics_opt_in,
     }
 
     try:
