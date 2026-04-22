@@ -55,6 +55,8 @@ prompts:
       webhook:  # For event-based jobs
         type: webhook
         enabled: false
+        # May include optional response config sub-keys (webhook_reply, status codes, response bodies).
+        # Preserve any such sub-keys exactly — do not drop them.
     edges:
       daily-trigger->job-one:
         id: '__ID_EDGE_daily-trigger->job-one__'
@@ -76,6 +78,8 @@ prompts:
     You must retain these placeholders EXACTLY as they appear (even if the job/edge name has changed) in the appropriate locations, so that the existing IDs and code can be added back in using string replacement later.
     You can rename jobs freely — code and IDs will be preserved using their respective placeholders, which you must not alter.
     When creating new jobs, use the standard `'// Add operations here'` placeholder for job code. You do not need to add an ID field for new jobs/edges, as these will be generated automatically.
+
+    Webhook triggers may include optional response-config sub-keys (e.g. `webhook_reply`, status codes, response bodies) — preserve any such sub-keys EXACTLY. See the optional webhook response configuration section below.
 
   yaml_structure_without_ids: |
     ## OpenFn Project.yaml Structure
@@ -102,6 +106,8 @@ prompts:
       webhook:  # For event-based jobs
         type: webhook
         enabled: false
+        # May include optional response config sub-keys (webhook_reply, status codes, response bodies).
+        # Preserve any such sub-keys exactly — do not drop them.
     edges:
       daily-trigger->job-one:
         source_trigger: daily-trigger
@@ -115,6 +121,8 @@ prompts:
         enabled: true
     ```
 
+    Webhook triggers may include optional response-config sub-keys (e.g. `webhook_reply`, status codes, response bodies) — preserve any such sub-keys EXACTLY. See the optional webhook response configuration section below.
+
   general_knowledge: |
     ## Adaptor Knowledge
 
@@ -126,6 +134,15 @@ prompts:
     - **Webhook**: Use for event-based triggers (default if not specified)
     - **Cron**: Use for time-based schedules
     The trigger should be set to enabled: false by default.
+
+    ### Optional webhook response configuration
+
+    A webhook trigger may include optional sub-keys that control its HTTP response. The main one is `webhook_reply`:
+    - `before_start` (async, default): responds immediately with the work order/run ID.
+    - `after_completion` (sync): waits for the workflow to finish, responds with final state.
+    - `custom`: like sync, but the user also defines success/failure status codes and response bodies, as either hardcoded values or `state.*` paths.
+
+    If these sub-keys are present, preserve them EXACTLY. Don't add them proactively. Only edit them if the user asks. Warn before switching away from `custom`/`after_completion` that any custom response config will be lost.
 
     ## Rules for Job Identification
 
