@@ -40,7 +40,7 @@ apollo/
 │
 ├── testing/                                # Shared test helpers — peer to services/, not a service itself
 │   ├── __init__.py
-│   ├── anthropic_mock.py                   # MockAnthropicClient + canned response builders; documents the `test_hooks` dict keys
+│   ├── anthropic_mock.py                   # MockAnthropic (regex → response) + tool_use helper + record_tool_call; documents the `test_hooks` dict keys
 │   ├── fixtures.py                         # pytest fixtures (mock client, test_hooks factory, payloads, yaml assertions)
 │   ├── server.py                           # apollo_server fixture + ApolloClient (sync / sse / ws)
 │   ├── judge.py                            # small LLM-as-judge helper for acceptance specs
@@ -90,7 +90,7 @@ def main(data_dict: dict, test_hooks: Optional[dict] = None) -> dict: ...
 
 `test_hooks` is a plain Python `dict` (not a formal type). Its recognised keys are documented as a docstring in `testing/anthropic_mock.py`:
 
-- `anthropic_http_client` — an `httpx.Client` backed by `httpx.MockTransport`; threaded into every `Anthropic(api_key=..., http_client=...)` constructor site via a new `services/util.py::build_anthropic_client()` factory.
+- `anthropic_http_client` — an `httpx.Client` backed by `httpx.MockTransport`. Built by `MockAnthropic`, which matches each request's latest user message text against test-registered regex → response pairs (no match → `AssertionError`). Threaded into every `Anthropic(api_key=..., http_client=...)` constructor site via a new `services/util.py::build_anthropic_client()` factory. The planner's internal tool-use loop (multiple Anthropic calls per `main()`) is covered by the same mechanism — each round has different latest-user-message text, so different regexes match. See `2-service-tests.md` §3.
 - `tool_calls` — a test-allocated `list[dict]` that production code appends to as breadcrumbs when present.
 - `tool_stubs` — a `dict[str, Callable]` keyed by tool name. The planner consults it before dispatching a tool; if a stub is registered, it's called instead of the real tool. Today only used for `search_documentation` (which otherwise hits Pinecone + OpenAI). See `2-service-tests.md` §5.
 
@@ -178,7 +178,7 @@ No changes needed in pyproject, CI, or shared helpers. Discovery is zero-config 
 
 1. **Scaffolding.** Create `testing/` (skeleton — `anthropic_mock.py`, `fixtures.py`, `server.py`, `judge.py`), root `apollo/conftest.py`, `[tool.pytest.ini_options]` block in pyproject. One PR — unblocks everything else.
 2. **Unit tier.** Migrate `services/workflow_chat/tests/test_functions.py` → `test_workflow_chat_functions_unit.py` as the worked example. Wire `tests.yaml` with just `-m unit`. Green CI on every push.
-3. **Service tier.** Add `test_hooks=None` to the three chat services' `main()`. Add `services/util.py::build_anthropic_client()`. Build `MockAnthropicClient`. Extend `tests.yaml` to `-m "unit or service"`. Migrate the first `pass_fail` test whose assertion doesn't depend on content.
+3. **Service tier.** Add `test_hooks=None` to the three chat services' `main()`. Add `services/util.py::build_anthropic_client()`. Build `MockAnthropic`. Extend `tests.yaml` to `-m "unit or service"`. Migrate the first `pass_fail` test whose assertion doesn't depend on content.
 4. **Integration tier.** Add `testing/server.py` (server fixture + `ApolloClient`). Create `llm-tests.yaml`. Migrate the first cross-service end-to-end test into `services/global_chat/tests/test_global_chat_integration.py`. Secrets wired.
 5. **Acceptance tier.** Add `testing/judge.py` and the markdown collector hook in the root conftest. Drop the first 2–3 hero specs into `services/global_chat/tests/acceptance/`. First manual run green (`workflow_dispatch`).
 
