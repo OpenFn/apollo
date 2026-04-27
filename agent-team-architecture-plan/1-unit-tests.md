@@ -1,4 +1,4 @@
-# Apollo Testing Architecture — Layer 1: Unit Tests (Simplified)
+# Apollo Testing Architecture — Layer 1: Unit Tests
 
 **Scope:** `services/global_chat/`, `services/workflow_chat/`, `services/job_chat/`, their tools, and any future sub-agent / tool service.
 
@@ -20,32 +20,37 @@ Tests that don't meet all five get moved to service or integration — see §7.
 
 ## 2. Directory and file layout
 
-Per-service: one flat `tests/` folder, filenames suffixed by tier.
+Per-service: one flat `tests/` folder holding all four tiers. This tier owns `*_unit.py` filenames.
 
 ```
 services/<svc>/tests/
   __init__.py
-  conftest.py                        # thin — re-exports shared fixtures; auto-applies tier marker by filename suffix
+  conftest.py                        # thin — auto-applies tier marker by filename suffix and folder name
   test_<module>_unit.py              # ← this tier
   test_<module>_service.py           # tier 2
+  test_<svc>_integration.py          # tier 3
+  acceptance/                        # tier 4 — markdown specs
+    *.md
   fixtures/                          # optional; static JSON/YAML sample inputs (per-service only)
 ```
 
-Cross-service util tests (`services/util.py` — `AdaptorSpecifier`, `DictObj`, `sum_usage`, `add_page_prefix`) live under `services/tests/test_util_unit.py`.
+Cross-service util tests (`services/util.py` — `AdaptorSpecifier`, `DictObj`, `sum_usage`, `add_page_prefix`) live under `services/tests/test_util_unit.py` — a shared test directory at the services root, since these helpers don't relate to a specific chat service.
 
-**Why suffix + auto-marker, not subdirs?** While each service has <20 test files, subdirs add bureaucracy for no gain. Tier marker is applied by filename suffix in the per-service conftest. If a service grows past ~30 test files, promoting to `tests/unit/` + `tests/service/` subdirs is a mechanical rename.
+**Why suffix + auto-marker, not subdirs?** While each service has <20 test files, subdirs add bureaucracy for no gain. Tier marker is applied by filename suffix in the per-service conftest. If a service grows past ~30 test files, promoting to subdirs is a mechanical rename.
 
 ---
 
-## 3. Shared helper package: `services/_testing/`
+## 3. Shared helper package: `apollo/testing/`
 
-Leading underscore is required — `platform/src/util/describe-modules.ts` auto-mounts any directory under `services/` whose name doesn't start with `_`.
+Lives at the apollo root as a peer of `services/` and `platform/` — it's test infrastructure, not a service.
 
 ```
-services/_testing/
+apollo/testing/
   __init__.py
   anthropic_mock.py       # owned by service tier; unit tier does not import
   fixtures.py             # pytest fixtures: sample payloads, fake api keys, yaml-assertion helpers
+  server.py               # owned by integration tier; unit tier does not import
+  judge.py                # owned by acceptance tier; unit tier does not import
   fixtures/               # sample YAML / JSON shared across services
     workflows/*.yaml
     histories/*.json
@@ -53,10 +58,11 @@ services/_testing/
 
 Unit-tier import rules:
 
-- ✅ Import from `services/_testing/fixtures.py` — pytest fixtures, YAML assertion helpers, payload builders, fixture loaders.
-- ❌ Do not import from `services/_testing/anthropic_mock.py` — that's the service tier's territory.
+- ✅ Import from `testing.fixtures` — pytest fixtures, YAML assertion helpers, payload builders, fixture loaders.
+- ❌ Do not import from `testing.anthropic_mock` — that's the service tier's territory.
+- ❌ Do not import from `testing.server` or `testing.judge` — integration / acceptance tiers only.
 
-`services/_testing/fixtures.py` owns (same module, flat — split into files only when this one grows past ~500 lines):
+`testing/fixtures.py` owns (same module, flat — split into files only when this one grows past ~500 lines):
 
 - Pytest fixtures (`sample_workflow_yaml`, `sample_<svc>_chat_payload`, `fake_api_key`, `anthropic_client_no_network`).
 - YAML assertion helpers migrated from the currently-duplicated `services/global_chat/tests/test_utils.py` and `services/workflow_chat/tests/test_utils.py` (`path_matches`, `assert_yaml_equal_except`, `assert_yaml_section_contains_all`, `assert_yaml_has_ids`, `assert_yaml_jobs_have_body`, `assert_no_special_chars`).
@@ -75,8 +81,8 @@ pytest. Add to `pyproject.toml`:
 ```toml
 [tool.pytest.ini_options]
 minversion = "8.0"
-pythonpath = ["services"]
-testpaths = ["services", "tests"]
+pythonpath = ["services", "."]
+testpaths = ["services"]
 python_files = ["test_*.py"]
 markers = [
   "unit: fast, isolated, no I/O, no LLM, no network",
@@ -87,7 +93,7 @@ markers = [
 addopts = ["-ra"]
 ```
 
-`pythonpath = ["services"]` kills the `sys.path.insert(...)` boilerplate at the top of every existing test file.
+`pythonpath = ["services", "."]` kills the `sys.path.insert(...)` boilerplate (the `"services"` entry lets you write `from global_chat.global_chat import main`; the `"."` entry lets you write `from testing.fixtures import ...`).
 
 Commands:
 
@@ -105,10 +111,10 @@ TypeScript platform tests continue to use `bun:test`. Unchanged.
 
 Two levels:
 
-### 5.1 Root: `services/conftest.py`
+### 5.1 Root: `apollo/conftest.py`
 
-- Calls `services._testing.fixtures.set_unit_test_env()` at import time.
-- Exposes `pytest_plugins = ["services._testing.fixtures"]` so shared fixtures are globally available.
+- Calls `testing.fixtures.set_unit_test_env()` at import time.
+- Exposes `pytest_plugins = ["testing.fixtures"]` so shared fixtures are globally available.
 
 ### 5.2 Per-service: `services/<svc>/tests/conftest.py`
 
@@ -125,7 +131,7 @@ Two levels:
               item.add_marker(pytest.mark.service)
   ```
 
-Same loop can live in the root `services/conftest.py` instead — one copy rather than per-service. Minor detail for implementation.
+Same loop can live in the root `apollo/conftest.py` instead — one copy rather than per-service. Minor detail for implementation.
 
 ---
 
@@ -141,12 +147,12 @@ Coverage: generate `--cov=services --cov-report=xml` and upload as artifact for 
 
 - `services/workflow_chat/tests/test_functions.py` — all eight tests are already unit-shaped. Rename to `test_workflow_chat_functions_unit.py`, delete `sys.path.insert(...)`, replace local `client` fixture with `anthropic_client_no_network`. No assertion changes.
 - `services/job_chat/tests/test_functions.py` — misclassified. `test_generate_system_message_loads_adaptor_docs_when_missing` hits Postgres → integration. `test_generate_queries_returns_valid_structure` hits real Anthropic → service (with mocked client) or integration. `test_search_docs_returns_general_docs_only` hits Pinecone → integration. A new `test_prompt_unit.py` covers the pure helpers (`build_prompt`, `build_error_correction_prompt`, `extract_page_prefix_from_last_turn`).
-- `services/global_chat/tests/test_utils.py` + `services/workflow_chat/tests/test_utils.py` — YAML helpers migrate to `services/_testing/fixtures.py`. The `call_<svc>_service` subprocess helpers are replaced by the integration tier's `ApolloClient`. Old files are deleted after all callers are updated.
+- `services/global_chat/tests/test_utils.py` + `services/workflow_chat/tests/test_utils.py` — YAML helpers migrate to `testing/fixtures.py`. The `call_<svc>_service` subprocess helpers are replaced by the integration tier's `ApolloClient`. Old files are deleted after all callers are updated.
 - `*_pass_fail.py`, `*_qualitative.py`, `*_langfuse_tracing.py`, `*_adaptor_version_passthrough.py`, `*_planner_*.py`, `*_good_morning_*.py` — owned by service/integration/acceptance tiers.
 
 **Migration order:**
 
-1. Create `services/_testing/` skeleton + root `services/conftest.py` (empty fixtures — just env guard + network block).
+1. Create `testing/` skeleton + root `apollo/conftest.py` (empty fixtures — just env guard + network block).
 2. Add `[tool.pytest.ini_options]` to pyproject.
 3. Migrate `workflow_chat/tests/test_functions.py` (smallest, cleanest — the worked example).
 4. Wire `.github/workflows/tests.yaml` with `-m unit` initially.
@@ -180,7 +186,7 @@ No pyproject, CI, or shared-package edits required.
 ## 10. Things deliberately NOT done
 
 - No per-tier subdirectories per service.
-- No separate `env.py` / `loaders.py` / `yaml_assertions.py` modules in `_testing/` — one `fixtures.py` until a concrete split is warranted.
+- No separate `env.py` / `loaders.py` / `yaml_assertions.py` modules in `testing/` — one `fixtures.py` until a concrete split is warranted.
 - No coverage gates.
 - No property-based testing (Hypothesis) in the initial plan — add a `strategies.py` module when the need arises.
 - No pytest plugin dev dep beyond what's already in poetry.lock.
@@ -189,4 +195,4 @@ No pyproject, CI, or shared-package edits required.
 
 ## Summary
 
-Unit layer is small, boring, and fast. One flat `tests/` folder per service with filename-suffixed tiers, one `services/_testing/` package with three files, dummy env vars in the root conftest, CI on every push with no secrets. Adding a unit test for a new function is a one-line import and a `def test_...`.
+Unit layer is small, boring, and fast. One flat `tests/` folder per service with filename-suffixed tiers, one `testing/` package with three files, dummy env vars in the root conftest, CI on every push with no secrets. Adding a unit test for a new function is a one-line import and a `def test_...`.

@@ -1,4 +1,4 @@
-# Section 2 — Service Tests Architecture (Simplified)
+# Section 2 — Service Tests Architecture
 
 > Scope: `services/global_chat/`, `services/workflow_chat/`, `services/job_chat/`, and the tools / sub-agents they invoke.
 
@@ -31,25 +31,28 @@ def main(data_dict: dict, test_hooks: Optional[dict] = None) -> dict: ...
 
 ### 2.2 The `test_hooks` dict — minimum viable shape
 
-Plain Python `dict`. No `TypedDict`, no pydantic model — just a dict with documented keys. The recognised keys are documented as a docstring in `services/_testing/anthropic_mock.py`:
+Plain Python `dict`. No `TypedDict`, no pydantic model — just a dict with documented keys. The recognised keys are documented as a docstring in `testing/anthropic_mock.py`:
 
 ```python
-# services/_testing/anthropic_mock.py
+# testing/anthropic_mock.py
 """
 The `test_hooks` dict accepts (all optional; all default to absent):
 
-- "anthropicHttpClient": an httpx.Client backed by httpx.MockTransport.
+- "anthropic_http_client": an httpx.Client backed by httpx.MockTransport.
   When present, threaded into every Anthropic(...) constructor site.
-- "toolCalls": a list[dict] the test allocates. Production code appends
+- "tool_calls": a list[dict] the test allocates. Production code appends
   breadcrumbs via record_tool_call(test_hooks, entry).
+- "tool_stubs": dict[str, Callable] keyed by tool name. When the planner
+  dispatches a tool, if a stub exists for that name, the stub is called
+  with the tool input and its return value used as the tool result. Today
+  only used for "search_documentation" — see §5.
 """
 ```
 
-Start with two keys. Add more only when a concrete test can't be written without one. Things intentionally left out until needed:
+Start with three keys. Add more only when a concrete test can't be written without one. Things intentionally left out until needed:
 
-- Sub-agent stub registry. Default behaviour: the sub-agent's `main()` runs under the same mock HTTP client — that's usually what a test wants. A stub registry (`test_hooks["subagentStubs"]`) can be added if a test needs to bypass the sub-agent's logic entirely.
-- Tool stub registry. Same logic — add only when a test needs to short-circuit a tool without exercising its real code path.
-- `seed`, `disableLangfuse`, `scratch`. Add when a test fails without them.
+- Sub-agent stub registry. Default behaviour: the sub-agent's `main()` runs under the same mock HTTP client — that's usually what a test wants. A stub registry (`test_hooks["subagent_stubs"]`) can be added if a test needs to bypass the sub-agent's logic entirely.
+- `seed`, `disable_langfuse`, `scratch`. Add when a test fails without them.
 
 ### 2.3 Threading `test_hooks` through
 
@@ -73,7 +76,7 @@ Production behaviour when `test_hooks is None` is byte-identical to today. Every
 
 ```python
 def build_anthropic_client(api_key: str, test_hooks: Optional[dict] = None) -> Anthropic:
-    http_client = (test_hooks or {}).get("anthropicHttpClient")
+    http_client = (test_hooks or {}).get("anthropic_http_client")
     kwargs = {"api_key": api_key}
     if http_client is not None:
         kwargs["http_client"] = http_client
@@ -82,7 +85,7 @@ def build_anthropic_client(api_key: str, test_hooks: Optional[dict] = None) -> A
 
 Every `AnthropicClient` / `RouterAgent` / `PlannerAgent` constructor swaps `Anthropic(api_key=...)` for `build_anthropic_client(api_key, test_hooks)`.
 
-### 3.2 `services/_testing/anthropic_mock.py`
+### 3.2 `testing/anthropic_mock.py`
 
 Single file — `MockAnthropicClient` class, canned response-body builders, docstring documenting recognised `test_hooks` keys, and the `record_tool_call(test_hooks, entry)` helper. Split later if it grows unwieldy.
 
@@ -141,7 +144,7 @@ def test_planner_calls_workflow_then_job_agents(test_hooks_factory):
     test_hooks = test_hooks_factory(anthropic=mock)
     result = global_chat_main(make_global_chat_payload("create a workflow"), test_hooks)
 
-    assert [c["tool"] for c in test_hooks["toolCalls"]] == [
+    assert [c["tool"] for c in test_hooks["tool_calls"]] == [
         "router_decision", "call_workflow_agent", "call_job_code_agent",
     ]
 ```
@@ -150,15 +153,15 @@ When a test wants to bypass a sub-agent's real code, it scripts responses for th
 
 ---
 
-## 4. Tool-call breadcrumbs (`test_hooks["toolCalls"]`)
+## 4. Tool-call breadcrumbs (`test_hooks["tool_calls"]`)
 
-`test_hooks["toolCalls"]` is a list the test allocates and production code appends to. One helper in `services/_testing/anthropic_mock.py`:
+`test_hooks["tool_calls"]` is a list the test allocates and production code appends to. One helper in `testing/anthropic_mock.py`:
 
 ```python
 def record_tool_call(test_hooks: Optional[dict], entry: dict) -> None:
     if test_hooks is None:
         return
-    crumbs = test_hooks.get("toolCalls")
+    crumbs = test_hooks.get("tool_calls")
     if crumbs is not None:
         crumbs.append(entry)
 ```
@@ -168,12 +171,46 @@ Dispatch sites (`planner._execute_tool`, `router.route_and_execute`) call `recor
 Tests read:
 
 ```python
-assert [c["tool"] for c in test_hooks["toolCalls"]] == ["router_decision", "call_workflow_agent"]
+assert [c["tool"] for c in test_hooks["tool_calls"]] == ["router_decision", "call_workflow_agent"]
 ```
 
 ---
 
-## 5. Directory layout
+## 5. Tool stubs (`test_hooks["tool_stubs"]`)
+
+Most planner tools don't need stubbing. `call_workflow_agent` and `call_job_code_agent` inherit `test_hooks` and run the sub-agent's own mocked `main()`. `inspect_job_code` is pure local code with no network. The one tool that does need stubbing is **`search_documentation`** — without a stub it would hit Pinecone (vector store) and OpenAI (embeddings) on every service test.
+
+Production change in `services/global_chat/planner.py::_execute_tool` — one if/else at the top of the dispatch:
+
+```python
+stub = (self._test_hooks or {}).get("tool_stubs", {}).get(tool_use_block.name)
+if stub is not None:
+    tool_result = stub(tool_use_block.input)
+else:
+    # original dispatch by name follows
+    ...
+```
+
+Test usage:
+
+```python
+test_hooks = {
+    "anthropic_http_client": mock.httpx_client,
+    "tool_calls": [],
+    "tool_stubs": {
+        "search_documentation": lambda tool_input: "Cron triggers run on a schedule...",
+    },
+}
+result = main(payload, test_hooks)
+```
+
+The stub returns whatever shape the real tool returns (here a string — the planner feeds it back into the next Anthropic call).
+
+A `build_search_documentation_stub(docs=[...])` helper in `testing/anthropic_mock.py` can emerge once a second test reuses the same shape — not preemptively.
+
+---
+
+## 6. Directory layout
 
 ```
 services/<svc>/tests/
@@ -196,10 +233,10 @@ Cross-service end-to-end flow tests (planner chain over mocks) also live under `
 
 ---
 
-## 6. Shared helpers in `services/_testing/`
+## 7. Shared helpers in `testing/`
 
 ```
-services/_testing/
+testing/
   __init__.py
   anthropic_mock.py      # MockAnthropicClient, response builders, test_hooks-keys docstring, record_tool_call
   fixtures.py            # pytest fixtures + YAML assertion helpers + payload builders + loaders
@@ -225,25 +262,26 @@ Key fixture:
 @pytest.fixture
 def test_hooks_factory():
     def _factory(*, anthropic=None, **overrides):
-        opts = {"toolCalls": []}
+        opts = {"tool_calls": []}
         if anthropic is not None:
-            opts["anthropicHttpClient"] = anthropic.httpx_client
+            opts["anthropic_http_client"] = anthropic.httpx_client
         opts.update(overrides)
         return opts
     return _factory
 ```
 
-Per-service `conftest.py` just exposes `pytest_plugins = ["services._testing.fixtures"]` (inherited from root) plus any per-service niche fixtures.
+Per-service `conftest.py` just exposes `pytest_plugins = ["testing.fixtures"]` (inherited from root) plus any per-service niche fixtures.
 
 ---
 
-## 7. Pytest configuration
+## 8. Pytest configuration
 
 Owned initially by this tier in PR #1 (bootstrap). See overview §5 for the full block. Relevant keys:
 
 ```toml
 [tool.pytest.ini_options]
-testpaths = ["services", "tests"]
+pythonpath = ["services", "."]
+testpaths = ["services"]
 python_files = ["test_*.py"]
 markers = [
   "unit: ...",
@@ -254,17 +292,17 @@ markers = [
 addopts = ["-ra"]
 ```
 
-Markers applied by filename suffix in the root `services/conftest.py` — authors don't decorate manually.
+Markers applied by filename suffix in the root `apollo/conftest.py` — authors don't decorate manually.
 
 ---
 
-## 8. CI integration
+## 9. CI integration
 
 Service runs in the same `tests.yaml` workflow as unit, via `pytest -m "unit or service"`. No secrets on this job (invariant). See overview §6.
 
 ---
 
-## 9. Migration recipe for existing `pass_fail` tests
+## 10. Migration recipe for existing `pass_fail` tests
 
 1. **Classify the assertion.** Content-sensitive (`"response mentions Salesforce"`) → integration or acceptance. Structural (`"workflow_yaml has 2 jobs"`) → service (with a canned mock producing that structure).
 2. **Replace the call site.** Swap `subprocess.run([..., "entry.py", ...])` for `from <svc>.<svc> import main; main(payload, test_hooks)`.
@@ -276,7 +314,7 @@ Expect ~50–70% of `pass_fail` tests to become service tests; the rest stay in 
 
 ---
 
-## 10. Production-code edits (summary)
+## 11. Production-code edits (summary)
 
 | File | Edit |
 |------|------|
@@ -292,7 +330,7 @@ Everywhere: backward-compatible defaults. `test_hooks is None` ⇒ existing beha
 
 ---
 
-## 11. Extensibility — new sub-agent or tool
+## 12. Extensibility — new sub-agent or tool
 
 **New sub-agent:**
 
@@ -311,17 +349,16 @@ Pattern: **one arg, one call to `record_tool_call`, one test**. No framework cha
 
 ---
 
-## 12. What this tier deliberately does NOT do
+## 13. What this tier deliberately does NOT do
 
 - **No sub-agent stub registry on day one.** Default behaviour (sub-agent runs under shared mock client) is what tests usually want.
-- **No tool stub registry on day one.** Same reason. Real tool code usually runs; when a tool hits Pinecone/Postgres, patch it in the test.
-- **No `test_hooks["seed"]` / `["disableLangfuse"]` / `["scratch"]`.** Add when a test fails without them.
+- **No `test_hooks["seed"]` / `["disable_langfuse"]` / `["scratch"]`.** Add when a test fails without them.
 - **No `pytest-asyncio`, `pytest-randomly`, or other dev deps.** Add when needed.
 - **No frozen public API contract between tiers.** Shared helpers live in one package; rename when the signature improves.
 
 ---
 
-## 13. What else belongs in this tier
+## 14. What else belongs in this tier
 
 Good service-test targets:
 
@@ -337,4 +374,4 @@ Good service-test targets:
 
 ## Summary
 
-`test_hooks` second arg on `main()` + `build_anthropic_client(api_key, test_hooks)` factory + `MockAnthropicClient` with `always`/`script`/`streaming` constructors + two optional `test_hooks` keys (`anthropicHttpClient`, `toolCalls`). Three files in `services/_testing/`, filename-suffix markers, shared workflow with the unit tier. Add sub-agent / tool stub infrastructure the first time a test can't be written without it.
+`test_hooks` second arg on `main()` + `build_anthropic_client(api_key, test_hooks)` factory + `MockAnthropicClient` with `always`/`script`/`streaming` constructors + three `test_hooks` keys (`anthropic_http_client`, `tool_calls`, `tool_stubs` — the last only used for `search_documentation` today). Three files in `testing/`, filename-suffix markers, shared workflow with the unit tier. Add sub-agent stub infrastructure the first time a test can't be written without it.

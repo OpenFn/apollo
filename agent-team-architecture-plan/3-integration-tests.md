@@ -1,4 +1,4 @@
-# Section 3 — Integration Tests Architecture (Simplified)
+# Section 3 — Integration Tests Architecture
 
 **Scope:** `services/global_chat/`, `services/workflow_chat/`, `services/job_chat/` and future sub-agents / tools.
 
@@ -31,32 +31,32 @@ Integration tests exercise a chat service **end-to-end through the running bun s
 
 ## 2. Directory layout
 
+Integration tests live alongside their service. **No top-level `tests/` tree.** One `*_integration.py` file per service:
+
 ```
-tests/
-├── conftest.py                       # session-scoped bun_server + ApolloClient + marker auto-apply
-├── integration/                      # THIS TIER
-│   ├── smoke/
-│   │   └── test_health_and_routes.py
-│   ├── global_chat/
-│   │   └── test_global_chat.py       # sync + stream + ws + cross-service end-to-end
-│   ├── workflow_chat/
-│   │   └── test_workflow_chat.py
-│   ├── job_chat/
-│   │   └── test_job_chat.py
-│   └── tools/
-│       └── test_<tool>.py
-└── acceptance/                       # tier 4
+services/<svc>/tests/
+  test_<svc>_integration.py        # sync POST + SSE stream + WS in one file
 ```
 
-**One test file per service**, covering sync POST, SSE streaming, and WS in that file. Split by transport (`test_<svc>_stream.py`) only if a single file gets unwieldy (>500 lines). Cross-service planner-chain tests live in `tests/integration/global_chat/` since `global_chat` owns the planner.
+Concretely:
 
-**Why top-level `tests/`** (not per-service): integration crosses service boundaries, shares the bun server fixture, and is opt-in. Per-service nesting hides the cross-service nature.
+```
+services/global_chat/tests/test_global_chat_integration.py
+services/workflow_chat/tests/test_workflow_chat_integration.py
+services/job_chat/tests/test_job_chat_integration.py
+```
+
+**Cross-service / planner-chain end-to-end tests** live under `services/global_chat/tests/test_global_chat_integration.py` because `global_chat` owns the planner that dispatches to `workflow_chat` and `job_chat` over real HTTP. There's no separate "cross-service" home — the orchestrator hosts them.
+
+**Smoke tests** for the platform itself (healthcheck `GET /`, 404 for unknown service, `test_errors` mapping) live under `services/echo/tests/test_echo_integration.py` since `echo` is the test-pipeline-verification service.
+
+**One file per service** covers sync POST, SSE streaming, and WS in one place. Split by transport (`test_<svc>_stream_integration.py`) only if a single file gets unwieldy (>500 lines).
 
 ---
 
 ## 3. Server lifecycle
 
-Shared `tests/conftest.py` — **not** a separate `tests/_common/` package. When acceptance reuses the fixture, it imports from `tests.conftest` directly. Promote to a package the day someone imports it from a third location.
+The session-scoped bun server fixture lives in **`testing/server.py`** (the shared helper package), not in a top-level conftest. Registered globally via `pytest_plugins = ["testing.server"]` in the root `apollo/conftest.py`.
 
 ### 3.1 Fixture
 
@@ -104,8 +104,9 @@ No `pytest-xdist` parallelism on day one — Anthropic rate limits per API key. 
 | `PINECONE_API_KEY` | search_docsite | skip | fail |
 | `POSTGRES_URL` | services using `util.get_db_connection()` | skip | fail |
 | `APOLLO_TEST_BASE_URL` | reuse deployed server | spawn | spawn |
+| `LANGFUSE_TRACING` | flip Langfuse export on/off without changing credentials | unset → off | unset → off |
 
-`require_env(*names)` helper in `tests/conftest.py`:
+`require_env(*names)` helper in `testing/server.py`:
 
 ```python
 def require_env(*names: str) -> None:
@@ -125,11 +126,22 @@ Per-module: `require_env("ANTHROPIC_API_KEY")` at module top.
 - Dedicated test Pinecone namespace; ephemeral test Postgres. Never share the production `apollo-mappings` index / DB.
 - Anthropic: separate API key with a low monthly cap, scoped to a test project.
 
+### 4.2 Langfuse opt-in
+
+Integration runs *can* trace to Langfuse but don't have to. Mechanism:
+
+- `LANGFUSE_TRACING=true` → existing `@observe` decorators on production `main()` export traces.
+- `LANGFUSE_TRACING=false` (or unset) → `@observe` short-circuits, no export.
+
+In the CI workflow, leave `LANGFUSE_TRACING` unset by default — integration runs are clean. Add a `workflow_dispatch` input "Trace to Langfuse" (or a separate `run-integration-traced` PR label) to flip it on for the runs where someone wants to inspect traces afterwards. Credentials stay configured either way.
+
+Integration writes traces only — no scores. Scoring is acceptance-tier territory.
+
 ---
 
 ## 5. HTTP client
 
-All transport lives in `tests/conftest.py` as `ApolloClient`:
+`ApolloClient` lives in **`testing/server.py`** alongside the server fixture:
 
 ```python
 class ApolloClient:
@@ -157,7 +169,7 @@ optional = true
 websockets = "^13"
 ```
 
-Installed in CI with `poetry install --with test-integration`. No `pytest-rerunfailures`, no `pytest-timeout`, no retry plugin on day one.
+Installed in CI with `poetry install --with test-integration`.
 
 Exposed fixture:
 
@@ -167,11 +179,13 @@ def client(apollo_server) -> ApolloClient:
     return ApolloClient(apollo_server.base_url)
 ```
 
+Both integration and acceptance tiers use the same `client` fixture.
+
 ---
 
 ## 6. Assertion helpers
 
-All in `tests/conftest.py` (or a small `tests/helpers.py` if it crowds the conftest):
+All in `testing/server.py` (or a small `testing/helpers.py` if it crowds the file):
 
 - `collect_until_complete(stream, *, timeout=120)` → `(list[SSEEvent], final_payload)`.
 - `assert_event_sequence(events, expected_types, *, strict=False)` — subsequence match by default.
@@ -179,24 +193,25 @@ All in `tests/conftest.py` (or a small `tests/helpers.py` if it crowds the conft
 - `assert_response_shape(response, required)` — `{"response": str, "usage": dict, "history": list}` style.
 - `assert_response_contains(response, *regexes, field="response", flags=re.IGNORECASE)`.
 
-YAML helpers (`assert_yaml_has_ids`, etc.) are imported from `services/_testing/fixtures.py` — one canonical location.
+YAML helpers (`assert_yaml_has_ids`, etc.) come from `testing/fixtures.py` — one canonical location.
 
 ---
 
 ## 7. Pytest configuration
 
-Markers are declared in `pyproject.toml` under `[tool.pytest.ini_options].markers` — see overview §5 and service-tests plan §7.
+Markers declared in `pyproject.toml [tool.pytest.ini_options].markers` — see overview §5 and service-tests plan §7.
 
-`tests/integration/conftest.py` auto-applies the marker:
+Marker auto-applied by filename suffix `_integration.py` in the per-service or root conftest:
 
 ```python
 def pytest_collection_modifyitems(config, items):
     for item in items:
-        if "tests/integration" in str(item.fspath):
+        name = item.fspath.basename
+        if name.endswith("_integration.py"):
             item.add_marker(pytest.mark.integration)
 ```
 
-Authors don't write `@pytest.mark.integration`. Placement under `tests/integration/` is sufficient.
+Authors don't write `@pytest.mark.integration`. Filename suffix is sufficient.
 
 ---
 
@@ -204,23 +219,26 @@ Authors don't write `@pytest.mark.integration`. Placement under `tests/integrati
 
 ```bash
 # Run the whole integration tier
-poetry run pytest tests/integration -m integration
+poetry run pytest -m integration
 
 # Run one service's
-poetry run pytest tests/integration/global_chat
+poetry run pytest services/global_chat/tests -m integration
 
 # Smoke only
-poetry run pytest tests/integration/smoke
+poetry run pytest services/echo/tests
 
 # Against a deployed server
-APOLLO_TEST_BASE_URL=https://apollo-staging.openfn.org poetry run pytest tests/integration
+APOLLO_TEST_BASE_URL=https://apollo-staging.openfn.org poetry run pytest -m integration
+
+# With Langfuse tracing on
+LANGFUSE_TRACING=true poetry run pytest -m integration
 ```
 
 ---
 
 ## 9. CI integration
 
-Integration and acceptance share one workflow: `.github/workflows/llm-tests.yaml`. Integration job runs on PR label `run-integration`, push to `main`, or `workflow_dispatch`. Acceptance job runs on PR label `run-acceptance`, nightly cron, or `workflow_dispatch`. Both share secrets.
+Integration and acceptance share one workflow: `.github/workflows/llm-tests.yaml`. Integration job runs on PR label `run-integration`, push to `main`, or `workflow_dispatch`. Acceptance job runs on PR label `run-acceptance` or `workflow_dispatch` only — never cron.
 
 ```yaml
 name: llm-tests
@@ -229,9 +247,12 @@ on:
     types: [labeled]
   push:
     branches: [main]
-  schedule:
-    - cron: "0 3 * * *"
   workflow_dispatch:
+    inputs:
+      trace_langfuse:
+        type: boolean
+        default: false
+        description: "Export traces to Langfuse"
 
 concurrency:
   group: llm-${{ github.ref }}
@@ -251,6 +272,10 @@ jobs:
       OPENAI_API_KEY:    ${{ secrets.OPENAI_API_KEY_TEST }}
       PINECONE_API_KEY:  ${{ secrets.PINECONE_API_KEY_TEST }}
       POSTGRES_URL:      ${{ secrets.POSTGRES_URL_TEST }}
+      LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY_TEST }}
+      LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY_TEST }}
+      LANGFUSE_BASE_URL:   ${{ secrets.LANGFUSE_BASE_URL }}
+      LANGFUSE_TRACING: ${{ inputs.trace_langfuse == true && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -259,7 +284,7 @@ jobs:
       - uses: snok/install-poetry@v1
       - run: bun install
       - run: poetry install --with test-integration
-      - run: poetry run pytest tests/integration -v -m integration --maxfail=5
+      - run: poetry run pytest -m integration -v --maxfail=5
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -292,7 +317,7 @@ Each of these has a real cost (learning curve, config churn, false alarms). Add 
 
 ## 11. Streaming and WebSocket testing
 
-Three transports need coverage:
+Three transports need coverage. All three live in the same `test_<svc>_integration.py` file per service.
 
 ### Sync POST
 
@@ -336,7 +361,10 @@ def test_workflow_chat_ws_lifecycle(client):
 
 ### Error paths
 
+Lives in the smoke tests for the test_errors service:
+
 ```python
+# services/echo/tests/test_echo_integration.py
 def test_stream_emits_error_event(client):
     events = list(client.stream("test_errors", {"trigger": "RATE_LIMIT"}))
     err = next(e for e in events if e.type == "error")
@@ -350,10 +378,10 @@ def test_stream_emits_error_event(client):
 | Existing file | Destination |
 |---|---|
 | `services/*/tests/test_functions.py` (pure) | unit tier |
-| `services/*/tests/test_pass_fail*.py` using `subprocess.run(entry.py)` | `tests/integration/<svc>/` — swap subprocess for `client.call()` |
+| `services/*/tests/test_pass_fail*.py` using `subprocess.run(entry.py)` | `services/<svc>/tests/test_<svc>_integration.py` — swap subprocess for `client.call()` |
 | `services/*/tests/test_pass_fail*.py` using mocked sub-agents (`test_adaptor_version_passthrough.py`, `test_planner_subagent_clarification.py`) | service tier (mocked LLM) |
 | `services/*/tests/test_qualitative.py` | mostly acceptance; a few with machine-checkable shape → integration |
-| `services/*/tests/test_langfuse_tracing.py` | `tests/integration/<svc>/` — swap subprocess for `client.call()` |
+| `services/*/tests/test_langfuse_tracing.py` | `services/<svc>/tests/test_<svc>_integration.py` — swap subprocess for `client.call()` |
 
 Migration strategy: one service at a time, smallest first (workflow_chat). Keep old file for one PR with `pytest.mark.skip("migrated")`, delete in follow-up.
 
@@ -363,10 +391,10 @@ Migration strategy: one service at a time, smallest first (workflow_chat). Keep 
 
 A new sub-agent or tool is a ~10-minute add:
 
-1. Create `tests/integration/<name>/test_<name>.py`.
+1. Create `services/<name>/tests/test_<name>_integration.py`.
 2. Use `client.call() / .stream() / .ws()` — no middleware changes; `describe-modules.ts` auto-mounts.
-3. Add `make_<name>_payload` to `services/_testing/fixtures.py` if needed.
-4. No CI changes — workflow already runs `tests/integration/` recursively.
+3. Add `make_<name>_payload` to `testing/fixtures.py` if needed.
+4. No CI changes — workflow already collects `-m integration` across all services.
 
 If a new tool requires a new external dep (new API key), add it to `require_env` and the CI secrets list.
 
@@ -374,10 +402,10 @@ If a new tool requires a new external dep (new API key), add it to `require_env`
 
 ## 14. What this tier deliberately does NOT do
 
+- No top-level `tests/` tree — everything lives with the service.
 - No cost tracker / pricing table / budget enforcement on day one.
 - No retry plugin.
-- No `tests/_common/` package — helpers live in `tests/conftest.py`.
-- No dual-API fixture (pytest fixture + context manager). Acceptance imports the fixture from `tests.conftest` via the standard pytest mechanism.
+- No dual-API fixture (pytest fixture + context manager). Acceptance imports the same `client` fixture.
 - No `APOLLO_TEST_QUICK` skip mode — `-m "not slow"` pattern can be added if needed, but no tests are marked `slow` on day one.
 - No contract testing / VCR / recorded HAR. Possible future addition.
 
@@ -385,4 +413,4 @@ If a new tool requires a new external dep (new API key), add it to `require_env`
 
 ## Summary
 
-One file per service under `tests/integration/<svc>/test_<svc>.py` covering sync + SSE + WS. Session-scoped `apollo_server` + `ApolloClient` in `tests/conftest.py`. Label-gated CI workflow shared with acceptance. No cost tracking, no retries, no parallelism on day one. Add each when it's actually missed.
+One file per service: `services/<svc>/tests/test_<svc>_integration.py` covering sync + SSE + WS. Session-scoped `apollo_server` + `ApolloClient` in `testing/server.py`. Label-gated CI workflow shared with acceptance. Langfuse tracing is opt-in via `LANGFUSE_TRACING=true` (workflow input or env var). No cost tracking, no retries, no parallelism on day one. Add each when it's actually missed.
