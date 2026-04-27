@@ -3,6 +3,13 @@
 **Supervisor:** team-lead
 **Scope:** architecture (files, utils, fixtures, CI wiring) for a four-tier test framework covering `global_chat`, `workflow_chat`, `job_chat`, their tools, and any future sub-agent / tool services. Specific tests are NOT designed here.
 
+
+generate in phases:
+phase 1 - just one leading test of each type
+phase 2 - all tests for all services
+phase 3 - new tests for new coverage - scale up!
+
+
 > **Note on provenance.** An earlier draft of this overview (and its four section files) grew a lot of scaffolding that wasn't in the original brief — a dedicated `llm_evaluator` service, a custom acceptance runner with `bless`/`differ`/`langfuse-sink`/`migrate-questions` subcommands, golden-answer trees, cost-tracker/pricing/retry plugins, dual homes for shared helpers, etc. This revision strips the plan back to what the original task actually asked for. The four tiers, the `test_hooks` second-arg pattern, the mocked Anthropic HTTP client, and one shared helper package remain. Everything else is deferred until a concrete need for it appears.
 
 Deep detail lives in:
@@ -36,6 +43,8 @@ Deep detail lives in:
 
 ```
 apollo/
+   - util # common and test utils (aka tools aka testing aka lib)
+
 ├── services/
 │   ├── _testing/                           # Shared python test helpers. Underscore hides it from describe-modules auto-mount.
 │   │   ├── __init__.py
@@ -48,6 +57,10 @@ apollo/
 │   ├── <chat-service>/                     # global_chat, workflow_chat, job_chat
 │   │   ├── <chat-service>.py               # main() gains optional `test_hooks` 2nd arg (default None)
 │   │   └── tests/
+            - unit
+            - integration
+            - service
+            - acceptance
 │   │       ├── conftest.py                 # re-exports shared fixtures; auto-marks by filename suffix
 │   │       ├── test_<module>_unit.py       # tier 1 — pure functions, marker: unit
 │   │       └── test_<module>_service.py    # tier 2 — main() with mocked anthropic, marker: service
@@ -76,9 +89,9 @@ apollo/
 **Decisions worth knowing:**
 
 - **One shared helper package: `services/_testing/`.** Underscore-prefixed so `platform/src/util/describe-modules.ts` doesn't auto-mount it. Everything any tier imports lives here. No separate `tests/_common/`.
-- **No `unit/` vs `service/` subdirs per service.** Filename suffix (`_unit.py` / `_service.py`) + auto-marker in `conftest.py` is enough while each service has <20 test files. Promote to subdirs only when someone has a reason.
-- **No `llm_evaluator` Apollo service.** The judge is a helper module (`tests/acceptance/judge.py`) used by the acceptance conftest. If the judge logic ever needs to be callable from another Apollo service, promote it then.
-- **Server fixture + HTTP client live in `tests/conftest.py`, not a separate package.** They can move to a package the day someone imports them from a third tier. Today, integration and acceptance both import from the one place.
+- **No `unit/` vs `service/` subdirs per service.** Filename suffix (`_unit.py` / `_service.py`) + auto-marker in `conftest.py` is enough while each service has <20 test files. Promote to subdirs only when someone has a reason. JOE HAS A REASON ACTUALLY
+- **No `llm_evaluator` Apollo service.** The judge is a helper module (`tests/acceptance/judge.py`) used by the acceptance conftest. If the judge logic ever needs to be callable from another Apollo service, promote it then. DON'T LIKE THIS - use one common judge module, but put rules/standards/guidelines in/alongside each test in the subdir
+- **Server fixture + HTTP client live in `tests/conftest.py`, not a separate package.** They can move to a package the day someone imports them from a third tier. Today, integration and acceptance both import from the one place. NOPE - KEEP THESE IN THE TOP UTIL/LIB
 - **`test_hooks` second-arg stays.** It's the load-bearing production change and it's cheap — `test_hooks is None` is byte-identical to today.
 
 ---

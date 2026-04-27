@@ -6,12 +6,12 @@
 
 ## 1. What qualifies as a unit test in Apollo
 
-A test is a unit test iff ALL of:
+A test is a unit test if ALL of:
 
 1. Exercises **exactly one function, method, or pure class behaviour**.
 2. **Zero I/O** — no network (Anthropic, Pinecone, Langfuse export, Sentry), no subprocess, no DB, no file writes outside `tmp_path`.
 3. **Zero LLM calls**, not even through a mock HTTP client. If the test needs a mocked Anthropic response to make sense, it's a service test.
-4. **Deterministic and fast** — target <50 ms per test; whole unit suite <15 s.
+4. **Deterministic and fast** — target <50 ms per test
 5. **Free** — no API keys required.
 
 Tests that don't meet all five get moved to service or integration — see §7.
@@ -19,6 +19,8 @@ Tests that don't meet all five get moved to service or integration — see §7.
 ---
 
 ## 2. Directory and file layout
+
+UNIT TESTS SHOULD LIVE UNDER SERVICES/SERVICE/TEST/UNIT
 
 Per-service: one flat `tests/` folder, filenames suffixed by tier.
 
@@ -31,7 +33,7 @@ services/<svc>/tests/
   fixtures/                          # optional; static JSON/YAML sample inputs (per-service only)
 ```
 
-Cross-service util tests (`services/util.py` — `AdaptorSpecifier`, `DictObj`, `sum_usage`, `add_page_prefix`) live under `services/tests/test_util_unit.py`.
+Cross-service util tests (`services/util.py` — `AdaptorSpecifier`, `DictObj`, `sum_usage`, `add_page_prefix`) live under `services/tests/test_util_unit.py`. <- CROSS-SERVICE STUFF NOW LIVES IN THE TOP /LIB FOLDER, WITH /LIB/TEST IF WE WANT IT
 
 **Why suffix + auto-marker, not subdirs?** While each service has <20 test files, subdirs add bureaucracy for no gain. Tier marker is applied by filename suffix in the per-service conftest. If a service grows past ~30 test files, promoting to `tests/unit/` + `tests/service/` subdirs is a mechanical rename.
 
@@ -39,7 +41,9 @@ Cross-service util tests (`services/util.py` — `AdaptorSpecifier`, `DictObj`, 
 
 ## 3. Shared helper package: `services/_testing/`
 
-Leading underscore is required — `platform/src/util/describe-modules.ts` auto-mounts any directory under `services/` whose name doesn't start with `_`.
+THESE UTILS MOVE TO TOP LEVEL MAYBE /LIB
+
+
 
 ```
 services/_testing/
