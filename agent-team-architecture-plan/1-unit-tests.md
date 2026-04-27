@@ -64,7 +64,7 @@ Unit-tier import rules:
 
 `testing/fixtures.py` owns (same module, flat — split into files only when this one grows past ~500 lines):
 
-- Pytest fixtures (`sample_workflow_yaml`, `sample_<svc>_chat_payload`, `fake_api_key`, `anthropic_client_no_network`).
+- Pytest fixtures (`sample_workflow_yaml`, `sample_<svc>_chat_payload`, `fake_api_key`).
 - YAML assertion helpers migrated from the currently-duplicated `services/global_chat/tests/test_utils.py` and `services/workflow_chat/tests/test_utils.py` (`path_matches`, `assert_yaml_equal_except`, `assert_yaml_section_contains_all`, `assert_yaml_has_ids`, `assert_yaml_jobs_have_body`, `assert_no_special_chars`).
 - Payload builders (`make_<svc>_chat_payload`) — shared with integration tier.
 - Fixture loaders (`load_fixture_json`, `load_fixture_yaml`).
@@ -145,7 +145,7 @@ Coverage: generate `--cov=services --cov-report=xml` and upload as artifact for 
 
 ## 7. Migration path for existing tests
 
-- `services/workflow_chat/tests/test_functions.py` — all eight tests are already unit-shaped. Rename to `test_workflow_chat_functions_unit.py`, delete `sys.path.insert(...)`, replace local `client` fixture with `anthropic_client_no_network`. No assertion changes.
+- `services/workflow_chat/tests/test_functions.py` — all eight tests are already unit-shaped. Rename to `test_workflow_chat_functions_unit.py`, delete `sys.path.insert(...)`, delete the local `client` fixture entirely (unit tests don't need an Anthropic client per §1's "zero LLM calls" rule). No assertion changes.
 - `services/job_chat/tests/test_functions.py` — misclassified. `test_generate_system_message_loads_adaptor_docs_when_missing` hits Postgres → integration. `test_generate_queries_returns_valid_structure` hits real Anthropic → service (with mocked client) or integration. `test_search_docs_returns_general_docs_only` hits Pinecone → integration. A new `test_prompt_unit.py` covers the pure helpers (`build_prompt`, `build_error_correction_prompt`, `extract_page_prefix_from_last_turn`).
 - `services/global_chat/tests/test_utils.py` + `services/workflow_chat/tests/test_utils.py` — YAML helpers migrate to `testing/fixtures.py`. The `call_<svc>_service` subprocess helpers are replaced by the integration tier's `ApolloClient`. Old files are deleted after all callers are updated.
 - `*_pass_fail.py`, `*_qualitative.py`, `*_langfuse_tracing.py`, `*_adaptor_version_passthrough.py`, `*_planner_*.py`, `*_good_morning_*.py` — owned by service/integration/acceptance tiers.

@@ -85,71 +85,110 @@ def build_anthropic_client(api_key: str, test_hooks: Optional[dict] = None) -> A
 
 Every `AnthropicClient` / `RouterAgent` / `PlannerAgent` constructor swaps `Anthropic(api_key=...)` for `build_anthropic_client(api_key, test_hooks)`.
 
-### 3.2 `testing/anthropic_mock.py`
+### 3.2 `MockAnthropic` in `testing/anthropic_mock.py`
 
-Single file — `MockAnthropicClient` class, canned response-body builders, docstring documenting recognised `test_hooks` keys, and the `record_tool_call(test_hooks, entry)` helper. Split later if it grows unwieldy.
-
-The `anthropic` Python SDK accepts a custom `http_client` — we build ours from `httpx.MockTransport`:
+`MockAnthropic` is a thin wrapper over `httpx.MockTransport`. Tests register regex → response pairs; on each Anthropic request the mock matches the latest user message text against registered patterns and returns the first match. No new runtime dep — `httpx.MockTransport` is built into httpx, which is already in `poetry.lock`.
 
 ```python
-class MockAnthropicClient:
-    """Thin wrapper over httpx.Client + httpx.MockTransport.
+class MockAnthropic:
+    """Mock Anthropic API backed by httpx.MockTransport.
+
+    Tests register regex → response pairs. Each request is matched against
+    the latest user message text (including tool_result content); the first
+    matching pattern wins. No match raises AssertionError.
 
     Usage:
-        mc = MockAnthropicClient.always(response=text_response("hello"))
-        mc = MockAnthropicClient.script([resp1, resp2, resp3])   # multi-turn
-        mc = MockAnthropicClient.streaming(events=[...])         # SSE
+        mock = MockAnthropic()
+        mock.set_response(r"haiku", "sure, here's a haiku")
+        mock.set_response(r"create workflow", tool_use("call_workflow_agent", {...}))
 
-    After the call:
-        mc.requests            # list[RecordedRequest]
-        mc.last_request.json["messages"]
-        mc.last_request.headers["x-api-key"]
+        test_hooks = test_hooks_factory(anthropic=mock)
+        main(payload, test_hooks)
+
+        assert mock.last_request.headers["x-api-key"] == "sk-test"
     """
-    @classmethod
-    def always(cls, response) -> "MockAnthropicClient": ...
-    @classmethod
-    def script(cls, responses) -> "MockAnthropicClient": ...
-    @classmethod
-    def streaming(cls, events) -> "MockAnthropicClient": ...
+
+    def __init__(self):
+        self._responses: list[tuple[re.Pattern, str | list[dict]]] = []
+        self.requests: list[httpx.Request] = []
+
+    def set_response(self, pattern: str, response: str | list[dict]) -> None:
+        """Register a response for any request whose latest user message
+        text matches `pattern`. `response` is either:
+        - str: returned as a single text content block.
+        - list[dict]: returned as content blocks (use for tool_use, mixed).
+        """
+        self._responses.append((re.compile(pattern), response))
 
     @property
-    def httpx_client(self) -> httpx.Client: ...
+    def httpx_client(self) -> httpx.Client:
+        return httpx.Client(transport=httpx.MockTransport(self._handle))
+
     @property
-    def requests(self) -> list[RecordedRequest]: ...
-    @property
-    def last_request(self) -> RecordedRequest: ...
+    def last_request(self) -> httpx.Request:
+        return self.requests[-1]
+
+    def _handle(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        body = json.loads(request.content)
+        user_text = _latest_user_text(body.get("messages", []))
+        for pattern, resp in self._responses:
+            if pattern.search(user_text):
+                return httpx.Response(200, json=_build_message_body(resp))
+        raise AssertionError(
+            f"MockAnthropic: no pattern matched user message {user_text!r}. "
+            f"Registered patterns: {[p.pattern for p, _ in self._responses]}"
+        )
+
+
+def tool_use(name: str, input: dict, id: str = "toolu_test") -> list[dict]:
+    """Build a single tool_use content block for `set_response`."""
+    return [{"type": "tool_use", "id": id, "name": name, "input": input}]
 ```
 
-Response-body builders in the same file:
+Two private helpers in the same file:
 
-- `text_response(text, model=..., usage=...)`
-- `tool_use_response(tool_name, tool_input, tool_use_id="toolu_01")`
-- `mixed_response(text, tool_uses=[...])`
-- `router_decision_response(destination, confidence=4, job_key=None)`
-- `stream_events(text="", tool_uses=None)`
-- `usage_block(input_tokens=100, output_tokens=50, cache_creation=0, cache_read=0)`
+- `_latest_user_text(messages)` walks `messages` in reverse, takes the last `role=user` message, and concatenates its `text` blocks plus any `tool_result` content. Matching against `tool_result` text is what makes the planner's internal loop work — see §3.3.
+- `_build_message_body(response)` wraps a string in `[{"type": "text", "text": ...}]` (or passes a list through), then assembles the standard Anthropic message envelope: `id`, `type`, `role: "assistant"`, `model`, `content`, `stop_reason`, `stop_sequence`, `usage`.
 
-No new runtime dep — `httpx.MockTransport` is built into httpx, which is already in `poetry.lock`.
+Design choices worth knowing:
 
-### 3.3 Scripted multi-turn example
+- **First-match-wins.** Order specific patterns before general ones.
+- **Loud no-match.** Raises `AssertionError` with the unmatched text and the list of registered patterns. Beats silent fallbacks that mask test drift.
+- **Captured requests.** `mock.requests` (list) and `mock.last_request` for assertions on outbound headers, body shape, system prompt, `cache_control`, beta headers, history round-trip.
+
+Tool-call breadcrumbs (`record_tool_call`) live in the same file — see §4.
+
+### 3.3 The planner's internal loop
+
+`main()` is one user turn, but the planner agent internally calls Anthropic multiple times within that turn — once per round of the tool-use loop (`call → tool_use → run tool → call with tool_result → ...` until `end_turn`). The regex matcher handles this naturally because each round has different content in the latest user message:
 
 ```python
 def test_planner_calls_workflow_then_job_agents(test_hooks_factory):
-    mock = MockAnthropicClient.script([
-        router_decision_response("planner", confidence=5),
-        tool_use_response("call_workflow_agent", {"message": "create workflow"}),
-        tool_use_response("call_job_code_agent", {"message": "code for step", "job_key": "fetch"}),
-        text_response("All done."),
-    ])
+    mock = MockAnthropic()
+    mock.set_response(r"create a workflow",
+                      tool_use("call_workflow_agent", {"message": "create workflow"}))
+    mock.set_response(r"workflow created",
+                      tool_use("call_job_code_agent", {"message": "code", "job_key": "fetch"}))
+    mock.set_response(r"code generated", "all done")
+
     test_hooks = test_hooks_factory(anthropic=mock)
-    result = global_chat_main(make_global_chat_payload("create a workflow"), test_hooks)
+    main(make_global_chat_payload("create a workflow"), test_hooks)
 
     assert [c["tool"] for c in test_hooks["tool_calls"]] == [
-        "router_decision", "call_workflow_agent", "call_job_code_agent",
+        "call_workflow_agent", "call_job_code_agent",
     ]
 ```
 
-When a test wants to bypass a sub-agent's real code, it scripts responses for the planner's `/v1/messages` calls and lets the sub-agent's own `main()` run under the same mock client. Stub registries aren't needed for the common case.
+- Round 1: latest user message = the user's prompt → matches `r"create a workflow"`, returns the first `tool_use`.
+- Round 2: latest user message = the `tool_result` from `call_workflow_agent` → matches `r"workflow created"`, returns the next `tool_use`.
+- Round 3: latest user message = the `tool_result` from `call_job_code_agent` → matches `r"code generated"`, returns the final text.
+
+When a sub-agent (`workflow_chat`, `job_chat`) gets invoked inside this loop, its own `main()` runs under the *same* mock client. Tests register regexes covering both the parent's and the child's expected user messages on one mock — no sub-agent stub registry needed.
+
+### 3.4 Streaming (deferred)
+
+Streaming endpoints (`/services/<svc>/stream`, `/services/<svc>` WS) emit Anthropic-formatted SSE events through `bridge.ts` (`StreamManager` in `services/streaming_util.py`). Detailed mock support — likely a `set_stream_response(pattern, events)` method or a sibling `MockAnthropicStream` class — is out of scope for this section. Defer until the first service test for a streaming code path actually needs it; meanwhile the integration tier covers stream behaviour against the real bun server.
 
 ---
 
@@ -238,7 +277,7 @@ Cross-service end-to-end flow tests (planner chain over mocks) also live under `
 ```
 testing/
   __init__.py
-  anthropic_mock.py      # MockAnthropicClient, response builders, test_hooks-keys docstring, record_tool_call
+  anthropic_mock.py      # MockAnthropic + tool_use helper, test_hooks-keys docstring, record_tool_call
   fixtures.py            # pytest fixtures + YAML assertion helpers + payload builders + loaders
   fixtures/
     workflows/*.yaml
@@ -250,7 +289,7 @@ testing/
 - `make_global_chat_payload`, `make_workflow_chat_payload`, `make_job_chat_payload`.
 - `get_workflow_yaml_attachment`, `get_suggested_code_attachment`, `get_usage`.
 - `assert_yaml_has_ids`, `assert_yaml_jobs_have_body`, `assert_yaml_equal_except`, `path_matches`, `assert_no_special_chars`.
-- Pytest fixtures: `mock_anthropic`, `test_hooks_factory`, `fake_api_key`, `sample_workflow_yaml`, `anthropic_client_no_network`.
+- Pytest fixtures: `mock_anthropic`, `test_hooks_factory`, `fake_api_key`, `sample_workflow_yaml`.
 - `set_unit_test_env` (dummy keys, disable langfuse/sentry).
 - `load_fixture_json`, `load_fixture_yaml`.
 
@@ -306,7 +345,7 @@ Service runs in the same `tests.yaml` workflow as unit, via `pytest -m "unit or 
 
 1. **Classify the assertion.** Content-sensitive (`"response mentions Salesforce"`) → integration or acceptance. Structural (`"workflow_yaml has 2 jobs"`) → service (with a canned mock producing that structure).
 2. **Replace the call site.** Swap `subprocess.run([..., "entry.py", ...])` for `from <svc>.<svc> import main; main(payload, test_hooks)`.
-3. **Build the mock.** Hand-craft an Anthropic response fixture (or a script for planner multi-turn) that produces the shape under test.
+3. **Build the mock.** Register one or more `set_response(pattern, response)` pairs on `MockAnthropic` so each Anthropic call in the path under test gets a matching canned response.
 4. **Assert on structure + breadcrumbs.** Replace content asserts with routing / shape asserts; keep content in acceptance.
 5. **Delete the old test** once the new one is stable.
 
@@ -363,7 +402,7 @@ Pattern: **one arg, one call to `record_tool_call`, one test**. No framework cha
 Good service-test targets:
 
 - **API key threading** — payload `api_key` ends up in `mock.last_request.headers["x-api-key"]`; absent → env var is used.
-- **Cache-control regression** — planner system prompt has `cache_control: {"type": "ephemeral"}`; assert on outbound request body.
+- **Cache-control regression** — planner system prompt has `cache_control: {"type": "ephemeral"}`; assert on outbound request body via `json.loads(mock.last_request.content)` (httpx `Request.content` is bytes — there's no `.json` accessor on the request side).
 - **Context-management beta** — planner sets `context-management-2025-06-27` header and `context_management` field on every call.
 - **History round-trip** — returned `history` equals input + this turn's user/assistant messages.
 - **`AdaptorSpecifier` propagation** — payload `context.adaptor = "@openfn/language-http@3.1.11"` shows up in the prompt.
@@ -374,4 +413,4 @@ Good service-test targets:
 
 ## Summary
 
-`test_hooks` second arg on `main()` + `build_anthropic_client(api_key, test_hooks)` factory + `MockAnthropicClient` with `always`/`script`/`streaming` constructors + three `test_hooks` keys (`anthropic_http_client`, `tool_calls`, `tool_stubs` — the last only used for `search_documentation` today). Three files in `testing/`, filename-suffix markers, shared workflow with the unit tier. Add sub-agent stub infrastructure the first time a test can't be written without it.
+`test_hooks` second arg on `main()` + `build_anthropic_client(api_key, test_hooks)` factory + `MockAnthropic` (regex → response pairs, `AssertionError` on no match) with a `tool_use(...)` helper for tool-use content blocks + three `test_hooks` keys (`anthropic_http_client`, `tool_calls`, `tool_stubs` — the last only used for `search_documentation` today). One mock file in `testing/`, filename-suffix markers, shared workflow with the unit tier. Streaming and any sub-agent stub infrastructure are deferred until a real test needs them.
