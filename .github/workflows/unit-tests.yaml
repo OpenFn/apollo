@@ -1,0 +1,41 @@
+name: Unit tests
+
+on:
+  pull_request:
+    branches: ["**"]
+  push:
+    branches: [main]
+
+jobs:
+  unit:
+    name: Python unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        run: pipx install poetry==1.8.3
+
+      - name: Cache Poetry virtualenv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: poetry-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+
+      - name: Install dependencies (main group only, no ft)
+        run: poetry install --no-interaction --no-root
+
+      - name: Run unit tests
+        env:
+          # No secrets injected — unit tests must not need them.
+          # If a test passes locally but fails on CI for a missing key, it
+          # was never a unit test. See conftest.py at the repo root.
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: poetry run pytest -m unit --maxfail=5
