@@ -105,47 +105,50 @@ def test_langfuse_multi_turn_global_chat():
     print(f"\n All 2 turns completed and verified in Langfuse for session: {SESSION_ID}")
 
 
-def test_langfuse_global_chat_force_tracking():
-    """global_chat should trace even without metrics_opt_in (force=True)."""
-    force_session = f"test-global-chat-force-{uuid.uuid4().hex[:8]}"
-
-    input_data = {
-        "content": "What adaptors are available?",
-        "history": [],
-        "meta": {"session_id": force_session},
-        # No metrics_opt_in — should still trace because global_chat uses force=True
-    }
-
-    response = call_global_chat_service(input_data)
-    assert "response" in response, f"Force-tracking test failed: {response}"
-
-    traces = _fetch_traces(force_session)
-    assert len(traces) >= 1, (
-        f"Expected traces for force-tracked session {force_session} even without "
-        f"metrics_opt_in, found none. global_chat should force-enable tracking."
-    )
-
-    print(f"\n Force-tracking verified for session: {force_session}")
-
-
-def test_langfuse_global_chat_force_tracking_explicit_false():
-    """global_chat should trace even with metrics_opt_in=False (force=True)."""
-    session = f"test-global-chat-force-false-{uuid.uuid4().hex[:8]}"
+def test_langfuse_global_chat_non_employee_not_tracked() -> None:
+    """global_chat with no user.employee flag should produce zero traces."""
+    session = f"test-global-chat-nonemp-{uuid.uuid4().hex[:8]}"
 
     input_data = {
         "content": "What adaptors are available?",
         "history": [],
         "meta": {"session_id": session},
-        "metrics_opt_in": False,
+        # No user, no metrics_opt_in — temporary employee-only gate should drop this.
     }
 
     response = call_global_chat_service(input_data)
-    assert "response" in response, f"Force-tracking (explicit false) test failed: {response}"
+    assert "response" in response, f"Non-employee test failed: {response}"
 
-    traces = _fetch_traces(session)
-    assert len(traces) >= 1, (
-        f"Expected traces for session {session} even with metrics_opt_in=False. "
-        f"global_chat should force-enable tracking regardless."
+    time.sleep(5)
+    traces = _fetch_traces(session, retries=1, delay=0)
+    assert len(traces) == 0, (
+        f"Expected zero traces for non-employee session {session}, "
+        f"found {len(traces)}. The employee-only gate may not be working."
     )
 
-    print(f"\n Force-tracking (explicit false) verified for session: {session}")
+    print(f"\n Non-employee gate verified (absent user): zero traces for session: {session}")
+
+
+def test_langfuse_global_chat_non_employee_explicit_false() -> None:
+    """global_chat with user.employee=False should produce zero traces."""
+    session = f"test-global-chat-nonemp-false-{uuid.uuid4().hex[:8]}"
+
+    input_data = {
+        "content": "What adaptors are available?",
+        "history": [],
+        "meta": {"session_id": session},
+        "user": {"id": "test-non-employee", "employee": False},
+        "metrics_opt_in": True,
+    }
+
+    response = call_global_chat_service(input_data)
+    assert "response" in response, f"Non-employee (explicit false) test failed: {response}"
+
+    time.sleep(5)
+    traces = _fetch_traces(session, retries=1, delay=0)
+    assert len(traces) == 0, (
+        f"Expected zero traces for session {session} with user.employee=False, "
+        f"found {len(traces)}."
+    )
+
+    print(f"\n Non-employee gate verified (explicit false): zero traces for session: {session}")
