@@ -433,7 +433,12 @@ class PlannerAgent:
             with ThreadPoolExecutor(max_workers=len(to_run)) as executor:
                 futures = {
                     executor.submit(
-                        call_job_agent, block.input, self.current_yaml, self.api_key
+                        call_job_agent,
+                        block.input,
+                        self.current_yaml,
+                        self.api_key,
+                        self._user,
+                        self._metrics_opt_in,
                     ): block
                     for block in to_run
                 }
@@ -442,7 +447,13 @@ class PlannerAgent:
                     parallel_results[block.id] = future.result()
         elif to_run:
             block = to_run[0]
-            parallel_results[block.id] = call_job_agent(block.input, self.current_yaml, self.api_key)
+            parallel_results[block.id] = call_job_agent(
+                block.input,
+                self.current_yaml,
+                self.api_key,
+                self._user,
+                self._metrics_opt_in,
+            )
 
         # Stitch results and update state sequentially
         tool_results = []

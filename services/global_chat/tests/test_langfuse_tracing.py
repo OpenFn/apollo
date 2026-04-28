@@ -52,8 +52,10 @@ def test_langfuse_multi_turn_global_chat():
     input_1 = {
         "content": content_1,
         "history": [],
-        "meta": {"session_id": SESSION_ID},
-        "user": {"id": USER_ID, "employee": True},
+        "meta": {
+            "session_id": SESSION_ID,
+            "user": {"id": USER_ID, "persona": "core-contributor"},
+        },
         "metrics_opt_in": True,
     }
 
@@ -73,8 +75,10 @@ def test_langfuse_multi_turn_global_chat():
     input_2 = {
         "content": content_2,
         "history": history_1,
-        "meta": {"session_id": SESSION_ID},
-        "user": {"id": USER_ID, "employee": True},
+        "meta": {
+            "session_id": SESSION_ID,
+            "user": {"id": USER_ID, "persona": "core-contributor"},
+        },
         "metrics_opt_in": True,
     }
 
@@ -95,9 +99,9 @@ def test_langfuse_multi_turn_global_chat():
     for trace in traces:
         # Verify user_id is set
         assert trace.user_id == USER_ID, f"Expected user_id={USER_ID}, got {trace.user_id}"
-        # Verify tags include service name and employee
+        # Verify tags include service name and persona
         assert "global_chat" in trace.tags, f"Missing 'global_chat' tag: {trace.tags}"
-        assert "employee" in trace.tags, f"Missing 'employee' tag: {trace.tags}"
+        assert "core-contributor" in trace.tags, f"Missing persona tag: {trace.tags}"
         # Verify api_key is NOT in trace input (capture_input=False fix)
         trace_input = str(trace.input or "")
         assert "api_key" not in trace_input, f"api_key leaked in trace input: {trace_input[:200]}"
@@ -105,50 +109,52 @@ def test_langfuse_multi_turn_global_chat():
     print(f"\n All 2 turns completed and verified in Langfuse for session: {SESSION_ID}")
 
 
-def test_langfuse_global_chat_non_employee_not_tracked() -> None:
-    """global_chat with no user.employee flag should produce zero traces."""
-    session = f"test-global-chat-nonemp-{uuid.uuid4().hex[:8]}"
+def test_langfuse_global_chat_opt_out() -> None:
+    """global_chat with metrics_opt_in absent should produce zero traces."""
+    session = f"test-global-chat-optout-{uuid.uuid4().hex[:8]}"
 
     input_data = {
         "content": "What adaptors are available?",
         "history": [],
         "meta": {"session_id": session},
-        # No user, no metrics_opt_in — temporary employee-only gate should drop this.
+        # No metrics_opt_in — gate should drop this.
     }
 
     response = call_global_chat_service(input_data)
-    assert "response" in response, f"Non-employee test failed: {response}"
+    assert "response" in response, f"Opt-out test failed: {response}"
 
     time.sleep(5)
     traces = _fetch_traces(session, retries=1, delay=0)
     assert len(traces) == 0, (
-        f"Expected zero traces for non-employee session {session}, "
-        f"found {len(traces)}. The employee-only gate may not be working."
+        f"Expected zero traces for opted-out session {session}, "
+        f"found {len(traces)}. The should_export_span filter may not be working."
     )
 
-    print(f"\n Non-employee gate verified (absent user): zero traces for session: {session}")
+    print(f"\n Opt-out verified (absent): zero traces for session: {session}")
 
 
-def test_langfuse_global_chat_non_employee_explicit_false() -> None:
-    """global_chat with user.employee=False should produce zero traces."""
-    session = f"test-global-chat-nonemp-false-{uuid.uuid4().hex[:8]}"
+def test_langfuse_global_chat_opt_out_explicit_false() -> None:
+    """global_chat with metrics_opt_in=False should produce zero traces."""
+    session = f"test-global-chat-optout-false-{uuid.uuid4().hex[:8]}"
 
     input_data = {
         "content": "What adaptors are available?",
         "history": [],
-        "meta": {"session_id": session},
-        "user": {"id": "test-non-employee", "employee": False},
-        "metrics_opt_in": True,
+        "meta": {
+            "session_id": session,
+            "user": {"id": "test-user", "persona": "user"},
+        },
+        "metrics_opt_in": False,
     }
 
     response = call_global_chat_service(input_data)
-    assert "response" in response, f"Non-employee (explicit false) test failed: {response}"
+    assert "response" in response, f"Opt-out (explicit false) test failed: {response}"
 
     time.sleep(5)
     traces = _fetch_traces(session, retries=1, delay=0)
     assert len(traces) == 0, (
-        f"Expected zero traces for session {session} with user.employee=False, "
+        f"Expected zero traces for session {session} with metrics_opt_in=False, "
         f"found {len(traces)}."
     )
 
-    print(f"\n Non-employee gate verified (explicit false): zero traces for session: {session}")
+    print(f"\n Opt-out verified (explicit false): zero traces for session: {session}")

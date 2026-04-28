@@ -32,7 +32,6 @@ class Payload:
     options: Optional[Dict] = None
     api_key: Optional[str] = None
     attachments: Optional[List[Dict]] = None
-    user: Optional[Dict] = None
     metrics_opt_in: Optional[bool] = None
 
     @classmethod
@@ -50,7 +49,6 @@ class Payload:
             options=data.get("options"),
             api_key=data.get("api_key"),
             attachments=data.get("attachments"),
-            user=data.get("user"),
             metrics_opt_in=data.get("metrics_opt_in"),
         )
 
@@ -76,7 +74,7 @@ def main(data_dict: dict) -> dict:
         logger.info(f"Global agent called with content: {data.content[:100]}...")
 
         session_id = data.meta.get("session_id") if data.meta else None
-        user_info = data.user or {}
+        user_info = (data.meta.get("user") or {}) if data.meta else {}
         tracking = should_track(data_dict)
 
         if tracking:
@@ -103,7 +101,7 @@ def main(data_dict: dict) -> dict:
                 history=data.history or [],
                 stream=data.get_stream(),
                 attachments=data.attachments or [],
-                user=data.user,
+                user=user_info,
                 metrics_opt_in=data.metrics_opt_in,
             )
 

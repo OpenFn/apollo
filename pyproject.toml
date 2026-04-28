@@ -22,6 +22,7 @@ sentry-sdk = "^2.35.0"
 psycopg2-binary = "^2.9.10"
 langfuse = "^4.0.1"
 opentelemetry-instrumentation-anthropic = "^0.53.3"
+opentelemetry-instrumentation-threading = "0.61b0"
 
 [tool.poetry.group.dev]
 optional = false

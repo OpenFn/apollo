@@ -239,7 +239,7 @@ class RouterAgent:
             "history": clean_history,
             "stream": stream,
             "api_key": self.api_key,
-            "user": self._user,
+            "meta": {"user": self._user} if self._user else None,
             "metrics_opt_in": self._metrics_opt_in,
         }
 
@@ -309,7 +309,7 @@ class RouterAgent:
             "history": clean_history,
             "stream": stream,
             "api_key": self.api_key,
-            "user": self._user,
+            "meta": {"user": self._user} if self._user else None,
             "metrics_opt_in": self._metrics_opt_in,
         }
 

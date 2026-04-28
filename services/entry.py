@@ -11,7 +11,9 @@ load_dotenv()
 
 # Langfuse: init after load_dotenv so env vars are available, before any Anthropic client is created
 from opentelemetry.instrumentation.anthropic import AnthropicInstrumentor
+from opentelemetry.instrumentation.threading import ThreadingInstrumentor
 AnthropicInstrumentor().instrument()
+ThreadingInstrumentor().instrument()
 
 from langfuse import Langfuse
 from langfuse.span_filter import is_default_export_span

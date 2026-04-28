@@ -91,7 +91,6 @@ class Payload:
     stream: Optional[bool] = False
     download_adaptor_docs: Optional[bool] = True
     refresh_rag: Optional[bool] = False
-    user: Optional[dict] = None
     metrics_opt_in: Optional[bool] = None
 
     @classmethod
@@ -111,7 +110,6 @@ class Payload:
             stream=data.get("stream", False),
             download_adaptor_docs=data.get("download_adaptor_docs", True),
             refresh_rag=data.get("refresh_rag", False),
-            user=data.get("user"),
             metrics_opt_in=data.get("metrics_opt_in"),
         )
 
@@ -594,7 +592,7 @@ def main(data_dict: dict) -> dict:
 
         input_meta = data_dict.get("meta") or {}
         session_id = input_meta.get("session_id") if isinstance(input_meta, dict) else None
-        user_info = data.user or {}
+        user_info = (input_meta.get("user") or {}) if isinstance(input_meta, dict) else {}
         tracking = should_track(data_dict)
 
         if tracking:

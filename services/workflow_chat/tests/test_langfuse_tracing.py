@@ -51,8 +51,10 @@ def test_langfuse_multi_turn_workflow_chat():
         history=[],
         content=content_1,
     )
-    input_1["meta"] = {"session_id": SESSION_ID}
-    input_1["user"] = {"id": USER_ID, "employee": True}
+    input_1["meta"] = {
+        "session_id": SESSION_ID,
+        "user": {"id": USER_ID, "persona": "core-contributor"},
+    }
     input_1["metrics_opt_in"] = True
 
     response_1 = call_workflow_chat_service(input_1)
@@ -69,8 +71,10 @@ def test_langfuse_multi_turn_workflow_chat():
         history=history_1,
         content=content_2,
     )
-    input_2["meta"] = {"session_id": SESSION_ID}
-    input_2["user"] = {"id": USER_ID, "employee": True}
+    input_2["meta"] = {
+        "session_id": SESSION_ID,
+        "user": {"id": USER_ID, "persona": "core-contributor"},
+    }
     input_2["metrics_opt_in"] = True
 
     response_2 = call_workflow_chat_service(input_2)
@@ -87,8 +91,10 @@ def test_langfuse_multi_turn_workflow_chat():
         history=history_2,
         content=content_3,
     )
-    input_3["meta"] = {"session_id": SESSION_ID}
-    input_3["user"] = {"id": USER_ID, "employee": True}
+    input_3["meta"] = {
+        "session_id": SESSION_ID,
+        "user": {"id": USER_ID, "persona": "core-contributor"},
+    }
     input_3["metrics_opt_in"] = True
 
     response_3 = call_workflow_chat_service(input_3)
@@ -105,8 +111,10 @@ def test_langfuse_multi_turn_workflow_chat():
         history=history_3,
         content=content_4,
     )
-    input_4["meta"] = {"session_id": SESSION_ID}
-    input_4["user"] = {"id": USER_ID, "employee": True}
+    input_4["meta"] = {
+        "session_id": SESSION_ID,
+        "user": {"id": USER_ID, "persona": "core-contributor"},
+    }
     input_4["metrics_opt_in"] = True
 
     response_4 = call_workflow_chat_service(input_4)
@@ -120,7 +128,7 @@ def test_langfuse_multi_turn_workflow_chat():
     for trace in traces:
         assert trace.user_id == USER_ID, f"Expected user_id={USER_ID}, got {trace.user_id}"
         assert "workflow_chat" in trace.tags, f"Missing 'workflow_chat' tag: {trace.tags}"
-        assert "employee" in trace.tags, f"Missing 'employee' tag: {trace.tags}"
+        assert "core-contributor" in trace.tags, f"Missing persona tag: {trace.tags}"
         trace_input = str(trace.input or "")
         assert "api_key" not in trace_input, f"api_key leaked in trace input: {trace_input[:200]}"
 

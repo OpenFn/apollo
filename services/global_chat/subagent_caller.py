@@ -48,7 +48,7 @@ def call_workflow_agent(
         "history": [],  # Supervisor includes context in message
         "stream": False,  # Never stream subagent calls from planner
         "api_key": api_key,
-        "user": user,
+        "meta": {"user": user} if user else None,
         "metrics_opt_in": metrics_opt_in,
     }
 
@@ -116,7 +116,7 @@ def call_job_agent(
         "stream": False,
         "history": [],  # Supervisor includes context in message
         "api_key": api_key,
-        "user": user,
+        "meta": {"user": user} if user else None,
         "metrics_opt_in": metrics_opt_in,
     }
 
