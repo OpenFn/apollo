@@ -34,7 +34,10 @@ export default async (app: Elysia, port: number) => {
       // simple post
       app.post(name, async (ctx) => {
         console.log(`POST /services/${name}: ${ctx.uuid}`);
-        const payload = ctx.body ?? {};
+        const payload = {
+          ...(ctx.body ?? {}),
+          session_id: ctx.uuid,
+        };
         const result = await callService(m, port, payload as any);
 
         if (isApolloError(result)) {
@@ -52,7 +55,10 @@ export default async (app: Elysia, port: number) => {
       // HTTP streaming
       app.post(`${name}/stream`, async (ctx) => {
         console.log(`STREAM START /services/${name}: ${ctx.uuid}`);
-        const payload = ctx.body ?? {};
+        const payload = {
+          ...(ctx.body ?? {}),
+          session_id: ctx.uuid,
+        };
 
         const stream = new ReadableStream({
           async start(controller) {
