@@ -47,12 +47,16 @@ describe("Python Services", () => {
       expect(response.status).toBe(200);
     });
 
-    it("echoes back an object", async () => {
+    it("echoes back an object with a session id", async () => {
       const json = { x: 1 };
       const response = await app.handle(post("services/echo", json));
 
       const text = await response.json();
-      expect(text).toEqual(json);
+      expect(text).toEqual({
+        ...json,
+        session_id: expect.any(String),
+      });
+      expect(text.session_id.length).toBeGreaterThan(0);
     });
 
     // echo through web socket with result and log
