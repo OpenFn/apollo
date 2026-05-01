@@ -31,9 +31,4 @@ jobs:
         run: poetry install --no-interaction --no-root
 
       - name: Run unit tests
-        env:
-          # No secrets injected — unit tests must not need them.
-          # If a test passes locally but fails on CI for a missing key, it
-          # was never a unit test. See conftest.py at the repo root.
-          PYTHONDONTWRITEBYTECODE: "1"
-        run: poetry run pytest -m unit --maxfail=5
+        run: poetry run pytest -m unit
