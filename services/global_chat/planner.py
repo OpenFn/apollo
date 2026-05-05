@@ -4,14 +4,13 @@ Planner Agent - Coordinates tools and subagents for complex multi-step tasks.
 import os
 from typing import List, Dict, Optional
 from dataclasses import dataclass
-from anthropic import Anthropic
 
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from langfuse import observe
-from util import create_logger, ApolloError, sum_usage
+from util import create_logger, ApolloError, sum_usage, build_anthropic_client
 from streaming_util import StreamManager
 from global_chat.config_loader import ConfigLoader
 from models import resolve_model
@@ -19,6 +18,7 @@ from global_chat.tools.tool_definitions import TOOL_DEFINITIONS
 from global_chat.yaml_utils import stitch_job_code, redact_job_bodies, find_job_in_yaml
 from tools.search_documentation.search_documentation import search_documentation_tool
 from global_chat.subagent_caller import call_workflow_agent, call_job_agent, format_subagent_result_for_llm
+from testing.anthropic_mock import record_tool_call
 
 logger = create_logger(__name__)
 
@@ -38,14 +38,20 @@ class PlannerAgent:
     Planner agent that coordinates subagents and tools for complex multi-step tasks.
     """
 
-    def __init__(self, config_loader: ConfigLoader, api_key: Optional[str] = None):
+    def __init__(
+        self,
+        config_loader: ConfigLoader,
+        api_key: Optional[str] = None,
+        test_hooks: Optional[dict] = None,
+    ):
         self.config_loader = config_loader
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
+        self._test_hooks = test_hooks
 
         if not self.api_key:
             raise ApolloError(500, "ANTHROPIC_API_KEY not found")
 
-        self.client = Anthropic(api_key=self.api_key)
+        self.client = build_anthropic_client(self.api_key, test_hooks)
         self.tools = TOOL_DEFINITIONS
 
         planner_config = config_loader.config.get("planner", {})
@@ -237,6 +243,14 @@ class PlannerAgent:
 
     def _execute_tool(self, tool_use_block, total_usage, tool_calls_meta) -> str:
         """Execute a single tool call and return the result string."""
+        record_tool_call(self._test_hooks, {"tool": tool_use_block.name, "input": tool_use_block.input})
+
+        stub = (self._test_hooks or {}).get("tool_stubs", {}).get(tool_use_block.name)
+        if stub is not None:
+            tool_result = stub(tool_use_block.input)
+            tool_calls_meta.append({"tool": tool_use_block.name, "input": tool_use_block.input})
+            return tool_result
+
         if tool_use_block.name == "search_documentation":
             tool_result = search_documentation_tool(tool_use_block.input)
 
@@ -252,6 +266,7 @@ class PlannerAgent:
                 api_key=self.api_key,
                 user=self._user,
                 metrics_opt_in=self._metrics_opt_in,
+                test_hooks=self._test_hooks,
             )
 
             if "usage" in subagent_result:
@@ -296,6 +311,7 @@ class PlannerAgent:
                 api_key=self.api_key,
                 user=self._user,
                 metrics_opt_in=self._metrics_opt_in,
+                test_hooks=self._test_hooks,
             )
 
             if "usage" in subagent_result:

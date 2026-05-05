@@ -49,6 +49,19 @@ pytest = "^8.3.4"
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
+[tool.pytest.ini_options]
+minversion = "8.0"
+pythonpath = ["services", "."]
+testpaths = ["services"]
+python_files = ["test_*.py"]
+markers = [
+  "unit: fast, isolated, no I/O, no LLM, no network",
+  "service: main() with mocked anthropic HTTP client",
+  "integration: real LLM via bun server",
+  "acceptance: LLM-judged quality/voice tests",
+]
+addopts = ["-ra"]
+
 [tool.black]
 line-length = 120
 

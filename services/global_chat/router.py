@@ -7,7 +7,6 @@ import os
 import json
 from typing import List, Dict, Optional
 from dataclasses import dataclass
-from anthropic import Anthropic
 
 # Import utilities from parent services directory
 import sys
@@ -15,7 +14,8 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from langfuse import observe
-from util import create_logger, ApolloError, sum_usage
+from util import create_logger, ApolloError, sum_usage, build_anthropic_client
+from testing.anthropic_mock import record_tool_call
 from global_chat.config_loader import ConfigLoader
 from models import resolve_model
 from global_chat.yaml_utils import get_step_name_from_page, find_job_in_yaml, stitch_job_code
@@ -51,14 +51,20 @@ class RouterAgent:
     - planner (for complex multi-step tasks)
     """
 
-    def __init__(self, config_loader: ConfigLoader, api_key: Optional[str] = None):
+    def __init__(
+        self,
+        config_loader: ConfigLoader,
+        api_key: Optional[str] = None,
+        test_hooks: Optional[dict] = None,
+    ):
         self.config_loader = config_loader
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
+        self._test_hooks = test_hooks
 
         if not self.api_key:
             raise ApolloError(500, "ANTHROPIC_API_KEY not found")
 
-        self.client = Anthropic(api_key=self.api_key)
+        self.client = build_anthropic_client(self.api_key, test_hooks)
 
         router_config = config_loader.config.get("router", {})
         self.model = resolve_model(router_config.get("model", "claude-haiku"))
@@ -112,6 +118,11 @@ class RouterAgent:
         except Exception as e:
             logger.warning(f"Routing decision failed: {e}. Defaulting to planner for safety.")
             decision = RouterDecision(destination="planner", confidence=1)
+
+        record_tool_call(self._test_hooks, {
+            "tool": "router_decision",
+            "input": {"destination": decision.destination, "job_key": decision.job_key},
+        })
 
         if decision.destination == "workflow_agent":
             result = self._route_to_workflow_chat(content, workflow_yaml, history, stream, decision.confidence)
@@ -245,7 +256,7 @@ class RouterAgent:
             "metrics_opt_in": self._metrics_opt_in,
         }
 
-        result = workflow_chat_main(payload)
+        result = workflow_chat_main(payload, self._test_hooks)
         total_usage = sum_usage(self.routing_usage, result["usage"])
 
         attachments = []
@@ -318,7 +329,7 @@ class RouterAgent:
             "metrics_opt_in": self._metrics_opt_in,
         }
 
-        result = job_chat_main(payload)
+        result = job_chat_main(payload, self._test_hooks)
         total_usage = sum_usage(self.routing_usage, result["usage"])
 
         # Stitch suggested_code back into workflow YAML
@@ -365,7 +376,7 @@ class RouterAgent:
         clean_history = [{"role": t["role"], "content": t["content"]} for t in history]
         enriched_content = self._format_attachments_for_content(content)
 
-        planner = PlannerAgent(self.config_loader, self.api_key)
+        planner = PlannerAgent(self.config_loader, self.api_key, test_hooks=self._test_hooks)
         planner_result = planner.run(
             content=enriched_content,
             workflow_yaml=workflow_yaml,
