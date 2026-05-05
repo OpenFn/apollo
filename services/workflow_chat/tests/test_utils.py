@@ -1,24 +1,10 @@
-"""Service-tier helpers for workflow_chat.
-
-YAML assertion helpers live in `testing.yaml_assertions`; they are re-exported
-here so existing service/integration tests keep working. New code should
-import from `testing.yaml_assertions` directly.
-"""
+"""Service-tier helpers for workflow_chat."""
 
 import json
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
-
-from testing.yaml_assertions import (  # noqa: F401
-    assert_no_special_chars,
-    assert_yaml_equal_except,
-    assert_yaml_has_ids,
-    assert_yaml_jobs_have_body,
-    assert_yaml_section_contains_all,
-    path_matches,
-)
 
 
 def call_workflow_chat_service(service_input):

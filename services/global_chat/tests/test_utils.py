@@ -6,18 +6,6 @@ import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
-# YAML helpers live in `testing.yaml_assertions`; re-exported so existing
-# imports from this module keep working. New code should import directly.
-from testing.yaml_assertions import (  # noqa: F401
-    assert_no_special_chars,
-    assert_yaml_equal_except,
-    assert_yaml_has_ids,
-    assert_yaml_jobs_have_body,
-    assert_yaml_section_contains_all,
-    path_matches,
-)
-
-
 def call_global_chat_service(service_input: Dict[str, Any]) -> Dict[str, Any]:
     """
     Call the global_chat service with the given input and return the response.

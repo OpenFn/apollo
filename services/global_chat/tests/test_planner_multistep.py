@@ -1,13 +1,15 @@
 import pytest
 import yaml
-from .test_utils import (
-    call_global_chat_service,
-    make_service_input,
-    print_response_details,
-    assert_routed_to,
-    get_attachment,
+from testing.yaml_assertions import (
     assert_yaml_has_ids,
     assert_yaml_jobs_have_body,
+)
+from .test_utils import (
+    assert_routed_to,
+    call_global_chat_service,
+    get_attachment,
+    make_service_input,
+    print_response_details,
 )
 
 
