@@ -1,14 +1,7 @@
 from workflow_chat.workflow_chat import AnthropicClient
 
 
-def _make_client():
-    # Bypass __init__ to skip anthropic.Anthropic() construction, which the
-    # unit-tier guard blocks. The helpers under test never touch self.client.
-    return object.__new__(AnthropicClient)
-
-
 def test_extract_job_codes_preserves_real_code():
-    client = _make_client()
     yaml_data = {
         "jobs": {
             "job1": {"body": "console.log('hello world')"},
@@ -16,7 +9,7 @@ def test_extract_job_codes_preserves_real_code():
         }
     }
 
-    preserved_values, _ = client.extract_and_preserve_components(yaml_data)
+    preserved_values, _ = AnthropicClient.extract_and_preserve_components(yaml_data)
 
     assert preserved_values == {
         "__CODE_BLOCK_job1__": "console.log('hello world')",
@@ -25,7 +18,6 @@ def test_extract_job_codes_preserves_real_code():
 
 
 def test_extract_job_codes_ignores_default_placeholder():
-    client = _make_client()
     yaml_data = {
         "jobs": {
             "job1": {"body": "// Add operations here"},
@@ -34,6 +26,6 @@ def test_extract_job_codes_ignores_default_placeholder():
         }
     }
 
-    preserved_values, _ = client.extract_and_preserve_components(yaml_data)
+    preserved_values, _ = AnthropicClient.extract_and_preserve_components(yaml_data)
 
     assert preserved_values == {"__CODE_BLOCK_job2__": "real code here"}
