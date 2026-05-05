@@ -291,7 +291,8 @@ class AnthropicClient:
             logger.warning(f"Could not remove IDs from YAML: {e}")
             return yaml_str
 
-    def sanitize_job_names(self, yaml_data):
+    @staticmethod
+    def sanitize_job_names(yaml_data):
         """
         Sanitize job names by removing special characters and normalizing diacritics.
         Also sanitizes job references in edges (source and target fields) and edge keys.
@@ -413,7 +414,8 @@ class AnthropicClient:
         except Exception as e:
             logger.error(f"validate_adaptors encountered an error: {e}")
 
-    def extract_and_preserve_components(self, yaml_data):
+    @staticmethod
+    def extract_and_preserve_components(yaml_data):
         """
         Extract both codes and IDs from all components.
         Returns: (preserved_values, processed_yaml_string)
