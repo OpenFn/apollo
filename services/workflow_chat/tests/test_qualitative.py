@@ -7,7 +7,17 @@ import tempfile
 import subprocess
 import yaml
 from pathlib import Path
-from .test_utils import call_workflow_chat_service, make_service_input, print_response_details, assert_yaml_section_contains_all, assert_yaml_has_ids, assert_yaml_jobs_have_body, assert_no_special_chars
+from testing.yaml_assertions import (
+    assert_no_special_chars,
+    assert_yaml_has_ids,
+    assert_yaml_jobs_have_body,
+    assert_yaml_section_contains_all,
+)
+from .test_utils import (
+    call_workflow_chat_service,
+    make_service_input,
+    print_response_details,
+)
 
 # ---- TESTS ----
 def test_basic_input():
