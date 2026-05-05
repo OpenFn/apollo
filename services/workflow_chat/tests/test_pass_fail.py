@@ -7,7 +7,17 @@ import subprocess
 from pathlib import Path
 import difflib
 from typing import List
-from .test_utils import assert_yaml_equal_except, call_workflow_chat_service, make_service_input, print_response_details, assert_no_special_chars, assert_yaml_jobs_have_body, assert_yaml_has_ids
+from testing.yaml_assertions import (
+    assert_no_special_chars,
+    assert_yaml_equal_except,
+    assert_yaml_has_ids,
+    assert_yaml_jobs_have_body,
+)
+from .test_utils import (
+    call_workflow_chat_service,
+    make_service_input,
+    print_response_details,
+)
 
 def test_change_trigger():
     print("==================TEST==================")
