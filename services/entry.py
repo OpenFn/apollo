@@ -3,11 +3,6 @@ import os
 import json
 import uuid
 import argparse
-from pathlib import Path
-
-# Allow `from testing.anthropic_mock import ...` in production code (the
-# helpers there contain no-op breadcrumb hooks invoked from dispatch sites).
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dotenv import load_dotenv
 import sentry_sdk

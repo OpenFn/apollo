@@ -221,6 +221,19 @@ def build_anthropic_client(api_key: str, test_hooks: Optional[dict] = None) -> A
     return Anthropic(**kwargs)
 
 
+def record_tool_call(test_hooks: Optional[dict], entry: dict) -> None:
+    """Append a tool-dispatch breadcrumb when tests have allocated a list.
+
+    No-op when `test_hooks is None` or when the dict has no `tool_calls`
+    list. Two dict lookups in the no-op path; negligible.
+    """
+    if test_hooks is None:
+        return
+    crumbs = test_hooks.get("tool_calls")
+    if crumbs is not None:
+        crumbs.append(entry)
+
+
 def add_page_prefix(content: str, page: dict | None) -> str:
     """
     Add [pg:...] prefix to message for page navigation tracking.

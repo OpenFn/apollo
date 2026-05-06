@@ -1,26 +1,9 @@
 """Shared pytest fixtures and small helpers for Apollo service tests."""
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from testing.anthropic_mock import MockAnthropic
-
-
-def set_unit_test_env() -> None:
-    """Set dummy keys + disable telemetry for the free test tiers.
-
-    Called from the root conftest at import time so the env is in place
-    before any service module is imported.
-    """
-    os.environ.setdefault("ANTHROPIC_API_KEY", "unit-test-dummy")
-    os.environ.setdefault("OPENAI_API_KEY", "unit-test-dummy")
-    os.environ.setdefault("PINECONE_API_KEY", "unit-test-dummy")
-    os.environ.setdefault("LANGFUSE_TRACING", "false")
-    os.environ.setdefault("LANGFUSE_PUBLIC_KEY", "pk-unit-test-dummy")
-    os.environ.setdefault("LANGFUSE_SECRET_KEY", "sk-unit-test-dummy")
-    os.environ.setdefault("SENTRY_DSN", "")
 
 
 @pytest.fixture

@@ -50,17 +50,41 @@ requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.pytest.ini_options]
-minversion = "8.0"
-pythonpath = ["services", "."]
-testpaths = ["services"]
-python_files = ["test_*.py"]
-markers = [
-  "unit: fast, isolated, no I/O, no LLM, no network",
-  "service: main() with mocked anthropic HTTP client",
-  "integration: real LLM via bun server",
-  "acceptance: LLM-judged quality/voice tests",
+# Make `services/` importable the same way `services/entry.py` does it.
+# Without this, `from workflow_chat.workflow_chat import ...` fails inside tests.
+pythonpath = ["services"]
+
+# Discovery roots. pytest walks these for test_*.py files.
+testpaths = [
+    "services/global_chat/tests",
+    "services/workflow_chat/tests",
+    "services/job_chat/tests",
+    "services/tools",
 ]
-addopts = ["-ra"]
+
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+markers = [
+    "unit: fast, isolated, no I/O. Runs on every PR push.",
+    "service: mocks HTTP/LLM clients; exercises service handlers. Runs on merge.",
+    "integration: hits real external services (LLM, Pinecone, Postgres). Manual/nightly.",
+    "acceptance: end-to-end acceptance criteria. Manual/nightly.",
+]
+
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "-ra",
+    "--tb=short",
+]
+
+filterwarnings = [
+    "default::DeprecationWarning",
+    "ignore::DeprecationWarning:anthropic.*",
+    "ignore::DeprecationWarning:pydantic.*",
+]
 
 [tool.black]
 line-length = 120

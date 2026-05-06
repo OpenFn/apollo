@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from langfuse import observe
-from util import create_logger, ApolloError, sum_usage, build_anthropic_client
+from util import create_logger, ApolloError, sum_usage, build_anthropic_client, record_tool_call
 from streaming_util import StreamManager
 from global_chat.config_loader import ConfigLoader
 from models import resolve_model
@@ -18,7 +18,6 @@ from global_chat.tools.tool_definitions import TOOL_DEFINITIONS
 from global_chat.yaml_utils import stitch_job_code, redact_job_bodies, find_job_in_yaml
 from tools.search_documentation.search_documentation import search_documentation_tool
 from global_chat.subagent_caller import call_workflow_agent, call_job_agent, format_subagent_result_for_llm
-from testing.anthropic_mock import record_tool_call
 
 logger = create_logger(__name__)
 

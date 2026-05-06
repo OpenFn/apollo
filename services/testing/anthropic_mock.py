@@ -1,4 +1,4 @@
-"""Mock Anthropic HTTP client + tool-call breadcrumb helpers for service tests.
+"""Mock Anthropic HTTP client for service tests.
 
 The `test_hooks` dict accepts (all optional; all default to absent):
 
@@ -6,7 +6,7 @@ The `test_hooks` dict accepts (all optional; all default to absent):
   When present, threaded into every Anthropic(...) constructor site via
   `services/util.py::build_anthropic_client`.
 - "tool_calls": a list[dict] the test allocates. Production code appends
-  breadcrumbs via `record_tool_call(test_hooks, entry)`.
+  breadcrumbs via `services/util.py::record_tool_call`.
 - "tool_stubs": dict[str, Callable] keyed by tool name. When the planner
   dispatches a tool, if a stub exists for that name it's called with the
   tool input and its return value is used as the tool result. Today only
@@ -17,18 +17,8 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from typing import Callable, Optional
 
 import httpx
-
-
-def record_tool_call(test_hooks: Optional[dict], entry: dict) -> None:
-    """Append a tool-dispatch breadcrumb when tests have allocated a list."""
-    if test_hooks is None:
-        return
-    crumbs = test_hooks.get("tool_calls")
-    if crumbs is not None:
-        crumbs.append(entry)
 
 
 def tool_use(name: str, input: dict, id: str = "toolu_test") -> list[dict]:

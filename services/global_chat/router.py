@@ -14,8 +14,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from langfuse import observe
-from util import create_logger, ApolloError, sum_usage, build_anthropic_client
-from testing.anthropic_mock import record_tool_call
+from util import create_logger, ApolloError, sum_usage, build_anthropic_client, record_tool_call
 from global_chat.config_loader import ConfigLoader
 from models import resolve_model
 from global_chat.yaml_utils import get_step_name_from_page, find_job_in_yaml, stitch_job_code
