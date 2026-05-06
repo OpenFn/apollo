@@ -6,6 +6,7 @@ authors = ["Isma-Ilou Sadou <isma@openfn.org>"]
 license = "LGPLv3"
 readme = "README.md"
 package-mode = false
+requires-poetry = ">=2.3.2"
 
 [tool.poetry.dependencies]
 python = "3.11.*"
