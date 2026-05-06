@@ -6,6 +6,7 @@ authors = ["Isma-Ilou Sadou <isma@openfn.org>"]
 license = "LGPLv3"
 readme = "README.md"
 package-mode = false
+requires-poetry = ">=2.3.2"
 
 [tool.poetry.dependencies]
 python = "3.11.*"
@@ -16,11 +17,13 @@ anthropic = "^0.85.0"
 langchain-pinecone = "0.2.2"
 langchain-community = "^0.3.27"
 langchain-openai = "^0.3.1"
-datasets = "^3.2.0"
 nltk = "^3.9.3"
 pytest = "^8.4.1"
 sentry-sdk = "^2.35.0"
 psycopg2-binary = "^2.9.10"
+langfuse = "^4.0.1"
+opentelemetry-instrumentation-anthropic = "^0.53.3"
+opentelemetry-instrumentation-threading = "0.61b0"
 
 [tool.poetry.group.dev]
 optional = false

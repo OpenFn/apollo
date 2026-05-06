@@ -16,6 +16,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent))
 
+from langfuse import observe
 from util import create_logger, ApolloError, sum_usage
 from global_chat.config_loader import ConfigLoader
 from models import resolve_model
@@ -70,6 +71,7 @@ class RouterAgent:
 
         logger.info(f"RouterAgent initialized with model: {self.model}")
 
+    @observe(name="router")
     def route_and_execute(
         self,
         content: str,
@@ -78,6 +80,8 @@ class RouterAgent:
         history: List[Dict],
         stream: bool,
         attachments: Optional[List[Dict]] = None,
+        user: Optional[Dict] = None,
+        metrics_opt_in: Optional[bool] = None,
     ) -> RouterResult:
         """
         Route request to appropriate handler and execute.
@@ -103,6 +107,8 @@ class RouterAgent:
         }
 
         self._input_attachments = attachments or []
+        self._user = user
+        self._metrics_opt_in = metrics_opt_in
 
         try:
             decision = self._make_routing_decision(content, workflow_yaml, page, history)
@@ -124,6 +130,7 @@ class RouterAgent:
 
         return result
 
+    @observe(name="routing_decision")
     def _make_routing_decision(
         self, content: str, workflow_yaml: Optional[str], page: Optional[str], history: List[Dict]
     ) -> RouterDecision:
@@ -232,6 +239,8 @@ class RouterAgent:
             "history": clean_history,
             "stream": stream,
             "api_key": self.api_key,
+            "meta": {"user": self._user} if self._user else None,
+            "metrics_opt_in": self._metrics_opt_in,
         }
 
         result = workflow_chat_main(payload)
@@ -300,6 +309,8 @@ class RouterAgent:
             "history": clean_history,
             "stream": stream,
             "api_key": self.api_key,
+            "meta": {"user": self._user} if self._user else None,
+            "metrics_opt_in": self._metrics_opt_in,
         }
 
         result = job_chat_main(payload)
@@ -348,7 +359,13 @@ class RouterAgent:
 
         planner = PlannerAgent(self.config_loader, self.api_key)
         planner_result = planner.run(
-            content=enriched_content, workflow_yaml=workflow_yaml, page=page, history=clean_history, stream=stream
+            content=enriched_content,
+            workflow_yaml=workflow_yaml,
+            page=page,
+            history=clean_history,
+            stream=stream,
+            user=self._user,
+            metrics_opt_in=self._metrics_opt_in,
         )
 
         total_usage = sum_usage(self.routing_usage, planner_result.usage)

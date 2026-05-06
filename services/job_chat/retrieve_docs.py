@@ -12,6 +12,7 @@ from anthropic import (
     InternalServerError,
 )
 import sentry_sdk
+from langfuse import observe
 from util import ApolloError, create_logger
 from models import resolve_model
 from search_docsite.search_docsite import DocsiteSearch
@@ -37,6 +38,7 @@ def get_client(api_key=None):
     return anthropic.Anthropic(api_key=key)
 
 
+@observe(name="job_chat_retrieve_docs")
 def retrieve_knowledge(content, history, code="", adaptor="", api_key=None, stream_manager=None):
     """
     Retrieve relevant documentation sections based on user's question.

@@ -16,6 +16,8 @@ from anthropic import (
     InternalServerError,
 )
 import sentry_sdk
+from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
+from langfuse_util import should_track, build_tags
 from util import ApolloError, create_logger, AdaptorSpecifier, add_page_prefix
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
@@ -89,6 +91,7 @@ class Payload:
     stream: Optional[bool] = False
     download_adaptor_docs: Optional[bool] = True
     refresh_rag: Optional[bool] = False
+    metrics_opt_in: Optional[bool] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
@@ -106,7 +109,8 @@ class Payload:
             suggest_code=data.get("suggest_code"),
             stream=data.get("stream", False),
             download_adaptor_docs=data.get("download_adaptor_docs", True),
-            refresh_rag=data.get("refresh_rag", False)
+            refresh_rag=data.get("refresh_rag", False),
+            metrics_opt_in=data.get("metrics_opt_in"),
         )
 
 
@@ -147,6 +151,7 @@ class AnthropicClient:
         except (json.JSONDecodeError, ValueError):
             return text
 
+    @observe(name="job_chat_generate")
     def generate(
         self,
         content: str,
@@ -499,6 +504,7 @@ class AnthropicClient:
 
         return (corrected_code, success, warning)
         
+    @observe(name="job_chat_error_correction")
     def try_error_correction(self, content: str, error_message: str, old_code: str, new_code: str, full_code: str, text_explanation: str) -> tuple[str, bool, Optional[str]]:
         """Try to correct the edit once, return (code, success)."""
         logger.info(f"Code edit error: {error_message}. Attempting correction...")
@@ -572,6 +578,7 @@ class AnthropicClient:
 
 
 
+@observe(name="job_chat", capture_input=False)
 def main(data_dict: dict) -> dict:
     """
     Main entry point with improved error handling and input validation.
@@ -582,6 +589,15 @@ def main(data_dict: dict) -> dict:
             })
 
         data = Payload.from_dict(data_dict)
+
+        input_meta = data_dict.get("meta") or {}
+        session_id = input_meta.get("session_id") if isinstance(input_meta, dict) else None
+        user_info = (input_meta.get("user") or {}) if isinstance(input_meta, dict) else {}
+        tracking = should_track(data_dict)
+
+        if tracking:
+            langfuse = get_langfuse_client()
+            langfuse.update_current_span(input=data.content)
 
         if data.context is None:
             data.context = {}
@@ -603,8 +619,7 @@ def main(data_dict: dict) -> dict:
                 logger.warning(f"Failed to parse adaptor string '{adaptor_string}': {e}")
 
         # Extract rag_data from meta if present
-        input_meta = data_dict.get("meta", {})
-        rag_data = input_meta.get("rag")
+        rag_data = input_meta.get("rag") if isinstance(input_meta, dict) else None
 
         # Detect navigation by comparing current page prefix with last turn's prefix
         current_prefix = add_page_prefix("", current_page).strip()
@@ -614,31 +629,36 @@ def main(data_dict: dict) -> dict:
 
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
-        result = client.generate(
-            content=data.content,
-            history=data_dict.get("history", []),
-            context=data.context,
-            rag=rag_data,
-            suggest_code=data.suggest_code,
-            stream=data.stream,
-            download_adaptor_docs=data.download_adaptor_docs,
-            refresh_rag=should_refresh_rag,
-            current_page=current_page
-        )
+        with propagate_attributes(
+            session_id=session_id,
+            user_id=user_info.get("id") if tracking else None,
+            tags=build_tags("job_chat", user_info) if tracking else None,
+            metadata=None if tracking else {"tracing_disabled": "true"},
+        ):
+            result = client.generate(
+                content=data.content,
+                history=data_dict.get("history", []),
+                context=data.context,
+                rag=rag_data,
+                suggest_code=data.suggest_code,
+                stream=data.stream,
+                download_adaptor_docs=data.download_adaptor_docs,
+                refresh_rag=should_refresh_rag,
+                current_page=current_page
+            )
 
+            response_dict = {
+                "response": result.response,
+                "suggested_code": result.suggested_code,
+                "history": result.history,
+                "usage": result.usage,
+                "meta": {"rag": result.rag}
+            }
 
-        response_dict = {
-            "response": result.response,
-            "suggested_code": result.suggested_code,
-            "history": result.history,
-            "usage": result.usage,
-            "meta": {"rag": result.rag}
-        }
+            if result.diff:
+                response_dict["diff"] = result.diff
 
-        if result.diff:
-            response_dict["diff"] = result.diff
-
-        return response_dict
+            return response_dict
 
     except ValueError as e:
         raise ApolloError(400, str(e), type="BAD_REQUEST")

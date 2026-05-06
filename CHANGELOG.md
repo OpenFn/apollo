@@ -1,5 +1,15 @@
 # apollo
 
+## 1.1.0
+
+### Minor Changes
+
+- 2869a83: Add langfuse support for evaluation and tracking
+
+### Patch Changes
+
+- 6fc9760: Remove unused dependencies
+
 ## 1.0.1
 
 ### Patch Changes
