@@ -2,10 +2,11 @@ import logging
 import os
 import sys
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
 import psycopg2
 import requests
+from anthropic import Anthropic
 
 # Adaptor parsing constants
 SCOPED_ADAPTOR_MIN_PARTS = 3
@@ -203,6 +204,34 @@ class AdaptorSpecifier:
     def short_name(self) -> str:
         """Short name without @openfn/language- prefix: 'http'"""
         return self.name.split("/")[-1].replace("language-", "")
+
+
+def build_anthropic_client(api_key: str, test_hooks: Optional[dict] = None) -> Anthropic:
+    """Construct an Anthropic client, optionally backed by a test http_client.
+
+    When `test_hooks` carries an `anthropic_http_client` (an `httpx.Client`
+    bound to a `MockTransport`), it's threaded into the SDK so no real HTTP
+    request is made. With `test_hooks is None`, behaviour is byte-identical
+    to `Anthropic(api_key=api_key)`.
+    """
+    http_client = (test_hooks or {}).get("anthropic_http_client")
+    kwargs = {"api_key": api_key}
+    if http_client is not None:
+        kwargs["http_client"] = http_client
+    return Anthropic(**kwargs)
+
+
+def record_tool_call(test_hooks: Optional[dict], entry: dict) -> None:
+    """Append a tool-dispatch breadcrumb when tests have allocated a list.
+
+    No-op when `test_hooks is None` or when the dict has no `tool_calls`
+    list. Two dict lookups in the no-op path; negligible.
+    """
+    if test_hooks is None:
+        return
+    crumbs = test_hooks.get("tool_calls")
+    if crumbs is not None:
+        crumbs.append(entry)
 
 
 def add_page_prefix(content: str, page: dict | None) -> str:

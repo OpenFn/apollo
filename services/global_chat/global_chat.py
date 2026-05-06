@@ -60,12 +60,13 @@ class Payload:
 
 
 @observe(name="global_chat", capture_input=False)
-def main(data_dict: dict) -> dict:
+def main(data_dict: dict, test_hooks: Optional[dict] = None) -> dict:
     """
     Main entry point for global agent service.
 
     Args:
         data_dict: Input payload as dictionary
+        test_hooks: Optional test-only dict; see testing/anthropic_mock.py.
 
     Returns:
         Response dictionary with response, attachments, history, usage, meta
@@ -93,7 +94,7 @@ def main(data_dict: dict) -> dict:
             config_loader = ConfigLoader("config.yaml")
 
             # 3. Initialize router
-            router = RouterAgent(config_loader, data.api_key)
+            router = RouterAgent(config_loader, data.api_key, test_hooks=test_hooks)
 
             # 4. Route and execute
             result = router.route_and_execute(

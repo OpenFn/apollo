@@ -17,7 +17,7 @@ from anthropic import (
 import sentry_sdk
 from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
 from langfuse_util import should_track, build_tags
-from util import ApolloError, create_logger, AdaptorSpecifier, add_page_prefix
+from util import ApolloError, create_logger, AdaptorSpecifier, add_page_prefix, build_anthropic_client
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
 from streaming_util import StreamManager
@@ -104,12 +104,12 @@ class ChatResponse:
     diff: Optional[Dict[str, Any]] = None
 
 class AnthropicClient:
-    def __init__(self, config: Optional[ChatConfig] = None):
+    def __init__(self, config: Optional[ChatConfig] = None, test_hooks: Optional[dict] = None):
         self.config = config or ChatConfig()
         self.api_key = self.config.api_key or os.getenv("ANTHROPIC_API_KEY")
         if not self.api_key:
             raise ValueError("API key must be provided")
-        self.client = Anthropic(api_key=self.api_key)
+        self.client = build_anthropic_client(self.api_key, test_hooks)
 
 
     @staticmethod
@@ -507,7 +507,7 @@ class AnthropicClient:
 
 
 @observe(name="job_chat", capture_input=False)
-def main(data_dict: dict) -> dict:
+def main(data_dict: dict, test_hooks: Optional[dict] = None) -> dict:
     """
     Main entry point with improved error handling and input validation.
     """
@@ -556,7 +556,7 @@ def main(data_dict: dict) -> dict:
         should_refresh_rag = data.refresh_rag or user_navigated
 
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
-        client = AnthropicClient(config)
+        client = AnthropicClient(config, test_hooks=test_hooks)
         with propagate_attributes(
             session_id=session_id,
             user_id=user_info.get("id") if tracking else None,
