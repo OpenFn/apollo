@@ -10,8 +10,8 @@ This directory is on the Python path via `pyproject.toml`
 
 - `anthropic_mock.py` — `MockAnthropic` (httpx.MockTransport-backed) and the
   `tool_use(...)` content-block helper. Service tier.
-- `fixtures.py` — pytest fixtures (`mock_anthropic`, `test_hooks_factory`,
-  `fake_api_key`), payload builders, and `set_default_test_env`.
+- `fixtures.py` — pytest fixtures registered via `pytest_plugins` in the
+  root `conftest.py`. Currently just `test_hooks_factory`.
 - `yaml_assertions.py` — pure-function YAML structural assertions, safe for
   every tier (unit included). Owned by the unit tier.
 

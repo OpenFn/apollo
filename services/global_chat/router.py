@@ -255,7 +255,7 @@ class RouterAgent:
             "metrics_opt_in": self._metrics_opt_in,
         }
 
-        result = workflow_chat_main(payload, self._test_hooks)
+        result = workflow_chat_main(payload, test_hooks=self._test_hooks)
         total_usage = sum_usage(self.routing_usage, result["usage"])
 
         attachments = []
@@ -328,7 +328,7 @@ class RouterAgent:
             "metrics_opt_in": self._metrics_opt_in,
         }
 
-        result = job_chat_main(payload, self._test_hooks)
+        result = job_chat_main(payload, test_hooks=self._test_hooks)
         total_usage = sum_usage(self.routing_usage, result["usage"])
 
         # Stitch suggested_code back into workflow YAML

@@ -185,10 +185,7 @@ services/testing/
   yaml_assertions.py    # YAML structural helpers (unit-tier safe; owned by unit tier)
 ```
 
-`fixtures.py` holds:
-
-- `make_global_chat_payload`, `make_workflow_chat_payload`, `make_job_chat_payload`
-- Pytest fixtures: `mock_anthropic`, `test_hooks_factory`, `fake_api_key`
+`fixtures.py` registers pytest fixtures via `pytest_plugins = ["testing.fixtures"]` in the root conftest. Today: just `test_hooks_factory` (builds a `test_hooks` dict, threading in a `MockAnthropic`'s httpx client). Add more fixtures here as service tests need them.
 
 Dummy env vars (Anthropic / OpenAI / Pinecone / Langfuse keys) are set inline in the root `conftest.py` at import time, before any service module loads — `setdefault` so real keys (for integration / acceptance) win.
 

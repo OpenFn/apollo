@@ -99,6 +99,7 @@ class MockAnthropic:
     def __init__(self):
         self._responses: list[tuple[re.Pattern, str | list[dict]]] = []
         self.requests: list[httpx.Request] = []
+        self.httpx_client = httpx.Client(transport=httpx.MockTransport(self._handle))
 
     def set_response(self, pattern: str, response: str | list[dict]) -> None:
         """Register a response for any request whose latest user-message text matches `pattern`.
@@ -108,10 +109,6 @@ class MockAnthropic:
           - list[dict]: returned as content blocks (use for tool_use, mixed).
         """
         self._responses.append((re.compile(pattern), response))
-
-    @property
-    def httpx_client(self) -> httpx.Client:
-        return httpx.Client(transport=httpx.MockTransport(self._handle))
 
     @property
     def last_request(self) -> httpx.Request:

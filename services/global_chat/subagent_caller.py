@@ -53,7 +53,7 @@ def call_workflow_agent(
 
     try:
         from workflow_chat.workflow_chat import main as workflow_chat_main
-        result = workflow_chat_main(workflow_payload, test_hooks)
+        result = workflow_chat_main(workflow_payload, test_hooks=test_hooks)
 
         response_preview = result.get("response", "")[:120]
         logger.info(f"workflow_agent response: {response_preview}")
@@ -121,7 +121,7 @@ def call_job_agent(
 
     try:
         from job_chat.job_chat import main as job_chat_main
-        result = job_chat_main(job_payload, test_hooks)
+        result = job_chat_main(job_payload, test_hooks=test_hooks)
 
         response_preview = result.get("response", "")[:120]
         logger.info(f"job_agent response: {response_preview}")
