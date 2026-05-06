@@ -15,9 +15,15 @@ This document defines the input and output payload structure for the Global Agen
                                           //   workflows/my-workflow
                                           //   workflows/my-workflow/settings
 
-  "metadata": {                            // Optional metadata
-    "user": {}                            //   User info (reserved for future use)
+  "meta": {                                // Optional metadata
+    "session_id": "string",              //   Session ID for multi-turn grouping
+    "user": {                            //   User identity for Langfuse attribution
+      "id": "string",                    //     User UUID
+      "persona": "string"                //     e.g. "core-contributor" | "user"
+    }
   },
+
+  "metrics_opt_in": false,                // If true, enable Langfuse tracing for this session
 
   "history": [                            // Chat history (optional)
     {
@@ -52,8 +58,11 @@ This document defines the input and output payload structure for the Global Agen
   - `workflows/<name>` — user is viewing the workflow overview
   - `workflows/<name>/settings` — user is viewing workflow settings
 
-- **`metadata`** (object, optional): Extensible metadata object.
-  - **`user`** (object, optional): User information. Reserved for future use.
+- **`meta`** (object, optional): Extensible metadata object.
+  - **`session_id`** (string, optional): Session ID for grouping multi-turn conversations.
+  - **`user`** (object, optional): User identity. `id` (string) and `persona` (string, e.g. `"core-contributor"` or `"user"`). Attributed to Langfuse traces when tracking is enabled.
+
+- **`metrics_opt_in`** (boolean, optional): If `true`, enables Langfuse tracing for this session. The frontend is responsible for setting this; the backend tracks if and only if this flag is `true`.
 
 - **`history`** (array, optional): Conversation history. Each turn has `role` and `content`. History is managed and returned by each agent internally.
 

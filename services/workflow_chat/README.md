@@ -42,6 +42,14 @@ Simple input:
 - `stream` (optional, default: `false`): Enable streaming response
 - `read_only` (optional, default: `false`): Enable read-only mode (IDs removed, no code preservation)
 - `api_key` (optional): Anthropic API key (falls back to environment variable)
+- `meta.session_id` (optional): Session ID for grouping multi-turn conversations
+  in Langfuse
+- `meta.user` (optional): User identity object with `id` (string) and `persona`
+  (string, e.g. `"core-contributor"` or `"user"`) — attributed to Langfuse
+  traces when tracking is enabled
+- `metrics_opt_in` (optional): Set to `true` to enable Langfuse tracing for this
+  session. The frontend is responsible for setting this flag; the backend
+  tracks if and only if this is `true`.
 
 Second conversation turn example:
 

@@ -41,6 +41,8 @@ from anthropic import (
     InternalServerError,
 )
 import sentry_sdk
+from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
+from langfuse_util import should_track, build_tags
 from util import ApolloError, create_logger, add_page_prefix
 from .gen_project_prompt import build_prompt
 from workflow_chat.available_adaptors import get_available_adaptors
@@ -83,8 +85,10 @@ class Payload:
     history: Optional[List[Dict[str, str]]] = None
     context: Optional[dict] = None
     api_key: Optional[str] = None
+    meta: Optional[str] = None
     stream: Optional[bool] = False
     read_only: Optional[bool] = False
+    metrics_opt_in: Optional[bool] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
@@ -99,8 +103,10 @@ class Payload:
             history=data.get("history", []),
             context=data.get("context"),
             api_key=data.get("api_key"),
+            meta=data.get("meta"),
             stream=data.get("stream", False),
-            read_only=data.get("read_only", False)
+            read_only=data.get("read_only", False),
+            metrics_opt_in=data.get("metrics_opt_in"),
         )
 
 
@@ -139,6 +145,7 @@ class AnthropicClient:
         except (json.JSONDecodeError, ValueError):
             return text
 
+    @observe(name="workflow_chat_generate")
     def generate(
         self,
         content: str = None,
@@ -583,6 +590,7 @@ class AnthropicClient:
         return accumulated_response, text_started, sent_length
 
 
+@observe(name="workflow_chat", capture_input=False)
 def main(data_dict: dict) -> dict:
     """
     Main entry point with improved error handling and input validation.
@@ -593,6 +601,15 @@ def main(data_dict: dict) -> dict:
             })
 
         data = Payload.from_dict(data_dict)
+
+        input_meta = data_dict.get("meta") or {}
+        session_id = input_meta.get("session_id") if isinstance(input_meta, dict) else None
+        user_info = (input_meta.get("user") or {}) if isinstance(input_meta, dict) else {}
+        tracking = should_track(data_dict)
+
+        if tracking:
+            langfuse = get_langfuse_client()
+            langfuse.update_current_span(input=data.content)
 
         if data.context is None:
             data.context = {}
@@ -607,25 +624,31 @@ def main(data_dict: dict) -> dict:
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
 
-        result = client.generate(
-            content=data.content,
-            existing_yaml=data.existing_yaml,
-            errors=data.errors,
-            history=data.history,
-            stream=data.stream,
-            current_page=current_page,
-            read_only=data.read_only
-        )
+        with propagate_attributes(
+            session_id=session_id,
+            user_id=user_info.get("id") if tracking else None,
+            tags=build_tags("workflow_chat", user_info) if tracking else None,
+            metadata=None if tracking else {"tracing_disabled": "true"},
+        ):
+            result = client.generate(
+                content=data.content,
+                existing_yaml=data.existing_yaml,
+                errors=data.errors,
+                history=data.history,
+                stream=data.stream,
+                current_page=current_page,
+                read_only=data.read_only
+            )
 
-        # Build response
-        response_dict = {
-            "response": result.content,
-            "response_yaml": result.content_yaml,
-            "history": result.history,
-            "usage": result.usage
-        }
+            # Build response
+            response_dict = {
+                "response": result.content,
+                "response_yaml": result.content_yaml,
+                "history": result.history,
+                "usage": result.usage
+            }
 
-        return response_dict
+            return response_dict
 
     except ValueError as e:
         raise ApolloError(400, str(e), type="BAD_REQUEST")

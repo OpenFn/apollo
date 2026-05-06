@@ -12,7 +12,9 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
+from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
 from util import ApolloError, create_logger
+from langfuse_util import should_track, build_tags
 from global_chat.config_loader import ConfigLoader
 from global_chat.router import RouterAgent
 
@@ -25,11 +27,12 @@ class Payload:
     content: str
     workflow_yaml: Optional[str] = None
     page: Optional[str] = None
-    metadata: Optional[Dict] = None
+    meta: Optional[Dict] = None
     history: Optional[List[Dict]] = None
     options: Optional[Dict] = None
     api_key: Optional[str] = None
     attachments: Optional[List[Dict]] = None
+    metrics_opt_in: Optional[bool] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
@@ -41,11 +44,12 @@ class Payload:
             content=data["content"],
             workflow_yaml=data.get("workflow_yaml"),
             page=data.get("page"),
-            metadata=data.get("metadata"),
+            meta=data.get("meta"),
             history=data.get("history"),
             options=data.get("options"),
             api_key=data.get("api_key"),
             attachments=data.get("attachments"),
+            metrics_opt_in=data.get("metrics_opt_in"),
         )
 
     def get_stream(self) -> bool:
@@ -53,6 +57,7 @@ class Payload:
         return (self.options or {}).get("stream", False)
 
 
+@observe(name="global_chat", capture_input=False)
 def main(data_dict: dict) -> dict:
     """
     Main entry point for global agent service.
@@ -68,30 +73,46 @@ def main(data_dict: dict) -> dict:
         data = Payload.from_dict(data_dict)
         logger.info(f"Global agent called with content: {data.content[:100]}...")
 
-        # 2. Load configuration
-        config_loader = ConfigLoader("config.yaml")
+        session_id = data.meta.get("session_id") if data.meta else None
+        user_info = (data.meta.get("user") or {}) if data.meta else {}
+        tracking = should_track(data_dict)
 
-        # 3. Initialize router
-        router = RouterAgent(config_loader, data.api_key)
+        if tracking:
+            langfuse = get_langfuse_client()
+            langfuse.update_current_span(input=data.content)
 
-        # 4. Route and execute
-        result = router.route_and_execute(
-            content=data.content,
-            workflow_yaml=data.workflow_yaml,
-            page=data.page,
-            history=data.history or [],
-            stream=data.get_stream(),
-            attachments=data.attachments or []
-        )
+        with propagate_attributes(
+            session_id=session_id,
+            user_id=user_info.get("id") if tracking else None,
+            tags=build_tags("global_chat", user_info) if tracking else None,
+            metadata=None if tracking else {"tracing_disabled": "true"},
+        ):
+            # 2. Load configuration
+            config_loader = ConfigLoader("config.yaml")
 
-        # 5. Return structured response
-        return {
-            "response": result.response,
-            "attachments": result.attachments,
-            "history": result.history,
-            "usage": result.usage,
-            "meta": result.meta
-        }
+            # 3. Initialize router
+            router = RouterAgent(config_loader, data.api_key)
+
+            # 4. Route and execute
+            result = router.route_and_execute(
+                content=data.content,
+                workflow_yaml=data.workflow_yaml,
+                page=data.page,
+                history=data.history or [],
+                stream=data.get_stream(),
+                attachments=data.attachments or [],
+                user=user_info,
+                metrics_opt_in=data.metrics_opt_in,
+            )
+
+            # 5. Return structured response
+            return {
+                "response": result.response,
+                "attachments": result.attachments,
+                "history": result.history,
+                "usage": result.usage,
+                "meta": result.meta
+            }
 
     except ApolloError as e:
         logger.error(f"ApolloError in global_chat: {e}")

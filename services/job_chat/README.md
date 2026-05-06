@@ -82,6 +82,8 @@ The input payload is a JSON object with the following structure
     "log": "execution log text"
   },
   "meta": {
+    "session_id": "session-uuid",
+    "user": { "id": "user-uuid", "persona": "core-contributor" },
     "rag": {
       "search_results": []
     }
@@ -90,11 +92,16 @@ The input payload is a JSON object with the following structure
   "stream": false,
   "download_adaptor_docs": true,
   "refresh_rag": false,
-  "api_key": "<Anthropic API key>"
+  "api_key": "<Anthropic API key>",
+  "metrics_opt_in": true
 }
 ```
 
 All context is optional, as is history.
+
+- `meta.session_id` (optional): Session ID for grouping multi-turn conversations in Langfuse
+- `meta.user` (optional): User identity object with `id` (string) and `persona` (string, e.g. `"core-contributor"` or `"user"`) — attributed to Langfuse traces when tracking is enabled
+- `metrics_opt_in` (optional): Set to `true` to enable Langfuse tracing for this session. The frontend is responsible for setting this flag; the backend tracks if and only if this is `true`.
 
 The `download_adaptor_docs` flag (defaults to `true`) controls whether adaptor docs are automatically loaded before building prompts. Set to `false` to skip auto-loading.
 

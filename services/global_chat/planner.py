@@ -13,6 +13,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent))
 
+from langfuse import observe
 from util import create_logger, ApolloError, sum_usage
 from streaming_util import (
     StreamManager,
@@ -67,8 +68,16 @@ class PlannerAgent:
 
         logger.info(f"PlannerAgent initialized with model: {self.model}")
 
+    @observe(name="planner")
     def run(
-        self, content: str, workflow_yaml: Optional[str], page: Optional[str], history: List[Dict], stream: bool
+        self,
+        content: str,
+        workflow_yaml: Optional[str],
+        page: Optional[str],
+        history: List[Dict],
+        stream: bool,
+        user: Optional[Dict] = None,
+        metrics_opt_in: Optional[bool] = None,
     ) -> PlannerResult:
         """
         Run the planner agent with tool-calling loop.
@@ -93,6 +102,8 @@ class PlannerAgent:
 
         self.current_yaml = workflow_yaml
         self.yaml_modified = False
+        self._user = user
+        self._metrics_opt_in = metrics_opt_in
 
         system_prompt = self._build_system_prompt()
 
@@ -293,7 +304,11 @@ class PlannerAgent:
 
         elif tool_use_block.name == "call_workflow_agent":
             subagent_result = call_workflow_agent(
-                tool_use_block.input, workflow_yaml=self.current_yaml, api_key=self.api_key
+                tool_use_block.input,
+                workflow_yaml=self.current_yaml,
+                api_key=self.api_key,
+                user=self._user,
+                metrics_opt_in=self._metrics_opt_in,
             )
 
             if "usage" in subagent_result:
@@ -333,7 +348,11 @@ class PlannerAgent:
                     return tool_result
 
             subagent_result = call_job_agent(
-                tool_use_block.input, workflow_yaml=self.current_yaml, api_key=self.api_key
+                tool_use_block.input,
+                workflow_yaml=self.current_yaml,
+                api_key=self.api_key,
+                user=self._user,
+                metrics_opt_in=self._metrics_opt_in,
             )
 
             if "usage" in subagent_result:
@@ -414,7 +433,12 @@ class PlannerAgent:
             with ThreadPoolExecutor(max_workers=len(to_run)) as executor:
                 futures = {
                     executor.submit(
-                        call_job_agent, block.input, self.current_yaml, self.api_key
+                        call_job_agent,
+                        block.input,
+                        self.current_yaml,
+                        self.api_key,
+                        self._user,
+                        self._metrics_opt_in,
                     ): block
                     for block in to_run
                 }
@@ -423,7 +447,13 @@ class PlannerAgent:
                     parallel_results[block.id] = future.result()
         elif to_run:
             block = to_run[0]
-            parallel_results[block.id] = call_job_agent(block.input, self.current_yaml, self.api_key)
+            parallel_results[block.id] = call_job_agent(
+                block.input,
+                self.current_yaml,
+                self.api_key,
+                self._user,
+                self._metrics_opt_in,
+            )
 
         # Stitch results and update state sequentially
         tool_results = []
