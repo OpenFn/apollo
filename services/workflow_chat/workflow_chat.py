@@ -271,6 +271,21 @@ class AnthropicClient:
 
                 # If YAML parsing succeeded or we're on the last attempt, return the result
                 if response_yaml is not None or attempt == max_retries:
+                    if not response_text:
+                        stop_reason = getattr(message, "stop_reason", None)
+                        empty_reason = "max_tokens" if stop_reason == "max_tokens" else "no_text_blocks"
+                        sentry_sdk.set_tag("stop_reason", stop_reason)
+                        sentry_sdk.set_tag("empty_reason", empty_reason)
+                        sentry_sdk.set_context("empty_response", {
+                            "service": "workflow_chat",
+                            "attempts": attempt + 1,
+                            "usage": accumulated_usage,
+                        })
+                        stream_manager.end_stream()
+                        if stop_reason == "max_tokens":
+                            raise ApolloError(502, "Response truncated", type="OUTPUT_TRUNCATED")
+                        raise ApolloError(502, "Model returned no usable text", type="EMPTY_OUTPUT")
+
                     # Add prefix to content when building history
                     prefixed_content = add_page_prefix(content, current_page)
 
@@ -650,6 +665,8 @@ def main(data_dict: dict) -> dict:
 
             return response_dict
 
+    except ApolloError:
+        raise
     except ValueError as e:
         raise ApolloError(400, str(e), type="BAD_REQUEST")
 
