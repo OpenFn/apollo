@@ -2,7 +2,7 @@ FROM python:3.11-bullseye
 
 WORKDIR /app
 
-COPY ./pyproject.toml ./poetry.lock poetry.toml ./
+COPY ./pyproject.toml ./poetry.lock ./
 COPY ./package.json bun.lockb ./
 COPY ./tsconfig.json ./
 COPY ./path.config ./
