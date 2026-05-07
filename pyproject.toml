@@ -36,6 +36,46 @@ ruff = "^0.15.10"
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
+[tool.pytest.ini_options]
+# Make `services/` importable the same way `services/entry.py` does it.
+# Without this, `from workflow_chat.workflow_chat import ...` fails inside tests.
+pythonpath = ["services"]
+
+# Discovery roots. pytest walks these for test_*.py files.
+testpaths = [
+    "services/global_chat/tests",
+    "services/workflow_chat/tests",
+    "services/job_chat/tests",
+    "services/tools",
+]
+
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+markers = [
+    "unit: fast, isolated, no I/O. Runs on every PR push.",
+    "service: mocks HTTP/LLM clients; exercises service handlers. Runs on merge.",
+    "integration: hits real external services (LLM, Pinecone, Postgres). Manual/nightly.",
+    "acceptance: end-to-end acceptance criteria. Manual/nightly.",
+]
+
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "-ra",
+    "--tb=short",
+]
+
+filterwarnings = [
+    "default::DeprecationWarning",
+    "ignore::DeprecationWarning:anthropic.*",
+    "ignore::DeprecationWarning:pydantic.*",
+]
+
+[tool.black]
+line-length = 120
+
 [tool.ruff]
 select = [
     "E",   # pycodestyle
