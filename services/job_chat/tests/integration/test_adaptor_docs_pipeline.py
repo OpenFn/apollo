@@ -1,16 +1,12 @@
-import sys
 import os
-from pathlib import Path
+
 import psycopg2
+import pytest
 from dotenv import load_dotenv
 
-load_dotenv()
-
-services_dir = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(services_dir))
-
-import pytest
 from job_chat.prompt import generate_system_message
+
+load_dotenv()
 
 
 def get_db_connection():
