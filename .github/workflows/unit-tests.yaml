@@ -26,7 +26,7 @@ jobs:
         run: poetry install
 
       - name: Run unit tests
-        run: poetry run pytest -m unit
+        run: poetry run pytest services/*/tests/unit
 
   bun:
     name: Bun unit tests
