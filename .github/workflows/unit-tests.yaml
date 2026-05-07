@@ -42,6 +42,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Install Poetry
+        run: pipx install poetry==2.3.2
+
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
