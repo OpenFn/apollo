@@ -1,5 +1,11 @@
 # apollo
 
+## 1.1.1
+
+### Patch Changes
+
+- Improve error reporting when the model returns an empty message
+
 ## 1.1.0
 
 ### Minor Changes
