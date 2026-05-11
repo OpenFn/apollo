@@ -7,6 +7,7 @@ from typing import List, Dict, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from anthropic import Anthropic
+import sentry_sdk
 
 import sys
 from pathlib import Path
@@ -208,6 +209,8 @@ class PlannerAgent:
                         logger.warning(f"Unexpected stop_reason: {response.stop_reason}")
                         break
 
+                except ApolloError:
+                    raise
                 except Exception as e:
                     logger.exception("Error in tool-calling loop")
                     raise ApolloError(500, f"Tool execution error: {str(e)}")
@@ -217,6 +220,27 @@ class PlannerAgent:
                 logger.warning(f"Loop exited without end_turn (reason: {response.stop_reason})")
         finally:
             stream_manager.end_stream()
+
+        if not final_text:
+            stop_reason = getattr(response, "stop_reason", None)
+            if tool_call_count >= self.max_tool_calls:
+                empty_reason = "max_tool_calls_hit"
+            elif stop_reason == "max_tokens":
+                empty_reason = "max_tokens"
+            elif stop_reason == "end_turn":
+                empty_reason = "no_text_blocks"
+            else:
+                empty_reason = f"unexpected_stop_reason:{stop_reason}"
+            sentry_sdk.set_tag("stop_reason", stop_reason)
+            sentry_sdk.set_tag("empty_reason", empty_reason)
+            sentry_sdk.set_context("empty_response", {
+                "service": "global_chat.planner",
+                "tool_call_count": tool_call_count,
+                "usage": total_usage,
+            })
+            if stop_reason == "max_tokens":
+                raise ApolloError(502, f"Planner response truncated ({empty_reason})", type="OUTPUT_TRUNCATED")
+            raise ApolloError(502, f"Planner produced no text ({empty_reason})", type="EMPTY_OUTPUT")
 
         agents_used = ["router", "planner"]
         for result in self.subagent_results:
