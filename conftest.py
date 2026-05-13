@@ -11,6 +11,11 @@ from unittest.mock import patch
 import pytest
 
 
+# Shared fixtures (apollo_client, ...) live in services/testing/fixtures.py.
+# Registered globally so any test can request them by name.
+pytest_plugins = ["testing.fixtures"]
+
+
 _TIER_DIRS = ("unit", "service", "integration", "acceptance")
 
 _BLOCKED_TARGETS = (
