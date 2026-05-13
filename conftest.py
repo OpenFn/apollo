@@ -12,8 +12,9 @@ import pytest
 
 
 # Shared fixtures (apollo_client, ...) live in services/testing/fixtures.py.
-# Registered globally so any test can request them by name.
-pytest_plugins = ["testing.fixtures"]
+# The spec collector picks up acceptance test markdown specs from
+# services/<svc>/tests/acceptance/*.md. Both registered globally.
+pytest_plugins = ["testing.fixtures", "testing.spec_collector"]
 
 
 _TIER_DIRS = ("unit", "service", "integration", "acceptance")

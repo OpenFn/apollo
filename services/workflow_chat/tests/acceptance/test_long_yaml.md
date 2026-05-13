@@ -1,21 +1,21 @@
-"""Long workflow YAML + multi-turn history. The service should preserve every
-existing job and edge while adding the new mailgun bulk-email step the user
-requested. Tests that the response isn't truncated or stripped of structure."""
+---
+id: workflow-chat.long-yaml
+service: workflow_chat
+---
 
-from testing import judge
-from testing.payloads import build_workflow_chat_payload
-from testing.yaml_assertions import (
-    assert_no_special_chars,
-    assert_yaml_section_contains_all,
-)
+# notes
 
+Long workflow YAML plus multi-turn history. The user has incrementally built up a 9-job pipeline over 5 turns. They now ask for one final addition (Mailgun bulk email after the Asana update). The service should preserve every existing job and edge and add the new step in the right position. Tests that the response is not truncated and that no structure is dropped.
 
-QUALITY_CRITERIA = [
-    "The new bulk-email step is plausibly integrated into the existing pipeline (positioned after the Asana update, as the user requested).",
-]
+# quality_criteria
 
+- The new bulk-email step is plausibly integrated into the existing pipeline, positioned after the Asana update as the user requested.
 
-EXISTING_YAML = """
+# settings
+
+## existing_yaml
+
+```yaml
 name: Data-Integration-and-Reporting
 jobs:
   Retrieve-Google-Sheets-Data:
@@ -123,51 +123,116 @@ edges:
     target_job: Update-asana
     condition_type: on_job_success
     enabled: true
-"""
+```
 
+# history
 
-# History is shortened to user/assistant pairs — the full reproduction lives in
-# the original test_qualitative.py and isn't needed to exercise the bug.
-HISTORY = [
-    {
-        "role": "user",
-        "content": (
-            "I need to create a comprehensive data integration workflow that pulls "
-            "data from Google Sheets, NetSuite, and Ferntech, then processes "
-            "everything together and creates various reports and notifications."
-        ),
-    },
-    {"role": "assistant", "content": "Absolutely! Let's start by setting up the workflow to retrieve data."},
-    {"role": "user", "content": "Once the data is retrieved, I want to process all the combined data together."},
-    {"role": "assistant", "content": "Great, I'll add a processing job."},
-    {"role": "user", "content": "After processing, I want to send an email report and also write the results back to a Google Sheet."},
-    {"role": "assistant", "content": "Understood. Added Send-Email-Report and write-to-sheet."},
-    {"role": "user", "content": "Can we also use Claude AI to summarize the processed data, then email and update Asana?"},
-    {"role": "assistant", "content": "Excellent — added Summarise-with-claude, Email-summary, Update-asana."},
-    {"role": "user", "content": "Can you make sure the workflow is robust to errors in any of the data retrieval steps?"},
-    {"role": "assistant", "content": "Added an error-handler with on_job_failure edges from each retrieval job."},
-]
+## turn
 
+### role
 
-def test_long_yaml(apollo_client):
-    payload = build_workflow_chat_payload(
-        existing_yaml=EXISTING_YAML,
-        history=HISTORY,
-        user_message=(
-            "Perfect! One final addition - after updating Asana, I want to format "
-            "the data for bulk emailing and then send out bulk emails using Mailgun."
-        ),
-    )
+user
 
-    response = apollo_client.call("workflow_chat", payload)
+### content
 
-    # ---- Structural assertions ---------------------------------------------
-    assert response is not None
-    assert isinstance(response, dict)
-    assert_yaml_section_contains_all(EXISTING_YAML, response.get("response_yaml", ""), "jobs")
-    assert_yaml_section_contains_all(EXISTING_YAML, response.get("response_yaml", ""), "edges")
-    assert_no_special_chars(response["response_yaml"])
+I need to create a comprehensive data integration workflow that pulls data from Google Sheets, NetSuite, and Ferntech, then processes everything together and creates various reports and notifications.
 
-    # ---- Quality assertions ------------------------------------------------
-    verdict = judge.evaluate(criteria=QUALITY_CRITERIA, candidate=response, test_notes=__doc__)
-    assert verdict.passed, verdict.summary
+## turn
+
+### role
+
+assistant
+
+### content
+
+Absolutely! Let's start by setting up the workflow to retrieve data.
+
+## turn
+
+### role
+
+user
+
+### content
+
+Once the data is retrieved, I want to process all the combined data together.
+
+## turn
+
+### role
+
+assistant
+
+### content
+
+Great, I'll add a processing job.
+
+## turn
+
+### role
+
+user
+
+### content
+
+After processing, I want to send an email report and also write the results back to a Google Sheet.
+
+## turn
+
+### role
+
+assistant
+
+### content
+
+Understood. Added Send-Email-Report and write-to-sheet.
+
+## turn
+
+### role
+
+user
+
+### content
+
+Can we also use Claude AI to summarize the processed data, then email and update Asana?
+
+## turn
+
+### role
+
+assistant
+
+### content
+
+Excellent — added Summarise-with-claude, Email-summary, Update-asana.
+
+## turn
+
+### role
+
+user
+
+### content
+
+Can you make sure the workflow is robust to errors in any of the data retrieval steps?
+
+## turn
+
+### role
+
+assistant
+
+### content
+
+Added an error-handler with on_job_failure edges from each retrieval job.
+
+# turn
+
+## role
+
+user
+
+## content
+
+Perfect! One final addition - after updating Asana, I want to format the data for bulk emailing and then send out bulk emails using Mailgun.
