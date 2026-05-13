@@ -29,8 +29,10 @@ from typing import Optional
 
 from anthropic import Anthropic
 
+from models import CLAUDE_SONNET
 
-DEFAULT_MODEL = "claude-sonnet-4-5"
+
+DEFAULT_MODEL = CLAUDE_SONNET
 _RULES_PATH = Path(__file__).parent / "judge_rules.md"
 
 
