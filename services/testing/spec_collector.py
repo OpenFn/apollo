@@ -29,7 +29,7 @@ def pytest_collect_file(parent, file_path):
     if (
         file_path.suffix == ".md"
         and not file_path.name.startswith("_")
-        and file_path.parent.name == "acceptance"
+        and "acceptance" in file_path.parts
     ):
         return SpecFile.from_parent(parent, path=file_path)
 
