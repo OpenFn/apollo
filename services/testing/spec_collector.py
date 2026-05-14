@@ -18,6 +18,11 @@ from testing.apollo_client import ApolloClient
 from testing.spec_parser import Spec, parse_spec
 
 
+# Verdicts collected across the session for the end-of-run rollup.
+# Each entry is (spec_id, Verdict).
+_session_verdicts: list[tuple[str, judge.Verdict]] = []
+
+
 def pytest_collect_file(parent, file_path):
     if (
         file_path.suffix == ".md"
@@ -74,6 +79,7 @@ class SpecItem(pytest.Item):
             print(f"  {mark} {judge_name}: {'PASS' if v.passed else 'FAIL'} "
                   f"(score={v.score:.2f}, flags={len(v.general_flags)})")
             verdicts.append(v)
+            _session_verdicts.append((spec.id, v))
 
         failing = [v for v in verdicts if not v.passed]
         if failing:
@@ -102,3 +108,72 @@ def _build_payload(spec: Spec) -> dict:
         payload["content"] = spec.current_turn["content"]
 
     return payload
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Print an acceptance-tier rollup after the session ends.
+
+    Only fires when at least one acceptance spec ran. Stays silent on unit /
+    integration runs.
+    """
+    if not _session_verdicts:
+        return
+
+    by_test: dict[str, list[judge.Verdict]] = {}
+    for spec_id, v in _session_verdicts:
+        by_test.setdefault(spec_id, []).append(v)
+
+    by_judge: dict[str, list[judge.Verdict]] = {}
+    for _, v in _session_verdicts:
+        by_judge.setdefault(v.judge_name, []).append(v)
+
+    test_pass_count = sum(1 for vs in by_test.values() if all(v.passed for v in vs))
+    test_total = len(by_test)
+    pct = (test_pass_count / test_total * 100) if test_total else 0
+
+    avg_score = sum(v.score for _, v in _session_verdicts) / len(_session_verdicts)
+
+    flag_counts = {"note": 0, "regression": 0}
+    for _, v in _session_verdicts:
+        for f in v.general_flags:
+            flag_counts[f.severity] = flag_counts.get(f.severity, 0) + 1
+
+    failing = [(tid, vs) for tid, vs in by_test.items() if not all(v.passed for v in vs)]
+
+    judge_col = max(len(name) for name in by_judge) + 2
+
+    print()
+    print("=== Acceptance summary ===")
+    print(f"Tests:  {test_pass_count}/{test_total} passed ({pct:.0f}%)")
+    print(f"Average score across all verdicts: {avg_score:.2f}")
+    print()
+    print("Per judge:")
+    for judge_name in sorted(by_judge):
+        verdicts = by_judge[judge_name]
+        passed = sum(1 for v in verdicts if v.passed)
+        print(f"  {judge_name:<{judge_col}}{passed}/{len(verdicts)} pass")
+    print()
+    print("Flags:")
+    for severity in ("regression", "note"):
+        print(f"  {severity:12} {flag_counts.get(severity, 0)}")
+
+    if failing:
+        print()
+        print("Failing tests:")
+        for spec_id, verdicts in failing:
+            print(f"  {spec_id}")
+            for v in verdicts:
+                if v.passed:
+                    continue
+                n_reg = sum(1 for f in v.general_flags if f.severity == "regression")
+                n_note = sum(1 for f in v.general_flags if f.severity == "note")
+                detail = []
+                if n_reg:
+                    detail.append(f"{n_reg} regression")
+                if n_note:
+                    detail.append(f"{n_note} note")
+                if v.score < 1.0:
+                    n_failed_criteria = sum(1 for c in v.criteria if not c.passed)
+                    detail.append(f"{n_failed_criteria} criterion fail")
+                detail_str = ", ".join(detail) if detail else "—"
+                print(f"    ✗ {v.judge_name}  ({detail_str})")
