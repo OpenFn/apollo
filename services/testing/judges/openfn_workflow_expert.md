@@ -15,7 +15,7 @@ A workflow is a trigger plus steps (jobs) connected by paths (edges). Each step 
 These mirror the workflow-generation contract. Reject the YAML if any are violated:
 
 - Output parses as valid YAML.
-- Every job, trigger, and edge has a non-empty `id` field. (Exception: in workflow-creation contexts where ids are auto-assigned downstream, missing ids for newly added items are tolerated — but the existing-item ids in an edit must be preserved.)
+- Every job, trigger, and edge in the returned workflow YAML has a non-empty `id` field. (The workflow_chat service auto-generates IDs for newly added items during post-processing, so the YAML you grade should already have them — flag any item that is still missing one.)
 - Every job has a `body` that is either real adaptor code or the canonical empty-job placeholder `// Add operations here`. Reject other placeholder markers such as `// PLACEHOLDER`, numbered placeholders, `TODO`, `FIXME`, or `<insert ... here>` — these are leftover generation artifacts.
 - Job names and edge `source_*` / `target_*` / key references contain only letters, numbers, spaces, hyphens, and underscores. Job names must be unique within a workflow and under 100 characters.
 - When the user is editing an existing workflow, every job and edge from the existing YAML is present and unchanged in the response unless the user asked to remove or modify it. Additions are fine.
@@ -31,9 +31,9 @@ These mirror the workflow-generation contract. Reject the YAML if any are violat
 ## Steps (jobs)
 
 - One step per backend system or per clearly distinct action. If the user's description involves fetching from system A, transforming, and posting to system B, that's typically three steps: fetch with the A adaptor → transform with `@openfn/language-common` → post with the B adaptor.
-- Adaptor choice should match the system named by the user. Use `@openfn/language-common@latest` for pure transforms and `@openfn/language-http@latest` for generic HTTP integrations where no specific adaptor exists. Prefer the most specific adaptor available over `http`.
+- Adaptor choice should match the system named by the user. Use `@openfn/language-common` for pure transforms and `@openfn/language-http` for generic HTTP integrations where no specific adaptor exists. Prefer the most specific adaptor available over `http`.
 - Do not invent adaptor packages. If an adaptor name doesn't follow the `@openfn/language-<name>` convention or doesn't correspond to a real system, flag it.
-- Don't pin random versions: use `@latest` for new workflows; preserve the version pinned on existing steps when editing.
+- Version handling: by default, adaptors should use the latest version (the workflow_chat service surfaces it as `@latest` in its YAML examples). When the user is editing existing YAML that already pins a specific version on a step, that pin must be preserved unless the user asks to change it. Flag silent downgrades or upgrades of existing pins.
 - Step names should be descriptive of the action ("Fetch visits from CommCare"), not generic ("Job 1"). Each name must be unique within the workflow.
 - The workflow_chat agent must NOT generate job code into `body` when creating workflow structure — `body` stays as `'// Add operations here'`. If the assistant fills `body` with real code during a workflow-shaping turn, flag it. (Code is written separately in the per-job code page.)
 
@@ -50,7 +50,7 @@ These mirror the workflow-generation contract. Reject the YAML if any are violat
 
 - The proposed shape should reflect the user's described process. A discovery-only request ("what time does the trigger run?") should not produce a new YAML.
 - For ambiguous requests, asking a clarifying question instead of generating a workflow is acceptable behavior, not a failure. The exception is when a test criterion explicitly evaluates whether the model acted versus asked — defer to the criterion in that case.
-- For requests that imply looping ("keep polling until X"), the correct response is to model the polling as a cron-triggered workflow with cursor-based state, not to invent a self-edge or back-edge.
+- For requests that imply looping ("keep polling until X"), a cron-triggered workflow is the right shape — looping workflows are not supported. Flag any structure that introduces a self-edge or back-edge to a previous step.
 - Don't add steps the user didn't ask for. Conversely, don't collapse genuinely distinct integrations into one step just to keep the workflow short.
 
 ## Out-of-scope concerns (do not grade)

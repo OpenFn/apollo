@@ -58,7 +58,6 @@ Valid:
 Invalid (flag these):
 - `const url = $.data.url;` — `$` outside an operation argument.
 - `$.data.x = something;` — `$` on the left side of assignment.
-- Using `$` inside an `fn(state => { ... })` callback body where `state` is already in scope — should just be `state.data`, etc.
 
 ## Callbacks must return state
 
