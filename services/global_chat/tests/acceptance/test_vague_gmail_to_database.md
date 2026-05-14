@@ -1,6 +1,7 @@
 ---
 id: global-chat.vague-gmail-to-database
 service: global_chat
+judges: [general, openfn_workflow_expert, openfn_code_quality]
 ---
 
 # notes

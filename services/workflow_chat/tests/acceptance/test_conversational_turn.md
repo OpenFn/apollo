@@ -1,6 +1,7 @@
 ---
 id: workflow-chat.conversational-turn
 service: workflow_chat
+judges: [general, openfn_workflow_expert]
 ---
 
 # notes

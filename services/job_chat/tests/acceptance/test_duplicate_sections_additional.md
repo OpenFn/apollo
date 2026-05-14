@@ -1,6 +1,7 @@
 ---
 id: job-chat.duplicate-sections-additional
 service: job_chat
+judges: [general, openfn_code_quality]
 ---
 
 # notes

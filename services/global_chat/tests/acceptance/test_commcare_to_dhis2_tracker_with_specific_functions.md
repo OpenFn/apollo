@@ -1,6 +1,7 @@
 ---
 id: global-chat.commcare-to-dhis2-tracker-with-specific-functions
 service: global_chat
+judges: [general, openfn_workflow_expert, openfn_code_quality]
 ---
 
 # notes

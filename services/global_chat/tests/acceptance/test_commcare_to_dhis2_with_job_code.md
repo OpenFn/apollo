@@ -1,6 +1,7 @@
 ---
 id: global-chat.commcare-to-dhis2-with-job-code
 service: global_chat
+judges: [general, openfn_workflow_expert, openfn_code_quality]
 ---
 
 # notes

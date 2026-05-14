@@ -1,6 +1,7 @@
 ---
 id: workflow-chat.simple-lang-bug
 service: workflow_chat
+judges: [general, openfn_workflow_expert]
 ---
 
 # notes
