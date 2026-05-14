@@ -28,6 +28,7 @@ Usage:
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -70,7 +71,8 @@ def _build_system_prompt(judge_name: str) -> str:
     parts = [config.role.strip()]
     parts += [
         "",
-        "Return JSON with this exact shape:",
+        "Respond with ONLY a JSON object, no prose, no markdown fences. The object "
+        "must have this exact shape:",
         "{",
         '  "criteria": [{"criterion": str, "passed": bool, "reasoning": str}, ...],',
         '  "general_flags": [{"description": str, "severity": "note" | "regression"}, ...]',
@@ -121,21 +123,64 @@ def _build_user_prompt(
     return "\n".join(parts)
 
 
+def _extract_json_object(text: str) -> Optional[dict]:
+    """Find and parse the first top-level JSON object in text.
+
+    Tolerates markdown fences and leading/trailing prose. Returns None if no
+    parseable object is found.
+    """
+    fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if fence:
+        try:
+            return json.loads(fence.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    start = text.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if escape:
+            escape = False
+            continue
+        if ch == "\\" and in_string:
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(text[start:i + 1])
+                except json.JSONDecodeError:
+                    return None
+    return None
+
+
 def _parse_verdict(
     raw_text: str,
     criteria: list[str],
     usage: dict,
     judge_name: str,
 ) -> Verdict:
-    try:
-        data = json.loads(raw_text)
-    except json.JSONDecodeError as e:
+    data = _extract_json_object(raw_text)
+    if data is None:
         return Verdict(
             passed=False,
             score=0.0,
             criteria=[],
-            general_flags=[GeneralFlag(description=f"judge_error: {e}", severity="regression")],
-            summary=f"judge_error ({judge_name}): failed to parse JSON output\n---\n{raw_text[:500]}",
+            general_flags=[GeneralFlag(description="judge_error: no JSON object in output", severity="regression")],
+            summary=f"judge_error ({judge_name}): no JSON object found in output\n---\n{raw_text[:500]}",
             judge_usage=usage,
             judge_name=judge_name,
         )
@@ -245,11 +290,10 @@ def evaluate(
         system=system_prompt,
         messages=[
             {"role": "user", "content": user_prompt},
-            {"role": "assistant", "content": "{"},  # prefill to force JSON
         ],
     )
 
-    raw_text = "{" + response.content[0].text
+    raw_text = response.content[0].text
     usage = {
         "input_tokens": response.usage.input_tokens,
         "output_tokens": response.usage.output_tokens,

@@ -6,9 +6,18 @@
   construction so accidental I/O fails loud instead of timing out.
 """
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from dotenv import load_dotenv
+
+
+# Load services/.env into the pytest process so the judge (running in-process)
+# can read ANTHROPIC_API_KEY etc. Services load this same .env themselves via
+# entry.py — we point at the same file rather than maintaining a separate copy
+# at the repo root. `override=False` means real env vars win.
+load_dotenv(Path(__file__).parent / "services" / ".env", override=False)
 
 
 # The spec collector picks up acceptance test markdown specs from

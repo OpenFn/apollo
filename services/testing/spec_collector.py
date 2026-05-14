@@ -47,24 +47,37 @@ class SpecItem(pytest.Item):
         self.run_index = run_index
 
     def runtest(self):
-        payload = _build_payload(self.spec)
+        spec = self.spec
+        print(f"\n→ {spec.id}")
+        print(f"  service: {spec.service}")
+        print(f"  judges:  {', '.join(spec.judges)}")
+
+        payload = _build_payload(spec)
         client = ApolloClient()
-        response = client.call(self.spec.service, payload)
+
+        print(f"  calling {spec.service}...", flush=True)
+        response = client.call(spec.service, payload)
+        print("  ✓ service responded")
 
         # One service call, N judges evaluate the same response.
         # Consensus: the test passes only if every judge passes.
-        verdicts = [
-            judge.evaluate(
-                criteria=self.spec.quality_criteria,
+        verdicts = []
+        for judge_name in spec.judges:
+            print(f"  judging with {judge_name}...", flush=True)
+            v = judge.evaluate(
+                criteria=spec.quality_criteria,
                 candidate=response,
-                test_notes=self.spec.notes or None,
+                test_notes=spec.notes or None,
                 judge=judge_name,
             )
-            for judge_name in self.spec.judges
-        ]
+            mark = "✓" if v.passed else "✗"
+            print(f"  {mark} {judge_name}: {'PASS' if v.passed else 'FAIL'} "
+                  f"(score={v.score:.2f}, flags={len(v.general_flags)})")
+            verdicts.append(v)
 
-        if not all(v.passed for v in verdicts):
-            summary = "\n\n".join(v.summary for v in verdicts)
+        failing = [v for v in verdicts if not v.passed]
+        if failing:
+            summary = "\n\n".join(v.summary for v in failing)
             raise AssertionError(summary)
 
     def repr_failure(self, excinfo, style=None):
