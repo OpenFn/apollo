@@ -11,6 +11,8 @@ Each item:
   4. Fails with the judge's reasoning summary if `verdict.passed` is False.
 """
 
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 
 from testing import judge
@@ -64,21 +66,24 @@ class SpecItem(pytest.Item):
         response = client.call(spec.service, payload)
         print("  ✓ service responded")
 
-        # One service call, N judges evaluate the same response.
+        # One service call, N judges evaluate the same response in parallel.
         # Consensus: the test passes only if every judge passes.
-        verdicts = []
-        for judge_name in spec.judges:
-            print(f"  judging with {judge_name}...", flush=True)
-            v = judge.evaluate(
+        def _run_judge(judge_name: str) -> judge.Verdict:
+            return judge.evaluate(
                 criteria=spec.quality_criteria,
                 candidate=response,
                 test_notes=spec.notes or None,
                 judge=judge_name,
             )
+
+        print(f"  running {len(spec.judges)} judge(s) in parallel...", flush=True)
+        with ThreadPoolExecutor(max_workers=len(spec.judges)) as executor:
+            verdicts = list(executor.map(_run_judge, spec.judges))
+
+        for judge_name, v in zip(spec.judges, verdicts):
             mark = "✓" if v.passed else "✗"
             print(f"  {mark} {judge_name}: {'PASS' if v.passed else 'FAIL'} "
                   f"(score={v.score:.2f}, flags={len(v.general_flags)})")
-            verdicts.append(v)
             _session_verdicts.append((spec.id, v))
 
         failing = [v for v in verdicts if not v.passed]
