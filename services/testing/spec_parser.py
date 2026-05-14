@@ -68,6 +68,7 @@ class Spec:
     id: str
     service: str
     runs: int = 1
+    judges: list[str] = field(default_factory=lambda: ["general"])
     notes: str = ""
     quality_criteria: list[str] = field(default_factory=list)
     settings: dict[str, Any] = field(default_factory=dict)
@@ -81,10 +82,19 @@ def parse_spec(path: Path) -> Spec:
     frontmatter, body = _split_frontmatter(text)
     sections = _split_headers(body, level=1)
 
+    judges_field = frontmatter.get("judges")
+    if judges_field is None:
+        judges = ["general"]
+    elif isinstance(judges_field, str):
+        judges = [judges_field]
+    else:
+        judges = list(judges_field)
+
     return Spec(
         id=frontmatter.get("id") or path.stem,
         service=frontmatter["service"],
         runs=int(frontmatter.get("runs", 1)),
+        judges=judges,
         notes=sections.get("notes", "").strip(),
         quality_criteria=_parse_bullets(sections.get("quality_criteria", "")),
         settings=_parse_settings(sections.get("settings", "")),

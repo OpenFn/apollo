@@ -11,12 +11,14 @@ This directory is on the Python path via `pyproject.toml`
 - `yaml_assertions.py` — pure-function YAML structural assertions, safe for
   every tier (unit included).
 - `judge.py` — LLM-as-judge helper for acceptance tests. Evaluates chat-service
-  responses against natural-language criteria. Loads universal rules from
-  `judge_rules.md` at evaluation time. Defaults to `CLAUDE_SONNET` from
-  `services/models.py`.
-- `judge_rules.md` — universal rules prepended to every acceptance judge
-  evaluation. Edit this file to add project-wide standards (voice, style,
-  refusal handling, etc.). One rule per bullet. Empty file = no universal rules.
+  responses against natural-language criteria under a named judge. Defaults to
+  `CLAUDE_SONNET` from `services/models.py` and the `general` judge.
+- `judges.py` — registry that loads judge configs from `judges/<name>.md`.
+- `judges/` — one markdown file per named judge. Each has a `# role` section
+  (who the judge is and what it evaluates) and a `# rules` section (universal
+  bullets that apply to every evaluation under this judge). Today: `general`
+  and `openfn_code_quality`. Specs select judges via the `judges:` frontmatter
+  field; default is `[general]`.
 - `spec_parser.py` — parses acceptance test markdown specs
   (`services/<svc>/tests/acceptance/*.md`) into `Spec` dataclasses.
 - `spec_collector.py` — pytest plugin (registered via `pytest_plugins` in the

@@ -51,14 +51,21 @@ class SpecItem(pytest.Item):
         client = ApolloClient()
         response = client.call(self.spec.service, payload)
 
-        verdict = judge.evaluate(
-            criteria=self.spec.quality_criteria,
-            candidate=response,
-            test_notes=self.spec.notes or None,
-        )
+        # One service call, N judges evaluate the same response.
+        # Consensus: the test passes only if every judge passes.
+        verdicts = [
+            judge.evaluate(
+                criteria=self.spec.quality_criteria,
+                candidate=response,
+                test_notes=self.spec.notes or None,
+                judge=judge_name,
+            )
+            for judge_name in self.spec.judges
+        ]
 
-        if not verdict.passed:
-            raise AssertionError(verdict.summary)
+        if not all(v.passed for v in verdicts):
+            summary = "\n\n".join(v.summary for v in verdicts)
+            raise AssertionError(summary)
 
     def repr_failure(self, excinfo, style=None):
         return str(excinfo.value)

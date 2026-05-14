@@ -3,9 +3,13 @@
 Evaluates a chat service's response against a small list of natural-language
 criteria, returning a structured verdict.
 
+Each evaluation runs under a named judge (configured in
+`services/testing/judges/<name>.md` — see `services/testing/judges.py`).
+Different judges have different role and rules, but share the same JSON output
+contract.
+
 Three layers feed the judge prompt:
-1. Universal rules — loaded from `judge_rules.md` next to this file. Apply to
-   every evaluation. Edit the markdown file to change them; no Python touched.
+1. Judge role + universal rules — loaded from the judge's MD config.
 2. Per-test criteria — passed in via `evaluate(criteria=[...])`.
 3. Open-ended "flag anything else notable" — hardcoded at the end of the
    prompt. Means the criteria list never has to be exhaustive.
@@ -17,6 +21,7 @@ Usage:
         criteria=["The response uses British English spelling.", ...],
         candidate=response_dict,
         test_notes=__doc__,
+        judge="general",
     )
     assert verdict.passed, verdict.summary
 """
@@ -24,16 +29,16 @@ Usage:
 import json
 import os
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Optional
 
 from anthropic import Anthropic
 
 from models import CLAUDE_SONNET
+from testing.judges import load_judge
 
 
 DEFAULT_MODEL = CLAUDE_SONNET
-_RULES_PATH = Path(__file__).parent / "judge_rules.md"
+DEFAULT_JUDGE = "general"
 
 
 @dataclass
@@ -57,23 +62,13 @@ class Verdict:
     general_flags: list[GeneralFlag]
     summary: str
     judge_usage: dict = field(default_factory=dict)
+    judge_name: str = DEFAULT_JUDGE
 
 
-def _load_universal_rules() -> str:
-    """Read the universal-rules markdown file. Empty string if absent or empty."""
-    if not _RULES_PATH.exists():
-        return ""
-    text = _RULES_PATH.read_text().strip()
-    return text
-
-
-def _build_system_prompt() -> str:
-    universal = _load_universal_rules()
-    parts = [
-        "You are a strict but fair quality reviewer for an AI assistant's responses.",
-        "You will be given (a) optional universal rules that apply to every response, "
-        "(b) a list of test-specific criteria, and (c) the AI assistant's full response "
-        "to evaluate.",
+def _build_system_prompt(judge_name: str) -> str:
+    config = load_judge(judge_name)
+    parts = [config.role.strip()]
+    parts += [
         "",
         "Return JSON with this exact shape:",
         "{",
@@ -91,11 +86,11 @@ def _build_system_prompt() -> str:
         "  - 'regression': would surprise a reviewer or hurt a user",
         "If nothing is notable, return an empty general_flags array.",
     ]
-    if universal:
+    if config.rules:
         parts += [
             "",
             "UNIVERSAL RULES (apply to every response):",
-            universal,
+            config.rules,
         ]
     return "\n".join(parts)
 
@@ -130,8 +125,8 @@ def _parse_verdict(
     raw_text: str,
     criteria: list[str],
     usage: dict,
+    judge_name: str,
 ) -> Verdict:
-    """Parse JSON judge output into a Verdict. Lenient: missing fields → defaults."""
     try:
         data = json.loads(raw_text)
     except json.JSONDecodeError as e:
@@ -140,8 +135,9 @@ def _parse_verdict(
             score=0.0,
             criteria=[],
             general_flags=[GeneralFlag(description=f"judge_error: {e}", severity="regression")],
-            summary=f"judge_error: failed to parse JSON output\n---\n{raw_text[:500]}",
+            summary=f"judge_error ({judge_name}): failed to parse JSON output\n---\n{raw_text[:500]}",
             judge_usage=usage,
+            judge_name=judge_name,
         )
 
     raw_criteria = data.get("criteria", [])
@@ -175,7 +171,7 @@ def _parse_verdict(
     passed = all_criteria_passed and not has_regression
     score = (sum(1 for c in parsed_criteria if c.passed) / len(parsed_criteria)) if parsed_criteria else 1.0
 
-    summary = _format_summary(parsed_criteria, parsed_flags, passed)
+    summary = _format_summary(judge_name, parsed_criteria, parsed_flags, passed)
 
     return Verdict(
         passed=passed,
@@ -184,11 +180,12 @@ def _parse_verdict(
         general_flags=parsed_flags,
         summary=summary,
         judge_usage=usage,
+        judge_name=judge_name,
     )
 
 
-def _format_summary(criteria: list[CriterionResult], flags: list[GeneralFlag], passed: bool) -> str:
-    lines = [f"Verdict: {'PASS' if passed else 'FAIL'}"]
+def _format_summary(judge_name: str, criteria: list[CriterionResult], flags: list[GeneralFlag], passed: bool) -> str:
+    lines = [f"Verdict ({judge_name}): {'PASS' if passed else 'FAIL'}"]
     if criteria:
         lines.append("")
         lines.append("Criteria:")
@@ -210,24 +207,25 @@ def evaluate(
     criteria: list[str],
     candidate: dict,
     test_notes: Optional[str] = None,
+    judge: str = DEFAULT_JUDGE,
     model: str = DEFAULT_MODEL,
     client: Optional[Anthropic] = None,
 ) -> Verdict:
-    """Evaluate a candidate response against criteria using an LLM judge.
+    """Evaluate a candidate response under a named judge.
 
     Args:
-        criteria: List of natural-language criteria. Can be empty — universal
-            rules and general_flags still apply.
-        candidate: Full response dict from the chat service. Whatever it
-            contains is shown verbatim to the judge.
+        criteria: Test-specific bullets the judge grades against.
+        candidate: Full response dict from the chat service.
         test_notes: Optional background context (typically the test's __doc__).
-            Shown to the judge but not graded against directly.
-        model: Judge model. Defaults to Sonnet.
+            Shown to the judge but not graded directly.
+        judge: Name of the judge (file at services/testing/judges/<name>.md).
+            Defaults to "general".
+        model: Model to use. Defaults to CLAUDE_SONNET from services/models.py.
         client: Optional Anthropic client. Constructed from env if not given.
 
     Returns:
-        A Verdict. Test code typically asserts on verdict.passed and uses
-        verdict.summary as the failure message.
+        A Verdict. Test code asserts on verdict.passed and uses verdict.summary
+        as the failure message.
     """
     if client is None:
         api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -238,7 +236,7 @@ def evaluate(
             )
         client = Anthropic(api_key=api_key)
 
-    system_prompt = _build_system_prompt()
+    system_prompt = _build_system_prompt(judge)
     user_prompt = _build_user_prompt(criteria, candidate, test_notes)
 
     response = client.messages.create(
@@ -256,4 +254,4 @@ def evaluate(
         "input_tokens": response.usage.input_tokens,
         "output_tokens": response.usage.output_tokens,
     }
-    return _parse_verdict(raw_text, criteria, usage)
+    return _parse_verdict(raw_text, criteria, usage, judge)
