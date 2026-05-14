@@ -25,8 +25,6 @@ This directory is on the Python path via `pyproject.toml`
 - `apollo_client.py` — `ApolloClient` for dispatching to a chat service.
   Currently a subprocess-based stub; the integration tier will replace its
   internals with a real HTTP client (same `.call()` signature, no test changes).
-- `fixtures.py` — pytest fixtures (`apollo_client`). Registered via
-  `pytest_plugins = ["testing.fixtures"]` in the repo-root `conftest.py`.
 
 ## Why under `services/` and not a top-level `tests/`?
 

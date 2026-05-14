@@ -11,10 +11,9 @@ from unittest.mock import patch
 import pytest
 
 
-# Shared fixtures (apollo_client, ...) live in services/testing/fixtures.py.
 # The spec collector picks up acceptance test markdown specs from
-# services/<svc>/tests/acceptance/*.md. Both registered globally.
-pytest_plugins = ["testing.fixtures", "testing.spec_collector"]
+# services/<svc>/tests/acceptance/*.md and turns them into pytest items.
+pytest_plugins = ["testing.spec_collector"]
 
 
 _TIER_DIRS = ("unit", "service", "integration", "acceptance")
