@@ -241,9 +241,9 @@ def _format_summary(judge_name: str, criteria: list[CriterionResult], flags: lis
                 lines.append(f"      → {c.reasoning}")
     if flags:
         lines.append("")
-        lines.append("General flags:")
+        lines.append("Flags raised by the judge:")
         for f in flags:
-            lines.append(f"  [{f.severity}] {f.description}")
+            lines.append(f"  ✗ [{f.severity}] {f.description}")
     return "\n".join(lines)
 
 
