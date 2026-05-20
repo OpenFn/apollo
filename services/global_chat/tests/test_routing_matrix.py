@@ -15,14 +15,16 @@ model inspects body keys, not just step names.
 
 import pytest
 import yaml
+from testing.yaml_assertions import (
+    assert_yaml_equal_except,
+    assert_yaml_jobs_have_body,
+)
 from .test_utils import (
     call_global_chat_service,
     make_service_input,
     print_response_details,
     assert_routed_to,
     get_response_yaml,
-    assert_yaml_equal_except,
-    assert_yaml_jobs_have_body,
 )
 
 
