@@ -1,5 +1,11 @@
 # apollo
 
+## 1.1.2
+
+### Patch Changes
+
+- c466b2b: workflow_chat: support webhook response configuration
+
 ## 1.1.1
 
 ### Patch Changes

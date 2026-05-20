@@ -7,11 +7,14 @@ the configured testpaths. Each spec becomes one or more pytest items
 Each item:
   1. Builds the service payload from `# settings`, `# history`, and `# turn`.
   2. Dispatches to the named service via ApolloClient.
-  3. Calls `judge.evaluate()` with the spec's quality_criteria.
-  4. Fails with the judge's reasoning summary if `verdict.passed` is False.
+  3. Captures any YAML in the response to a `tmp/` folder next to the spec
+     file (e.g. `services/workflow_chat/tests/acceptance/tmp/<spec_id>.yaml`).
+  4. Calls `judge.evaluate()` with the spec's quality_criteria.
+  5. Fails with the judge's reasoning summary if `verdict.passed` is False.
 """
 
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 
@@ -66,6 +69,12 @@ class SpecItem(pytest.Item):
         response = client.call(spec.service, payload)
         print("  ✓ service responded")
 
+        yaml_path = _capture_response_yaml(
+            response, spec.id, self.run_index, spec.runs, self.path.parent / "tmp"
+        )
+        if yaml_path is not None:
+            print(f"  ✓ project YAML saved to {yaml_path}")
+
         # One service call, N judges evaluate the same response in parallel.
         # Consensus: the test passes only if every judge passes.
         def _run_judge(judge_name: str) -> judge.Verdict:
@@ -113,6 +122,59 @@ def _build_payload(spec: Spec) -> dict:
         payload["content"] = spec.current_turn["content"]
 
     return payload
+
+
+def _extract_yaml_from_response(response: dict) -> str | None:
+    """Pull the full project YAML out of a service response, if any.
+
+    Different services use different keys:
+      - workflow_chat: `response_yaml`
+      - global_chat: `attachments` list with `type=workflow_yaml`
+    Falls back to `workflow_yaml` / `content_yaml` for any other service that
+    might use them.
+    """
+    if not isinstance(response, dict):
+        return None
+
+    for key in ("response_yaml", "workflow_yaml", "content_yaml"):
+        value = response.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+
+    for attachment in response.get("attachments") or []:
+        if (
+            isinstance(attachment, dict)
+            and attachment.get("type") == "workflow_yaml"
+            and isinstance(attachment.get("content"), str)
+            and attachment["content"].strip()
+        ):
+            return attachment["content"]
+
+    return None
+
+
+def _capture_response_yaml(
+    response: dict,
+    spec_id: str,
+    run_index: int,
+    runs: int,
+    output_dir: Path,
+) -> Path | None:
+    """Write the response's project YAML to `output_dir/<spec_id>.yaml`.
+
+    For multi-run specs, appends `__run-N` to the filename so each run is
+    preserved. Returns the written path, or None if no YAML was present.
+    """
+    yaml_str = _extract_yaml_from_response(response)
+    if yaml_str is None:
+        return None
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    suffix = f"__run-{run_index}" if runs > 1 else ""
+    safe_id = spec_id.replace("/", "_")
+    path = output_dir / f"{safe_id}{suffix}.yaml"
+    path.write_text(yaml_str)
+    return path
 
 
 def pytest_sessionfinish(session, exitstatus):
