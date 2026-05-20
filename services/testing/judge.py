@@ -101,12 +101,19 @@ def _build_user_prompt(
     criteria: list[str],
     candidate: dict,
     test_notes: Optional[str],
+    request: Optional[dict],
 ) -> str:
     parts = []
     if test_notes:
         parts += [
             "TEST CONTEXT (background; do not grade against this directly):",
             test_notes.strip(),
+            "",
+        ]
+    if request:
+        parts += [
+            "ORIGINAL REQUEST sent to the service (use as ground truth for what existed before and what was asked):",
+            json.dumps(request, indent=2, default=str),
             "",
         ]
     parts += ["CRITERIA TO EVALUATE:"]
@@ -252,6 +259,7 @@ def evaluate(
     criteria: list[str],
     candidate: dict,
     test_notes: Optional[str] = None,
+    request: Optional[dict] = None,
     judge: str = DEFAULT_JUDGE,
     model: str = DEFAULT_MODEL,
     client: Optional[Anthropic] = None,
@@ -263,6 +271,10 @@ def evaluate(
         candidate: Full response dict from the chat service.
         test_notes: Optional background context (typically the test's __doc__).
             Shown to the judge but not graded directly.
+        request: Optional original request payload sent to the service. When
+            provided, the judge can ground "before vs after" reasoning in the
+            actual inputs (workflow_yaml, current turn, history) instead of
+            guessing.
         judge: Name of the judge (file at services/testing/judges/<name>.md).
             Defaults to "general".
         model: Model to use. Defaults to CLAUDE_SONNET from services/models.py.
@@ -282,7 +294,7 @@ def evaluate(
         client = Anthropic(api_key=api_key)
 
     system_prompt = _build_system_prompt(judge)
-    user_prompt = _build_user_prompt(criteria, candidate, test_notes)
+    user_prompt = _build_user_prompt(criteria, candidate, test_notes, request)
 
     response = client.messages.create(
         model=model,

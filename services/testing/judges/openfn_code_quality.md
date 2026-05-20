@@ -103,7 +103,7 @@ Returning a trimmed object is fine **only as the final cleanup step**, where dro
 
 ## Scaffolding / placeholder leftovers
 
-- Job code must not contain leftover generation scaffolding: `// PLACEHOLDER`, numbered placeholders (`// step 1`, `// PLACEHOLDER_1`), `TODO`, `FIXME`, `<insert ... here>`, or empty `() => {}` callbacks meant to be filled in. The one acceptable placeholder is the canonical empty-job marker `// Add operations here`, and only when the assistant has deliberately declined to generate code.
+- Flag leftover orchestration markers (`# [use inspect_job_code to view]`, `// PLACEHOLDER`, `// PLACEHOLDER_1`, `<insert ... here>`, `TODO`, `FIXME`) or empty `() => {}` callbacks meant to be filled in — these signal the redaction or string-replace pipeline failed. The one acceptable placeholder is the canonical empty-job marker `// Add operations here`, and only when the assistant has deliberately declined to generate code. Do **not** flag LLM-chosen identifier names (e.g. `your_source_id`); those are normal substitution hints in suggested code.
 
 ## Grading guidance
 

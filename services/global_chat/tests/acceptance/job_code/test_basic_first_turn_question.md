@@ -10,7 +10,7 @@ First conversation turn on a job step page. The user asks a non-modifying questi
 
 # quality_criteria
 
-- The response explains the existing job code in plain language and references concepts that actually appear in the code on the page (cursor, get, each).
+- The response explains the existing job code in plain language and references concepts that actually appear in the code on the page (cursor, getSubmissions, fn).
 - The response does NOT propose a code change or generate replacement code — the user only asked a question.
 - The response stays focused on the kobo-fetch-submissions step, not the postgres-insert step that follows it.
 

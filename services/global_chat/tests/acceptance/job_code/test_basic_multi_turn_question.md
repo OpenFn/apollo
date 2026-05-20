@@ -6,13 +6,13 @@ judges: [general, openfn_code_quality]
 
 # notes
 
-Multi-turn conversation entirely about the same job code. The user has already asked two clarifying questions about the upsert step in a Salesforce contact sync and now asks a follow-up that requires keeping prior context in mind ("you mentioned external IDs — show me how to pick one"). The router should send this to job_code_agent. The response should pick up the thread from the prior assistant message rather than restarting the explanation, and should not propose unsolicited code edits.
+Multi-turn conversation entirely about the same job code. The user has already asked two clarifying questions about the upsert step in a Salesforce contact sync and now asks a follow-up that requires keeping prior context in mind ("you mentioned external IDs — show me how to pick one"). The router should send this to job_code_agent. The response should pick up the thread from the prior assistant message rather than restarting the explanation. Inline code snippets in chat text are fine; the thing to avoid is generating a `code_edits` / `job_code` attachment that renders as an intrusive diff in the editor.
 
 # quality_criteria
 
 - The response builds on the prior conversation about external IDs rather than restarting from scratch (e.g. does not re-introduce what an upsert is from the top).
 - The response answers the user's question about choosing an external ID for the Contact object — preferring a stable, unique field like Email or an Salesforce-side External_Id__c field.
-- The response does NOT rewrite the job body or propose a code change — the user is still asking conceptual questions.
+- The response does NOT generate a `code_edits` / `job_code` attachment (which renders as an intrusive diff in the editor). Describing the change in chat text — including inline or fenced code snippets — and offering to apply it ("want me to update the code?") is fine.
 
 # settings
 
@@ -125,4 +125,4 @@ user
 
 ## content
 
-OK that makes sense. If I wanted to use a Salesforce-side External_Id__c field on Contact instead of Email, what would I need to change about how I pick it? Don't rewrite the code yet — I just want to understand what makes a good external ID.
+OK that makes sense. If I wanted to use a Salesforce-side External_Id__c field on Contact instead of Email, what would I need to change about how I pick it?
