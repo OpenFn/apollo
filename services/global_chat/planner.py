@@ -362,8 +362,9 @@ class PlannerAgent:
                 tool_result = "ERROR: No workflow exists yet. Call call_workflow_agent first to create the workflow, then call call_job_code_agent."
                 tool_calls_meta.append({"tool": "call_job_code_agent", "input": tool_use_block.input, "skipped": True})
                 return tool_result
+            matched_job_key = None
             if job_key:
-                _, job_data = find_job_in_yaml(self.current_yaml, job_key)
+                matched_job_key, job_data = find_job_in_yaml(self.current_yaml, job_key)
                 if not job_data:
                     tool_result = f"ERROR: Job key '{job_key}' not found in workflow YAML. Create the workflow with this job first."
                     tool_calls_meta.append(
@@ -382,12 +383,15 @@ class PlannerAgent:
             if "usage" in subagent_result:
                 total_usage.update(sum_usage(total_usage, subagent_result["usage"]))
 
-            # Stitch code into live state immediately
+            # Stitch code into live state immediately. Use the YAML key returned by
+            # find_job_in_yaml — `job_key` from the planner may be a fuzzy variant
+            # (case, hyphens vs underscores, or the job's name field), and
+            # stitch_job_code does an exact key match.
             suggested_code = subagent_result.get("suggested_code")
-            if job_key and suggested_code and self.current_yaml:
-                self.current_yaml = stitch_job_code(self.current_yaml, job_key, suggested_code)
+            if matched_job_key and suggested_code and self.current_yaml:
+                self.current_yaml = stitch_job_code(self.current_yaml, matched_job_key, suggested_code)
                 self.yaml_modified = True
-                logger.info(f"Stitched code for job '{job_key}' into current_yaml")
+                logger.info(f"Stitched code for job '{matched_job_key}' into current_yaml")
 
             self.subagent_results.append(subagent_result)
             tool_result = format_subagent_result_for_llm(subagent_result)
@@ -433,20 +437,24 @@ class PlannerAgent:
             status = "Writing job code..."
         stream_manager.send_thinking(status)
 
-        # Validate and prepare — skip invalid ones before launching threads
+        # Validate and prepare — skip invalid ones before launching threads.
+        # matched_keys carries the YAML key resolved by find_job_in_yaml's
+        # fuzzy match; stitch_job_code below requires the exact key.
         to_run = []
         skipped = {}
+        matched_keys: dict[str, str] = {}
         for block in blocks:
             job_key = block.input.get("job_key")
             if not self.current_yaml:
                 skipped[block.id] = "ERROR: No workflow exists yet. Call call_workflow_agent first to create the workflow, then call call_job_code_agent."
                 tool_calls_meta.append({"tool": "call_job_code_agent", "input": block.input, "skipped": True})
             elif job_key:
-                _, job_data = find_job_in_yaml(self.current_yaml, job_key)
+                matched_job_key, job_data = find_job_in_yaml(self.current_yaml, job_key)
                 if not job_data:
                     skipped[block.id] = f"ERROR: Job key '{job_key}' not found in workflow YAML. Create the workflow with this job first."
                     tool_calls_meta.append({"tool": "call_job_code_agent", "input": block.input, "skipped": True})
                 else:
+                    matched_keys[block.id] = matched_job_key
                     to_run.append(block)
             else:
                 to_run.append(block)
@@ -489,16 +497,16 @@ class PlannerAgent:
                 continue
 
             subagent_result = parallel_results[block.id]
-            job_key = block.input.get("job_key")
+            matched_job_key = matched_keys.get(block.id)
 
             if "usage" in subagent_result:
                 total_usage.update(sum_usage(total_usage, subagent_result["usage"]))
 
             suggested_code = subagent_result.get("suggested_code")
-            if job_key and suggested_code and self.current_yaml:
-                self.current_yaml = stitch_job_code(self.current_yaml, job_key, suggested_code)
+            if matched_job_key and suggested_code and self.current_yaml:
+                self.current_yaml = stitch_job_code(self.current_yaml, matched_job_key, suggested_code)
                 self.yaml_modified = True
-                logger.info(f"Stitched code for job '{job_key}' into current_yaml")
+                logger.info(f"Stitched code for job '{matched_job_key}' into current_yaml")
 
             self.subagent_results.append(subagent_result)
             tool_result = format_subagent_result_for_llm(subagent_result)
