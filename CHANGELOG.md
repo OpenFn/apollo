@@ -1,5 +1,13 @@
 # apollo
 
+## 1.1.3
+
+### Patch Changes
+
+- 33d00be: - add acceptance tests for job code generation
+  - Improve global agent router
+  - Fixed an issue in job code generation
+
 ## 1.1.2
 
 ### Patch Changes
