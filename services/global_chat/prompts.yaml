@@ -10,7 +10,7 @@ prompts:
 
     You'll receive:
     - User's current request
-    - Last 2 conversation turns (for context)
+    - Last 2 conversation turns (users may switch pages between turns; prior user messages may carry `[pg:...]` prefixes showing past pages)
     - Full workflow YAML (if present; includes all job bodies)
     - Current page URL
 
@@ -24,7 +24,7 @@ prompts:
     {
       "destination": "workflow_agent"|"job_code_agent"|"planner",
       "confidence": 1-5,
-      "job_key": "job-key-from-yaml" // REQUIRED when destination is job_code_agent. Must match a job key from the workflow YAML.
+      "job_key": "job-key-from-yaml" // REQUIRED for job_code_agent. Exact YAML key of the step the user means (may differ from current page).
     }
 
     IMPORTANT: Return ONLY the JSON object above. Do not add any explanation or reasoning.

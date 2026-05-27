@@ -201,7 +201,7 @@ class RouterAgent:
             parts.append("\nRecent conversation:")
             for turn in recent_history:
                 role = turn.get("role", "unknown")
-                msg = turn.get("content", "")[:200]
+                msg = turn.get("content", "")[:1000]
                 parts.append(f"  {role}: {msg}")
 
         if workflow_yaml:
@@ -281,23 +281,31 @@ class RouterAgent:
 
         logger.info("Routing to job_chat")
 
-        # Build job context from YAML using step name from page,
-        # falling back to the router's job_key decision
+        # Router's job_key wins if it resolves to a job in the YAML;
+        # otherwise fall back to the step parsed from the page URL
         job_context = {}
-        matched_job_key = None
+        matched_job_key, job_data = None, None
 
-        step_name = get_step_name_from_page(page) or router_job_key
-        if workflow_yaml and step_name:
-            matched_job_key, job_data = find_job_in_yaml(workflow_yaml, step_name)
+        if workflow_yaml:
+            if router_job_key:
+                matched_job_key, job_data = find_job_in_yaml(workflow_yaml, router_job_key)
             if matched_job_key is None:
-                logger.warning(f"No job found in YAML matching step name '{step_name}'")
-            if job_data:
-                if job_data.get("body"):
-                    job_context["expression"] = job_data["body"]
-                if job_data.get("adaptor"):
-                    job_context["adaptor"] = job_data["adaptor"]
-                if job_data.get("name"):
-                    job_context["page_name"] = job_data["name"]
+                page_step = get_step_name_from_page(page)
+                if page_step:
+                    matched_job_key, job_data = find_job_in_yaml(workflow_yaml, page_step)
+
+        if matched_job_key is None:
+            logger.warning(
+                f"No job found in YAML for router_job_key='{router_job_key}' or page='{page}'",
+            )
+
+        if job_data:
+            if job_data.get("body"):
+                job_context["expression"] = job_data["body"]
+            if job_data.get("adaptor"):
+                job_context["adaptor"] = job_data["adaptor"]
+            if job_data.get("name"):
+                job_context["page_name"] = job_data["name"]
 
         clean_history = [{"role": t["role"], "content": t["content"]} for t in history]
         enriched_content = self._format_attachments_for_content(content)

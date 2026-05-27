@@ -75,6 +75,12 @@ class SpecItem(pytest.Item):
         if yaml_path is not None:
             print(f"  ✓ project YAML saved to {yaml_path}")
 
+        text_path = _capture_response_text(
+            response, spec.id, self.run_index, spec.runs, self.path.parent / "tmp"
+        )
+        if text_path is not None:
+            print(f"  ✓ response text saved to {text_path}")
+
         # One service call, N judges evaluate the same response in parallel.
         # Consensus: the test passes only if every judge passes.
         def _run_judge(judge_name: str) -> judge.Verdict:
@@ -82,6 +88,7 @@ class SpecItem(pytest.Item):
                 criteria=spec.quality_criteria,
                 candidate=response,
                 test_notes=spec.notes or None,
+                request=payload,
                 judge=judge_name,
             )
 
@@ -174,6 +181,60 @@ def _capture_response_yaml(
     safe_id = spec_id.replace("/", "_")
     path = output_dir / f"{safe_id}{suffix}.yaml"
     path.write_text(yaml_str)
+    return path
+
+
+def _format_agent_path(meta: dict) -> str | None:
+    """Build an arrow-separated path showing which agents handled the request.
+
+    Uses `subagent_calls` (in-order, with repetitions) when present so a
+    planner that called the job_code agent twice shows as
+    `router -> planner -> job_code_agent -> job_code_agent`. Falls back to
+    the deduped `agents` list for direct routes.
+    """
+    if not isinstance(meta, dict):
+        return None
+
+    subagent_calls = meta.get("subagent_calls")
+    if isinstance(subagent_calls, list) and subagent_calls:
+        ordered = ["router", "planner"]
+        for call in subagent_calls:
+            if not isinstance(call, dict):
+                continue
+            name = call.get("_call_metadata", {}).get("subagent")
+            if name:
+                ordered.append(name)
+        return " -> ".join(ordered)
+
+    agents = meta.get("agents")
+    if isinstance(agents, list) and agents:
+        return " -> ".join(str(a) for a in agents)
+
+    return None
+
+
+def _capture_response_text(
+    response: dict,
+    spec_id: str,
+    run_index: int,
+    runs: int,
+    output_dir: Path,
+) -> Path | None:
+    """Write the agent path and response text to `output_dir/<spec_id>.txt`."""
+    if not isinstance(response, dict):
+        return None
+    text = response.get("response")
+    if not isinstance(text, str) or not text.strip():
+        return None
+
+    agent_path = _format_agent_path(response.get("meta", {}))
+    body = f"agents: {agent_path}\n\n{text}" if agent_path else text
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    suffix = f"__run-{run_index}" if runs > 1 else ""
+    safe_id = spec_id.replace("/", "_")
+    path = output_dir / f"{safe_id}{suffix}.txt"
+    path.write_text(body)
     return path
 
 
