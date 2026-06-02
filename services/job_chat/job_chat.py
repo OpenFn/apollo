@@ -60,6 +60,25 @@ _CODE_OUTPUT_SCHEMA = {
     "additionalProperties": False
 }
 
+# Answer tool: the model returns its reply by CALLING this tool rather than
+# emitting JSON text. Deliberately NOT strict — we want a structured output
+# channel (tool input comes back as a parsed dict) WITHOUT grammar-constrained
+# decoding, which garbled badly. tool_choice stays "auto" (forced tool use is
+# incompatible with thinking), so the prompt strongly instructs the model to
+# always call it, and we fall back to plain text if it ever doesn't.
+_ANSWER_TOOL = {
+    "name": "answer",
+    "description": (
+        "Return your reply to the user. ALWAYS call this tool — it is the only way "
+        "your response reaches the user; do not answer in plain text. Put your "
+        "conversational reply (markdown, including ```js code examples, is fine) in "
+        "'text_answer'. Use 'code_edits' ONLY when the user wants their own job code "
+        "changed; otherwise pass an empty array. Showing an example in text_answer "
+        "does not change the user's job."
+    ),
+    "input_schema": _CODE_OUTPUT_SCHEMA,
+}
+
 
 # Helper function for page navigation
 def extract_page_prefix_from_last_turn(history: List[Dict[str, str]]) -> Optional[str]:
@@ -202,13 +221,15 @@ class AnthropicClient:
                         refresh_rag=refresh_rag
                         )
 
-            # NOTE: structured outputs (output_config.format json_schema) were
-            # removed — grammar-constrained decoding produced severe repetitive /
-            # garbled output (esp. on Opus 4.8). The model is still instructed by
-            # the prompt to return {code_edits, text_answer} JSON, and we parse it
-            # defensively in parse_and_apply_edits (falls back to raw text on
-            # invalid JSON). effort still applies to all modes.
+            # effort applies to all modes. For suggest_code we expose the `answer`
+            # tool (non-strict) so the reply comes back as a parsed dict without
+            # grammar-constrained decoding. tool_choice stays "auto" because forced
+            # tool use is incompatible with thinking — the prompt does the nudging.
             output_config = {"effort": "medium"}
+            tool_kwargs = (
+                {"tools": [_ANSWER_TOOL], "tool_choice": {"type": "auto"}}
+                if suggest_code else {}
+            )
 
             with sentry_sdk.start_span(description="anthropic_api_call"):
                 if stream:
@@ -228,7 +249,8 @@ class AnthropicClient:
                         model=self.config.model,
                         system=system_message,
                         thinking={"type": "adaptive"},
-                        output_config=output_config
+                        output_config=output_config,
+                        **tool_kwargs
                     )
 
                     with self.client.messages.stream(**stream_kwargs) as stream_obj:
@@ -260,7 +282,8 @@ class AnthropicClient:
                     create_kwargs = dict(
                         max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message,
                         thinking={"type": "adaptive"},
-                        output_config=output_config
+                        output_config=output_config,
+                        **tool_kwargs
                     )
                     message = self.client.messages.create(**create_kwargs)
 
@@ -270,30 +293,40 @@ class AnthropicClient:
                 if message.usage.cache_read_input_tokens:
                     logger.info(f"Cache read: {message.usage.cache_read_input_tokens} tokens")
 
-            response_parts = []
+            # Pull the reply from the `answer` tool call (preferred). Collect any
+            # plain text the model emitted as a fallback for the rare case where
+            # it answers without calling the tool.
+            answer_input = None
+            text_parts = []
             for content_block in message.content:
-                if content_block.type == "text":
-                    response_parts.append(content_block.text)
-
-            response = "\n\n".join(response_parts)
+                if getattr(content_block, "type", None) == "tool_use" and getattr(content_block, "name", None) == "answer":
+                    answer_input = content_block.input or {}
+                elif getattr(content_block, "type", None) == "text":
+                    text_parts.append(content_block.text)
 
             if suggest_code is True:
                 job_code = context.get("expression") if isinstance(context, dict) else None
 
-                if getattr(self, "_stream_applied", False):
-                    # Streaming already applied edits — reuse instead of redoing the work
-                    try:
-                        text_response = json.loads(response).get("text_answer", "").strip()
-                    except (json.JSONDecodeError, ValueError):
-                        text_response = response
-                    suggested_code = self._stream_suggested_code
-                    diff = self._stream_diff
+                if answer_input is not None:
+                    # Tool input is already a parsed dict — no JSON parsing needed.
+                    text_response = (answer_input.get("text_answer") or "").strip()
+                    code_edits = answer_input.get("code_edits") or []
+                    if code_edits and job_code:
+                        with sentry_sdk.start_span(description="apply_code_edits"):
+                            suggested_code, diff = self.apply_code_edits(
+                                content=content, text_answer=text_response,
+                                original_code=job_code, code_edits=code_edits,
+                            )
+                    else:
+                        suggested_code, diff = None, None
                 else:
-                    with sentry_sdk.start_span(description="parse_and_apply_edits"):
-                        text_response, suggested_code, diff = self.parse_and_apply_edits(response=response, content=content, original_code=job_code)
+                    # Fallback: model replied in plain text instead of calling answer().
+                    logger.warning("answer tool not called; falling back to text response")
+                    text_response = "\n\n".join(text_parts).strip()
+                    suggested_code, diff = None, None
 
             else:
-                text_response = response
+                text_response = "\n\n".join(text_parts)
                 suggested_code = None
                 diff = None
 

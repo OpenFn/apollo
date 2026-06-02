@@ -185,99 +185,37 @@ step by step. Focus on one bit at a time. For example, when uploading from CommC
 # drop the JSON envelope and (b) the prose-preamble + JSON "hybrid" that breaks
 # json.loads. All explanatory prose and any example code live INSIDE text_answer.
 output_format = """
-<output_format>
-CRITICAL — this overrides any other formatting instinct. Your ENTIRE response
-must be a single JSON object and nothing else. It has exactly two fields:
+<response_format>
+ALWAYS reply by calling the `answer` tool. That tool call is the only way your
+response reaches the user — never reply with plain text or a JSON object in the
+message body. Every turn = exactly one `answer` tool call.
 
-{
-  "code_edits": [],
-  "text_answer": "Your conversational response here"
-}
+The `answer` tool has two fields:
+- "text_answer": everything the user reads — explanations, guidance, conversation,
+  and any illustrative/teaching code. Use normal markdown here, including ```js
+  fenced code blocks with REAL newlines (you are filling a tool argument, not
+  writing escaped JSON — do not escape newlines yourself).
+- "code_edits": an array of edits applied directly to the user's job code. Use it
+  ONLY when the user wants their job changed. If they just want to understand or
+  see something, pass an empty array [] and put the example in "text_answer".
+  Showing an example in text_answer does NOT touch their job.
 
-Hard output rules (follow all of them, every time):
-- Output ONLY the JSON object. No text, greeting, or commentary before or after it.
-- The very first character of your response must be `{` and the very last must be `}`.
-- Do NOT wrap the JSON in markdown code fences. Never begin your response with ```json or ```.
-- ALL prose, explanations, and any example code go INSIDE the "text_answer" string.
-  You never reply with bare markdown or bare prose — it must always be the value
-  of "text_answer" within the JSON object.
-- Your answer MUST be parsable with json.loads(). Every string value (including
-  "old_code", "new_code", and "text_answer") must be a valid JSON string:
-  escape newlines as \\n, escape double quotes as \\", and include no unescaped
-  control characters. Inside a string, write code as a single line using \\n for
-  line breaks.
-
-Choosing between the two fields:
-- "text_answer" is everything the user reads: explanations, guidance, conversation,
-  AND any illustrative/teaching code. To show example code, put a markdown fenced
-  block (```js ... ```) INSIDE the text_answer string (with its newlines escaped as
-  \\n). Showing an example here does NOT touch the user's job.
-- "code_edits" are applied directly to the user's job code — a "rewrite", or a
-  "replace" of the whole body, overwrites whatever they currently have. Only use
-  code_edits when the user actually wants their job changed.
-- Decide from what the user is asking: if they just want to understand or see
-  something, leave "code_edits" empty ([]) and put the example in "text_answer".
-  If they clearly want the change made to their job, use "code_edits".
-- Either way, the response is still ONE JSON object with both fields. text_answer
-  is never emitted on its own outside the envelope. Avoid ending text_answer on a
-  colon — the code panel is separate, so a dangling "here's the code:" reads oddly.
-
-Code edit actions:
-{
-  "action": "replace",
-  "old_code": "exact code to find and replace",
-  "new_code": "replacement code"
-}
-
-{
-  "action": "rewrite",
-  "new_code": "complete new code"
-}
+Code edit actions (each item in the "code_edits" array):
+- {"action": "replace", "old_code": "<exact code to find>", "new_code": "<replacement>"}
+- {"action": "rewrite", "new_code": "<complete new code>"}
 
 <code editing rules>
-- The old_code must match exactly, including all whitespace and indentation
-- Apply edits sequentially - later edits work on the already-modified code
-- If old_code is not found exactly, the edit will fail safely rather than corrupt the file
-
-To insert new code using replace:
-- Find a suitable insertion point and replace it with itself plus the new code
-- Example: To insert after "get('/patients');", replace it with "get('/patients');\\n[new code here]"
-
-**IMPORTANT: INCLUDE CONTEXT TO AVOID DUPLICATE MATCHES**
-We will use literal string replacement to apply your changes. To avoid duplicate matches, you MUST:
-1. Include ample surrounding context in the old_code to replace (comments, variable declarations, both similar passages etc.)
-2. If in doubt, use "rewrite" action instead to rewrite the whole code
+- old_code must match the user's code EXACTLY, including all whitespace and indentation.
+- Edits apply sequentially — later edits work on the already-modified code.
+- If old_code isn't found exactly, the edit fails safely rather than corrupting the file.
+- To insert, replace an anchor with itself plus the new code.
+- INCLUDE AMPLE SURROUNDING CONTEXT in old_code so it matches a single, unique location
+  (comments, variable declarations, neighbouring lines). If in doubt, use "rewrite".
 </code editing rules>
 
-Examples — note that in BOTH cases the WHOLE response is the JSON object, with no
-text before it, no text after it, and no markdown fences around it.
-
-1) The user wants an edit applied to their job:
-{
-  "code_edits": [{
-    "action": "replace",
-    "old_code": "get('/patients');",
-    "new_code": "get('/patients');\\nfn(state => {\\n  if (!state.data) {\\n    throw new Error(\\\"No data received\\\");\\n  }\\n  return state;\\n});"
-  }],
-  "text_answer": "I'll add error handling after your GET request."
-}
-
-2) The user wants an explanation with an example (no change to their job) — the
-example code is a fenced block INSIDE text_answer, code_edits stays empty:
-{
-  "code_edits": [],
-  "text_answer": "`request()` is the lowest-level operation — every other function is built on it. For example:\\n\\n```js\\nrequest('GET', '/campaigns', { query: { count: 10 } });\\n```\\n\\nUse it when no purpose-built helper exists for the endpoint you need."
-}
-
-ALWAYS use \\n inside strings instead of actual newlines:
-THIS IS WRONG:
-"new_code": "function() {
-  return true;
-}"
-
-THIS IS CORRECT:
-"new_code": "function() {\\n  return true;\\n}"
-</output_format>
+You are filling tool-call arguments, so write code with real newlines — do NOT
+escape them as \\n and do NOT wrap the call in markdown fences.
+</response_format>
 """
 
 error_correction_system_prompt = """
@@ -483,7 +421,15 @@ def build_prompt(content, history, context, rag=None, api_key=None, stream_manag
 
     prompt = []
     prompt.extend(history)
-    prompt.append({"role": "user", "content": content})
+    # Per-message nudge: appended to the CURRENT turn only (the last thing the
+    # model reads), to push tool_choice="auto" toward actually calling `answer`.
+    # Added only to the message sent to the model — the stored history (built in
+    # generate() from the raw content) does NOT include this, so it never
+    # accumulates across turns.
+    prompt.append({
+        "role": "user",
+        "content": f"{content}\n\nRespond by calling the `answer` tool: put your reply in text_answer, and code_edits only if you're changing the job.",
+    })
 
     return (system_message, prompt, retrieved_knowledge)
 
