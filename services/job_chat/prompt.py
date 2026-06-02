@@ -1,3 +1,18 @@
+"""EXPERIMENTAL prompt variant for testing — not wired in by default.
+
+Identical to prompt.py except for the output-format contract, which is:
+  1. moved OUT of job_writing_summary (where it was buried mid-guide) into its
+     own `output_format` block appended LAST in generate_system_message, so it
+     is the final thing the model reads (recency);
+  2. hardened to forbid the prose+JSON hybrid — the entire response must be a
+     single JSON object, no prose before/after, no markdown fences; and
+  3. re-anchored so the "inline example" guidance can't pull the model out of
+     the JSON envelope — inline markdown code goes INSIDE the text_answer string.
+
+To try it, temporarily point job_chat.py's import at this module:
+    from .prompt_test import build_prompt, build_error_correction_prompt
+"""
+
 import json
 import time
 import sentry_sdk
@@ -147,7 +162,7 @@ create(
 );
 ```
 </example>
-<examples>
+</examples>
 </job writing guide>
 <workflow guide>
 A job is just one step in a workflow (or pipeline). Workflows are used
@@ -162,18 +177,50 @@ step by step. Focus on one bit at a time. For example, when uploading from CommC
 2. Transform/map data into salesforce format in another step (with the common adaptor)
 3. Upload the transformed data into salesforce in the final step
 </workflow guide>
+"""
 
-<output format>
-You must respond in JSON format with two fields:
+# Output contract — appended LAST in the system message (see
+# generate_system_message) so it is the final, most prominent instruction the
+# model reads. Kept deliberately strict to prevent (a) plain-prose replies that
+# drop the JSON envelope and (b) the prose-preamble + JSON "hybrid" that breaks
+# json.loads. All explanatory prose and any example code live INSIDE text_answer.
+output_format = """
+<output_format>
+CRITICAL — this overrides any other formatting instinct. Your ENTIRE response
+must be a single JSON object and nothing else. It has exactly two fields:
 
 {
   "code_edits": [],
   "text_answer": "Your conversational response here"
 }
 
-"code_edits" are applied directly to the user's job code — a "rewrite", or a "replace" of the whole body, will overwrite whatever they currently have. So reach for code_edits when the user actually wants their job changed. When you're explaining, teaching, or showing an illustrative example that shouldn't disturb their current work, put the code inline in "text_answer" as a markdown code block instead. Judge from what the user is asking which they want — and if they clearly want the example in their job, edit it; if they just want to understand or see it, keep it inline.
-Use "text_answer" for all explanations, guidance, and conversation.
-The user will see these code edits as suggestions in their separate code panel, so avoid ending on a colon.
+Hard output rules (follow all of them, every time):
+- Output ONLY the JSON object. No text, greeting, or commentary before or after it.
+- The very first character of your response must be `{` and the very last must be `}`.
+- Do NOT wrap the JSON in markdown code fences. Never begin your response with ```json or ```.
+- ALL prose, explanations, and any example code go INSIDE the "text_answer" string.
+  You never reply with bare markdown or bare prose — it must always be the value
+  of "text_answer" within the JSON object.
+- Your answer MUST be parsable with json.loads(). Every string value (including
+  "old_code", "new_code", and "text_answer") must be a valid JSON string:
+  escape newlines as \\n, escape double quotes as \\", and include no unescaped
+  control characters. Inside a string, write code as a single line using \\n for
+  line breaks.
+
+Choosing between the two fields:
+- "text_answer" is everything the user reads: explanations, guidance, conversation,
+  AND any illustrative/teaching code. To show example code, put a markdown fenced
+  block (```js ... ```) INSIDE the text_answer string (with its newlines escaped as
+  \\n). Showing an example here does NOT touch the user's job.
+- "code_edits" are applied directly to the user's job code — a "rewrite", or a
+  "replace" of the whole body, overwrites whatever they currently have. Only use
+  code_edits when the user actually wants their job changed.
+- Decide from what the user is asking: if they just want to understand or see
+  something, leave "code_edits" empty ([]) and put the example in "text_answer".
+  If they clearly want the change made to their job, use "code_edits".
+- Either way, the response is still ONE JSON object with both fields. text_answer
+  is never emitted on its own outside the envelope. Avoid ending text_answer on a
+  colon — the code panel is separate, so a dangling "here's the code:" reads oddly.
 
 Code edit actions:
 {
@@ -194,32 +241,35 @@ Code edit actions:
 
 To insert new code using replace:
 - Find a suitable insertion point and replace it with itself plus the new code
-- Example: To insert after "get('/patients');", replace it with "get('/patients');\n[new code here]"
+- Example: To insert after "get('/patients');", replace it with "get('/patients');\\n[new code here]"
 
 **IMPORTANT: INCLUDE CONTEXT TO AVOID DUPLICATE MATCHES**
 We will use literal string replacement to apply your changes. To avoid duplicate matches, you MUST:
 1. Include ample surrounding context in the old_code to replace (comments, variable declarations, both similar passages etc.)
 2. If in doubt, use "rewrite" action instead to rewrite the whole code
+</code editing rules>
 
-**Output valid JSON strings**
-Your answer MUST be parsable with json.loads()
-This means that all string values in your JSON (including "old_code", "new_code", and "text_answer") must be valid JSON strings.  
-- Escape all newlines as \\n (one backslash followed by n)  
-- Escape all double quotes as \\"  (one backslash followed by double quotation mark)  
-- Do not include unescaped control characters in any string value.  
-- When you include code in a string, ensure it is a single line with \\n for line breaks.
+Examples — note that in BOTH cases the WHOLE response is the JSON object, with no
+text before it, no text after it, and no markdown fences around it.
 
-Example:
+1) The user wants an edit applied to their job:
 {
   "code_edits": [{
     "action": "replace",
     "old_code": "get('/patients');",
     "new_code": "get('/patients');\\nfn(state => {\\n  if (!state.data) {\\n    throw new Error(\\\"No data received\\\");\\n  }\\n  return state;\\n});"
   }],
-  "text_answer": "I'll add error handling after your GET request"
+  "text_answer": "I'll add error handling after your GET request."
 }
 
-ALWAYS use \\n instead of actual newlines:
+2) The user wants an explanation with an example (no change to their job) — the
+example code is a fenced block INSIDE text_answer, code_edits stays empty:
+{
+  "code_edits": [],
+  "text_answer": "`request()` is the lowest-level operation — every other function is built on it. For example:\\n\\n```js\\nrequest('GET', '/campaigns', { query: { count: 10 } });\\n```\\n\\nUse it when no purpose-built helper exists for the endpoint you need."
+}
+
+ALWAYS use \\n inside strings instead of actual newlines:
 THIS IS WRONG:
 "new_code": "function() {
   return true;
@@ -227,8 +277,7 @@ THIS IS WRONG:
 
 THIS IS CORRECT:
 "new_code": "function() {\\n  return true;\\n}"
-</code editing rules>
-</output format>
+</output_format>
 """
 
 error_correction_system_prompt = """
@@ -242,13 +291,13 @@ The correction system will look for your corrected_old_code in full_original_cod
 
 Context to use:
 You will be given relevant context under "Original edit details" below.
-This may include an explanation of attempted changes. Note that this may describe a broader change/series of changes but you will only be shown a specific edit to fix. 
+This may include an explanation of attempted changes. Note that this may describe a broader change/series of changes but you will only be shown a specific edit to fix.
 
 Common issues:
 1. "old_code not found" - the old_code doesn't exactly match what's in the file
   --> Look at the full code and find the closest matching section
 2. "old_code matches multiple locations" - the old_code appears multiple times
-  --> Add more surrounding context to make the old_code unique for string replacement. 
+  --> Add more surrounding context to make the old_code unique for string replacement.
       **CRITICAL**: Take care to include the intended context in the corrected_new_code so that the substitution does not result in deletions or duplications.
 3. "Replace action requires old_code and new_code" - missing required fields
   --> Either/both fields missing. Use the given context and full code to fill these.
@@ -265,11 +314,13 @@ Output JSON format:
   "corrected_new_code": "corrected new code"
 }
 
-**Output valid JSON strings**
-Your answer MUST be parsable with json.loads()
-- Escape all newlines as \\n (one backslash followed by n)  
-- Escape all double quotes as \\"  (one backslash followed by double quotation mark)  
-- Do not include unescaped control characters in any string value.  
+**Output ONLY the JSON object**
+Your ENTIRE response must be a single JSON object and nothing else: no prose before
+or after it, no markdown code fences. The first character must be `{` and the last `}`.
+Your answer MUST be parsable with json.loads():
+- Escape all newlines as \\n (one backslash followed by n)
+- Escape all double quotes as \\"  (one backslash followed by double quotation mark)
+- Do not include unescaped control characters in any string value.
 - When you include code in a string, ensure it is a single line with \\n for line breaks.
 
 ALWAYS use \\n instead of actual newlines:
@@ -383,6 +434,9 @@ and system information. When debugging, analyze these logs carefully to identify
 ```{context.log}```
 </run_logs>""")
 
+    # Output contract goes LAST so it is the final, most prominent instruction.
+    message.append(output_format)
+
     return list(map(lambda text: text if isinstance(text, dict) else {"type": "text", "text": text}, message))
 
 def format_search_results(search_results):
@@ -435,9 +489,9 @@ def build_prompt(content, history, context, rag=None, api_key=None, stream_manag
 
 def build_error_correction_prompt(content: str, error_message: str, old_code: str, new_code: str, full_code: str, text_explanation: str):
     """Build a prompt for correcting code edit errors."""
-    
+
     system_message = [{"type": "text", "text": error_correction_system_prompt}]
-    
+
     user_content = f"""A code edit failed with this error: "{error_message}"
 
 Original edit details:
@@ -451,7 +505,7 @@ Original edit details:
 ```
 
 Please provide corrected old_code and new_code that will successfully apply the intended change with string replacement."""
-    
+
     prompt = [{"role": "user", "content": user_content}]
     logger.info(f"prompt in full:\n{prompt}")
     return (system_message, prompt)
