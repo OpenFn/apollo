@@ -186,21 +186,17 @@ step by step. Focus on one bit at a time. For example, when uploading from CommC
 # json.loads. All explanatory prose and any example code live INSIDE text_answer.
 output_format = """
 <response_format>
-ALWAYS reply by calling the `answer` tool. That tool call is the only way your
-response reaches the user — never reply with plain text or a JSON object in the
-message body. Every turn = exactly one `answer` tool call.
+Reply to the user in normal text. Markdown is fine, including ```js fenced code
+blocks for illustrative examples. That text IS your answer — you do not need to
+call any tool just to talk, explain, or show an example.
 
-The `answer` tool has two fields:
-- "text_answer": everything the user reads — explanations, guidance, conversation,
-  and any illustrative/teaching code. Use normal markdown here, including ```js
-  fenced code blocks with REAL newlines (you are filling a tool argument, not
-  writing escaped JSON — do not escape newlines yourself).
-- "code_edits": an array of edits applied directly to the user's job code. Use it
-  ONLY when the user wants their job changed. If they just want to understand or
-  see something, pass an empty array [] and put the example in "text_answer".
-  Showing an example in text_answer does NOT touch their job.
+Call the `edit_job` tool ONLY when the user wants their CURRENT job code changed.
+When you do, pass ALL the edits in a SINGLE call via the `code_edits` array. Do
+NOT call `edit_job` to show an example — examples belong in your text reply. If the
+user only wants an explanation or to be shown something, just answer in text and
+do not call the tool.
 
-Code edit actions (each item in the "code_edits" array):
+Each item in `code_edits`:
 - {"action": "replace", "old_code": "<exact code to find>", "new_code": "<replacement>"}
 - {"action": "rewrite", "new_code": "<complete new code>"}
 
@@ -212,9 +208,6 @@ Code edit actions (each item in the "code_edits" array):
 - INCLUDE AMPLE SURROUNDING CONTEXT in old_code so it matches a single, unique location
   (comments, variable declarations, neighbouring lines). If in doubt, use "rewrite".
 </code editing rules>
-
-You are filling tool-call arguments, so write code with real newlines — do NOT
-escape them as \\n and do NOT wrap the call in markdown fences.
 </response_format>
 """
 
@@ -421,14 +414,14 @@ def build_prompt(content, history, context, rag=None, api_key=None, stream_manag
 
     prompt = []
     prompt.extend(history)
-    # Per-message nudge: appended to the CURRENT turn only (the last thing the
-    # model reads), to push tool_choice="auto" toward actually calling `answer`.
-    # Added only to the message sent to the model — the stored history (built in
-    # generate() from the raw content) does NOT include this, so it never
-    # accumulates across turns.
+    # Per-message reminder on the CURRENT turn only (the last thing the model
+    # reads). It is conditional by design — we do NOT want to force a tool call,
+    # only remind the model to route an actual code change through `edit_job`.
+    # Added only to the message sent to the model; the stored history (built in
+    # generate() from the raw content) omits it, so it never accumulates.
     prompt.append({
         "role": "user",
-        "content": f"{content}\n\nRespond by calling the `answer` tool: put your reply in text_answer, and code_edits only if you're changing the job.",
+        "content": f"{content}\n\nReply in text. If this requires changing the job code, also call the `edit_job` tool to apply the change.",
     })
 
     return (system_message, prompt, retrieved_knowledge)

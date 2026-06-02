@@ -60,23 +60,28 @@ _CODE_OUTPUT_SCHEMA = {
     "additionalProperties": False
 }
 
-# Answer tool: the model returns its reply by CALLING this tool rather than
-# emitting JSON text. Deliberately NOT strict — we want a structured output
-# channel (tool input comes back as a parsed dict) WITHOUT grammar-constrained
-# decoding, which garbled badly. tool_choice stays "auto" (forced tool use is
-# incompatible with thinking), so the prompt strongly instructs the model to
-# always call it, and we fall back to plain text if it ever doesn't.
-_ANSWER_TOOL = {
-    "name": "answer",
+# Code-edit tool: the model answers the user in NORMAL TEXT, and calls this tool
+# only when it wants to change the user's job code. This works with the model's
+# grain (answering in text is its default) instead of forcing every reply through
+# a tool. Deliberately NOT strict — we want the edits as a parsed dict without
+# grammar-constrained decoding (which garbled). tool_choice stays "auto": the
+# model SHOULD only call it when editing, so auto is the correct semantics here.
+_EDIT_TOOL = {
+    "name": "edit_job",
     "description": (
-        "Return your reply to the user. ALWAYS call this tool — it is the only way "
-        "your response reaches the user; do not answer in plain text. Put your "
-        "conversational reply (markdown, including ```js code examples, is fine) in "
-        "'text_answer'. Use 'code_edits' ONLY when the user wants their own job code "
-        "changed; otherwise pass an empty array. Showing an example in text_answer "
-        "does not change the user's job."
+        "Apply one or more edits to the user's CURRENT job code. Call this ONLY when "
+        "the user wants their job changed — never to show an illustrative example "
+        "(put examples in your normal text reply instead). Pass ALL edits in a single "
+        "call via the `code_edits` array; they are applied in order, each operating on "
+        "the result of the previous one. Write your conversational reply as normal text "
+        "outside this tool call."
     ),
-    "input_schema": _CODE_OUTPUT_SCHEMA,
+    "input_schema": {
+        "type": "object",
+        "properties": {"code_edits": _CODE_OUTPUT_SCHEMA["properties"]["code_edits"]},
+        "required": ["code_edits"],
+        "additionalProperties": False,
+    },
 }
 
 
@@ -221,13 +226,12 @@ class AnthropicClient:
                         refresh_rag=refresh_rag
                         )
 
-            # effort applies to all modes. For suggest_code we expose the `answer`
-            # tool (non-strict) so the reply comes back as a parsed dict without
-            # grammar-constrained decoding. tool_choice stays "auto" because forced
-            # tool use is incompatible with thinking — the prompt does the nudging.
+            # effort applies to all modes. For suggest_code we expose the `edit_job`
+            # tool (non-strict). tool_choice stays "auto": the model answers in text
+            # and only calls the tool when it actually wants to change the job.
             output_config = {"effort": "medium"}
             tool_kwargs = (
-                {"tools": [_ANSWER_TOOL], "tool_choice": {"type": "auto"}}
+                {"tools": [_EDIT_TOOL], "tool_choice": {"type": "auto"}}
                 if suggest_code else {}
             )
 
@@ -293,42 +297,45 @@ class AnthropicClient:
                 if message.usage.cache_read_input_tokens:
                     logger.info(f"Cache read: {message.usage.cache_read_input_tokens} tokens")
 
-            # Pull the reply from the `answer` tool call (preferred). Collect any
-            # plain text the model emitted as a fallback for the rare case where
-            # it answers without calling the tool.
-            answer_input = None
+            # The model answers in normal text; it calls the `edit_job` tool only
+            # when it wants to change the user's job. So text = the reply, and the
+            # tool's parsed input carries the code edits (no JSON-in-text parsing).
             text_parts = []
+            tool_code_edits = None
             for content_block in message.content:
-                if getattr(content_block, "type", None) == "tool_use" and getattr(content_block, "name", None) == "answer":
-                    answer_input = content_block.input or {}
+                if getattr(content_block, "type", None) == "tool_use" and getattr(content_block, "name", None) == "edit_job":
+                    tool_code_edits = (content_block.input or {}).get("code_edits") or []
                 elif getattr(content_block, "type", None) == "text":
                     text_parts.append(content_block.text)
 
-            if suggest_code is True:
+            text_response = "\n\n".join(text_parts).strip()
+            suggested_code = None
+            diff = None
+
+            if suggest_code is True and tool_code_edits:
                 job_code = context.get("expression") if isinstance(context, dict) else None
+                if job_code:
+                    with sentry_sdk.start_span(description="apply_code_edits"):
+                        suggested_code, diff = self.apply_code_edits(
+                            content=content, text_answer=text_response,
+                            original_code=job_code, code_edits=tool_code_edits,
+                        )
+                # If the model called the tool but emitted no prose, give the user
+                # a short confirmation so the response isn't empty.
+                if not text_response and suggested_code:
+                    text_response = "I've updated your job code."
 
-                if answer_input is not None:
-                    # Tool input is already a parsed dict — no JSON parsing needed.
-                    text_response = (answer_input.get("text_answer") or "").strip()
-                    code_edits = answer_input.get("code_edits") or []
-                    if code_edits and job_code:
-                        with sentry_sdk.start_span(description="apply_code_edits"):
-                            suggested_code, diff = self.apply_code_edits(
-                                content=content, text_answer=text_response,
-                                original_code=job_code, code_edits=code_edits,
-                            )
-                    else:
-                        suggested_code, diff = None, None
+            # Visibility: did the model call edit_job, and in what block order?
+            # (block order shows whether text came before/after the tool call.)
+            if suggest_code is True:
+                _blocks = [getattr(b, "type", "?") for b in message.content]
+                if tool_code_edits is None:
+                    logger.info("edit_job NOT called — text-only answer (blocks=%r)", _blocks)
                 else:
-                    # Fallback: model replied in plain text instead of calling answer().
-                    logger.warning("answer tool not called; falling back to text response")
-                    text_response = "\n\n".join(text_parts).strip()
-                    suggested_code, diff = None, None
-
-            else:
-                text_response = "\n\n".join(text_parts)
-                suggested_code = None
-                diff = None
+                    logger.info(
+                        "edit_job CALLED: %d edit(s), patches_applied=%s (blocks=%r)",
+                        len(tool_code_edits), (diff or {}).get("patches_applied"), _blocks,
+                    )
 
             # Add prefix to content when building history
             prefixed_content = add_page_prefix(content, current_page)
@@ -395,65 +402,14 @@ class AnthropicClient:
         """
         Process a single stream event from the Anthropic API.
 
-        With suggest_code, code_edits are generated first (buffered silently),
-        then a changes event is sent, and text_answer streams to the client.
+        The conversational reply is plain text now. Code edits arrive via the
+        `edit_job` tool call (as input_json_delta) and are applied from the final
+        message — not streamed here — so we simply forward text deltas live.
         """
-        if event.type == "content_block_delta":
-            if event.delta.type == "text_delta":
-                text_chunk = event.delta.text
-                accumulated_response += text_chunk
-
-                if suggest_code and not text_started:
-                    # Code edits phase: buffer silently until text_answer starts.
-                    # Tolerant of whitespace variants the model may emit.
-                    match = re.search(r'"text_answer"\s*:\s*"', accumulated_response)
-
-                    if match:
-                        # Extract code_edits from the JSON before the delimiter
-                        edits_part = accumulated_response[:match.start()]
-                        # Find the code_edits array value
-                        try:
-                            # Close the partial object and extract code_edits
-                            partial = edits_part.rstrip().rstrip(",") + "}"
-                            code_edits = json.loads(partial).get("code_edits", [])
-
-                            if original_code and code_edits:
-                                suggested_code, diff = self.apply_code_edits(
-                                    content=content or "",
-                                    text_answer="",
-                                    original_code=original_code,
-                                    code_edits=code_edits
-                                )
-                                self._stream_applied = True
-                                self._stream_suggested_code = suggested_code
-                                self._stream_diff = diff
-                                if suggested_code:
-                                    stream_manager.send_changes({"code": suggested_code})
-                                else:
-                                    stream_manager.send_changes({"code_edits": code_edits})
-                            elif code_edits:
-                                stream_manager.send_changes({"code_edits": code_edits})
-                        except (json.JSONDecodeError, ValueError):
-                            logger.warning(f"Failed to parse code_edits during streaming")
-
-                        # Mark where text content starts in the accumulated buffer
-                        sent_length = match.end()
-                        text_started = True
-
-                if suggest_code and text_started:
-                    # Text phase: stream with buffer to handle split escape sequences
-                    # Use 2-char buffer since longest escape is 2 chars (e.g. \n, \")
-                    buffer_size = 2
-                    safe_to_send_until = len(accumulated_response) - buffer_size
-
-                    if safe_to_send_until > sent_length:
-                        safe_text = accumulated_response[sent_length:safe_to_send_until]
-                        stream_manager.send_text(self._unescape_json_string(safe_text))
-                        sent_length = safe_to_send_until
-
-                elif not suggest_code:
-                    # Normal streaming for non-code suggestions
-                    stream_manager.send_text(text_chunk)
+        if event.type == "content_block_delta" and event.delta.type == "text_delta":
+            text_chunk = event.delta.text
+            accumulated_response += text_chunk
+            stream_manager.send_text(text_chunk)
 
         return accumulated_response, text_started, sent_length
 
