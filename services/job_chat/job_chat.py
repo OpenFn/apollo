@@ -202,14 +202,13 @@ class AnthropicClient:
                         refresh_rag=refresh_rag
                         )
 
-            # Structured outputs for suggest_code mode, effort for all modes
-            if suggest_code:
-                output_config = {
-                    "format": {"type": "json_schema", "schema": _CODE_OUTPUT_SCHEMA},
-                    "effort": "medium"
-                }
-            else:
-                output_config = {"effort": "medium"}
+            # NOTE: structured outputs (output_config.format json_schema) were
+            # removed — grammar-constrained decoding produced severe repetitive /
+            # garbled output (esp. on Opus 4.8). The model is still instructed by
+            # the prompt to return {code_edits, text_answer} JSON, and we parse it
+            # defensively in parse_and_apply_edits (falls back to raw text on
+            # invalid JSON). effort still applies to all modes.
+            output_config = {"effort": "medium"}
 
             with sentry_sdk.start_span(description="anthropic_api_call"):
                 if stream:
@@ -311,18 +310,31 @@ class AnthropicClient:
                 *[usage_data for usage_key, usage_data in retrieved_knowledge.get("usage", {}).items()]
             )
 
-            if not text_response:
-                stop_reason = getattr(message, "stop_reason", None)
-                empty_reason = "max_tokens" if stop_reason == "max_tokens" else "no_text_blocks"
+            stop_reason = getattr(message, "stop_reason", None)
+
+            # Check truncation BEFORE the empty check. max_tokens commonly leaves
+            # PARTIAL text behind (or partial/broken JSON in suggest_code mode);
+            # if we only inspected stop_reason when text_response is empty, that
+            # cut-off content would be returned as a normal success and the
+            # truncation signal lost. Surface it regardless of whether text came back.
+            if stop_reason == "max_tokens":
                 sentry_sdk.set_tag("stop_reason", stop_reason)
-                sentry_sdk.set_tag("empty_reason", empty_reason)
+                sentry_sdk.set_tag("empty_reason", "max_tokens")
                 sentry_sdk.set_context("empty_response", {
                     "service": "job_chat",
                     "suggest_code": bool(suggest_code),
                 })
                 stream_manager.end_stream()
-                if stop_reason == "max_tokens":
-                    raise ApolloError(502, "Response truncated", type="OUTPUT_TRUNCATED")
+                raise ApolloError(502, "Response truncated", type="OUTPUT_TRUNCATED")
+
+            if not text_response:
+                sentry_sdk.set_tag("stop_reason", stop_reason)
+                sentry_sdk.set_tag("empty_reason", "no_text_blocks")
+                sentry_sdk.set_context("empty_response", {
+                    "service": "job_chat",
+                    "suggest_code": bool(suggest_code),
+                })
+                stream_manager.end_stream()
                 raise ApolloError(502, "Model returned no usable text", type="EMPTY_OUTPUT")
 
             stream_manager.end_stream()
@@ -532,25 +544,15 @@ class AnthropicClient:
                 full_code=full_code,
                 text_explanation=text_explanation
             )
-            correction_schema = {
-                "type": "object",
-                "properties": {
-                    "explanation": {"type": "string"},
-                    "corrected_old_code": {"type": "string"},
-                    "corrected_new_code": {"type": "string"}
-                },
-                "required": ["explanation", "corrected_old_code", "corrected_new_code"],
-                "additionalProperties": False
-            }
+            # structured outputs removed here too (see note in generate); the
+            # correction prompt already instructs the {explanation, corrected_*}
+            # JSON shape and json.loads below is wrapped in try/except.
             message = self.client.messages.create(
                 max_tokens=16384,
                 messages=prompt,
                 model=self.config.model,
                 system=system_message,
-                output_config={
-                    "format": {"type": "json_schema", "schema": correction_schema},
-                    "effort": "medium"
-                },
+                output_config={"effort": "medium"},
                 thinking={"type": "adaptive"}
             )
 
