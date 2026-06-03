@@ -178,6 +178,8 @@ NOT call `edit_job` to show an example — examples belong in your text reply. I
 user only wants an explanation or to be shown something, just answer in text and
 do not call the tool.
 
+Describe edits in the future tense ("I'll add X"), not the past ("I added X").
+
 Each item in `code_edits`:
 - {"action": "replace", "old_code": "<exact code to find>", "new_code": "<replacement>"}
 - {"action": "rewrite", "new_code": "<complete new code>"}
