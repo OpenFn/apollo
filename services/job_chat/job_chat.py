@@ -76,6 +76,12 @@ _EDIT_TOOL = {
         "the result of the previous one. Write your conversational reply as normal text "
         "outside this tool call."
     ),
+    # strict: True => grammar-constrained tool input, so code_edits is guaranteed
+    # schema-valid (correct types, no missing action/new_code). Only the TOOL INPUT
+    # is constrained — NOT the model's text reply or thinking — so the prose answer
+    # is unaffected. NOTE: this is the same constrained decoding that garbled on
+    # Opus 4.8; if it garbles, it'd show up in the code_edits *content*, not the prose.
+    "strict": True,
     "input_schema": {
         "type": "object",
         "properties": {"code_edits": _CODE_OUTPUT_SCHEMA["properties"]["code_edits"]},
