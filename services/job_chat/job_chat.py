@@ -319,7 +319,7 @@ class AnthropicClient:
                 # If the model called the tool but emitted no prose, give the user
                 # a short confirmation so the response isn't empty.
                 if not text_response and suggested_code:
-                    text_response = "I'll updated your job code."
+                    text_response = "I'll updated your job code." # TODO
 
             # Visibility: did the model call edit_job, and in what block order?
             # (block order shows whether text came before/after the tool call.)
