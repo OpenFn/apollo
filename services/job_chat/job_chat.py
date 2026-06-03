@@ -60,12 +60,6 @@ _CODE_OUTPUT_SCHEMA = {
     "additionalProperties": False
 }
 
-# Code-edit tool: the model answers the user in NORMAL TEXT, and calls this tool
-# only when it wants to change the user's job code. This works with the model's
-# grain (answering in text is its default) instead of forcing every reply through
-# a tool. Deliberately NOT strict — we want the edits as a parsed dict without
-# grammar-constrained decoding (which garbled). tool_choice stays "auto": the
-# model SHOULD only call it when editing, so auto is the correct semantics here.
 _EDIT_TOOL = {
     "name": "edit_job",
     "description": (
@@ -76,12 +70,8 @@ _EDIT_TOOL = {
         "the result of the previous one. Write your conversational reply as normal text "
         "outside this tool call."
     ),
-    # strict: True => grammar-constrained tool input, so code_edits is guaranteed
-    # schema-valid (correct types, no missing action/new_code). Only the TOOL INPUT
-    # is constrained — NOT the model's text reply or thinking — so the prose answer
-    # is unaffected. NOTE: this is the same constrained decoding that garbled on
-    # Opus 4.8; if it garbles, it'd show up in the code_edits *content*, not the prose.
-    "strict": True,
+
+    "strict": True, # Structured outputs only used for code edits, not the entire model answer.
     "input_schema": {
         "type": "object",
         "properties": {"code_edits": _CODE_OUTPUT_SCHEMA["properties"]["code_edits"]},
@@ -233,7 +223,7 @@ class AnthropicClient:
                         )
 
             # effort applies to all modes. For suggest_code we expose the `edit_job`
-            # tool (non-strict). tool_choice stays "auto": the model answers in text
+            # tool. tool_choice stays "auto": the model answers in text
             # and only calls the tool when it actually wants to change the job.
             output_config = {"effort": "medium"}
             tool_kwargs = (
@@ -329,7 +319,7 @@ class AnthropicClient:
                 # If the model called the tool but emitted no prose, give the user
                 # a short confirmation so the response isn't empty.
                 if not text_response and suggested_code:
-                    text_response = "I've updated your job code."
+                    text_response = "I'll updated your job code."
 
             # Visibility: did the model call edit_job, and in what block order?
             # (block order shows whether text came before/after the tool call.)

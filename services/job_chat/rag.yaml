@@ -1,5 +1,5 @@
 config_version: 1.0
-model: "claude-opus"
+model: "claude-sonnet"
 llm_search_decision: "claude-sonnet"
 llm_retrieval: "claude-sonnet"
 threshold: 0.8
