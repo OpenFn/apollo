@@ -79,6 +79,10 @@ STATUS_WORKING = [
     "Sorting it out...",
 ]
 
+STATUS_WRITING_CODE = [
+    "Writing code...",
+]
+
 
 @dataclass
 class ContentBlock:

@@ -26,6 +26,7 @@ from streaming_util import (
     STATUS_REVIEWING_CODE,
     STATUS_NEW_CODE,
     STATUS_WORKING,
+    STATUS_WRITING_CODE,
 )
 from models import resolve_model
 
@@ -257,6 +258,10 @@ class AnthropicClient:
                         for event in stream_obj:
                             if event.type == "message_start":
                                 stream_manager.send_thinking(STATUS_WORKING)
+                            # The edit_job tool block starts after the text ends; its
+                            # input (the code) streams silently, so show a status here.
+                            elif event.type == "content_block_start" and getattr(getattr(event, "content_block", None), "type", None) == "tool_use":
+                                stream_manager.send_thinking(STATUS_WRITING_CODE)
                             accumulated_response, text_started, sent_length = self.process_stream_event(
                                 event,
                                 accumulated_response,
@@ -319,7 +324,7 @@ class AnthropicClient:
                 # If the model called the tool but emitted no prose, give the user
                 # a short confirmation so the response isn't empty.
                 if not text_response and suggested_code:
-                    text_response = "I'll update your job code." # TODO
+                    text_response = "I'll update your job code."
 
             # Visibility: did the model call edit_job, and in what block order?
             # (block order shows whether text came before/after the tool call.)
