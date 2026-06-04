@@ -1,5 +1,13 @@
 # apollo
 
+## 1.2.0
+
+### Minor Changes
+
+- c3ebe8e: Update Job_chat to use a code edit tool. This fixes issues of empty
+  responses coming back from the model. It also changes the order in which text
+  and code are returned in streaming mode.
+
 ## 1.1.3
 
 ### Patch Changes
