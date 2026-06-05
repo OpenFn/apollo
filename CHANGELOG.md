@@ -1,5 +1,11 @@
 # apollo
 
+## 1.2.1
+
+### Patch Changes
+
+- Security updates
+
 ## 1.2.0
 
 ### Minor Changes
