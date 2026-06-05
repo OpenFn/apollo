@@ -26,6 +26,7 @@ from streaming_util import (
     STATUS_REVIEWING_CODE,
     STATUS_NEW_CODE,
     STATUS_WORKING,
+    STATUS_WRITING_CODE,
 )
 from models import resolve_model
 
@@ -58,6 +59,26 @@ _CODE_OUTPUT_SCHEMA = {
     },
     "required": ["code_edits", "text_answer"],
     "additionalProperties": False
+}
+
+_EDIT_TOOL = {
+    "name": "edit_job",
+    "description": (
+        "Apply one or more edits to the user's CURRENT job code. Call this ONLY when "
+        "the user wants their job changed — never to show an illustrative example "
+        "(put examples in your normal text reply instead). Pass ALL edits in a single "
+        "call via the `code_edits` array; they are applied in order, each operating on "
+        "the result of the previous one. Write your conversational reply as normal text "
+        "outside this tool call."
+    ),
+
+    "strict": True, # Structured outputs only used for code edits, not the entire model answer.
+    "input_schema": {
+        "type": "object",
+        "properties": {"code_edits": _CODE_OUTPUT_SCHEMA["properties"]["code_edits"]},
+        "required": ["code_edits"],
+        "additionalProperties": False,
+    },
 }
 
 
@@ -202,14 +223,14 @@ class AnthropicClient:
                         refresh_rag=refresh_rag
                         )
 
-            # Structured outputs for suggest_code mode, effort for all modes
-            if suggest_code:
-                output_config = {
-                    "format": {"type": "json_schema", "schema": _CODE_OUTPUT_SCHEMA},
-                    "effort": "medium"
-                }
-            else:
-                output_config = {"effort": "medium"}
+            # effort applies to all modes. For suggest_code we expose the `edit_job`
+            # tool. tool_choice stays "auto": the model answers in text
+            # and only calls the tool when it actually wants to change the job.
+            output_config = {"effort": "medium"}
+            tool_kwargs = (
+                {"tools": [_EDIT_TOOL], "tool_choice": {"type": "auto"}}
+                if suggest_code else {}
+            )
 
             with sentry_sdk.start_span(description="anthropic_api_call"):
                 if stream:
@@ -229,13 +250,18 @@ class AnthropicClient:
                         model=self.config.model,
                         system=system_message,
                         thinking={"type": "adaptive"},
-                        output_config=output_config
+                        output_config=output_config,
+                        **tool_kwargs
                     )
 
                     with self.client.messages.stream(**stream_kwargs) as stream_obj:
                         for event in stream_obj:
                             if event.type == "message_start":
                                 stream_manager.send_thinking(STATUS_WORKING)
+                            # The edit_job tool block starts after the text ends; its
+                            # input (the code) streams silently, so show a status here.
+                            elif event.type == "content_block_start" and getattr(getattr(event, "content_block", None), "type", None) == "tool_use":
+                                stream_manager.send_thinking(STATUS_WRITING_CODE)
                             accumulated_response, text_started, sent_length = self.process_stream_event(
                                 event,
                                 accumulated_response,
@@ -261,7 +287,8 @@ class AnthropicClient:
                     create_kwargs = dict(
                         max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message,
                         thinking={"type": "adaptive"},
-                        output_config=output_config
+                        output_config=output_config,
+                        **tool_kwargs
                     )
                     message = self.client.messages.create(**create_kwargs)
 
@@ -271,32 +298,45 @@ class AnthropicClient:
                 if message.usage.cache_read_input_tokens:
                     logger.info(f"Cache read: {message.usage.cache_read_input_tokens} tokens")
 
-            response_parts = []
+            # The model answers in normal text; it calls the `edit_job` tool only
+            # when it wants to change the user's job. So text = the reply, and the
+            # tool's parsed input carries the code edits (no JSON-in-text parsing).
+            text_parts = []
+            tool_code_edits = None
             for content_block in message.content:
-                if content_block.type == "text":
-                    response_parts.append(content_block.text)
+                if getattr(content_block, "type", None) == "tool_use" and getattr(content_block, "name", None) == "edit_job":
+                    tool_code_edits = (content_block.input or {}).get("code_edits") or []
+                elif getattr(content_block, "type", None) == "text":
+                    text_parts.append(content_block.text)
 
-            response = "\n\n".join(response_parts)
+            text_response = "\n\n".join(text_parts).strip()
+            suggested_code = None
+            diff = None
 
-            if suggest_code is True:
+            if suggest_code is True and tool_code_edits:
                 job_code = context.get("expression") if isinstance(context, dict) else None
+                if job_code:
+                    with sentry_sdk.start_span(description="apply_code_edits"):
+                        suggested_code, diff = self.apply_code_edits(
+                            content=content, text_answer=text_response,
+                            original_code=job_code, code_edits=tool_code_edits,
+                        )
+                # If the model called the tool but emitted no prose, give the user
+                # a short confirmation so the response isn't empty.
+                if not text_response and suggested_code:
+                    text_response = "I'll update your job code."
 
-                if getattr(self, "_stream_applied", False):
-                    # Streaming already applied edits — reuse instead of redoing the work
-                    try:
-                        text_response = json.loads(response).get("text_answer", "").strip()
-                    except (json.JSONDecodeError, ValueError):
-                        text_response = response
-                    suggested_code = self._stream_suggested_code
-                    diff = self._stream_diff
+            # Visibility: did the model call edit_job, and in what block order?
+            # (block order shows whether text came before/after the tool call.)
+            if suggest_code is True:
+                _blocks = [getattr(b, "type", "?") for b in message.content]
+                if tool_code_edits is None:
+                    logger.info("edit_job NOT called — text-only answer (blocks=%r)", _blocks)
                 else:
-                    with sentry_sdk.start_span(description="parse_and_apply_edits"):
-                        text_response, suggested_code, diff = self.parse_and_apply_edits(response=response, content=content, original_code=job_code)
-
-            else:
-                text_response = response
-                suggested_code = None
-                diff = None
+                    logger.info(
+                        "edit_job CALLED: %d edit(s), patches_applied=%s (blocks=%r)",
+                        len(tool_code_edits), (diff or {}).get("patches_applied"), _blocks,
+                    )
 
             # Add prefix to content when building history
             prefixed_content = add_page_prefix(content, current_page)
@@ -311,18 +351,31 @@ class AnthropicClient:
                 *[usage_data for usage_key, usage_data in retrieved_knowledge.get("usage", {}).items()]
             )
 
-            if not text_response:
-                stop_reason = getattr(message, "stop_reason", None)
-                empty_reason = "max_tokens" if stop_reason == "max_tokens" else "no_text_blocks"
+            stop_reason = getattr(message, "stop_reason", None)
+
+            # Check truncation BEFORE the empty check. max_tokens commonly leaves
+            # PARTIAL text behind (or partial/broken JSON in suggest_code mode);
+            # if we only inspected stop_reason when text_response is empty, that
+            # cut-off content would be returned as a normal success and the
+            # truncation signal lost. Surface it regardless of whether text came back.
+            if stop_reason == "max_tokens":
                 sentry_sdk.set_tag("stop_reason", stop_reason)
-                sentry_sdk.set_tag("empty_reason", empty_reason)
+                sentry_sdk.set_tag("empty_reason", "max_tokens")
                 sentry_sdk.set_context("empty_response", {
                     "service": "job_chat",
                     "suggest_code": bool(suggest_code),
                 })
                 stream_manager.end_stream()
-                if stop_reason == "max_tokens":
-                    raise ApolloError(502, "Response truncated", type="OUTPUT_TRUNCATED")
+                raise ApolloError(502, "Response truncated", type="OUTPUT_TRUNCATED")
+
+            if not text_response:
+                sentry_sdk.set_tag("stop_reason", stop_reason)
+                sentry_sdk.set_tag("empty_reason", "no_text_blocks")
+                sentry_sdk.set_context("empty_response", {
+                    "service": "job_chat",
+                    "suggest_code": bool(suggest_code),
+                })
+                stream_manager.end_stream()
                 raise ApolloError(502, "Model returned no usable text", type="EMPTY_OUTPUT")
 
             stream_manager.end_stream()
@@ -350,65 +403,14 @@ class AnthropicClient:
         """
         Process a single stream event from the Anthropic API.
 
-        With suggest_code, code_edits are generated first (buffered silently),
-        then a changes event is sent, and text_answer streams to the client.
+        The conversational reply is plain text now. Code edits arrive via the
+        `edit_job` tool call (as input_json_delta) and are applied from the final
+        message — not streamed here — so we simply forward text deltas live.
         """
-        if event.type == "content_block_delta":
-            if event.delta.type == "text_delta":
-                text_chunk = event.delta.text
-                accumulated_response += text_chunk
-
-                if suggest_code and not text_started:
-                    # Code edits phase: buffer silently until text_answer starts.
-                    # Tolerant of whitespace variants the model may emit.
-                    match = re.search(r'"text_answer"\s*:\s*"', accumulated_response)
-
-                    if match:
-                        # Extract code_edits from the JSON before the delimiter
-                        edits_part = accumulated_response[:match.start()]
-                        # Find the code_edits array value
-                        try:
-                            # Close the partial object and extract code_edits
-                            partial = edits_part.rstrip().rstrip(",") + "}"
-                            code_edits = json.loads(partial).get("code_edits", [])
-
-                            if original_code and code_edits:
-                                suggested_code, diff = self.apply_code_edits(
-                                    content=content or "",
-                                    text_answer="",
-                                    original_code=original_code,
-                                    code_edits=code_edits
-                                )
-                                self._stream_applied = True
-                                self._stream_suggested_code = suggested_code
-                                self._stream_diff = diff
-                                if suggested_code:
-                                    stream_manager.send_changes({"code": suggested_code})
-                                else:
-                                    stream_manager.send_changes({"code_edits": code_edits})
-                            elif code_edits:
-                                stream_manager.send_changes({"code_edits": code_edits})
-                        except (json.JSONDecodeError, ValueError):
-                            logger.warning(f"Failed to parse code_edits during streaming")
-
-                        # Mark where text content starts in the accumulated buffer
-                        sent_length = match.end()
-                        text_started = True
-
-                if suggest_code and text_started:
-                    # Text phase: stream with buffer to handle split escape sequences
-                    # Use 2-char buffer since longest escape is 2 chars (e.g. \n, \")
-                    buffer_size = 2
-                    safe_to_send_until = len(accumulated_response) - buffer_size
-
-                    if safe_to_send_until > sent_length:
-                        safe_text = accumulated_response[sent_length:safe_to_send_until]
-                        stream_manager.send_text(self._unescape_json_string(safe_text))
-                        sent_length = safe_to_send_until
-
-                elif not suggest_code:
-                    # Normal streaming for non-code suggestions
-                    stream_manager.send_text(text_chunk)
+        if event.type == "content_block_delta" and event.delta.type == "text_delta":
+            text_chunk = event.delta.text
+            accumulated_response += text_chunk
+            stream_manager.send_text(text_chunk)
 
         return accumulated_response, text_started, sent_length
 
@@ -532,25 +534,15 @@ class AnthropicClient:
                 full_code=full_code,
                 text_explanation=text_explanation
             )
-            correction_schema = {
-                "type": "object",
-                "properties": {
-                    "explanation": {"type": "string"},
-                    "corrected_old_code": {"type": "string"},
-                    "corrected_new_code": {"type": "string"}
-                },
-                "required": ["explanation", "corrected_old_code", "corrected_new_code"],
-                "additionalProperties": False
-            }
+            # structured outputs removed here too (see note in generate); the
+            # correction prompt already instructs the {explanation, corrected_*}
+            # JSON shape and json.loads below is wrapped in try/except.
             message = self.client.messages.create(
                 max_tokens=16384,
                 messages=prompt,
                 model=self.config.model,
                 system=system_message,
-                output_config={
-                    "format": {"type": "json_schema", "schema": correction_schema},
-                    "effort": "medium"
-                },
+                output_config={"effort": "medium"},
                 thinking={"type": "adaptive"}
             )
 

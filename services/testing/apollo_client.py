@@ -56,6 +56,14 @@ class ApolloClient:
                 text=True,
                 cwd=_SERVICES_DIR,
             )
+            # Forward the subprocess's stdout/stderr to the test runner so
+            # logger output from the service is visible under `pytest -s`.
+            # Without this, Python logs sink into the captured buffers and
+            # silently disappear on success.
+            if result.stdout:
+                sys.stdout.write(result.stdout)
+            if result.stderr:
+                sys.stderr.write(result.stderr)
             if result.returncode != 0:
                 raise RuntimeError(
                     f"{service_name} exited {result.returncode}.\n"
