@@ -1,6 +1,5 @@
-"""Prompt construction for the job_chat service."""
-
 import json
+import time
 import sentry_sdk
 from langfuse import observe
 from util import create_logger, ApolloError, AdaptorSpecifier, get_db_connection
@@ -119,9 +118,9 @@ fn(state => {
   return { ...state, data: { patients } };
 })
 post('/patients', dataValue('patients'));
-```
 </example>
 <example>
+```
 Example job code with the Salesforce adaptor:
 ```
 each(
@@ -148,7 +147,7 @@ create(
 );
 ```
 </example>
-</examples>
+<examples>
 </job writing guide>
 <workflow guide>
 A job is just one step in a workflow (or pipeline). Workflows are used
@@ -163,36 +162,73 @@ step by step. Focus on one bit at a time. For example, when uploading from CommC
 2. Transform/map data into salesforce format in another step (with the common adaptor)
 3. Upload the transformed data into salesforce in the final step
 </workflow guide>
-"""
 
-# Response contract, appended last in the system message.
-output_format = """
-<response_format>
-Reply to the user in normal text. Markdown is fine, including ```js fenced code
-blocks for illustrative examples. That text IS your answer — you do not need to
-call any tool just to talk, explain, or show an example.
+<output format>
+You must respond in JSON format with two fields:
 
-Call the `edit_job` tool ONLY when the user wants their CURRENT job code changed.
-When you do, pass ALL the edits in a SINGLE call via the `code_edits` array. Do
-NOT call `edit_job` to show an example — examples belong in your text reply. If the
-user only wants an explanation or to be shown something, just answer in text and
-do not call the tool.
+{
+  "code_edits": [],
+  "text_answer": "Your conversational response here"
+}
 
-Describe edits in the future tense ("I'll add X"), not the past ("I added X").
+"code_edits" are applied directly to the user's job code — a "rewrite", or a "replace" of the whole body, will overwrite whatever they currently have. So reach for code_edits when the user actually wants their job changed. When you're explaining, teaching, or showing an illustrative example that shouldn't disturb their current work, put the code inline in "text_answer" as a markdown code block instead. Judge from what the user is asking which they want — and if they clearly want the example in their job, edit it; if they just want to understand or see it, keep it inline.
+Use "text_answer" for all explanations, guidance, and conversation.
+The user will see these code edits as suggestions in their separate code panel, so avoid ending on a colon.
 
-Each item in `code_edits`:
-- {"action": "replace", "old_code": "<exact code to find>", "new_code": "<replacement>"}
-- {"action": "rewrite", "new_code": "<complete new code>"}
+Code edit actions:
+{
+  "action": "replace",
+  "old_code": "exact code to find and replace",
+  "new_code": "replacement code"
+}
+
+{
+  "action": "rewrite",
+  "new_code": "complete new code"
+}
 
 <code editing rules>
-- old_code must match the user's code EXACTLY, including all whitespace and indentation.
-- Edits apply sequentially — later edits work on the already-modified code.
-- If old_code isn't found exactly, the edit fails safely rather than corrupting the file.
-- To insert, replace an anchor with itself plus the new code.
-- INCLUDE AMPLE SURROUNDING CONTEXT in old_code so it matches a single, unique location
-  (comments, variable declarations, neighbouring lines). If in doubt, use "rewrite".
+- The old_code must match exactly, including all whitespace and indentation
+- Apply edits sequentially - later edits work on the already-modified code
+- If old_code is not found exactly, the edit will fail safely rather than corrupt the file
+
+To insert new code using replace:
+- Find a suitable insertion point and replace it with itself plus the new code
+- Example: To insert after "get('/patients');", replace it with "get('/patients');\n[new code here]"
+
+**IMPORTANT: INCLUDE CONTEXT TO AVOID DUPLICATE MATCHES**
+We will use literal string replacement to apply your changes. To avoid duplicate matches, you MUST:
+1. Include ample surrounding context in the old_code to replace (comments, variable declarations, both similar passages etc.)
+2. If in doubt, use "rewrite" action instead to rewrite the whole code
+
+**Output valid JSON strings**
+Your answer MUST be parsable with json.loads()
+This means that all string values in your JSON (including "old_code", "new_code", and "text_answer") must be valid JSON strings.  
+- Escape all newlines as \\n (one backslash followed by n)  
+- Escape all double quotes as \\"  (one backslash followed by double quotation mark)  
+- Do not include unescaped control characters in any string value.  
+- When you include code in a string, ensure it is a single line with \\n for line breaks.
+
+Example:
+{
+  "code_edits": [{
+    "action": "replace",
+    "old_code": "get('/patients');",
+    "new_code": "get('/patients');\\nfn(state => {\\n  if (!state.data) {\\n    throw new Error(\\\"No data received\\\");\\n  }\\n  return state;\\n});"
+  }],
+  "text_answer": "I'll add error handling after your GET request"
+}
+
+ALWAYS use \\n instead of actual newlines:
+THIS IS WRONG:
+"new_code": "function() {
+  return true;
+}"
+
+THIS IS CORRECT:
+"new_code": "function() {\\n  return true;\\n}"
 </code editing rules>
-</response_format>
+</output format>
 """
 
 error_correction_system_prompt = """
@@ -206,13 +242,13 @@ The correction system will look for your corrected_old_code in full_original_cod
 
 Context to use:
 You will be given relevant context under "Original edit details" below.
-This may include an explanation of attempted changes. Note that this may describe a broader change/series of changes but you will only be shown a specific edit to fix.
+This may include an explanation of attempted changes. Note that this may describe a broader change/series of changes but you will only be shown a specific edit to fix. 
 
 Common issues:
 1. "old_code not found" - the old_code doesn't exactly match what's in the file
   --> Look at the full code and find the closest matching section
 2. "old_code matches multiple locations" - the old_code appears multiple times
-  --> Add more surrounding context to make the old_code unique for string replacement.
+  --> Add more surrounding context to make the old_code unique for string replacement. 
       **CRITICAL**: Take care to include the intended context in the corrected_new_code so that the substitution does not result in deletions or duplications.
 3. "Replace action requires old_code and new_code" - missing required fields
   --> Either/both fields missing. Use the given context and full code to fill these.
@@ -229,13 +265,11 @@ Output JSON format:
   "corrected_new_code": "corrected new code"
 }
 
-**Output ONLY the JSON object**
-Your ENTIRE response must be a single JSON object and nothing else: no prose before
-or after it, no markdown code fences. The first character must be `{` and the last `}`.
-Your answer MUST be parsable with json.loads():
-- Escape all newlines as \\n (one backslash followed by n)
-- Escape all double quotes as \\"  (one backslash followed by double quotation mark)
-- Do not include unescaped control characters in any string value.
+**Output valid JSON strings**
+Your answer MUST be parsable with json.loads()
+- Escape all newlines as \\n (one backslash followed by n)  
+- Escape all double quotes as \\"  (one backslash followed by double quotation mark)  
+- Do not include unescaped control characters in any string value.  
 - When you include code in a string, ensure it is a single line with \\n for line breaks.
 
 ALWAYS use \\n instead of actual newlines:
@@ -349,9 +383,6 @@ and system information. When debugging, analyze these logs carefully to identify
 ```{context.log}```
 </run_logs>""")
 
-    # Output contract goes LAST so it is the final, most prominent instruction.
-    message.append(output_format)
-
     return list(map(lambda text: text if isinstance(text, dict) else {"type": "text", "text": text}, message))
 
 def format_search_results(search_results):
@@ -398,23 +429,15 @@ def build_prompt(content, history, context, rag=None, api_key=None, stream_manag
 
     prompt = []
     prompt.extend(history)
-    # Per-message reminder on the CURRENT turn only (the last thing the model
-    # reads). It is conditional by design — we do NOT want to force a tool call,
-    # only remind the model to route an actual code change through `edit_job`.
-    # Added only to the message sent to the model; the stored history (built in
-    # generate() from the raw content) omits it, so it never accumulates.
-    prompt.append({
-        "role": "user",
-        "content": f"{content}\n\nReply in text. If this requires changing the job code, also call the `edit_job` tool to apply the change.",
-    })
+    prompt.append({"role": "user", "content": content})
 
     return (system_message, prompt, retrieved_knowledge)
 
 def build_error_correction_prompt(content: str, error_message: str, old_code: str, new_code: str, full_code: str, text_explanation: str):
     """Build a prompt for correcting code edit errors."""
-
+    
     system_message = [{"type": "text", "text": error_correction_system_prompt}]
-
+    
     user_content = f"""A code edit failed with this error: "{error_message}"
 
 Original edit details:
@@ -428,7 +451,7 @@ Original edit details:
 ```
 
 Please provide corrected old_code and new_code that will successfully apply the intended change with string replacement."""
-
+    
     prompt = [{"role": "user", "content": user_content}]
     logger.info(f"prompt in full:\n{prompt}")
     return (system_message, prompt)
