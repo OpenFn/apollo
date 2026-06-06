@@ -12,17 +12,23 @@ calls instead.**
 
 - `bun dev` - Start hot-reloading development server (watches TypeScript files)
 - `bun start` - Start production server
-- `bun test` - Run TypeScript tests (uses `bun:test`, files in `platform/test/`)
 - `bun py <service> --input <input.json>` - Run Python service directly via
   entry.py (bypasses HTTP, same execution path as server)
 
 ### Python Dependencies
 
-- `poetry install` - Install main Python dependencies (creates `.venv` in
-  project)
-- `poetry install --with ft` - Also install finetuning dependencies (large
-  models)
+- `poetry install` - Install Python dependencies (creates in-project `.venv`)
 - `poetry add <module>` - Add a new Python dependency
+- `ruff check <path>` - Lint Python (ruff is a dev dependency); only lint files
+  you changed
+
+### Tests
+
+- `bun test` - TypeScript tests (`platform/test/`)
+- `poetry run pytest services/<service>/tests/` - Python service tests (run from
+  the repo root). Chat-agent suites split into `test_pass_fail.py` (strict
+  assertions) and `test_qualitative.py` (prints output for review); pass `-s` to
+  see it. These hit live LLM APIs and cost tokens.
 
 ## Architecture
 
@@ -67,6 +73,25 @@ Every mounted service gets three endpoints automatically:
 - `DictObj(dict)` - Dot-accessible dictionary wrapper
 - `AdaptorSpecifier(str)` - Parses adaptor strings like
   `"@openfn/language-http@3.1.11"` or `"http@3.1.11"`
+- `get_db_connection()` - psycopg2 connection from `POSTGRES_URL` (used by the
+  Postgres-backed adaptor-doc services)
+- `sum_usage(*usages)` - Aggregate Anthropic token/cache usage across calls
+- `add_page_prefix(content, page)` - Tag a message with `[pg:type/name/adaptor]`
+  for client-side navigation
+
+### Models (`services/models.py`)
+
+Central Claude model config. Use the `CLAUDE_OPUS` / `CLAUDE_SONNET` /
+`CLAUDE_HAIKU` constants or `resolve_model(alias)` rather than hardcoding model
+IDs anywhere. All chat/agent services use Anthropic; OpenAI is used **only** for
+embeddings (`OpenAIEmbeddings`).
+
+### Observability (`services/langfuse_util.py`)
+
+Langfuse tracing is initialised in `entry.py` and applied per-service with
+`@observe`. It is opt-in per request: `should_track(data_dict)` checks the
+`metrics_opt_in` flag on the payload. Keys: `LANGFUSE_SECRET_KEY`,
+`LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL`.
 
 ### Streaming (`services/streaming_util.py`)
 
@@ -87,21 +112,44 @@ SSE to clients.
 - `workflow_chat/` - AI chat service for generating and editing OpenFn workflow
   YAML. Preserves job code and IDs during edits, validates adaptors, and retries
   on parse failures. Streams responses.
-- `search_docsite/` - Searches OpenFn docs using Pinecone vector store (used by
-  job_chat and global_chat for dynamic context)
-- `embed_docsite/` - Indexes OpenFn documentation for search
-- `embeddings/` - Vector embeddings with Pinecone (production index:
-  "apollo-mappings")
-- `vocab_mapper/` - Maps medical vocabularies (LOINC/SNOMED) using embeddings
+- `doc_agent_chat/` - Agentic chat over a project's uploaded documents (RAG via
+  the `doc-agent` Pinecone index, one namespace per project).
+- `doc_agent_upload/` - Fetches and indexes project documents into the
+  `doc-agent` index under a `project-{id}` namespace.
+- `search_docsite/` - Semantic search over OpenFn docs (reads the `docsite`
+  Pinecone index; used by job_chat and global_chat for dynamic context).
+- `embed_docsite/` - Downloads and indexes the OpenFn docs into the `docsite`
+  index.
+- `load_adaptor_docs/` / `search_adaptor_docs/` - Parse adaptor function docs
+  into Postgres and query them back by version (Postgres-backed, not vector).
+- `latest_adaptors/` - Fetches the latest adaptor versions from the OpenFn repo.
+- `adaptor_apis/` - **TypeScript** service: produces a JSON schema of an
+  adaptor's API.
+- `vocab_mapper/` + `embeddings/` - Maps medical vocabularies (LOINC/SNOMED)
+  against the `apollo-mappings` Pinecone index (collections `loinc-mappings-v2`,
+  `snomed-mappings`). `embed_loinc_dataset` / `embed_snomed_dataset` populate it.
+- `status/` - Health check: validates Anthropic, OpenAI and Pinecone keys.
 - `echo/` - Test service that returns its input; useful for verifying the server
-  pipeline
+  pipeline.
+
+Note: there are **three distinct Pinecone indexes** — `docsite` (OpenFn docs),
+`doc-agent` (user uploads, per-project namespaces), and `apollo-mappings`
+(medical vocab only). They are not interchangeable.
+
+### Testing (`services/testing/`)
+
+Shared acceptance-test harness (YAML specs, LLM-as-judge, an Apollo client
+stub), used by the chat-agent test suites. Not a mounted service (it has no
+`testing.py` index file).
 
 ### Environment
 
 - **Python 3.11 exactly** (recommend asdf with python plugin)
 - **Poetry** with in-project `.venv` (configured in `poetry.toml`)
-- **`.env` file** at root for API keys (OpenAI, Pinecone, Sentry DSN,
-  POSTGRES_URL)
-- **Sentry** integration in entry.py with environment-based trace sampling
-- **Vector store**: Pinecone index "apollo-mappings" with namespace-based
-  collections
+- **`.env` file** at root for API keys (OpenAI, Anthropic, Pinecone, Postgres,
+  Sentry DSN, Langfuse) — see `.env.example`
+- **Sentry** + **Langfuse** integration in entry.py (Sentry trace sampling is
+  environment-based; Langfuse is opt-in per request via `metrics_opt_in`)
+- **Vector store**: Pinecone, with three separate indexes (`docsite`,
+  `doc-agent`, `apollo-mappings`) — see Key Python Services above. Embeddings are
+  generated with OpenAI.

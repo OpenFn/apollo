@@ -9,7 +9,7 @@ This repo contains:
 
 - A bunjs-based webserver
 - A number of python-based AI services
-- (soon) A numberof Typescript-based data services
+- A number of Typescript-based data services
 
 ## Requirements
 
@@ -52,8 +52,8 @@ is set up on your machine, you may need to add these env vars to your `.bashrc`
 (or whatever you use):
 
 ```
-export BUN_INSTALL= "$HOME/.bun"
-export PATH= "$BUN_INSTALL/bin:$PATH"
+export BUN_INSTALL="$HOME/.bun"
+export PATH="$BUN_INSTALL/bin:$PATH"
 ```
 
 ## Bun installation
@@ -62,16 +62,16 @@ Bun does not require an installation, like npm does. You can run `bun start`
 right after cloning the repo.
 
 Bun will then install dependencies against the global cache on your machine.
-This still uses package.lock.
+This still uses the lockfile (`bun.lockb`).
 
-To update a module version, run `bun add <module>@version>`, which will update
+To update a module version, run `bun add <module>@<version>`, which will update
 your lockfile.
 
-One drawback of this is that there is no intelliense, because IDEs rely on
+One drawback of this is that there is no intellisense, because IDEs rely on
 node_modules to load d.ts files. You are welcome to run `bun install` to run
 from a node_modules. None of this affects python.
 
-See [bun auto-install]() for more details.
+See [bun's install docs](https://bun.sh/docs/cli/install) for more details.
 
 ## Python Setup
 
@@ -83,11 +83,11 @@ you run `poetry install`.
 All python is invoked through `entry.py`, which loads the environment properly
 so that relative imports work.
 
-You can invoke entry.py directly (ie, without HTTP or any intermedia js) through
-bun from the root:
+You can invoke entry.py directly (ie, without HTTP or any intermediate js)
+through bun from the root:
 
 ```
-bun py echo tmp/payload.json
+bun py echo --input tmp/payload.json
 ```
 
 ## CLI
@@ -112,7 +112,7 @@ export OPENFN_APOLLO_DEFAULT_ENV=local
 Or pass an explicit URL if you're not running on the default port:
 
 ```
-export OPENFN_APOLLO_DEFAULT_ENV=http://locahost:6666
+export OPENFN_APOLLO_DEFAULT_ENV=http://localhost:6666
 ```
 
 Output will be shown in stdout by default. Pass `-o path/to/output/.json` to
@@ -124,8 +124,8 @@ You can get more help with:
 openfn apollo help
 ```
 
-Note that if a service returns `{ files: {} }` object in the payload, an you
-pass `-o` with a folder, those files will be written to disk .
+Note that if a service returns a `{ files: {} }` object in the payload, and you
+pass `-o` with a folder, those files will be written to disk.
 
 ## API Keys & Env vars
 
@@ -135,7 +135,7 @@ Rather than coding these into your JSON payloads directly, keys can be loaded
 from the `.env` file at the root.
 
 Also note that `tmp` dirs are untracked, so if you do want to store credentials
-in your json, keep in inside a tmp dir and it'll remain safe and secret.
+in your json, keep it inside a tmp dir and it'll remain safe and secret.
 
 ## Server Architecture
 
@@ -144,7 +144,7 @@ The Apollo server uses bunjs with the Elysia framework.
 It is a very lightweight server, with at the time of writing no authentication
 or governance included.
 
-Python services are hosted at `/services/<name>`. Each services expects a POST
+Python services are hosted at `/services/<name>`. Each service expects a POST
 request with a JSON body, and will return JSON.
 
 There is very little standard for formality in the JSON structures to date. The
@@ -176,10 +176,10 @@ Websockets use the following events:
 `complete`: sent by the server when the python script has completed. The result
 is a JSON payload in the `data` key.
 
-`log`: send by the server whenever a `print()` line is logged by the python
-process.
+`log`: sent by the server whenever the python process logs a line through a
+logger object.
 
-Note that `print()` statements do not get send out to the web socket, as these
+Note that `print()` statements do not get sent out to the web socket, as these
 are intended for local debugging. Only logs from a logger object are diverted.
 
 ## Docker
