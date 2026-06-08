@@ -14,7 +14,7 @@ openai = "^1.23.3"
 python-dotenv = "^1.2.2"
 anthropic = "^0.85.0"
 
-langchain-pinecone = "0.2.2"
+langchain-pinecone = "^0.2.13"
 langchain-community = "^0.3.27"
 langchain-openai = "^0.3.1"
 nltk = "^3.9.3"
