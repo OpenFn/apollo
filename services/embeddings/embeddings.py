@@ -4,7 +4,7 @@ from dataclasses import dataclass, asdict
 import warnings
 from dotenv import load_dotenv
 from langchain_community.vectorstores import Zilliz
-from langchain_pinecone import Pinecone
+from langchain_pinecone import PineconeVectorStore
 from langchain_openai import OpenAIEmbeddings
 
 @dataclass
@@ -44,7 +44,7 @@ class VectorStore:
     }
     VECTORSTORE_CLASSES = {
         'zilliz': Zilliz,
-        'pinecone': Pinecone
+        'pinecone': PineconeVectorStore
     }
 
     def __init__(self, collection_name='LangChainCollection', vectorstore_type='zilliz', 
