@@ -18,7 +18,7 @@ langchain-pinecone = "^0.2.13"
 langchain-community = "^0.3.27"
 langchain-openai = "^0.3.1"
 nltk = "^3.9.3"
-pytest = "^8.4.1"
+pytest = "^9.0.3"
 sentry-sdk = "^2.35.0"
 psycopg2-binary = "^2.9.10"
 langfuse = "^4.0.1"
@@ -29,7 +29,7 @@ opentelemetry-instrumentation-threading = "0.61b0"
 optional = false
 
 [tool.poetry.group.dev.dependencies]
-pytest = "^8.3.4"
+pytest = "^9.0.3"
 ruff = "^0.15.10"
 
 [build-system]
