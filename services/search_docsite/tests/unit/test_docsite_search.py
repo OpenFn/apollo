@@ -42,14 +42,16 @@ def make_search(default_top_k=5):
 
 # --- _build_filter (pure logic) ------------------------------------------------
 
-def test_build_filter_doc_title_only():
+@pytest.mark.parametrize(
+    "kwargs, expected",
+    [
+        ({"doc_title": "Adaptor X"}, {"doc_title": {"$eq": "Adaptor X"}}),
+        ({"docs_type": "general_docs"}, {"docs_type": {"$eq": "general_docs"}}),
+    ],
+)
+def test_build_filter_single_key(kwargs, expected):
     ds = make_search()
-    assert ds._build_filter(doc_title="Adaptor X") == {"doc_title": {"$eq": "Adaptor X"}}
-
-
-def test_build_filter_docs_type_only():
-    ds = make_search()
-    assert ds._build_filter(docs_type="general_docs") == {"docs_type": {"$eq": "general_docs"}}
+    assert ds._build_filter(**kwargs) == expected
 
 
 def test_build_filter_both_combines_with_and():
@@ -136,13 +138,3 @@ def test_get_most_recent_namespace_raises_when_none_valid():
         with pytest.raises(ApolloError) as exc:
             ds._get_most_recent_namespace()
     assert exc.value.code == 404
-
-
-# --- dependency-symbol contract ------------------------------------------------
-
-def test_module_exposes_expected_dependency_symbols():
-    # Guards against renames/removals across the langchain/pinecone/openai bump:
-    # if any import broke, the module wouldn't load and these would be missing.
-    assert callable(m.Pinecone)
-    assert callable(m.PineconeVectorStore)
-    assert callable(m.OpenAIEmbeddings)

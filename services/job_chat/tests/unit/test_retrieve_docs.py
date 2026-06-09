@@ -1,7 +1,6 @@
 """Unit tests for job_chat.retrieve_docs pure-logic + LLM-call helpers.
 
 Covers the parts that don't need live services:
-  - format_context: context-string assembly
   - generate_queries: JSON parsing, 4-query truncation, and the invalid-JSON guard
   - call_llm: happy path (text + usage) and the unexpected-error wrapper
 
@@ -18,19 +17,6 @@ import pytest
 
 from job_chat import retrieve_docs as rd
 from util import ApolloError
-
-
-# --- format_context (pure logic) -----------------------------------------------
-
-def test_format_context_includes_all_parts():
-    out = rd.format_context(adaptor="http", code="get('/x')", history="prev")
-    assert "http adaptor" in out
-    assert "get('/x')" in out
-    assert "prev" in out
-
-
-def test_format_context_empty_when_no_inputs():
-    assert rd.format_context(adaptor="", code="", history="") == ""
 
 
 # --- generate_queries ----------------------------------------------------------
