@@ -132,6 +132,11 @@ class AnthropicClient:
         if not self.api_key:
             raise ValueError("API key must be provided")
         self.client = Anthropic(api_key=self.api_key)
+        # Holds the finalized YAML sent in the streaming `changes` event. The
+        # final response reuses this exact string rather than finalizing again,
+        # so restore_components runs once and new-component UUIDs stay identical
+        # between the streamed preview and the persisted payload.
+        self._streamed_yaml = None
 
     @staticmethod
     def _unescape_json_string(text):
@@ -205,6 +210,8 @@ class AnthropicClient:
 
             max_retries = 1
             for attempt in range(max_retries + 1):
+                # Reset per attempt so a retry never reuses a prior stream's YAML
+                self._streamed_yaml = None
                 with sentry_sdk.start_span(description="anthropic_api_call"):
                     if stream:
                         logger.info("Making streaming API call")
@@ -231,7 +238,8 @@ class AnthropicClient:
                                     accumulated_response,
                                     text_started,
                                     sent_length,
-                                    stream_manager
+                                    stream_manager,
+                                    preserved_values
                                 )
                         message = stream_obj.get_final_message()
 
@@ -393,6 +401,24 @@ class AnthropicClient:
             
             yaml_data["edges"] = sanitized_edges
 
+    def finalize_yaml(self, parsed_yaml, preserved_values=None):
+        """
+        Apply the full post-processing pipeline to a parsed workflow dict and
+        return the YAML string: validate adaptors, sanitize names, and restore
+        preserved IDs/code (placeholders -> real values, or new UUIDs).
+
+        This MUST run before the YAML leaves the service. Both the streaming
+        `changes` event and the final response carry the output of this method,
+        never the raw __ID_*__ / __CODE_BLOCK_*__ placeholder tokens.
+        """
+        with sentry_sdk.start_span(description="validate_adaptors"):
+            self.validate_adaptors(parsed_yaml)
+        with sentry_sdk.start_span(description="sanitize_job_names"):
+            self.sanitize_job_names(parsed_yaml)
+        with sentry_sdk.start_span(description="restore_components"):
+            self.restore_components(parsed_yaml, preserved_values)
+        return yaml.dump(parsed_yaml, sort_keys=False)
+
     def split_format_yaml(self, response, preserved_values=None, stream_manager=None):
         """Split text and YAML in response and format the YAML."""
         output_text, output_yaml = "", None
@@ -406,27 +432,26 @@ class AnthropicClient:
             raw_yaml = response_data.get("yaml") or ""
 
             if raw_yaml and raw_yaml.strip():
-                if stream_manager:
-                    stream_manager.send_thinking("Formatting workflow...", signature="proxy_formatting_signature")
-                # Parse YAML string into Python object (separate try/except
-                # so bad yaml can't leak through to the response)
-                try:
-                    parsed_yaml = yaml.safe_load(raw_yaml)
+                if self._streamed_yaml is not None:
+                    # Reuse the YAML already finalized and sent in the streaming
+                    # `changes` event so the preview and the persisted payload
+                    # are byte-identical (new-component UUIDs can't diverge).
+                    output_yaml = self._streamed_yaml
+                else:
+                    if stream_manager:
+                        stream_manager.send_thinking("Formatting workflow...", signature="proxy_formatting_signature")
+                    # Parse YAML string into Python object (separate try/except
+                    # so bad yaml can't leak through to the response)
+                    try:
+                        parsed_yaml = yaml.safe_load(raw_yaml)
 
-                    if isinstance(parsed_yaml, dict):
-                        with sentry_sdk.start_span(description="validate_adaptors"):
-                            self.validate_adaptors(parsed_yaml)
-                        with sentry_sdk.start_span(description="sanitize_job_names"):
-                            self.sanitize_job_names(parsed_yaml)
-                        with sentry_sdk.start_span(description="restore_components"):
-                            self.restore_components(parsed_yaml, preserved_values)
-                        # Convert back to YAML string with preserved order
-                        output_yaml = yaml.dump(parsed_yaml, sort_keys=False)
-                    else:
+                        if isinstance(parsed_yaml, dict):
+                            output_yaml = self.finalize_yaml(parsed_yaml, preserved_values)
+                        else:
+                            output_yaml = ""
+                    except Exception as e:
+                        logger.warning(f"YAML parsing failed, discarding yaml content: {e}")
                         output_yaml = ""
-                except Exception as e:
-                    logger.warning(f"YAML parsing failed, discarding yaml content: {e}")
-                    output_yaml = ""
             else:
                 output_yaml = ""
 
@@ -555,12 +580,14 @@ class AnthropicClient:
                 else:
                     edge_data["id"] = str(uuid.uuid4())
 
-    def process_stream_event(self, event, accumulated_response, text_started, sent_length, stream_manager):
+    def process_stream_event(self, event, accumulated_response, text_started, sent_length, stream_manager, preserved_values=None):
         """
         Process a single stream event from the Anthropic API.
 
-        YAML is generated first (buffered silently), then a changes event
-        is sent, and the text explanation streams to the client.
+        YAML is generated first (buffered silently), then finalized (IDs/code
+        restored) and sent as a changes event, and the text explanation streams
+        to the client. The finalized YAML is cached so the final response reuses
+        it rather than restoring a second time.
         """
         if event.type == "content_block_delta":
             if event.delta.type == "text_delta":
@@ -582,11 +609,16 @@ class AnthropicClient:
                             yaml_value = None
 
                         if yaml_value:
-                            # Only send changes if the content is actually valid YAML (a dict)
+                            # Finalize before sending so the streamed preview carries
+                            # real IDs/code, not raw placeholders. Cache it so the final
+                            # response reuses the identical YAML. Only send if the content
+                            # is actually valid YAML (a dict).
                             try:
                                 parsed = yaml.safe_load(yaml_value)
                                 if isinstance(parsed, dict):
-                                    stream_manager.send_changes({"yaml": yaml_value})
+                                    restored_yaml = self.finalize_yaml(parsed, preserved_values)
+                                    self._streamed_yaml = restored_yaml
+                                    stream_manager.send_changes({"yaml": restored_yaml})
                             except Exception:
                                 pass  # Invalid YAML, skip changes event
 

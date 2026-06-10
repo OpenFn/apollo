@@ -10,26 +10,28 @@ requires-poetry = ">=2.3.2"
 
 [tool.poetry.dependencies]
 python = "3.11.*"
-openai = "^1.23.3"
+openai = "^2.26"
 python-dotenv = "^1.2.2"
-anthropic = "^0.85.0"
+anthropic = "^0.107.1"
 
-langchain-pinecone = "0.2.2"
-langchain-community = "^0.3.27"
-langchain-openai = "^0.3.1"
+langchain-pinecone = "^0.2.13"
+langchain-core = "^1.4"
+langchain-community = "^0.4.2"
+langchain-openai = "^1.2"
+langchain-text-splitters = "^1.1"
 nltk = "^3.9.3"
-pytest = "^8.4.1"
+pytest = "^9.0.3"
 sentry-sdk = "^2.35.0"
 psycopg2-binary = "^2.9.10"
 langfuse = "^4.0.1"
-opentelemetry-instrumentation-anthropic = "^0.53.3"
+opentelemetry-instrumentation-anthropic = "^0.61.0"
 opentelemetry-instrumentation-threading = "0.61b0"
 
 [tool.poetry.group.dev]
 optional = false
 
 [tool.poetry.group.dev.dependencies]
-pytest = "^8.3.4"
+pytest = "^9.0.3"
 ruff = "^0.15.10"
 
 [build-system]
@@ -46,6 +48,7 @@ testpaths = [
     "services/global_chat/tests",
     "services/workflow_chat/tests",
     "services/job_chat/tests",
+    "services/search_docsite/tests",
     "services/tools",
 ]
 

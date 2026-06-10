@@ -1,5 +1,15 @@
 # apollo
 
+## 1.3.0
+
+### Minor Changes
+
+- 08f4c2a: update dependencies
+
+### Patch Changes
+
+- workflow_chat: Fix an issue where placeholder ids can be sent to lightning
+
 ## 1.2.1
 
 ### Patch Changes
