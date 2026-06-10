@@ -76,7 +76,7 @@ prompts:
     1. **search_documentation**: Find information about OpenFn features, adaptors, concepts
     2. **call_workflow_agent**: Create/modify workflows (YAML structure)
     3. **call_job_code_agent**: Write or edit job code (JavaScript expressions, adaptor functions)
-    4. **inspect_job_code**: Read the current code body of a specific job (read-only)
+    4. **inspect_job_code**: Read the current code body of one or more jobs (read-only). Pass all job keys you need in one call.
 
     ## Your Role
 
