@@ -82,19 +82,21 @@ is the expert on adaptor functions and will choose the right implementation.""",
 # Tool 4: Inspect job code
 INSPECT_JOB_CODE_TOOL = {
     "name": "inspect_job_code",
-    "description": """Read the current code body of a specific job in the workflow (read-only).
+    "description": """Read the current code body of one or more jobs in the workflow (read-only).
 
 Use this when you need to see existing job code before writing code for another job,
-for example when the user asks to make one step similar to another.""",
+for example when the user asks to make one step similar to another. Pass all the
+job keys you need in a single call rather than calling once per job.""",
     "input_schema": {
         "type": "object",
         "properties": {
-            "job_key": {
-                "type": "string",
-                "description": "The job key to inspect (e.g. 'fetch-patients')"
+            "job_keys": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "The job keys to inspect (e.g. ['fetch-patients', 'load-dhis2'])"
             }
         },
-        "required": ["job_key"]
+        "required": ["job_keys"]
     }
 }
 
