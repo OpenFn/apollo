@@ -1,5 +1,0 @@
----
-"apollo": minor
----
-
-update dependencies
