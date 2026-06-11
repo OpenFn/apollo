@@ -22,9 +22,11 @@ class Agent:
         if not self.api_key:
             raise ValueError("API key must be provided")
 
-        self.client = Anthropic(api_key=self.api_key)
-        self.model = resolve_model(config.get("model", "claude-sonnet"))
-        self.max_tokens = config.get("max_tokens", 16384)
+        # Explicit timeout: with max_tokens > ~21k the SDK refuses
+        # non-streaming requests unless a timeout is set.
+        self.client = Anthropic(api_key=self.api_key, timeout=600.0)
+        self.model = resolve_model(config.get("model", "claude-fable"))
+        self.max_tokens = config.get("max_tokens", 49152)
         self.max_tool_calls = config.get("max_tool_calls", 10)
         self.search_top_k = config.get("search_top_k", 5)
         self.search_threshold = config.get("search_threshold", 0.7)

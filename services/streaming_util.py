@@ -11,7 +11,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from models import CLAUDE_SONNET
+from models import CLAUDE_FABLE
 
 # Shared status message pools for user-facing progress indicators.
 # Services compose from these to build context-specific pools.
@@ -105,7 +105,7 @@ class StreamManager:
         manager.end_stream()
     """
 
-    def __init__(self, model: str = CLAUDE_SONNET, stream: bool = True):
+    def __init__(self, model: str = CLAUDE_FABLE, stream: bool = True):
         """
         Initialize the stream manager.
 

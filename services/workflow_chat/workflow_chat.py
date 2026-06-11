@@ -12,7 +12,7 @@ _dir = os.path.dirname(os.path.abspath(__file__))
 with open(os.path.join(_dir, "gen_project_config.yaml")) as _f:
     _service_config = yaml.safe_load(_f)
 
-_MODEL = resolve_model(_service_config.get("model", "claude-sonnet"))
+_MODEL = resolve_model(_service_config.get("model", "claude-fable"))
 
 # JSON schema for structured outputs — guarantees valid JSON from the API
 _OUTPUT_SCHEMA = {
@@ -113,7 +113,7 @@ class Payload:
 @dataclass
 class ChatConfig:
     model: str = _MODEL
-    max_tokens: int = 16384
+    max_tokens: int = 49152
     api_key: Optional[str] = None
 
 
@@ -131,7 +131,9 @@ class AnthropicClient:
         self.api_key = self.config.api_key or os.getenv("ANTHROPIC_API_KEY")
         if not self.api_key:
             raise ValueError("API key must be provided")
-        self.client = Anthropic(api_key=self.api_key)
+        # Explicit timeout: with max_tokens > ~21k the SDK refuses
+        # non-streaming requests unless a timeout is set.
+        self.client = Anthropic(api_key=self.api_key, timeout=600.0)
         # Holds the finalized YAML sent in the streaming `changes` event. The
         # final response reuses this exact string rather than finalizing again,
         # so restore_components runs once and new-component UUIDs stay identical

@@ -55,13 +55,14 @@ class PlannerAgent:
         if not self.api_key:
             raise ApolloError(500, "ANTHROPIC_API_KEY not found")
 
-        self.client = Anthropic(api_key=self.api_key)
+        # Explicit timeout: with max_tokens > ~21k the SDK refuses
+        # non-streaming requests unless a timeout is set.
+        self.client = Anthropic(api_key=self.api_key, timeout=600.0)
         self.tools = TOOL_DEFINITIONS
 
         planner_config = config_loader.config.get("planner", {})
-        self.model = resolve_model(planner_config.get("model", "claude-sonnet"))
-        self.max_tokens = planner_config.get("max_tokens", 8192)
-        self.temperature = planner_config.get("temperature", 1.0)
+        self.model = resolve_model(planner_config.get("model", "claude-fable"))
+        self.max_tokens = planner_config.get("max_tokens", 24576)
         self.max_tool_calls = planner_config.get("max_tool_calls", 20)
 
         self.current_yaml: Optional[str] = None
@@ -285,6 +286,7 @@ class PlannerAgent:
                 messages=messages,
                 tools=self.tools,
                 thinking={"type": "adaptive"},
+                output_config={"effort": "medium"},
             ) as stream_obj:
                 for event in stream_obj:
                     if event.type == "content_block_delta":
@@ -299,7 +301,7 @@ class PlannerAgent:
                 messages=messages,
                 tools=self.tools,
                 thinking={"type": "adaptive"},
-                output_config={"effort": "high"},
+                output_config={"effort": "medium"},
                 betas=["context-management-2025-06-27"],
                 context_management={
                     "edits": [
