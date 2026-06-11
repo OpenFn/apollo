@@ -34,11 +34,11 @@ from typing import Optional
 
 from anthropic import Anthropic
 
-from models import CLAUDE_SONNET
+from models import CLAUDE_FABLE
 from testing.judges import load_judge
 
 
-DEFAULT_MODEL = CLAUDE_SONNET
+DEFAULT_MODEL = CLAUDE_FABLE
 DEFAULT_JUDGE = "general"
 
 
@@ -277,7 +277,7 @@ def evaluate(
             guessing.
         judge: Name of the judge (file at services/testing/judges/<name>.md).
             Defaults to "general".
-        model: Model to use. Defaults to CLAUDE_SONNET from services/models.py.
+        model: Model to use. Defaults to CLAUDE_FABLE from services/models.py.
         client: Optional Anthropic client. Constructed from env if not given.
 
     Returns:
@@ -298,14 +298,16 @@ def evaluate(
 
     response = client.messages.create(
         model=model,
-        max_tokens=4096,
+        max_tokens=8192,
         system=system_prompt,
         messages=[
             {"role": "user", "content": user_prompt},
         ],
     )
 
-    raw_text = response.content[0].text
+    # First text block, not content[0]: Fable always thinks, so the
+    # response may lead with a thinking block.
+    raw_text = next((b.text for b in response.content if b.type == "text"), "")
     usage = {
         "input_tokens": response.usage.input_tokens,
         "output_tokens": response.usage.output_tokens,
