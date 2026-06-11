@@ -12,7 +12,7 @@ _dir = os.path.dirname(os.path.abspath(__file__))
 with open(os.path.join(_dir, "gen_project_config.yaml")) as _f:
     _service_config = yaml.safe_load(_f)
 
-_MODEL = resolve_model(_service_config.get("model", "claude-sonnet"))
+_MODEL = resolve_model(_service_config.get("model", "claude-fable"))
 
 # JSON schema for structured outputs — guarantees valid JSON from the API
 _OUTPUT_SCHEMA = {
@@ -29,6 +29,7 @@ _OUTPUT_SCHEMA = {
     "required": ["yaml", "text"],
     "additionalProperties": False
 }
+import httpx
 from anthropic import (
     Anthropic,
     APIConnectionError,
@@ -113,7 +114,7 @@ class Payload:
 @dataclass
 class ChatConfig:
     model: str = _MODEL
-    max_tokens: int = 16384
+    max_tokens: int = 49152
     api_key: Optional[str] = None
 
 
@@ -256,7 +257,11 @@ class AnthropicClient:
                         message = self.client.messages.create(
                             max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message,
                             output_config=output_config,
-                            thinking={"type": "adaptive"}
+                            thinking={"type": "adaptive"},
+                            # Per-request timeout (same values as the SDK default):
+                            # required for non-streaming calls with max_tokens > ~21k,
+                            # which the SDK otherwise rejects.
+                            timeout=httpx.Timeout(600.0, connect=5.0),
                         )
 
                 # Track usage from this attempt

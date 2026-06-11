@@ -1,5 +1,11 @@
 # apollo
 
+## 1.3.1
+
+### Patch Changes
+
+- Use Anthropic Fable in chat assistants
+
 ## 1.3.0
 
 ### Minor Changes
