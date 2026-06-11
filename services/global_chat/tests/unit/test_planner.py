@@ -83,6 +83,49 @@ def test_workflow_agent_failure_returns_error_tool_result() -> None:
     assert planner.yaml_modified is False
 
 
+def test_job_code_without_matched_key_is_reported_as_not_stitched() -> None:
+    planner = make_planner()
+    block = FakeToolUse("call_job_code_agent", {"message": "write code"})  # no job_key
+    subagent_result = {"response": "done", "suggested_code": "newCode();", "usage": empty_usage()}
+
+    with patch("global_chat.planner.call_job_agent", return_value=subagent_result):
+        result = planner._execute_tool(block, empty_usage(), [])
+
+    assert "NOT added to the workflow" in result
+    assert "stitched into the workflow" not in result
+    assert planner.current_yaml == WORKFLOW_YAML
+    assert planner.yaml_modified is False
+
+
+def test_workflow_agent_yaml_response_updates_structure_view() -> None:
+    planner = make_planner()
+    block = FakeToolUse("call_workflow_agent", {"message": "add a step"})
+    new_yaml = WORKFLOW_YAML + "  new-step:\n    name: New Step\n    body: '// Add operations here'\n"
+    subagent_result = {"response": "Added the step.", "response_yaml": new_yaml, "usage": empty_usage()}
+
+    with patch("global_chat.planner.call_workflow_agent", return_value=subagent_result):
+        result = planner._execute_tool(block, empty_usage(), [])
+
+    assert "Updated workflow structure:" in result
+    assert "new-step" in result
+    assert planner.current_yaml == new_yaml
+    assert planner.yaml_modified is True
+
+
+def test_workflow_agent_without_yaml_reports_no_change() -> None:
+    planner = make_planner()
+    block = FakeToolUse("call_workflow_agent", {"message": "add a step"})
+    subagent_result = {"response": "Which DHIS2 instance?", "response_yaml": None, "usage": empty_usage()}
+
+    with patch("global_chat.planner.call_workflow_agent", return_value=subagent_result):
+        result = planner._execute_tool(block, empty_usage(), [])
+
+    assert "[No workflow changes were made — no YAML was produced.]" in result
+    assert "Updated workflow structure:" not in result
+    assert planner.current_yaml == WORKFLOW_YAML
+    assert planner.yaml_modified is False
+
+
 def test_parallel_job_agent_failure_keeps_sibling_results() -> None:
     planner = make_planner()
     blocks = [
