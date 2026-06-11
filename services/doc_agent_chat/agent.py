@@ -1,5 +1,6 @@
 import os
 from typing import List, Dict, Any, Optional
+import httpx
 from anthropic import Anthropic
 from util import create_logger
 from doc_agent_chat.doc_search import DocSearch
@@ -22,9 +23,7 @@ class Agent:
         if not self.api_key:
             raise ValueError("API key must be provided")
 
-        # Explicit timeout: with max_tokens > ~21k the SDK refuses
-        # non-streaming requests unless a timeout is set.
-        self.client = Anthropic(api_key=self.api_key, timeout=600.0)
+        self.client = Anthropic(api_key=self.api_key)
         self.model = resolve_model(config.get("model", "claude-fable"))
         self.max_tokens = config.get("max_tokens", 49152)
         self.max_tool_calls = config.get("max_tool_calls", 10)
@@ -65,7 +64,11 @@ class Agent:
                 max_tokens=self.max_tokens,
                 system=system_prompt,
                 messages=messages,
-                tools=TOOL_DEFINITIONS
+                tools=TOOL_DEFINITIONS,
+                # Per-request timeout (same values as the SDK default):
+                # required for non-streaming calls with max_tokens > ~21k,
+                # which the SDK otherwise rejects.
+                timeout=httpx.Timeout(600.0, connect=5.0),
             )
 
             if hasattr(response, "usage"):

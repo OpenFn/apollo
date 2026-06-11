@@ -4,6 +4,7 @@ import re
 import yaml
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
+import httpx
 from anthropic import (
     Anthropic,
     APIConnectionError,
@@ -157,9 +158,7 @@ class AnthropicClient:
         self.api_key = self.config.api_key or os.getenv("ANTHROPIC_API_KEY")
         if not self.api_key:
             raise ValueError("API key must be provided")
-        # Explicit timeout: with max_tokens > ~21k the SDK refuses
-        # non-streaming requests unless a timeout is set.
-        self.client = Anthropic(api_key=self.api_key, timeout=600.0)
+        self.client = Anthropic(api_key=self.api_key)
 
     @staticmethod
     def _unescape_json_string(text):
@@ -290,6 +289,10 @@ class AnthropicClient:
                         max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message,
                         thinking={"type": "adaptive"},
                         output_config=output_config,
+                        # Per-request timeout (same values as the SDK default):
+                        # required for non-streaming calls with max_tokens > ~21k,
+                        # which the SDK otherwise rejects.
+                        timeout=httpx.Timeout(600.0, connect=5.0),
                         **tool_kwargs
                     )
                     message = self.client.messages.create(**create_kwargs)

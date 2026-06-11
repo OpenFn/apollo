@@ -6,6 +6,7 @@ import os
 from typing import List, Dict, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+import httpx
 from anthropic import Anthropic
 import sentry_sdk
 
@@ -55,9 +56,7 @@ class PlannerAgent:
         if not self.api_key:
             raise ApolloError(500, "ANTHROPIC_API_KEY not found")
 
-        # Explicit timeout: with max_tokens > ~21k the SDK refuses
-        # non-streaming requests unless a timeout is set.
-        self.client = Anthropic(api_key=self.api_key, timeout=600.0)
+        self.client = Anthropic(api_key=self.api_key)
         self.tools = TOOL_DEFINITIONS
 
         planner_config = config_loader.config.get("planner", {})
@@ -302,6 +301,10 @@ class PlannerAgent:
                 tools=self.tools,
                 thinking={"type": "adaptive"},
                 output_config={"effort": "medium"},
+                # Per-request timeout (same values as the SDK default):
+                # required for non-streaming calls with max_tokens > ~21k,
+                # which the SDK otherwise rejects.
+                timeout=httpx.Timeout(600.0, connect=5.0),
                 betas=["context-management-2025-06-27"],
                 context_management={
                     "edits": [
