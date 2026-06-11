@@ -96,7 +96,7 @@ class PlannerAgent:
         logger.info("Planner.run() called")
 
         stream_manager = StreamManager(model=self.model, stream=stream)
-        if self.current_yaml:
+        if workflow_yaml:
             stream_manager.send_thinking(STATUS_REVIEWING_WORKFLOW + STATUS_PLANNING)
         else:
             stream_manager.send_thinking(STATUS_NEW_WORKFLOW + STATUS_PLANNING)
@@ -367,10 +367,15 @@ class PlannerAgent:
 
             tool_result = format_subagent_result_for_llm(subagent_result)
 
-            # Give planner a fresh structural view after each workflow change
-            if self.current_yaml:
+            # Give planner a fresh structural view after each workflow change.
+            # If no YAML came back, nothing changed — say so instead of re-sending
+            # the unchanged structure (a conversational reply or a failed YAML
+            # parse would otherwise read as a successful edit).
+            if subagent_result.get("response_yaml"):
                 redacted = redact_job_bodies(self.current_yaml)
                 tool_result += f"\n\nUpdated workflow structure:\n{redacted}"
+            else:
+                tool_result += "\n\n[No workflow changes were made — no YAML was produced.]"
 
             tool_calls_meta.append({"tool": "call_workflow_agent", "input": tool_use_block.input})
 
@@ -413,15 +418,19 @@ class PlannerAgent:
             # (case, hyphens vs underscores, or the job's name field), and
             # stitch_job_code does an exact key match.
             suggested_code = subagent_result.get("suggested_code")
+            stitched = False
             if matched_job_key and suggested_code and self.current_yaml:
                 self.current_yaml = stitch_job_code(self.current_yaml, matched_job_key, suggested_code)
                 self.yaml_modified = True
+                stitched = True
                 logger.info(f"Stitched code for job '{matched_job_key}' into current_yaml")
 
             self.subagent_results.append(subagent_result)
             tool_result = format_subagent_result_for_llm(subagent_result)
-            if suggested_code:
+            if stitched:
                 tool_result += "\n\n[Job code generated and stitched into the workflow.]"
+            elif suggested_code:
+                tool_result += "\n\n[Job code was generated but NOT added to the workflow — no job_key matched. Retry with the exact job key.]"
             else:
                 tool_result += "\n\n[No job code was generated.]"
 
@@ -554,15 +563,19 @@ class PlannerAgent:
                 total_usage.update(sum_usage(total_usage, subagent_result["usage"]))
 
             suggested_code = subagent_result.get("suggested_code")
+            stitched = False
             if matched_job_key and suggested_code and self.current_yaml:
                 self.current_yaml = stitch_job_code(self.current_yaml, matched_job_key, suggested_code)
                 self.yaml_modified = True
+                stitched = True
                 logger.info(f"Stitched code for job '{matched_job_key}' into current_yaml")
 
             self.subagent_results.append(subagent_result)
             tool_result = format_subagent_result_for_llm(subagent_result)
-            if suggested_code:
+            if stitched:
                 tool_result += "\n\n[Job code generated and stitched into the workflow.]"
+            elif suggested_code:
+                tool_result += "\n\n[Job code was generated but NOT added to the workflow — no job_key matched. Retry with the exact job key.]"
             else:
                 tool_result += "\n\n[No job code was generated.]"
 

@@ -324,21 +324,17 @@ class RouterAgent:
         result = job_chat_main(payload)
         total_usage = sum_usage(self.routing_usage, result["usage"])
 
-        # Stitch suggested_code back into workflow YAML
-        updated_yaml = None
-        if result.get("suggested_code") and workflow_yaml and matched_job_key:
-            updated_yaml = stitch_job_code(workflow_yaml, matched_job_key, result["suggested_code"])
-        elif result.get("suggested_code") and not matched_job_key:
-            logger.warning(f"suggested_code generated but no job matched for page '{page}' - YAML not updated")
-
+        # Stitch suggested_code back into the workflow YAML. The full YAML is
+        # the only artifact returned — no separate job_code attachment.
         attachments = []
         if result.get("suggested_code"):
-            job_code_attachment = {"type": "job_code", "content": result["suggested_code"]}
-            if matched_job_key:
-                job_code_attachment["job_key"] = matched_job_key
-            attachments.append(job_code_attachment)
-        if updated_yaml:
-            attachments.append({"type": "workflow_yaml", "content": updated_yaml})
+            if workflow_yaml and matched_job_key:
+                updated_yaml = stitch_job_code(workflow_yaml, matched_job_key, result["suggested_code"])
+                attachments.append({"type": "workflow_yaml", "content": updated_yaml})
+            else:
+                logger.warning(
+                    f"suggested_code generated but no job matched for page '{page}' - code dropped from response"
+                )
 
         return RouterResult(
             response=result["response"],
