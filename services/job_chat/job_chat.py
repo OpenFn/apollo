@@ -29,13 +29,13 @@ from streaming_util import (
     STATUS_WORKING,
     STATUS_WRITING_CODE,
 )
-from models import resolve_model
+from models import preferred_chat_model
 
 _dir = os.path.dirname(os.path.abspath(__file__))
 with open(os.path.join(_dir, "rag.yaml")) as _f:
     _service_config = yaml.safe_load(_f)
 
-_MODEL = resolve_model(_service_config.get("model", "claude-fable"))
+_MODEL = preferred_chat_model(_service_config.get("model"))
 
 logger = create_logger("job_chat")
 

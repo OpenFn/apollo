@@ -49,6 +49,7 @@ testpaths = [
     "services/workflow_chat/tests",
     "services/job_chat/tests",
     "services/search_docsite/tests",
+    "services/tests",
     "services/tools",
 ]
 

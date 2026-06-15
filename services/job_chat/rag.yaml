@@ -1,5 +1,8 @@
 config_version: 1.0
-model: "claude-fable"
+# Main chat model is set centrally in services/models.py (CHAT_MODEL_DEFAULT) and
+# can be overridden at runtime via the APOLLO_CHAT_MODEL env var. Add a `model:`
+# key here only to pin this service. (The llm_* keys below are the smaller
+# RAG/retrieval models and are unaffected by that default.)
 llm_search_decision: "claude-sonnet"
 llm_retrieval: "claude-sonnet"
 threshold: 0.8

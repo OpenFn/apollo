@@ -24,7 +24,7 @@ from streaming_util import (
     STATUS_PLANNING,
 )
 from global_chat.config_loader import ConfigLoader
-from models import resolve_model
+from models import preferred_chat_model
 from global_chat.tools.tool_definitions import TOOL_DEFINITIONS
 from global_chat.yaml_utils import stitch_job_code, redact_job_bodies, find_job_in_yaml
 from tools.search_documentation.search_documentation import search_documentation_tool
@@ -60,7 +60,7 @@ class PlannerAgent:
         self.tools = TOOL_DEFINITIONS
 
         planner_config = config_loader.config.get("planner", {})
-        self.model = resolve_model(planner_config.get("model", "claude-fable"))
+        self.model = preferred_chat_model(planner_config.get("model"))
         self.max_tokens = planner_config.get("max_tokens", 24576)
         self.max_tool_calls = planner_config.get("max_tool_calls", 20)
 
