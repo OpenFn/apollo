@@ -8,7 +8,7 @@ router:
 
 # Planner configuration (complex orchestration)
 # The planner's chat model is configured in services/models.py (the default plus
-# the APOLLO_CHAT_MODEL env override), not here.
+# the APOLLO_GLOBAL_CHAT_MODEL env override), not here.
 planner:
   max_tokens: 24576
   max_tool_calls: 10

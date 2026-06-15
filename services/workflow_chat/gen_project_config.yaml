@@ -1,5 +1,5 @@
 config_version: 1.0
-# The chat model is configured in services/models.py (per-service default plus
-# APOLLO_CHAT_MODEL / APOLLO_WORKFLOW_CHAT_MODEL env overrides), not here.
+# The chat model is configured in services/models.py (the default plus the
+# APOLLO_WORKFLOW_CHAT_MODEL env override), not here.
 threshold: 0.7
 top_k: 5

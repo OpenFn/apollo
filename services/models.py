@@ -35,41 +35,33 @@ def resolve_model(alias: str) -> str:
 # Default chat model for any service without its own entry below.
 CHAT_MODEL_DEFAULT = CLAUDE_OPUS
 
-# Global override env var. When set, forces every chat service to this model
-# (except a service that has its own env var set — see precedence below).
-CHAT_MODEL_ENV = "APOLLO_CHAT_MODEL"
-
 # Per-service model config. `default` is the built-in choice; `env`, if set at
-# runtime, overrides it (and the global env var) for that service only.
-# Services not listed use CHAT_MODEL_DEFAULT and only honour CHAT_MODEL_ENV.
+# runtime, overrides it for that service only (one env var per service, no
+# global override). Services not listed (e.g. doc_agent_chat) use
+# CHAT_MODEL_DEFAULT and have no runtime override.
 CHAT_SERVICE_MODELS: dict[str, dict[str, str]] = {
     # workflow_chat forces JSON/YAML output via structured outputs; Sonnet
     # handles that better than Opus today, so it defaults to Sonnet.
     "workflow_chat": {"default": CLAUDE_SONNET, "env": "APOLLO_WORKFLOW_CHAT_MODEL"},
     "job_chat":      {"default": CLAUDE_OPUS,   "env": "APOLLO_JOB_CHAT_MODEL"},
+    "global_chat":   {"default": CLAUDE_OPUS,   "env": "APOLLO_GLOBAL_CHAT_MODEL"},
 }
 
 
 def preferred_chat_model(service: str | None = None) -> str:
     """Resolve the main chat model for `service`.
 
-    Precedence (most specific wins):
-        per-service env var  >  global env var (APOLLO_CHAT_MODEL)
-                             >  per-service default  >  CHAT_MODEL_DEFAULT
-
-    So APOLLO_CHAT_MODEL is a "force everything" switch, while a per-service env
-    var (e.g. APOLLO_WORKFLOW_CHAT_MODEL) pins that one service against it. All
-    env vars are optional; with none set, each service uses its default. The env
-    vars let us switch the live model without redeploying.
+    Precedence: the service's env var if set, else its per-service default, else
+    CHAT_MODEL_DEFAULT. Each service's env var (e.g. APOLLO_WORKFLOW_CHAT_MODEL)
+    is optional and lets us switch that one service's live model without
+    redeploying.
     """
     cfg = CHAT_SERVICE_MODELS.get(service, {})
 
-    service_override = os.getenv(cfg["env"]) if cfg.get("env") else None
-    if service_override:
-        return resolve_model(service_override)
-
-    global_override = os.getenv(CHAT_MODEL_ENV)
-    if global_override:
-        return resolve_model(global_override)
+    env_name = cfg.get("env")
+    if env_name:
+        override = os.getenv(env_name)
+        if override:
+            return resolve_model(override)
 
     return cfg.get("default", CHAT_MODEL_DEFAULT)

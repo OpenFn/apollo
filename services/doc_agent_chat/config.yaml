@@ -1,6 +1,6 @@
 config_version: 1.0
-# The chat model is configured in services/models.py (the default plus the
-# APOLLO_CHAT_MODEL env override), not here.
+# The chat model is configured in services/models.py (the default; doc_agent has
+# no per-service env override), not here.
 max_tokens: 49152
 max_tool_calls: 10
 search_top_k: 5
