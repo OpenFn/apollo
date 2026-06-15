@@ -8,11 +8,7 @@ import yaml
 from dataclasses import dataclass
 from models import preferred_chat_model
 
-_dir = os.path.dirname(os.path.abspath(__file__))
-with open(os.path.join(_dir, "gen_project_config.yaml")) as _f:
-    _service_config = yaml.safe_load(_f)
-
-_MODEL = preferred_chat_model(_service_config.get("model"))
+_MODEL = preferred_chat_model("workflow_chat")
 
 # JSON schema for structured outputs — guarantees valid JSON from the API
 _OUTPUT_SCHEMA = {

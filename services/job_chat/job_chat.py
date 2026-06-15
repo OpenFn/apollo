@@ -1,7 +1,6 @@
 import os
 import json
 import re
-import yaml
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 import httpx
@@ -31,11 +30,7 @@ from streaming_util import (
 )
 from models import preferred_chat_model
 
-_dir = os.path.dirname(os.path.abspath(__file__))
-with open(os.path.join(_dir, "rag.yaml")) as _f:
-    _service_config = yaml.safe_load(_f)
-
-_MODEL = preferred_chat_model(_service_config.get("model"))
+_MODEL = preferred_chat_model("job_chat")
 
 logger = create_logger("job_chat")
 

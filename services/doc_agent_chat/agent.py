@@ -24,7 +24,7 @@ class Agent:
             raise ValueError("API key must be provided")
 
         self.client = Anthropic(api_key=self.api_key)
-        self.model = preferred_chat_model(config.get("model"))
+        self.model = preferred_chat_model("doc_agent_chat")
         self.max_tokens = config.get("max_tokens", 49152)
         self.max_tool_calls = config.get("max_tool_calls", 10)
         self.search_top_k = config.get("search_top_k", 5)

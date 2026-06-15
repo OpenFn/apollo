@@ -1,8 +1,7 @@
 config_version: 1.0
-# Main chat model is set centrally in services/models.py (CHAT_MODEL_DEFAULT) and
-# can be overridden at runtime via the APOLLO_CHAT_MODEL env var. Add a `model:`
-# key here only to pin this service. (The llm_* keys below are the smaller
-# RAG/retrieval models and are unaffected by that default.)
+# The main chat model is configured in services/models.py (per-service default
+# plus APOLLO_CHAT_MODEL / APOLLO_JOB_CHAT_MODEL env overrides), not here. The
+# llm_* keys below are the smaller RAG/retrieval models and are separate.
 llm_search_decision: "claude-sonnet"
 llm_retrieval: "claude-sonnet"
 threshold: 0.8

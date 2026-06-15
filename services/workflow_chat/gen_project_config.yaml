@@ -1,6 +1,5 @@
 config_version: 1.0
-# Chat model is set centrally in services/models.py (CHAT_MODEL_DEFAULT) and can
-# be overridden at runtime via the APOLLO_CHAT_MODEL env var. Add a `model:` key
-# here only to pin this service to a specific model.
+# The chat model is configured in services/models.py (per-service default plus
+# APOLLO_CHAT_MODEL / APOLLO_WORKFLOW_CHAT_MODEL env overrides), not here.
 threshold: 0.7
 top_k: 5

@@ -1,33 +1,56 @@
 """Unit tests for the central chat-model selection in `services/models.py`.
 
-No real model calls — pure resolution logic. The repo-root conftest marks
+No real model calls, pure resolution logic. The repo-root conftest marks
 everything under a `unit/` dir as `unit` and blocks real client construction.
 """
 
 import models as m
 import pytest
 
+_WORKFLOW_ENV = m.CHAT_SERVICE_MODELS["workflow_chat"]["env"]
+
 
 @pytest.fixture(autouse=True)
 def _clear_env(monkeypatch):
-    """Ensure a stray APOLLO_CHAT_MODEL in the real environment can't skew tests."""
+    """Clear the global and all per-service overrides so the real environment
+    can't skew tests."""
     monkeypatch.delenv(m.CHAT_MODEL_ENV, raising=False)
+    for cfg in m.CHAT_SERVICE_MODELS.values():
+        monkeypatch.delenv(cfg["env"], raising=False)
 
 
-# --- preferred_chat_model: precedence ---------------------------------------
+# --- defaults ---------------------------------------------------------------
 
-def test_preferred_defaults_to_opus_when_nothing_set():
-    assert m.preferred_chat_model() == m.CLAUDE_OPUS
-    assert m.preferred_chat_model(None) == m.CLAUDE_OPUS
-
-
-def test_preferred_uses_config_value_when_no_env():
-    assert m.preferred_chat_model("claude-sonnet") == m.CLAUDE_SONNET
-    # full IDs pass through unchanged
-    assert m.preferred_chat_model("claude-opus-4-7") == "claude-opus-4-7"
+def test_unlisted_service_uses_global_default():
+    # A service with no entry (or none at all) falls back to CHAT_MODEL_DEFAULT.
+    assert m.preferred_chat_model() == m.CHAT_MODEL_DEFAULT
+    assert m.preferred_chat_model("doc_agent_chat") == m.CHAT_MODEL_DEFAULT
 
 
-def test_preferred_env_overrides_config(monkeypatch):
-    # Also proves the env value is alias-resolved ("claude-sonnet" -> full ID).
+def test_per_service_defaults():
+    assert m.preferred_chat_model("workflow_chat") == m.CLAUDE_SONNET
+    assert m.preferred_chat_model("job_chat") == m.CLAUDE_OPUS
+
+
+# --- precedence -------------------------------------------------------------
+
+def test_per_service_env_overrides_its_default(monkeypatch):
+    # Also proves the env value is alias-resolved ("claude-opus" -> full ID).
+    monkeypatch.setenv(_WORKFLOW_ENV, "claude-opus")
+    assert m.preferred_chat_model("workflow_chat") == m.CLAUDE_OPUS
+
+
+def test_global_env_overrides_defaults(monkeypatch):
     monkeypatch.setenv(m.CHAT_MODEL_ENV, "claude-sonnet")
-    assert m.preferred_chat_model("claude-opus") == m.CLAUDE_SONNET
+    # applies to a service with no per-service env set...
+    assert m.preferred_chat_model("job_chat") == m.CLAUDE_SONNET
+    # ...and to an unlisted service
+    assert m.preferred_chat_model("doc_agent_chat") == m.CLAUDE_SONNET
+
+
+def test_per_service_env_beats_global_env(monkeypatch):
+    # Global says "force everything to opus", but workflow pins itself to sonnet.
+    monkeypatch.setenv(m.CHAT_MODEL_ENV, "claude-opus")
+    monkeypatch.setenv(_WORKFLOW_ENV, "claude-sonnet")
+    assert m.preferred_chat_model("workflow_chat") == m.CLAUDE_SONNET  # per-service wins
+    assert m.preferred_chat_model("job_chat") == m.CLAUDE_OPUS         # global applies here

@@ -26,25 +26,50 @@ def resolve_model(alias: str) -> str:
 # The "main chat model" is the large model that drives user-facing chat
 # (job_chat, workflow_chat, doc_agent_chat, and the global_chat planner). It is
 # distinct from the smaller models used for RAG/routing (haiku/sonnet), which
-# are configured directly and are NOT affected by the helper below.
+# are configured directly and are NOT affected by the helpers below.
+#
+# The whole per-service model story lives here on purpose, so there is one place
+# to read what each service uses and how to override it. Nothing is configured
+# in the service yamls.
 
-# Env var that overrides the main chat model at runtime, so we can switch the
-# live model without a redeploy. Holds a model alias or full ID.
-CHAT_MODEL_ENV = "APOLLO_CHAT_MODEL"
-
-# Default main chat model when neither the env var nor a service config overrides it.
+# Default chat model for any service without its own entry below.
 CHAT_MODEL_DEFAULT = CLAUDE_OPUS
 
+# Global override env var. When set, forces every chat service to this model
+# (except a service that has its own env var set — see precedence below).
+CHAT_MODEL_ENV = "APOLLO_CHAT_MODEL"
 
-def preferred_chat_model(config_value: str | None = None) -> str:
-    """Resolve the main chat model.
+# Per-service model config. `default` is the built-in choice; `env`, if set at
+# runtime, overrides it (and the global env var) for that service only.
+# Services not listed use CHAT_MODEL_DEFAULT and only honour CHAT_MODEL_ENV.
+CHAT_SERVICE_MODELS: dict[str, dict[str, str]] = {
+    # workflow_chat forces JSON/YAML output via structured outputs; Sonnet
+    # handles that better than Opus today, so it defaults to Sonnet.
+    "workflow_chat": {"default": CLAUDE_SONNET, "env": "APOLLO_WORKFLOW_CHAT_MODEL"},
+    "job_chat":      {"default": CLAUDE_OPUS,   "env": "APOLLO_JOB_CHAT_MODEL"},
+}
 
-    Precedence: APOLLO_CHAT_MODEL env var > per-service config value > CLAUDE_OPUS.
-    The env var lets us switch the live chat model without redeploying.
+
+def preferred_chat_model(service: str | None = None) -> str:
+    """Resolve the main chat model for `service`.
+
+    Precedence (most specific wins):
+        per-service env var  >  global env var (APOLLO_CHAT_MODEL)
+                             >  per-service default  >  CHAT_MODEL_DEFAULT
+
+    So APOLLO_CHAT_MODEL is a "force everything" switch, while a per-service env
+    var (e.g. APOLLO_WORKFLOW_CHAT_MODEL) pins that one service against it. All
+    env vars are optional; with none set, each service uses its default. The env
+    vars let us switch the live model without redeploying.
     """
-    override = os.getenv(CHAT_MODEL_ENV)
-    if override:
-        return resolve_model(override)
-    if config_value:
-        return resolve_model(config_value)
-    return CHAT_MODEL_DEFAULT
+    cfg = CHAT_SERVICE_MODELS.get(service, {})
+
+    service_override = os.getenv(cfg["env"]) if cfg.get("env") else None
+    if service_override:
+        return resolve_model(service_override)
+
+    global_override = os.getenv(CHAT_MODEL_ENV)
+    if global_override:
+        return resolve_model(global_override)
+
+    return cfg.get("default", CHAT_MODEL_DEFAULT)

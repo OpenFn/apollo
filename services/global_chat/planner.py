@@ -60,7 +60,7 @@ class PlannerAgent:
         self.tools = TOOL_DEFINITIONS
 
         planner_config = config_loader.config.get("planner", {})
-        self.model = preferred_chat_model(planner_config.get("model"))
+        self.model = preferred_chat_model("global_chat")
         self.max_tokens = planner_config.get("max_tokens", 24576)
         self.max_tool_calls = planner_config.get("max_tool_calls", 20)
 

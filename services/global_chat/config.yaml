@@ -7,9 +7,8 @@ router:
   temperature: 0.0
 
 # Planner configuration (complex orchestration)
-# Chat model is set centrally in services/models.py (CHAT_MODEL_DEFAULT) and can
-# be overridden at runtime via the APOLLO_CHAT_MODEL env var. Add a `model:` key
-# here only to pin the planner to a specific model.
+# The planner's chat model is configured in services/models.py (the default plus
+# the APOLLO_CHAT_MODEL env override), not here.
 planner:
   max_tokens: 24576
   max_tool_calls: 10
