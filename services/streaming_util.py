@@ -96,7 +96,7 @@ class StreamManager:
     block lifecycle and index tracking.
 
     Example usage:
-        manager = StreamManager(model=resolve_model("claude-fable"))
+        manager = StreamManager(model=resolve_model("claude-opus"))
         manager.start_stream()
         manager.send_thinking("Researching...")
         manager.send_text("Here's what I found...")

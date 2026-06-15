@@ -34,11 +34,11 @@ from typing import Optional
 
 from anthropic import Anthropic
 
-from models import CLAUDE_FABLE
+from models import CLAUDE_OPUS
 from testing.judges import load_judge
 
 
-DEFAULT_MODEL = CLAUDE_FABLE
+DEFAULT_MODEL = CLAUDE_OPUS
 DEFAULT_JUDGE = "general"
 
 
@@ -277,7 +277,7 @@ def evaluate(
             guessing.
         judge: Name of the judge (file at services/testing/judges/<name>.md).
             Defaults to "general".
-        model: Model to use. Defaults to CLAUDE_FABLE from services/models.py.
+        model: Model to use. Defaults to CLAUDE_OPUS from services/models.py.
         client: Optional Anthropic client. Constructed from env if not given.
 
     Returns:

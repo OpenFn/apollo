@@ -1,5 +1,7 @@
 config_version: 1.0
-model: "claude-fable"
+# The main chat model is configured in services/models.py (the default plus the
+# APOLLO_JOB_CHAT_MODEL env override), not here. The llm_* keys below are the
+# smaller RAG/retrieval models and are separate.
 llm_search_decision: "claude-sonnet"
 llm_retrieval: "claude-sonnet"
 threshold: 0.8

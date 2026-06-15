@@ -6,13 +6,9 @@ import unicodedata
 from typing import List, Optional, Dict, Any
 import yaml
 from dataclasses import dataclass
-from models import resolve_model
+from models import preferred_chat_model
 
-_dir = os.path.dirname(os.path.abspath(__file__))
-with open(os.path.join(_dir, "gen_project_config.yaml")) as _f:
-    _service_config = yaml.safe_load(_f)
-
-_MODEL = resolve_model(_service_config.get("model", "claude-fable"))
+_MODEL = preferred_chat_model("workflow_chat")
 
 # JSON schema for structured outputs — guarantees valid JSON from the API
 _OUTPUT_SCHEMA = {
