@@ -7,7 +7,7 @@ from doc_agent_chat.doc_search import DocSearch
 from doc_agent_chat.prompt import build_system_prompt
 from doc_agent_chat.tools import TOOL_DEFINITIONS, search_documents, format_search_results_as_documents
 from doc_agent_chat.config_loader import ConfigLoader
-from models import preferred_chat_model
+from models import preferred_chat_model, call_with_model_fallback
 
 logger = create_logger("agent")
 
@@ -59,16 +59,19 @@ class Agent:
         for iteration in range(self.max_tool_calls):
             logger.info(f"Agentic loop iteration {iteration + 1}")
 
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                system=system_prompt,
-                messages=messages,
-                tools=TOOL_DEFINITIONS,
-                # Per-request timeout (same values as the SDK default):
-                # required for non-streaming calls with max_tokens > ~21k,
-                # which the SDK otherwise rejects.
-                timeout=httpx.Timeout(600.0, connect=5.0),
+            response = call_with_model_fallback(
+                lambda m: self.client.messages.create(
+                    model=m,
+                    max_tokens=self.max_tokens,
+                    system=system_prompt,
+                    messages=messages,
+                    tools=TOOL_DEFINITIONS,
+                    # Per-request timeout (same values as the SDK default):
+                    # required for non-streaming calls with max_tokens > ~21k,
+                    # which the SDK otherwise rejects.
+                    timeout=httpx.Timeout(600.0, connect=5.0),
+                ),
+                preferred=self.model,
             )
 
             if hasattr(response, "usage"):

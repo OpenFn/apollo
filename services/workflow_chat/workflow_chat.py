@@ -6,7 +6,11 @@ import unicodedata
 from typing import List, Optional, Dict, Any
 import yaml
 from dataclasses import dataclass
-from models import preferred_chat_model
+from models import (
+    preferred_chat_model,
+    call_with_model_fallback,
+    stream_with_model_fallback,
+)
 
 _MODEL = preferred_chat_model("workflow_chat")
 
@@ -217,18 +221,10 @@ class AnthropicClient:
                         else:
                             stream_manager.send_thinking(STATUS_NEW_WORKFLOW + STATUS_DESIGNING_WORKFLOW)
 
-                        text_started = False
-                        sent_length = 0
-                        accumulated_response = ""
-
-                        with self.client.messages.stream(
-                            max_tokens=self.config.max_tokens,
-                            messages=prompt,
-                            model=self.config.model,
-                            system=system_message,
-                            output_config=output_config,
-                            thinking={"type": "adaptive"}
-                        ) as stream_obj:
+                        def _consume(stream_obj, commit):
+                            text_started = False
+                            sent_length = 0
+                            accumulated_response = ""
                             for event in stream_obj:
                                 accumulated_response, text_started, sent_length = self.process_stream_event(
                                     event,
@@ -238,26 +234,48 @@ class AnthropicClient:
                                     stream_manager,
                                     preserved_values
                                 )
-                        message = stream_obj.get_final_message()
+                                # Once user-facing text has streamed, we can't
+                                # cleanly fall back without re-sending it.
+                                if text_started:
+                                    commit()
 
-                        # Flush any remaining buffered text, stripping JSON closing chars
-                        if text_started:
-                            if sent_length < len(accumulated_response):
-                                remaining = accumulated_response[sent_length:]
-                                remaining = re.sub(r'"\s*}\s*$', '', remaining)
-                                if remaining:
-                                    stream_manager.send_text(self._unescape_json_string(remaining))
+                            msg = stream_obj.get_final_message()
+
+                            # Flush any remaining buffered text, stripping JSON closing chars
+                            if text_started:
+                                if sent_length < len(accumulated_response):
+                                    remaining = accumulated_response[sent_length:]
+                                    remaining = re.sub(r'"\s*}\s*$', '', remaining)
+                                    if remaining:
+                                        stream_manager.send_text(self._unescape_json_string(remaining))
+                            return msg
+
+                        message = stream_with_model_fallback(
+                            lambda m: self.client.messages.stream(
+                                max_tokens=self.config.max_tokens,
+                                messages=prompt,
+                                model=m,
+                                system=system_message,
+                                output_config=output_config,
+                                thinking={"type": "adaptive"}
+                            ),
+                            _consume,
+                            preferred=self.config.model,
+                        )
 
                     else:
                         logger.info("Making non-streaming API call")
-                        message = self.client.messages.create(
-                            max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message,
-                            output_config=output_config,
-                            thinking={"type": "adaptive"},
-                            # Per-request timeout (same values as the SDK default):
-                            # required for non-streaming calls with max_tokens > ~21k,
-                            # which the SDK otherwise rejects.
-                            timeout=httpx.Timeout(600.0, connect=5.0),
+                        message = call_with_model_fallback(
+                            lambda m: self.client.messages.create(
+                                max_tokens=self.config.max_tokens, messages=prompt, model=m, system=system_message,
+                                output_config=output_config,
+                                thinking={"type": "adaptive"},
+                                # Per-request timeout (same values as the SDK default):
+                                # required for non-streaming calls with max_tokens > ~21k,
+                                # which the SDK otherwise rejects.
+                                timeout=httpx.Timeout(600.0, connect=5.0),
+                            ),
+                            preferred=self.config.model,
                         )
 
                 # Track usage from this attempt

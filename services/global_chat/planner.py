@@ -24,7 +24,11 @@ from streaming_util import (
     STATUS_PLANNING,
 )
 from global_chat.config_loader import ConfigLoader
-from models import preferred_chat_model
+from models import (
+    preferred_chat_model,
+    call_with_model_fallback,
+    stream_with_model_fallback,
+)
 from global_chat.tools.tool_definitions import TOOL_DEFINITIONS
 from global_chat.yaml_utils import stitch_job_code, redact_job_bodies, find_job_in_yaml
 from tools.search_documentation.search_documentation import search_documentation_tool
@@ -276,47 +280,56 @@ class PlannerAgent:
         task-specific status messages sent before each tool execution.
         """
         if stream:
-            buffered_text = []
-
-            with self.client.messages.stream(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                system=system_prompt,
-                messages=messages,
-                tools=self.tools,
-                thinking={"type": "adaptive"},
-                output_config={"effort": "medium"},
-            ) as stream_obj:
+            def _consume(stream_obj, commit):
+                buffered_text = []
                 for event in stream_obj:
                     if event.type == "content_block_delta":
                         if event.delta.type == "text_delta":
                             buffered_text.append(event.delta.text)
+                            commit()
                 return stream_obj.get_final_message(), buffered_text
+
+            return stream_with_model_fallback(
+                lambda m: self.client.messages.stream(
+                    model=m,
+                    max_tokens=self.max_tokens,
+                    system=system_prompt,
+                    messages=messages,
+                    tools=self.tools,
+                    thinking={"type": "adaptive"},
+                    output_config={"effort": "medium"},
+                ),
+                _consume,
+                preferred=self.model,
+            )
         else:
-            response = self.client.beta.messages.create(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                system=system_prompt,
-                messages=messages,
-                tools=self.tools,
-                thinking={"type": "adaptive"},
-                output_config={"effort": "medium"},
-                # Per-request timeout (same values as the SDK default):
-                # required for non-streaming calls with max_tokens > ~21k,
-                # which the SDK otherwise rejects.
-                timeout=httpx.Timeout(600.0, connect=5.0),
-                betas=["context-management-2025-06-27"],
-                context_management={
-                    "edits": [
-                        {
-                            "type": "clear_tool_uses_20250919",
-                            "trigger": {"type": "tool_uses", "value": 20},
-                            "keep": {"type": "tool_uses", "value": 10},
-                            "exclude_tools": ["search_documentation"],
-                            "clear_tool_inputs": True,
-                        }
-                    ]
-                },
+            response = call_with_model_fallback(
+                lambda m: self.client.beta.messages.create(
+                    model=m,
+                    max_tokens=self.max_tokens,
+                    system=system_prompt,
+                    messages=messages,
+                    tools=self.tools,
+                    thinking={"type": "adaptive"},
+                    output_config={"effort": "medium"},
+                    # Per-request timeout (same values as the SDK default):
+                    # required for non-streaming calls with max_tokens > ~21k,
+                    # which the SDK otherwise rejects.
+                    timeout=httpx.Timeout(600.0, connect=5.0),
+                    betas=["context-management-2025-06-27"],
+                    context_management={
+                        "edits": [
+                            {
+                                "type": "clear_tool_uses_20250919",
+                                "trigger": {"type": "tool_uses", "value": 20},
+                                "keep": {"type": "tool_uses", "value": 10},
+                                "exclude_tools": ["search_documentation"],
+                                "clear_tool_inputs": True,
+                            }
+                        ]
+                    },
+                ),
+                preferred=self.model,
             )
             return response, []
 
