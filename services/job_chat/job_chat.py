@@ -28,7 +28,11 @@ from streaming_util import (
     STATUS_WORKING,
     STATUS_WRITING_CODE,
 )
-from models import preferred_chat_model
+from models import (
+    preferred_chat_model,
+    call_with_model_fallback,
+    stream_with_model_fallback,
+)
 
 _MODEL = preferred_chat_model("job_chat")
 
@@ -231,26 +235,18 @@ class AnthropicClient:
             with sentry_sdk.start_span(description="anthropic_api_call"):
                 if stream:
                     logger.info("Making streaming API call")
-                    text_started = False
-                    sent_length = 0
-                    accumulated_response = ""
-                    self._stream_applied = False
-                    self._stream_suggested_code = None
-                    self._stream_diff = None
-
                     original_code = context.get("expression") if context and isinstance(context, dict) else None
 
-                    stream_kwargs = dict(
-                        max_tokens=self.config.max_tokens,
-                        messages=prompt,
-                        model=self.config.model,
-                        system=system_message,
-                        thinking={"type": "adaptive"},
-                        output_config=output_config,
-                        **tool_kwargs
-                    )
+                    def _consume(stream_obj, commit):
+                        # Reset per attempt so a model fallback never reuses a
+                        # prior (failed) stream's partial state.
+                        text_started = False
+                        sent_length = 0
+                        accumulated_response = ""
+                        self._stream_applied = False
+                        self._stream_suggested_code = None
+                        self._stream_diff = None
 
-                    with self.client.messages.stream(**stream_kwargs) as stream_obj:
                         for event in stream_obj:
                             if event.type == "message_start":
                                 stream_manager.send_thinking(STATUS_WORKING)
@@ -268,20 +264,40 @@ class AnthropicClient:
                                 original_code,
                                 content
                             )
-                    message = stream_obj.get_final_message()
+                            # Once user-facing text has streamed, we can't cleanly
+                            # fall back to another model without re-sending it.
+                            if text_started:
+                                commit()
 
-                    # Flush any remaining buffered text, stripping JSON closing chars
-                    if suggest_code and text_started:
-                        if sent_length < len(accumulated_response):
-                            remaining = accumulated_response[sent_length:]
-                            remaining = re.sub(r'"\s*}\s*$', '', remaining)
-                            if remaining:
-                                stream_manager.send_text(self._unescape_json_string(remaining))
+                        msg = stream_obj.get_final_message()
+
+                        # Flush any remaining buffered text, stripping JSON closing chars
+                        if suggest_code and text_started:
+                            if sent_length < len(accumulated_response):
+                                remaining = accumulated_response[sent_length:]
+                                remaining = re.sub(r'"\s*}\s*$', '', remaining)
+                                if remaining:
+                                    stream_manager.send_text(self._unescape_json_string(remaining))
+                        return msg
+
+                    stream_kwargs = dict(
+                        max_tokens=self.config.max_tokens,
+                        messages=prompt,
+                        system=system_message,
+                        thinking={"type": "adaptive"},
+                        output_config=output_config,
+                        **tool_kwargs
+                    )
+                    message = stream_with_model_fallback(
+                        lambda m: self.client.messages.stream(model=m, **stream_kwargs),
+                        _consume,
+                        preferred=self.config.model,
+                    )
 
                 else:
                     logger.info("Making non-streaming API call")
                     create_kwargs = dict(
-                        max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message,
+                        max_tokens=self.config.max_tokens, messages=prompt, system=system_message,
                         thinking={"type": "adaptive"},
                         output_config=output_config,
                         # Per-request timeout (same values as the SDK default):
@@ -290,7 +306,10 @@ class AnthropicClient:
                         timeout=httpx.Timeout(600.0, connect=5.0),
                         **tool_kwargs
                     )
-                    message = self.client.messages.create(**create_kwargs)
+                    message = call_with_model_fallback(
+                        lambda m: self.client.messages.create(model=m, **create_kwargs),
+                        preferred=self.config.model,
+                    )
 
             if hasattr(message, "usage"):
                 if message.usage.cache_creation_input_tokens:
@@ -537,13 +556,16 @@ class AnthropicClient:
             # structured outputs removed here too (see note in generate); the
             # correction prompt already instructs the {explanation, corrected_*}
             # JSON shape and json.loads below is wrapped in try/except.
-            message = self.client.messages.create(
-                max_tokens=16384,
-                messages=prompt,
-                model=self.config.model,
-                system=system_message,
-                output_config={"effort": "medium"},
-                thinking={"type": "adaptive"}
+            message = call_with_model_fallback(
+                lambda m: self.client.messages.create(
+                    max_tokens=16384,
+                    messages=prompt,
+                    model=m,
+                    system=system_message,
+                    output_config={"effort": "medium"},
+                    thinking={"type": "adaptive"}
+                ),
+                preferred=self.config.model,
             )
 
             response = "\n\n".join([block.text for block in message.content if block.type == "text"])
