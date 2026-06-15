@@ -6,6 +6,7 @@ Routes requests to workflow_chat, job_chat, or planner based on user intent.
 
 import os
 import json
+import yaml
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 from anthropic import Anthropic
@@ -295,8 +296,25 @@ class RouterAgent:
                     matched_job_key, job_data = find_job_in_yaml(workflow_yaml, page_step)
 
         if matched_job_key is None:
+            # Distinguish the failure modes so the cause is visible in logs:
+            # no YAML sent vs. a YAML shape we can't read (e.g. Lightning's
+            # project format nests jobs under `workflows:` rather than a
+            # top-level `jobs:`) vs. YAML present but the job name not found.
+            if not workflow_yaml:
+                reason = "no workflow_yaml was provided in the request"
+            else:
+                try:
+                    parsed = yaml.safe_load(workflow_yaml)
+                    if not isinstance(parsed, dict):
+                        reason = "workflow_yaml did not parse to a mapping"
+                    elif "jobs" not in parsed:
+                        reason = f"workflow_yaml has no top-level 'jobs' key (top-level keys: {list(parsed.keys())})"
+                    else:
+                        reason = f"job not found among keys {list(parsed['jobs'].keys())}"
+                except Exception as e:
+                    reason = f"workflow_yaml failed to parse: {e}"
             logger.warning(
-                f"No job found in YAML for router_job_key='{router_job_key}' or page='{page}'",
+                f"No job matched for router_job_key='{router_job_key}' or page='{page}': {reason}"
             )
 
         if job_data:
