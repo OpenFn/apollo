@@ -45,6 +45,30 @@ bun dev
 
 To see an index of the available language services, head to `localhost:3000`.
 
+## Debugging
+
+The server defaults to port 3000. You can test any service directly with curl to confirm Apollo is working independently of Lightning (or any other client).
+
+For example, to trigger a `workflow_chat` stream:
+
+```bash
+curl -N -X POST http://localhost:3000/services/workflow_chat/stream \
+    -H "Content-Type: application/json" \
+    -d '{"content":"make a simple http workflow","history":[],"api_key":"<your-anthropic-api-key>"}'
+```
+
+The `api_key` field is your Anthropic API key. If `ANTHROPIC_API_KEY` is already set in your `.env`, you can omit it. In Lightning, this is configured via the `ANTHROPIC_API_KEY` environment variable and passed through to Apollo on each request.
+
+The `-N` flag disables buffering so SSE events appear as they arrive. You should see a stream of `event: log` lines followed by `event: complete`. An `event: error` response means the issue is inside Apollo.
+
+If the stream returns successfully here but Lightning isn't receiving it, the issue is on the Lightning side -- check that `APOLLO_ENDPOINT=http://localhost:3000` is set correctly in Lightning's environment (no trailing slash).
+
+To check API key connectivity (Anthropic, OpenAI, Pinecone), hit the status service:
+
+```bash
+curl http://localhost:3000/services/status
+```
+
 ## Troubleshooting
 
 If you get errors like `poetry: command not found` (error code 127), and poetry
