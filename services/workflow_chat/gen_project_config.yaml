@@ -1,4 +1,5 @@
 config_version: 1.0
-model: "claude-fable"
+model: "claude-sonnet"
 threshold: 0.7
 top_k: 5
+temperature: 0

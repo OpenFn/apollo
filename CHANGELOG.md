@@ -1,10 +1,12 @@
 # apollo
 
-## 1.3.1
+## 1.3.2
 
 ### Patch Changes
 
-- Use Anthropic Fable in chat assistants
+- Revert "Update assistants to Fable" (1.3.1). Restores the 1.3.0 model
+  configuration (Opus/Sonnet/Haiku) across the chat assistants. 1.3.2 is
+  functionally identical to 1.3.0 and is released as the new `latest`.
 
 ## 1.3.0
 
