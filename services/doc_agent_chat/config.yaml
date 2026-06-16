@@ -1,6 +1,7 @@
 config_version: 1.0
-model: claude-fable
-max_tokens: 49152
+model: claude-sonnet
+max_tokens: 16384
+temperature: 0
 max_tool_calls: 10
 search_top_k: 5
 search_threshold: 0.7

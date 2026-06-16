@@ -11,6 +11,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from models import CLAUDE_SONNET
 
 # Shared status message pools for user-facing progress indicators.
 # Services compose from these to build context-specific pools.
@@ -96,7 +97,7 @@ class StreamManager:
     block lifecycle and index tracking.
 
     Example usage:
-        manager = StreamManager(model=resolve_model("claude-fable"))
+        manager = StreamManager()
         manager.start_stream()
         manager.send_thinking("Researching...")
         manager.send_text("Here's what I found...")
@@ -104,13 +105,12 @@ class StreamManager:
         manager.end_stream()
     """
 
-    def __init__(self, model: str, stream: bool = True):
+    def __init__(self, model: str = CLAUDE_SONNET, stream: bool = True):
         """
         Initialize the stream manager.
 
         Args:
-            model: Model name to include in message_start event. Required so
-                the stream metadata always reflects the model actually used.
+            model: Model name to include in message_start event
         """
         self.stream = stream
         self.model = model

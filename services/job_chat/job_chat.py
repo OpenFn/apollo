@@ -4,7 +4,6 @@ import re
 import yaml
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
-import httpx
 from anthropic import (
     Anthropic,
     APIConnectionError,
@@ -35,7 +34,7 @@ _dir = os.path.dirname(os.path.abspath(__file__))
 with open(os.path.join(_dir, "rag.yaml")) as _f:
     _service_config = yaml.safe_load(_f)
 
-_MODEL = resolve_model(_service_config.get("model", "claude-fable"))
+_MODEL = resolve_model(_service_config.get("model", "claude-sonnet"))
 
 logger = create_logger("job_chat")
 
@@ -139,7 +138,7 @@ class Payload:
 @dataclass
 class ChatConfig:
     model: str = _MODEL
-    max_tokens: int = 49152
+    max_tokens: int = 16384
     api_key: Optional[str] = None
 
 
@@ -289,10 +288,6 @@ class AnthropicClient:
                         max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message,
                         thinking={"type": "adaptive"},
                         output_config=output_config,
-                        # Per-request timeout (same values as the SDK default):
-                        # required for non-streaming calls with max_tokens > ~21k,
-                        # which the SDK otherwise rejects.
-                        timeout=httpx.Timeout(600.0, connect=5.0),
                         **tool_kwargs
                     )
                     message = self.client.messages.create(**create_kwargs)
