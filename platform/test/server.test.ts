@@ -8,9 +8,9 @@ const baseUrl = `http://localhost:${port}`;
 
 const app = await setup(port);
 
-// setup() runs initAuth(), which may enable auth if the dev's .env points at a
-// DB with the lightning_clients table. Force auth off so the suite is
-// deterministic; the auth block below opts back in via the test seam.
+// setup() runs initAuth(), which enables auth if the dev's .env sets
+// INSTANCE_AUTH. Force auth off so the suite is deterministic; the auth block
+// below opts back in via the test seam.
 __setAuthForTest(null);
 
 const get = (path: string) => {

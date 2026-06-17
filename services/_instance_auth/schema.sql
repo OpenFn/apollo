@@ -1,8 +1,11 @@
 -- Instance auth: the allow-list of Lightning clients permitted to call Apollo.
 --
--- Creating this table is the opt-in for instance auth. When it exists (and
--- POSTGRES_URL is set), the Apollo server gates every /services/* request on a
--- valid bearer token. Without it, the server stays open as before.
+-- Instance auth is opt-in via the INSTANCE_AUTH env var. When it is set, the
+-- Apollo server gates every /services/* request on a valid bearer token and
+-- looks tokens up in this table (via POSTGRES_URL). This table must exist for
+-- auth to work — if INSTANCE_AUTH is set but the table is missing, the gate
+-- fails closed and rejects every external caller. Without INSTANCE_AUTH, the
+-- server stays open as before.
 --
 -- Rows are managed by hand. Use hash_token.py to mint a token + its hash, then
 -- INSERT a row and configure the Lightning instance with the plaintext token as

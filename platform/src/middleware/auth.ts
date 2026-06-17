@@ -8,10 +8,15 @@ type Client = { name: string; anthropicKey: string | null };
 // A lookup resolves a token hash to a client, or null if unknown.
 type Lookup = (hash: string) => Promise<Client | null> | Client | null;
 
-// Instance auth is opt-in: enabled only when POSTGRES_URL is set AND the
-// lightning_clients table exists (see initAuth). With it disabled, /services/*
-// is open exactly as before.
+// Instance auth is opt-in via the INSTANCE_AUTH env var (see initAuth). When it
+// is unset/falsey, /services/* is open exactly as before. When set, every
+// /services/* request requires a valid bearer token.
 let enabled = false;
+
+// True once the lightning_clients lookup is actually usable. When auth is
+// enabled but the DB/table can't be reached, this stays false and the gate
+// fails CLOSED (rejects every external caller) rather than silently opening up.
+let dbReady = false;
 
 // When set (by tests), this replaces the DB-backed lookup so the suite can
 // enable auth with a known token set without a real Postgres.
@@ -52,6 +57,8 @@ async function loadClients(): Promise<Map<string, Client>> {
 }
 
 async function dbLookup(hash: string): Promise<Client | null> {
+  // Auth is on but the lookup never came up — reject (fail closed).
+  if (!dbReady || !sql) return null;
   const now = Date.now();
   if (!clientCache || now - cacheTs > CACHE_TTL_MS) {
     clientCache = await loadClients();
@@ -60,41 +67,60 @@ async function dbLookup(hash: string): Promise<Client | null> {
   return clientCache.get(hash) ?? null;
 }
 
+/** Whether the INSTANCE_AUTH env var opts this instance into auth. */
+function authOptIn(): boolean {
+  const v = (process.env.INSTANCE_AUTH ?? "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
 /**
- * Decide once at startup whether instance auth is active. Enabled iff
- * POSTGRES_URL is set and the lightning_clients table exists. Any failure
- * leaves auth disabled (fail-open) so a misconfigured DB never bricks Apollo.
+ * Decide once at startup whether instance auth is active. The INSTANCE_AUTH env
+ * var is the master switch: unset/falsey leaves /services/* open as before.
+ * When set, auth is enabled and tokens are looked up in the lightning_clients
+ * table (via POSTGRES_URL). If that table can't be reached, auth stays enabled
+ * but the gate fails CLOSED (rejects every external caller) — an explicit
+ * opt-in must never silently fall back to open.
  */
 export async function initAuth(): Promise<void> {
-  const url = process.env.POSTGRES_URL;
-  if (!url) {
-    enabled = false;
+  enabled = authOptIn();
+  if (!enabled) {
+    dbReady = false;
     console.warn(
-      "Apollo instance auth DISABLED: POSTGRES_URL not set — /services/* is open to all callers."
+      "Apollo instance auth DISABLED: INSTANCE_AUTH not set — /services/* is open to all callers."
     );
     return;
   }
+
+  const url = process.env.POSTGRES_URL;
+  if (!url) {
+    dbReady = false;
+    console.error(
+      "Apollo instance auth ENABLED but POSTGRES_URL is not set — clients cannot be looked up. /services/* will REJECT all external callers until this is fixed."
+    );
+    return;
+  }
+
   try {
     sql = new SQL(url);
     const rows = (await sql`
       SELECT to_regclass('public.lightning_clients') AS t
     `) as Array<{ t: string | null }>;
     if (rows?.[0]?.t) {
-      enabled = true;
+      dbReady = true;
       clientCache = null; // force a fresh load on the first request
       console.log(
-        "Apollo instance auth ENABLED (lightning_clients table present)."
+        "Apollo instance auth ENABLED (INSTANCE_AUTH set; lightning_clients table present)."
       );
     } else {
-      enabled = false;
-      console.warn(
-        "Apollo instance auth DISABLED: lightning_clients table not found — /services/* is open. Run services/_instance_auth/schema.sql to enable."
+      dbReady = false;
+      console.error(
+        "Apollo instance auth ENABLED but the lightning_clients table was not found — /services/* will REJECT all external callers. Run services/_instance_auth/schema.sql to provision it."
       );
     }
   } catch (err) {
-    enabled = false;
-    console.warn(
-      "Apollo instance auth DISABLED: could not verify lightning_clients table — /services/* is open.",
+    dbReady = false;
+    console.error(
+      "Apollo instance auth ENABLED but the lightning_clients table could not be verified — /services/* will REJECT all external callers.",
       err
     );
   }
