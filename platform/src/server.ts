@@ -5,6 +5,7 @@ import setupHealthcheck from "./middleware/healthcheck";
 import setupServices from "./middleware/services";
 import { html } from "@elysiajs/html";
 import logRequest from "./util/log-request";
+import { initAuth } from "./middleware/auth";
 import { randomUUID } from "node:crypto";
 
 export default async (port: number | string = 3000) => {
@@ -18,6 +19,9 @@ export default async (port: number | string = 3000) => {
   await setupHealthcheck(app);
   await setupDir(app);
   await setupServices(app, +port);
+
+  // Decide whether /services/* is gated by an instance token (see auth.ts).
+  await initAuth();
 
   console.log("Apollo Server listening on ", port);
   app.listen(port);

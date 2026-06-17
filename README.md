@@ -175,11 +175,32 @@ in your json, keep it inside a tmp dir and it'll remain safe and secret.
 
 The Apollo server uses bunjs with the Elysia framework.
 
-It is a very lightweight server, with at the time of writing no authentication
-or governance included.
+It is a very lightweight server. By default it includes no authentication, but
+instance auth can be enabled (see below).
 
 Python services are hosted at `/services/<name>`. Each service expects a POST
 request with a JSON body, and will return JSON.
+
+### Instance authentication (optional)
+
+`/services/*` can be gated so that only known clients (e.g. specific Lightning
+instances) may call it, with Apollo using **each client's own Anthropic API key**
+for that client's requests.
+
+- It is **opt-in and backward compatible**: auth is active only when
+  `POSTGRES_URL` is set **and** the `lightning_clients` table exists. Otherwise
+  the server stays fully open as before.
+- Clients authenticate with `Authorization: Bearer <token>`. Apollo stores only a
+  SHA-256 hash of the token; an unknown/missing token gets
+  `401 { "code": 401, "type": "UNAUTHORIZED" }`.
+- On a match, the client's stored Anthropic key is injected into the request, so
+  LLM usage bills to that client (falls back to the global `ANTHROPIC_API_KEY` if
+  the client has no key).
+- Health/root endpoints (`/livez`, `/status`, `/`) and loopback/internal
+  service-to-service calls are exempt.
+
+To enable it and provision clients, see
+[`services/_instance_auth/`](services/_instance_auth/README.md).
 
 There is very little standard for formality in the JSON structures to date. The
 server may soon establish some conventions for better interopability with the

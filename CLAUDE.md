@@ -45,6 +45,11 @@ TypeScript) service modules.
 - **Service discovery**: `platform/src/util/describe-modules.ts` - Auto-mounts
   any `services/<name>/` directory not starting with `_`. Detects service type
   by checking for `<name>.py` (Python) or `<name>.ts` (TypeScript) index file.
+- **Instance auth** (`platform/src/middleware/auth.ts`): `/services/*` is gated by
+  a bearer token only when `POSTGRES_URL` is set AND the `lightning_clients` table
+  exists (opt-in; otherwise open). A matched client's stored Anthropic key is
+  injected into the payload as `api_key`. Health endpoints and loopback/internal
+  `apollo()` calls are exempt. Provisioning lives in `services/_instance_auth/`.
 
 ### Services Architecture
 
