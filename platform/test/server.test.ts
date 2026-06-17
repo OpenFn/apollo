@@ -1,11 +1,17 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import setup from "../src/server";
+import { __setAuthForTest, hashToken } from "../src/middleware/auth";
 
 const port = 9865;
 
 const baseUrl = `http://localhost:${port}`;
 
 const app = await setup(port);
+
+// setup() runs initAuth(), which may enable auth if the dev's .env points at a
+// DB with the lightning_clients table. Force auth off so the suite is
+// deterministic; the auth block below opts back in via the test seam.
+__setAuthForTest(null);
 
 const get = (path: string) => {
   return new Request(`${baseUrl}/${path}`);
@@ -124,9 +130,79 @@ describe("Python Services", () => {
       );
 
       expect(response.status).toBe(200);
-      
+
       const body = await response.json();
       expect(body).toEqual({ success: true });
+    });
+  });
+});
+
+describe("Instance authentication", () => {
+  // Two known clients, keyed by token hash (no real DB — this is the seam).
+  const ALPHA = "alpha-token";
+  const BETA = "beta-token";
+  const clients: Record<string, { name: string; anthropicKey: string | null }> = {
+    [hashToken(ALPHA)]: { name: "alpha", anthropicKey: "sk-ant-alpha" },
+    [hashToken(BETA)]: { name: "beta", anthropicKey: "sk-ant-beta" },
+  };
+
+  const postWith = (path: string, data: any, token?: string) =>
+    new Request(`${baseUrl}/${path}`, {
+      method: "POST",
+      body: JSON.stringify(data),
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+
+  afterEach(() => {
+    // Restore the open state the rest of the suite expects.
+    __setAuthForTest(null);
+  });
+
+  it("stays open when auth is disabled", async () => {
+    __setAuthForTest(null);
+    const res = await app.handle(post("services/echo", { x: 1 }));
+    expect(res.status).toBe(200);
+  });
+
+  describe("when enabled", () => {
+    beforeEach(() => {
+      __setAuthForTest((hash) => clients[hash] ?? null);
+    });
+
+    it("allows a valid token and injects the client's anthropic key", async () => {
+      const res = await app.handle(postWith("services/echo", { x: 1 }, ALPHA));
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.x).toBe(1);
+      expect(body.api_key).toBe("sk-ant-alpha");
+    });
+
+    it("allows a second client's token", async () => {
+      const res = await app.handle(postWith("services/echo", { x: 2 }, BETA));
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.api_key).toBe("sk-ant-beta");
+    });
+
+    it("rejects a missing token with 401 UNAUTHORIZED", async () => {
+      const res = await app.handle(post("services/echo", { x: 1 }));
+      expect(res.status).toBe(401);
+      const body = await res.json();
+      expect(body.code).toBe(401);
+      expect(body.type).toBe("UNAUTHORIZED");
+    });
+
+    it("rejects a wrong token with 401", async () => {
+      const res = await app.handle(postWith("services/echo", { x: 1 }, "nope"));
+      expect(res.status).toBe(401);
+    });
+
+    it("leaves health and root endpoints open", async () => {
+      expect((await app.handle(get("livez"))).status).toBe(200);
+      expect((await app.handle(get(""))).status).toBe(200);
     });
   });
 });

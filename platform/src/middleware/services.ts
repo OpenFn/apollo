@@ -7,6 +7,7 @@ import describeModules, {
   type ModuleDescription,
 } from "../util/describe-modules";
 import { isApolloError } from "../util/errors";
+import { authGate, apiKeyOverride } from "./auth";
 
 const callService = (
   m: ModuleDescription,
@@ -27,6 +28,10 @@ export default async (app: Elysia, port: number) => {
   console.log("Loading routes:");
   const modules = await describeModules(path.resolve("./services"));
   app.group("/services", (app) => {
+    // Gate every /services/* route on a valid instance token (no-op when
+    // instance auth is disabled). Loopback/internal calls are exempted.
+    app.onBeforeHandle(authGate);
+
     modules.forEach((m) => {
       const { name, readme } = m;
       console.log(" - mounted /services/" + name);
@@ -37,6 +42,7 @@ export default async (app: Elysia, port: number) => {
         const payload = {
           ...(ctx.body ?? {}),
           session_id: ctx.uuid,
+          ...apiKeyOverride(ctx),
         };
         const result = await callService(m, port, payload as any);
 
@@ -58,6 +64,7 @@ export default async (app: Elysia, port: number) => {
         const payload = {
           ...(ctx.body ?? {}),
           session_id: ctx.uuid,
+          ...apiKeyOverride(ctx),
         };
 
         const stream = new ReadableStream({
@@ -133,6 +140,11 @@ export default async (app: Elysia, port: number) => {
       // TODO in the web socket API, does it make more sense to open a socket at root
       // and then pick the service you want? So you'd connect to /ws an send { call: 'echo', payload: {} }
       app.ws(name, {
+        // Gate the WS upgrade too, so it can't be used to bypass auth. Note:
+        // per-client Anthropic key injection is only wired into the POST and
+        // /stream paths (the chat transports Lightning uses); WS payloads pass
+        // through as-is.
+        beforeHandle: authGate,
         open() {
           console.log(`Websocket connected  at /services/${name}`);
         },
