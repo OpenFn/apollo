@@ -19,8 +19,11 @@ router). It is just the schema and a helper script; the actual gate lives in
   request payload as `api_key`, so all LLM usage for that request bills to the
   client. If the column is `NULL`, Apollo falls back to its global
   `ANTHROPIC_API_KEY`.
-- **Opt-in / backward compatible:** auth is active only when `POSTGRES_URL` is set
-  *and* this table exists. Otherwise the server stays open exactly as before.
+- **Opt-in / backward compatible:** auth is active only when the `INSTANCE_AUTH`
+  environment variable is set (e.g. `INSTANCE_AUTH=true`). Otherwise the server
+  stays open exactly as before. When auth is enabled but this table can't be
+  reached, the gate **fails closed** (every external caller gets `401`) rather
+  than silently opening up.
 - Loopback callers (`127.0.0.1`/`::1`) and the health endpoints (`/livez`,
   `/status`, `/`) are exempt.
 
@@ -51,7 +54,9 @@ router). It is just the schema and a helper script; the actual gate lives in
 4. Configure that Lightning instance to send `Authorization: Bearer <token>` on
    its Apollo requests.
 
-5. Restart Apollo. The startup log shows `Apollo instance auth ENABLED`.
+5. Set `INSTANCE_AUTH=true` in Apollo's environment and restart. The startup log
+   shows `Apollo instance auth ENABLED`. (If `INSTANCE_AUTH` is set but the table
+   is missing, the log warns and every external caller is rejected.)
 
 ## Managing clients
 

@@ -177,9 +177,12 @@ request with a JSON body, and will return JSON.
 instances) may call it, with Apollo using **each client's own Anthropic API key**
 for that client's requests.
 
-- It is **opt-in and backward compatible**: auth is active only when
-  `POSTGRES_URL` is set **and** the `lightning_clients` table exists. Otherwise
-  the server stays fully open as before.
+- It is **opt-in and backward compatible**: auth is active only when the
+  `INSTANCE_AUTH` environment variable is set (e.g. `INSTANCE_AUTH=true`).
+  Otherwise the server stays fully open as before. Tokens are looked up in the
+  `lightning_clients` table via `POSTGRES_URL`; if auth is enabled but that table
+  can't be reached, the gate **fails closed** (rejects all external callers)
+  rather than silently opening up.
 - Clients authenticate with `Authorization: Bearer <token>`. Apollo stores only a
   SHA-256 hash of the token; an unknown/missing token gets
   `401 { "code": 401, "type": "UNAUTHORIZED" }`.
