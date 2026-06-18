@@ -5,6 +5,28 @@ Want to contribute to OpenFn Apollo? Read on.
 For technical details about the server architecture (including how the JS server
 calls python modules), see the main readme.
 
+## Pull requests
+
+When your fix or feature is completed, raise a pull request against
+[openfn/apollo](https://www.github.com/openfn/apollo).
+
+Make sure to include a changeset: run `bun changeset`, follow the prompts, and
+commit the changes.
+
+Changesets are release notes which are saved to a file in the repo. When the
+release is prepared, all changesets are assembled into the changelog and the
+server version is increased automatically.
+
+To write a good changeset:
+
+- Keep it short, usually just one sentence.
+- Only include a single feature/fix/change per changeset
+- You can include as many different changesets as you like
+- Describe of the changes from the end user's perspective.
+- Do not make it a sales pitch, do not sell the change.
+- Do not justify or explain the change. No why or because.
+- If there are breaking changes for users, include a migration guide.
+
 ## Adding a Python Module
 
 Your python service can be your own little world inside Apollo. We give you a
@@ -139,8 +161,3 @@ To add models as python packages:
 - Copy the `.whl` file to `/models` at the repo root
 - Add the file to poetry (you should be able to do
   `poetry add models/<my-model>.whl`)
-
-## Releasing
-
-When your contribution is ready, please open a Pull Request at
-[openfn/gen](https://www.github.com/openfn/gen)

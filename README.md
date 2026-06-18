@@ -47,7 +47,8 @@ To see an index of the available language services, head to `localhost:3000`.
 
 ## Debugging
 
-The server defaults to port 3000. You can test any service directly with curl to confirm Apollo is working independently of Lightning (or any other client).
+The server defaults to port 3000. You can test any service directly with curl to
+confirm Apollo is working independently of Lightning (or any other client).
 
 For example, to trigger a `workflow_chat` stream:
 
@@ -57,13 +58,22 @@ curl -N -X POST http://localhost:3000/services/workflow_chat/stream \
     -d '{"content":"make a simple http workflow","history":[],"api_key":"<your-anthropic-api-key>"}'
 ```
 
-The `api_key` field is your Anthropic API key. If `ANTHROPIC_API_KEY` is already set in your `.env`, you can omit it. In Lightning, this is configured via the `ANTHROPIC_API_KEY` environment variable and passed through to Apollo on each request.
+The `api_key` field is your Anthropic API key. If `ANTHROPIC_API_KEY` is already
+set in your `.env`, you can omit it. In Lightning, this is configured via the
+`ANTHROPIC_API_KEY` environment variable and passed through to Apollo on each
+request.
 
-The `-N` flag disables buffering so SSE events appear as they arrive. You should see a stream of `event: log` lines followed by `event: complete`. An `event: error` response means the issue is inside Apollo.
+The `-N` flag disables buffering so SSE events appear as they arrive. You should
+see a stream of `event: log` lines followed by `event: complete`. An
+`event: error` response means the issue is inside Apollo.
 
-If the stream returns successfully here but Lightning isn't receiving it, the issue is on the Lightning side -- check that `APOLLO_ENDPOINT=http://localhost:3000` is set correctly in Lightning's environment (no trailing slash).
+If the stream returns successfully here but Lightning isn't receiving it, the
+issue is on the Lightning side -- check that
+`APOLLO_ENDPOINT=http://localhost:3000` is set correctly in Lightning's
+environment (no trailing slash).
 
-To check API key connectivity (Anthropic, OpenAI, Pinecone), hit the status service:
+To check API key connectivity (Anthropic, OpenAI, Pinecone), hit the status
+service:
 
 ```bash
 curl http://localhost:3000/services/status
@@ -224,3 +234,27 @@ docker run -p 3000:3000 openfn-apollo
 
 See the Contribution Guide for more details about how and where to contribute to
 the Apollo platform.
+
+## Release
+
+New releases are assembled as Docker images whenever a version tag of the form
+`@openfn/apollo@x.y.x` is pushed to GitHub.
+
+This tag is automatically generated upon merging to main.
+
+Github's `main` should represent the latest production version of apollo.
+Ideally, releases should be assembled on a branch - usually `release/next` or
+`release/1.2.3`. But this is not required - releases can be cut straight from a
+fix or feature branch, or even from main.
+
+To release a new apollo version:
+
+- Checkout the branch that contains the release
+- Run `bun changeset version`
+- (if there are no changesets, you can either run `bun changeset` to create one,
+  or manually bump `package.json` and update `changelog.md`)
+- Sanity check the new version number and changelog updates, just to be sure
+  there's no funny stuff.
+- Commit changes and push
+- When the PR is merged to main, a new tag is generated and a new Docker image
+  is built
