@@ -7,7 +7,7 @@ import describeModules, {
   type ModuleDescription,
 } from "../util/describe-modules";
 import { isApolloError } from "../util/errors";
-import { authGate, apiKeyOverride } from "./auth";
+import { createKeyResolver, type ClientLookup } from "./client_keys";
 
 const callService = (
   m: ModuleDescription,
@@ -24,14 +24,27 @@ const callService = (
   }
 };
 
-export default async (app: Elysia, port: number) => {
+export default async (app: Elysia, port: number, lookup: ClientLookup | null) => {
   console.log("Loading routes:");
   const modules = await describeModules(path.resolve("./services"));
-  app.group("/services", (app) => {
-    // Gate every /services/* route on a valid instance token (no-op when
-    // instance auth is disabled). Loopback/internal calls are exempted.
-    app.onBeforeHandle(authGate);
+  const resolveKey = createKeyResolver(lookup);
 
+  // Build the service payload. If the caller's api_key is a known client token,
+  // it's swapped for the key we hold for that client; anything unrecognised is
+  // left as-is, so a client passing its own provider key is untouched.
+  //
+  // NOTE: handlers must reference `ctx.body` directly. Elysia decides whether to
+  // parse the request body by statically inspecting the handler; hiding the
+  // reference makes it skip parsing and the service receives an empty body.
+  const buildPayload = async (ctx: any, body: any) => {
+    const payload: any = { ...(body ?? {}) };
+    const apiKey = await resolveKey(payload.api_key);
+    if (apiKey === undefined) delete payload.api_key;
+    else payload.api_key = apiKey;
+    return { ...payload, session_id: ctx.uuid };
+  };
+
+  app.group("/services", (app) => {
     modules.forEach((m) => {
       const { name, readme } = m;
       console.log(" - mounted /services/" + name);
@@ -39,11 +52,7 @@ export default async (app: Elysia, port: number) => {
       // simple post
       app.post(name, async (ctx) => {
         console.log(`POST /services/${name}: ${ctx.uuid}`);
-        const payload = {
-          ...(ctx.body ?? {}),
-          session_id: ctx.uuid,
-          ...apiKeyOverride(ctx),
-        };
+        const payload = await buildPayload(ctx, ctx.body);
         const result = await callService(m, port, payload as any);
 
         if (isApolloError(result)) {
@@ -61,11 +70,7 @@ export default async (app: Elysia, port: number) => {
       // HTTP streaming
       app.post(`${name}/stream`, async (ctx) => {
         console.log(`STREAM START /services/${name}: ${ctx.uuid}`);
-        const payload = {
-          ...(ctx.body ?? {}),
-          session_id: ctx.uuid,
-          ...apiKeyOverride(ctx),
-        };
+        const payload = await buildPayload(ctx, ctx.body);
 
         const stream = new ReadableStream({
           async start(controller) {
@@ -140,11 +145,6 @@ export default async (app: Elysia, port: number) => {
       // TODO in the web socket API, does it make more sense to open a socket at root
       // and then pick the service you want? So you'd connect to /ws an send { call: 'echo', payload: {} }
       app.ws(name, {
-        // Gate the WS upgrade too, so it can't be used to bypass auth. Note:
-        // per-client Anthropic key injection is only wired into the POST and
-        // /stream paths (the chat transports Lightning uses); WS payloads pass
-        // through as-is.
-        beforeHandle: authGate,
         open() {
           console.log(`Websocket connected  at /services/${name}`);
         },

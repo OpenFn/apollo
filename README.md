@@ -165,34 +165,30 @@ in your json, keep it inside a tmp dir and it'll remain safe and secret.
 
 The Apollo server uses bunjs with the Elysia framework.
 
-It is a very lightweight server. By default it includes no authentication, but
-instance auth can be enabled (see below).
+It is a very lightweight server with no authentication. It does support optional
+per-client API key mapping (see below).
 
 Python services are hosted at `/services/<name>`. Each service expects a POST
 request with a JSON body, and will return JSON.
 
-### Instance authentication (optional)
+### Per-client API key mapping (optional)
 
-`/services/*` can be gated so that only known clients (e.g. specific Lightning
-instances) may call it, with Apollo using **each client's own Anthropic API key**
-for that client's requests.
+Apollo can let a client authenticate with an **OpenFn-issued token** instead of
+holding a real provider key. When a request's `api_key` matches a known client
+token, Apollo swaps in the key it holds for that client; anything unrecognised is
+passed through unchanged.
 
-- It is **opt-in and backward compatible**: auth is active only when the
-  `INSTANCE_AUTH` environment variable is set (e.g. `INSTANCE_AUTH=true`).
-  Otherwise the server stays fully open as before. Tokens are looked up in the
-  `lightning_clients` table via `POSTGRES_URL`; if auth is enabled but that table
-  can't be reached, the gate **fails closed** (rejects all external callers)
-  rather than silently opening up.
-- Clients authenticate with `Authorization: Bearer <token>`. Apollo stores only a
-  SHA-256 hash of the token; an unknown/missing token gets
-  `401 { "code": 401, "type": "UNAUTHORIZED" }`.
-- On a match, the client's stored Anthropic key is injected into the request, so
-  LLM usage bills to that client (falls back to the global `ANTHROPIC_API_KEY` if
-  the client has no key).
-- Health/root endpoints (`/livez`, `/status`, `/`) and loopback/internal
-  service-to-service calls are exempt.
+- It is **opt-in and backward compatible**: it activates only when the
+  `lightning_clients` table is provisioned (via `POSTGRES_URL`). Without that
+  table every request passes through exactly as before. There's no env flag.
+  Enabling it requires **Bun >= 1.2** (uses `Bun.SQL`).
+- Apollo stores only the **SHA-256 hash** of each token, never the plaintext. A
+  client with no stored key falls back to the global `ANTHROPIC_API_KEY`.
+- Because it only *recognises* tokens and never rejects anyone, multiple clients
+  can safely share one Apollo: known clients are mapped to their key, everyone
+  else is untouched.
 
-To enable it and provision clients, see
+To provision clients, see
 [`services/_instance_auth/`](services/_instance_auth/README.md).
 
 There is very little standard for formality in the JSON structures to date. The

@@ -50,6 +50,7 @@ testpaths = [
     "services/job_chat/tests",
     "services/search_docsite/tests",
     "services/tools",
+    "services/_instance_auth/tests",
 ]
 
 python_files = ["test_*.py"]

@@ -45,13 +45,15 @@ TypeScript) service modules.
 - **Service discovery**: `platform/src/util/describe-modules.ts` - Auto-mounts
   any `services/<name>/` directory not starting with `_`. Detects service type
   by checking for `<name>.py` (Python) or `<name>.ts` (TypeScript) index file.
-- **Instance auth** (`platform/src/middleware/auth.ts`): `/services/*` is gated by
-  a bearer token when the `INSTANCE_AUTH` env var is set (opt-in; otherwise open).
-  Tokens are looked up in the `lightning_clients` table via `POSTGRES_URL`; a
-  matched client's stored Anthropic key is injected into the payload as `api_key`.
-  If auth is enabled but the table can't be reached, the gate fails closed
-  (rejects all external callers). Health endpoints and loopback/internal
-  `apollo()` calls are exempt. Provisioning lives in `services/_instance_auth/`.
+- **Per-client API key mapping** (`platform/src/middleware/client_keys.ts`): when
+  the `lightning_clients` table is provisioned (via `POSTGRES_URL`, needs Bun >=
+  1.2 for `Bun.SQL`), an incoming `api_key` that matches a known client token
+  (SHA-256 hash) is swapped for the key Apollo holds for that client; anything
+  unrecognised passes through unchanged. This lets a client (e.g. a Lightning
+  instance) authenticate with an OpenFn-issued token instead of holding a real
+  provider key, while other callers are unaffected. It is opt-in purely by
+  provisioning the table (no env flag); without it every request passes through
+  as before. Provisioning lives in `services/_instance_auth/`.
 
 ### Services Architecture
 
