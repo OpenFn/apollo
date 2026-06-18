@@ -54,6 +54,13 @@ let loaderOverride: (() => Promise<Map<string, Client>>) | null = null;
 // so "Apollo calling itself" skips auth without trusting network position (the
 // old loopback exemption trusted any local caller, including Lightning).
 // Honour an operator-provided value; otherwise mint a fresh random one.
+//
+// MULTI-PROCESS DEPLOYMENTS: when unset, each process mints its OWN random
+// token. apollo() self-calls target 127.0.0.1:{port}, so they normally hit the
+// same process and the minted token matches. But if several processes share a
+// port (e.g. SO_REUSEPORT / clustering), a self-call can land on a sibling
+// whose token differs and get a spurious 401. Set APOLLO_INTERNAL_TOKEN to the
+// SAME value across all processes in that case so they recognise each other.
 export const INTERNAL_HEADER = "x-apollo-internal";
 const INTERNAL_TOKEN =
   process.env.APOLLO_INTERNAL_TOKEN ?? randomBytes(32).toString("hex");
@@ -272,7 +279,14 @@ export async function authGate(ctx: any): Promise<ApolloError | void> {
   // check. External callers can't forge this — it's a per-process secret that
   // is never sent to clients.
   const internal = ctx.request?.headers?.get?.(INTERNAL_HEADER) ?? "";
-  if (internal && safeEqual(internal, INTERNAL_TOKEN)) return;
+  if (internal && safeEqual(internal, INTERNAL_TOKEN)) {
+    // Flag the exemption so apiKeyOverride leaves the payload untouched. Without
+    // this, an internal call (which never resolves a lightningClient) would have
+    // any api_key it forwards stripped to the global key — mis-billing a service
+    // that legitimately passes the per-client key down an apollo() hop.
+    ctx.internalCall = true;
+    return;
+  }
 
   // The credential is the api_key the client (Lightning) already sends in the
   // request body — there is no separate bearer token and no Lightning-side
@@ -296,15 +310,19 @@ export async function authGate(ctx: any): Promise<ApolloError | void> {
  * When auth is OFF, returns {} — the payload is left exactly as the caller sent
  * it (backward compatible; the legacy "client supplies its own key" behaviour).
  *
- * When auth is ON, the api_key the client sent is ONLY an auth credential and is
- * NEVER passed through to the LLM. It is always overwritten: with the matched
- * client's stored anthropic_api_key, or — if that client has no stored key —
- * with `undefined`, which drops the field on serialisation so Apollo falls back
- * to its global ANTHROPIC_API_KEY. Either way the inbound credential cannot
- * survive into the payload.
+ * Internal apollo() self-calls (flagged by authGate) also return {} — they were
+ * already authenticated upstream, so whatever api_key the calling service chose
+ * to forward must pass through unchanged rather than being stripped here.
+ *
+ * Otherwise (auth ON, external caller) the api_key the client sent is ONLY an
+ * auth credential and is NEVER passed through to the LLM. It is always
+ * overwritten: with the matched client's stored anthropic_api_key, or — if that
+ * client has no stored key — with `undefined`, which drops the field on
+ * serialisation so Apollo falls back to its global ANTHROPIC_API_KEY. Either way
+ * the inbound credential cannot survive into the payload.
  */
 export function apiKeyOverride(ctx: any): { api_key?: string } {
-  if (!enabled) return {};
+  if (!enabled || ctx?.internalCall) return {};
   const client = ctx?.lightningClient as Client | undefined;
   return { api_key: client?.anthropicKey ?? undefined };
 }

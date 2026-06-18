@@ -235,6 +235,39 @@ describe("Instance authentication", () => {
       const res = await app.handle(req);
       expect(res.status).toBe(401);
     });
+
+    it("passes a forwarded api_key through on internal self-calls untouched", async () => {
+      // An internal apollo() call was already authenticated upstream, so any
+      // api_key the calling service forwards (e.g. the resolved per-client key)
+      // must survive into the payload rather than being stripped to the global
+      // key. Echo back what the service actually received.
+      const req = new Request(`${baseUrl}/services/echo`, {
+        method: "POST",
+        body: JSON.stringify({ x: 9, api_key: "sk-ant-forwarded" }),
+        headers: { "Content-Type": "application/json", ...internalAuthHeader() },
+      });
+      const res = await app.handle(req);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.api_key).toBe("sk-ant-forwarded");
+    });
+
+    it("rejects an unauthenticated WebSocket upgrade", async () => {
+      // The WS upgrade carries no body, so it has no api_key to validate; the
+      // beforeHandle gate must reject it rather than let it bypass auth. (Real
+      // clients use POST/stream, which is where the credential lives.)
+      const req = new Request(`${baseUrl}/services/echo`, {
+        method: "GET",
+        headers: {
+          Connection: "Upgrade",
+          Upgrade: "websocket",
+          "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
+          "Sec-WebSocket-Version": "13",
+        },
+      });
+      const res = await app.handle(req);
+      expect(res.status).toBe(401);
+    });
   });
 });
 
