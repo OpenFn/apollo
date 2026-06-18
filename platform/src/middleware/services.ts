@@ -29,7 +29,7 @@ export default async (app: Elysia, port: number) => {
   const modules = await describeModules(path.resolve("./services"));
   app.group("/services", (app) => {
     // Gate every /services/* route on a valid instance token (no-op when
-    // instance auth is disabled). Loopback/internal calls are exempted.
+    // instance auth is disabled).
     app.onBeforeHandle(authGate);
 
     modules.forEach((m) => {
@@ -140,10 +140,11 @@ export default async (app: Elysia, port: number) => {
       // TODO in the web socket API, does it make more sense to open a socket at root
       // and then pick the service you want? So you'd connect to /ws an send { call: 'echo', payload: {} }
       app.ws(name, {
-        // Gate the WS upgrade too, so it can't be used to bypass auth. Note:
-        // per-client Anthropic key injection is only wired into the POST and
-        // /stream paths (the chat transports Lightning uses); WS payloads pass
-        // through as-is.
+        // Gate the WS upgrade too, so it can't be used to bypass auth. The
+        // credential lives in the request body (api_key), which a WS upgrade
+        // doesn't carry — so when auth is on, WS upgrades are rejected. That's
+        // fine: Lightning uses the POST and /stream transports, which is also
+        // where the api_key is validated and the per-client key swapped in.
         beforeHandle: authGate,
         open() {
           console.log(`Websocket connected  at /services/${name}`);

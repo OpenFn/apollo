@@ -1,5 +1,5 @@
 import { SQL } from "bun";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { ApolloError } from "../util/errors";
 
 // A row from the lightning_clients table, as used at runtime.
@@ -10,7 +10,8 @@ type Lookup = (hash: string) => Promise<Client | null> | Client | null;
 
 // Instance auth is opt-in via the INSTANCE_AUTH env var (see initAuth). When it
 // is unset/falsey, /services/* is open exactly as before. When set, every
-// /services/* request requires a valid bearer token.
+// /services/* request must carry an api_key (in the body) that matches a known
+// client.
 let enabled = false;
 
 // True once the lightning_clients lookup is actually usable. When auth is
@@ -31,9 +32,31 @@ const CACHE_TTL_MS = 60_000;
 let clientCache: Map<string, Client> | null = null;
 let cacheTs = 0;
 
-const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+// A per-process secret that identifies genuine Apollo-to-Apollo calls. The
+// bridge spawns Python services as child processes that inherit this process's
+// env, so exporting the token here lets services/util.py apollo() echo it back
+// via the X-Apollo-Internal header. authGate exempts any request carrying it,
+// so "Apollo calling itself" skips auth without trusting network position (the
+// old loopback exemption trusted any local caller, including Lightning).
+// Honour an operator-provided value; otherwise mint a fresh random one.
+export const INTERNAL_HEADER = "x-apollo-internal";
+const INTERNAL_TOKEN =
+  process.env.APOLLO_INTERNAL_TOKEN ?? randomBytes(32).toString("hex");
+process.env.APOLLO_INTERNAL_TOKEN = INTERNAL_TOKEN;
 
-/** SHA-256 hex of a bearer token. Must match services/_instance_auth/hash_token.py. */
+/** Constant-time string compare, length-guarded. */
+function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  return ab.length === bb.length && timingSafeEqual(ab, bb);
+}
+
+/** Header set marking a request as an internal apollo() self-call (used by tests). */
+export function internalAuthHeader(): Record<string, string> {
+  return { [INTERNAL_HEADER]: INTERNAL_TOKEN };
+}
+
+/** SHA-256 hex of a client credential (the api_key). Must match services/_instance_auth/hash_token.py. */
 export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
@@ -71,6 +94,55 @@ async function dbLookup(hash: string): Promise<Client | null> {
 function authOptIn(): boolean {
   const v = (process.env.INSTANCE_AUTH ?? "").trim().toLowerCase();
   return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
+/** Whether APOLLO_AUTH_DEBUG opts into per-request logging (read live each call). */
+function debugEnabled(): boolean {
+  const v = (process.env.APOLLO_AUTH_DEBUG ?? "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
+/**
+ * Opt-in logging of the shape of every /services/* request, for debugging what
+ * callers (e.g. Lightning) actually send. Enable with APOLLO_AUTH_DEBUG=true.
+ * Secrets are never printed raw: the inbound api_key (the credential) is shown
+ * as its SHA-256 hash — exactly the value lightning_clients.auth_token_hash
+ * stores, so you can paste it straight into the table to allow-list a client.
+ * The internal token is shown only as present/absent and body values are
+ * omitted (just the top-level key names). Wrapped so it can never break a
+ * request if something is unexpectedly shaped.
+ */
+function debugLogRequest(ctx: any): void {
+  if (!debugEnabled()) return;
+  try {
+    const req = ctx.request;
+    const ip = ctx.server?.requestIP?.(req)?.address ?? "(no peer address)";
+    const headers: Record<string, string> = {};
+    req?.headers?.forEach?.((value: string, key: string) => {
+      if (key === "authorization") {
+        const token = value.startsWith("Bearer ") ? value.slice(7).trim() : "";
+        headers[key] = token ? `Bearer <sha256:${hashToken(token)}>` : "<malformed>";
+      } else if (key === INTERNAL_HEADER) {
+        headers[key] = "<present>";
+      } else {
+        headers[key] = value;
+      }
+    });
+    const bodyKeys =
+      ctx.body && typeof ctx.body === "object" ? Object.keys(ctx.body) : [];
+    const rawKey =
+      typeof ctx.body?.api_key === "string" ? ctx.body.api_key.trim() : "";
+    const apiKeyHash = rawKey ? `sha256:${hashToken(rawKey)}` : "(none)";
+    const pathname = req?.url ? new URL(req.url).pathname : "(no url)";
+    console.log(
+      `[auth-debug] ${req?.method} ${pathname} from ${ip} | auth ${enabled ? "ON" : "OFF"}\n` +
+        `[auth-debug]   headers: ${JSON.stringify(headers)}\n` +
+        `[auth-debug]   body keys: ${JSON.stringify(bodyKeys)}\n` +
+        `[auth-debug]   api_key (credential): ${apiKeyHash}`
+    );
+  } catch (err) {
+    console.log("[auth-debug] failed to log request:", err);
+  }
 }
 
 /**
@@ -128,7 +200,7 @@ export async function initAuth(): Promise<void> {
 
 function unauthorized(ctx: any): ApolloError {
   ctx.set.status = 401;
-  return { code: 401, type: "UNAUTHORIZED", message: "Missing or invalid API token" };
+  return { code: 401, type: "UNAUTHORIZED", message: "Missing or invalid API key" };
 }
 
 /**
@@ -137,34 +209,49 @@ function unauthorized(ctx: any): ApolloError {
  * On success it stashes the resolved client on the context for apiKeyOverride.
  */
 export async function authGate(ctx: any): Promise<ApolloError | void> {
+  debugLogRequest(ctx);
   if (!enabled) return;
 
-  // Exempt loopback callers — internal service-to-service apollo() calls hit
-  // 127.0.0.1. Synthetic requests (app.handle) have no peer address, so the
-  // gate is enforced for them (which is what the test suite relies on).
-  const address = ctx.server?.requestIP?.(ctx.request)?.address;
-  if (address && LOOPBACK.has(address)) return;
+  // Apollo calling itself: the bridge's Python children echo back the internal
+  // token (see services/util.py apollo()), so such calls skip the api_key
+  // check. External callers can't forge this — it's a per-process secret that
+  // is never sent to clients.
+  const internal = ctx.request?.headers?.get?.(INTERNAL_HEADER) ?? "";
+  if (internal && safeEqual(internal, INTERNAL_TOKEN)) return;
 
-  const header = ctx.request?.headers?.get?.("authorization") ?? "";
-  const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
-  if (!token) return unauthorized(ctx);
+  // The credential is the api_key the client (Lightning) already sends in the
+  // request body — there is no separate bearer token and no Lightning-side
+  // change. Hash it and look for a matching row in lightning_clients; an absent
+  // or unknown key is rejected.
+  const apiKey =
+    typeof ctx.body?.api_key === "string" ? ctx.body.api_key.trim() : "";
+  if (!apiKey) return unauthorized(ctx);
 
   const lookup = lookupOverride ?? dbLookup;
-  const client = await lookup(hashToken(token));
+  const client = await lookup(hashToken(apiKey));
   if (!client) return unauthorized(ctx);
 
   ctx.lightningClient = client;
 }
 
 /**
- * Returns an { api_key } override to merge into a service payload so Apollo
- * uses the client's own Anthropic key. Returns {} when auth is off or the
- * client has no stored key, leaving the payload untouched (Python then falls
- * back to the global ANTHROPIC_API_KEY).
+ * Resolve the api_key for the outgoing service payload. Merged LAST over the
+ * request body so it always wins.
+ *
+ * When auth is OFF, returns {} — the payload is left exactly as the caller sent
+ * it (backward compatible; the legacy "client supplies its own key" behaviour).
+ *
+ * When auth is ON, the api_key the client sent is ONLY an auth credential and is
+ * NEVER passed through to the LLM. It is always overwritten: with the matched
+ * client's stored anthropic_api_key, or — if that client has no stored key —
+ * with `undefined`, which drops the field on serialisation so Apollo falls back
+ * to its global ANTHROPIC_API_KEY. Either way the inbound credential cannot
+ * survive into the payload.
  */
 export function apiKeyOverride(ctx: any): { api_key?: string } {
+  if (!enabled) return {};
   const client = ctx?.lightningClient as Client | undefined;
-  return client?.anthropicKey ? { api_key: client.anthropicKey } : {};
+  return { api_key: client?.anthropicKey ?? undefined };
 }
 
 /** Test seam: pass a fake lookup to enable auth without a DB, or null to disable. */

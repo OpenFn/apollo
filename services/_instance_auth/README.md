@@ -1,8 +1,8 @@
 # Instance auth
 
 Gates Apollo's `/services/*` endpoints so that only known Lightning instances can
-call them, and makes Apollo use **each client's own Anthropic API key** for that
-client's requests.
+call them, and makes Apollo use **its own per-client Anthropic API key** for each
+request rather than trusting anything the caller sends.
 
 This directory is not a mounted service (the leading `_` keeps it off the HTTP
 router). It is just the schema and a helper script; the actual gate lives in
@@ -10,22 +10,35 @@ router). It is just the schema and a helper script; the actual gate lives in
 
 ## How it works
 
-- A single Postgres table, `lightning_clients`, lists the allowed clients. Each row
-  has a `name`, the **SHA-256 hash** of its bearer token (never the plaintext), and
-  an optional `anthropic_api_key`.
-- On every `/services/*` request the server reads `Authorization: Bearer <token>`,
-  hashes it, and looks for a matching row. No match → `401 UNAUTHORIZED`.
-- On a match, the client's `anthropic_api_key` (if set) is injected into the
-  request payload as `api_key`, so all LLM usage for that request bills to the
-  client. If the column is `NULL`, Apollo falls back to its global
-  `ANTHROPIC_API_KEY`.
+- The credential is the **`api_key` the caller already sends in the request
+  body** — the same field Lightning sends today. There is no bearer token, no
+  `Authorization` header, and **no change required on the Lightning side**.
+- A single Postgres table, `lightning_clients`, is the allow-list. Each row has a
+  `name`, the **SHA-256 hash** of that client's `api_key` (never the plaintext),
+  and an optional `anthropic_api_key`.
+- On every `/services/*` request the server reads `api_key` from the body,
+  hashes it, and looks for a matching row. Missing or no match → `401
+  UNAUTHORIZED`.
+- The inbound `api_key` is treated **purely as a credential and is never
+  forwarded to the LLM**. On a match it is replaced with the client's stored
+  `anthropic_api_key`, so all LLM usage for that request bills to the key Apollo
+  controls. If the column is `NULL`, the inbound key is **stripped** and Apollo
+  falls back to its global `ANTHROPIC_API_KEY`. Either way the caller's key
+  cannot pass through.
+- **Performance:** the client list is cached in memory and refreshed on a ~60s
+  TTL, so the database is queried at most once per minute per process, never on
+  the per-request path to Anthropic. The per-request cost is a hash plus a map
+  lookup. The trade-off is that revocations/rotations take up to ~60s to take
+  effect (see Managing clients).
 - **Opt-in / backward compatible:** auth is active only when the `INSTANCE_AUTH`
   environment variable is set (e.g. `INSTANCE_AUTH=true`). Otherwise the server
-  stays open exactly as before. When auth is enabled but this table can't be
-  reached, the gate **fails closed** (every external caller gets `401`) rather
-  than silently opening up.
-- Loopback callers (`127.0.0.1`/`::1`) and the health endpoints (`/livez`,
-  `/status`, `/`) are exempt.
+  stays open exactly as before and the caller's `api_key` passes through
+  untouched. When auth is enabled but this table can't be reached, the gate
+  **fails closed** (every external caller gets `401`) rather than silently
+  opening up.
+- The health endpoints (`/livez`, `/status`, `/`) sit outside `/services/*` and
+  are never gated. Internal Apollo-to-Apollo `apollo()` calls are exempt via a
+  per-process internal token (`APOLLO_INTERNAL_TOKEN`), not by network position.
 
 ## Enabling it
 
@@ -35,43 +48,47 @@ router). It is just the schema and a helper script; the actual gate lives in
    psql "$POSTGRES_URL" -f services/_instance_auth/schema.sql
    ```
 
-2. Mint a token for a Lightning instance and get its hash:
+2. Get the SHA-256 hash of the `api_key` a given Lightning instance sends:
 
    ```sh
-   poetry run python services/_instance_auth/hash_token.py
+   poetry run python services/_instance_auth/hash_token.py <the-api-key>
    ```
 
-   This prints a plaintext token (give it to the Lightning instance), the hash to
-   store, and a ready-to-edit `INSERT`.
+   (Run with no argument to instead mint a fresh credential to hand to the
+   instance.) This prints the hash to store and a ready-to-edit `INSERT`.
 
-3. Insert the row (set `name` and the client's Anthropic key):
+3. Insert the row. Set `name`, the hash, and the Anthropic key Apollo should use
+   for this client (leave `anthropic_api_key` as `NULL` to use Apollo's global
+   key):
 
    ```sql
    INSERT INTO lightning_clients (name, auth_token_hash, anthropic_api_key)
    VALUES ('my-lightning-instance', '<hash>', 'sk-ant-...');
    ```
 
-4. Configure that Lightning instance to send `Authorization: Bearer <token>` on
-   its Apollo requests.
-
-5. Set `INSTANCE_AUTH=true` in Apollo's environment and restart. The startup log
+4. Set `INSTANCE_AUTH=true` in Apollo's environment and restart. The startup log
    shows `Apollo instance auth ENABLED`. (If `INSTANCE_AUTH` is set but the table
    is missing, the log warns and every external caller is rejected.)
+
+No Lightning-side configuration is needed: it keeps sending its `api_key` exactly
+as it does now.
 
 ## Managing clients
 
 There is no CLI — manage rows directly in the DB:
 
 - **Revoke a client:** `DELETE FROM lightning_clients WHERE name = '...';`
-- **Rotate a token:** mint a new one with `hash_token.py` and
+- **Rotate a credential:** hash the new `api_key` with `hash_token.py` and
   `UPDATE lightning_clients SET auth_token_hash = '<new-hash>' WHERE name = '...';`
-- **Change a client's key:**
+- **Change the Anthropic key Apollo uses for a client:**
   `UPDATE lightning_clients SET anthropic_api_key = '...' WHERE name = '...';`
 
-Changes are picked up within ~60s (the server caches the client list briefly).
+Changes are picked up within ~60s (the server caches the client list briefly). If
+you need a revocation to take effect immediately, restart Apollo.
 
 ## Note
 
 The `anthropic_api_key` is stored as plaintext because Apollo must be able to use
-it. Protect this table at rest (DB encryption, restricted access) accordingly. The
-bearer tokens themselves are only ever stored as hashes.
+it, and it is held in the in-memory cache while the server runs. Protect this
+table at rest (DB encryption, restricted access) accordingly. The clients'
+`api_key` credentials are only ever stored and compared as hashes.

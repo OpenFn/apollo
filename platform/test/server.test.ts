@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import setup from "../src/server";
-import { __setAuthForTest, hashToken } from "../src/middleware/auth";
+import {
+  __setAuthForTest,
+  hashToken,
+  internalAuthHeader,
+} from "../src/middleware/auth";
 
 const port = 9865;
 
@@ -138,23 +142,20 @@ describe("Python Services", () => {
 });
 
 describe("Instance authentication", () => {
-  // Two known clients, keyed by token hash (no real DB — this is the seam).
-  const ALPHA = "alpha-token";
-  const BETA = "beta-token";
+  // The credential is the api_key the client sends in the body. Clients are
+  // keyed by the SHA-256 of that credential (no real DB — this is the seam).
+  // ALPHA has a stored Anthropic key (Apollo swaps it in); BETA has none (the
+  // credential is stripped and Apollo falls back to its global key). Neither
+  // credential may ever pass through to the LLM call.
+  const ALPHA = "lightning-cred-alpha";
+  const BETA = "lightning-cred-beta";
   const clients: Record<string, { name: string; anthropicKey: string | null }> = {
-    [hashToken(ALPHA)]: { name: "alpha", anthropicKey: "sk-ant-alpha" },
-    [hashToken(BETA)]: { name: "beta", anthropicKey: "sk-ant-beta" },
+    [hashToken(ALPHA)]: { name: "alpha", anthropicKey: "sk-ant-stored-alpha" },
+    [hashToken(BETA)]: { name: "beta", anthropicKey: null },
   };
 
-  const postWith = (path: string, data: any, token?: string) =>
-    new Request(`${baseUrl}/${path}`, {
-      method: "POST",
-      body: JSON.stringify(data),
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-    });
+  const postKey = (path: string, data: any, apiKey?: string) =>
+    post(path, { ...data, ...(apiKey ? { api_key: apiKey } : {}) });
 
   afterEach(() => {
     // Restore the open state the rest of the suite expects.
@@ -172,22 +173,25 @@ describe("Instance authentication", () => {
       __setAuthForTest((hash) => clients[hash] ?? null);
     });
 
-    it("allows a valid token and injects the client's anthropic key", async () => {
-      const res = await app.handle(postWith("services/echo", { x: 1 }, ALPHA));
+    it("accepts a known credential and swaps in the client's stored key", async () => {
+      const res = await app.handle(postKey("services/echo", { x: 1 }, ALPHA));
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.x).toBe(1);
-      expect(body.api_key).toBe("sk-ant-alpha");
+      // The stored key replaces the credential; the credential never passes through.
+      expect(body.api_key).toBe("sk-ant-stored-alpha");
+      expect(body.api_key).not.toBe(ALPHA);
     });
 
-    it("allows a second client's token", async () => {
-      const res = await app.handle(postWith("services/echo", { x: 2 }, BETA));
+    it("strips the credential when the client has no stored key", async () => {
+      const res = await app.handle(postKey("services/echo", { x: 2 }, BETA));
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.api_key).toBe("sk-ant-beta");
+      // No stored key → api_key dropped entirely (Apollo uses its global key).
+      expect(body.api_key).toBeUndefined();
     });
 
-    it("rejects a missing token with 401 UNAUTHORIZED", async () => {
+    it("rejects a missing api_key with 401 UNAUTHORIZED", async () => {
       const res = await app.handle(post("services/echo", { x: 1 }));
       expect(res.status).toBe(401);
       const body = await res.json();
@@ -195,14 +199,34 @@ describe("Instance authentication", () => {
       expect(body.type).toBe("UNAUTHORIZED");
     });
 
-    it("rejects a wrong token with 401", async () => {
-      const res = await app.handle(postWith("services/echo", { x: 1 }, "nope"));
+    it("rejects an unknown api_key with 401", async () => {
+      const res = await app.handle(postKey("services/echo", { x: 1 }, "sk-ant-nope"));
       expect(res.status).toBe(401);
     });
 
     it("leaves health and root endpoints open", async () => {
       expect((await app.handle(get("livez"))).status).toBe(200);
       expect((await app.handle(get(""))).status).toBe(200);
+    });
+
+    it("exempts internal apollo() self-calls carrying the internal token", async () => {
+      const req = new Request(`${baseUrl}/services/echo`, {
+        method: "POST",
+        body: JSON.stringify({ x: 9 }),
+        headers: { "Content-Type": "application/json", ...internalAuthHeader() },
+      });
+      const res = await app.handle(req);
+      expect(res.status).toBe(200);
+    });
+
+    it("still rejects a request bearing a bogus internal token", async () => {
+      const req = new Request(`${baseUrl}/services/echo`, {
+        method: "POST",
+        body: JSON.stringify({ x: 9 }),
+        headers: { "Content-Type": "application/json", "x-apollo-internal": "nope" },
+      });
+      const res = await app.handle(req);
+      expect(res.status).toBe(401);
     });
   });
 });

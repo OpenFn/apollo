@@ -45,13 +45,24 @@ TypeScript) service modules.
 - **Service discovery**: `platform/src/util/describe-modules.ts` - Auto-mounts
   any `services/<name>/` directory not starting with `_`. Detects service type
   by checking for `<name>.py` (Python) or `<name>.ts` (TypeScript) index file.
-- **Instance auth** (`platform/src/middleware/auth.ts`): `/services/*` is gated by
-  a bearer token when the `INSTANCE_AUTH` env var is set (opt-in; otherwise open).
-  Tokens are looked up in the `lightning_clients` table via `POSTGRES_URL`; a
-  matched client's stored Anthropic key is injected into the payload as `api_key`.
-  If auth is enabled but the table can't be reached, the gate fails closed
-  (rejects all external callers). Health endpoints and loopback/internal
-  `apollo()` calls are exempt. Provisioning lives in `services/_instance_auth/`.
+- **Instance auth** (`platform/src/middleware/auth.ts`): `/services/*` is gated
+  when the `INSTANCE_AUTH` env var is set (opt-in; otherwise open). The
+  credential is the `api_key` the caller (Lightning) already sends in the request
+  body — there is no bearer token and no Lightning-side change. Its SHA-256 is
+  looked up in the `lightning_clients` table via `POSTGRES_URL`; a missing or
+  unknown key is rejected with `401`. The inbound `api_key` is treated purely as
+  a credential and is **never** forwarded to the LLM: on a match it is replaced
+  with the matched client's stored `anthropic_api_key`, or stripped (falling back
+  to the global `ANTHROPIC_API_KEY`) when that column is `NULL`. Lookups are
+  cached in memory (~60s TTL), so the DB is hit at most once per minute per
+  process, not per request. If auth is enabled but the table can't be reached,
+  the gate fails closed (rejects all external callers). The gate is scoped to
+  `/services/*`, so health/root endpoints outside that group are unaffected.
+  Internal Apollo-to-Apollo `apollo()` calls are exempt via a per-process
+  internal token (`APOLLO_INTERNAL_TOKEN`, minted at startup, injected into the
+  env and echoed back by `services/util.py`); this replaces the old loopback
+  exemption so a co-located Lightning is still required to authenticate.
+  Provisioning lives in `services/_instance_auth/`.
 
 ### Services Architecture
 
