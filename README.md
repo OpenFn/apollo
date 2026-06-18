@@ -179,18 +179,24 @@ for that client's requests.
 
 - It is **opt-in and backward compatible**: auth is active only when the
   `INSTANCE_AUTH` environment variable is set (e.g. `INSTANCE_AUTH=true`).
-  Otherwise the server stays fully open as before. Tokens are looked up in the
-  `lightning_clients` table via `POSTGRES_URL`; if auth is enabled but that table
-  can't be reached, the gate **fails closed** (rejects all external callers)
-  rather than silently opening up.
+  Otherwise the server stays fully open as before. Enabling it requires **Bun
+  >= 1.2** (uses `Bun.SQL`). Tokens are looked up in the `lightning_clients`
+  table via `POSTGRES_URL`; if auth is enabled but that table can't be reached,
+  the gate **fails closed** (rejects all external callers) rather than silently
+  opening up.
 - Clients authenticate with `Authorization: Bearer <token>`. Apollo stores only a
   SHA-256 hash of the token; an unknown/missing token gets
   `401 { "code": 401, "type": "UNAUTHORIZED" }`.
-- On a match, the client's stored Anthropic key is injected into the request, so
-  LLM usage bills to that client (falls back to the global `ANTHROPIC_API_KEY` if
-  the client has no key).
-- Health/root endpoints (`/livez`, `/status`, `/`) and loopback/internal
-  service-to-service calls are exempt.
+- On a match, any caller-supplied `api_key` is **dropped** and the client's
+  resolved key is injected into the request (falls back to the global
+  `ANTHROPIC_API_KEY` if the client has no stored key).
+- **Internal service-to-service calls** (the `apollo()` helper) authenticate with
+  an `APOLLO_INTERNAL_SECRET` header and pass through untouched (preserving a
+  parent-forwarded `api_key`). Apollo auto-generates this secret at startup and
+  spawned services inherit it, so internal auth needs no configuration. The gate
+  **never trusts a caller by network address**, so a same-host reverse proxy
+  cannot bypass it. Pin `APOLLO_INTERNAL_SECRET` only to set a stable value.
+- Health/root endpoints (`/livez`, `/status`, `/`) are exempt.
 
 To enable it and provision clients, see
 [`services/_instance_auth/`](services/_instance_auth/README.md).

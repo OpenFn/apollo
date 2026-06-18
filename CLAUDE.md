@@ -46,12 +46,17 @@ TypeScript) service modules.
   any `services/<name>/` directory not starting with `_`. Detects service type
   by checking for `<name>.py` (Python) or `<name>.ts` (TypeScript) index file.
 - **Instance auth** (`platform/src/middleware/auth.ts`): `/services/*` is gated by
-  a bearer token when the `INSTANCE_AUTH` env var is set (opt-in; otherwise open).
-  Tokens are looked up in the `lightning_clients` table via `POSTGRES_URL`; a
-  matched client's stored Anthropic key is injected into the payload as `api_key`.
-  If auth is enabled but the table can't be reached, the gate fails closed
-  (rejects all external callers). Health endpoints and loopback/internal
-  `apollo()` calls are exempt. Provisioning lives in `services/_instance_auth/`.
+  a bearer token when the `INSTANCE_AUTH` env var is set (opt-in; otherwise open;
+  requires Bun >= 1.2 for `Bun.SQL`). Tokens are looked up in the
+  `lightning_clients` table via `POSTGRES_URL`; for an authenticated external
+  client any caller-supplied `api_key` is stripped and the client's resolved key
+  (`resolveCredential()`) is injected as `api_key`. If auth is enabled but the
+  table can't be reached, the gate fails closed (rejects all external callers).
+  Internal service-to-service `apollo()` calls authenticate via an
+  `APOLLO_INTERNAL_SECRET` header (auto-generated at startup and inherited by
+  spawned services; never network-address trust) and pass through untouched,
+  preserving a parent-forwarded `api_key`. Health endpoints are exempt.
+  Provisioning lives in `services/_instance_auth/`.
 
 ### Services Architecture
 

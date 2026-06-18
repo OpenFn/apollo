@@ -1,179 +1,200 @@
-import { SQL } from "bun";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { ApolloError } from "../util/errors";
 
-// A row from the lightning_clients table, as used at runtime.
-type Client = { name: string; anthropicKey: string | null };
+export type Client = { name: string; anthropicKey: string | null };
 
-// A lookup resolves a token hash to a client, or null if unknown.
-type Lookup = (hash: string) => Promise<Client | null> | Client | null;
+/** Resolves a bearer-token hash to a client, or null if unknown. */
+export type Lookup = (hash: string) => Promise<Client | null> | Client | null;
 
-// Instance auth is opt-in via the INSTANCE_AUTH env var (see initAuth). When it
-// is unset/falsey, /services/* is open exactly as before. When set, every
-// /services/* request requires a valid bearer token.
-let enabled = false;
+/** The slice of the Elysia context the gate reads and writes. */
+export interface AuthContext {
+  request: Request;
+  set: { status?: number | string };
+  lightningClient?: Client;
+  internalCall?: boolean;
+}
 
-// True once the lightning_clients lookup is actually usable. When auth is
-// enabled but the DB/table can't be reached, this stays false and the gate
-// fails CLOSED (rejects every external caller) rather than silently opening up.
-let dbReady = false;
+export interface AuthConfig {
+  enabled: boolean;
+  /** Shared secret for internal service-to-service calls; "" disables internal trust. */
+  internalSecret: string;
+  lookup: Lookup;
+}
 
-// When set (by tests), this replaces the DB-backed lookup so the suite can
-// enable auth with a known token set without a real Postgres.
-let lookupOverride: Lookup | null = null;
+export interface InstanceAuth {
+  gate(ctx: AuthContext): Promise<ApolloError | void>;
+  isExternalClient(ctx: AuthContext): boolean;
+  apiKeyOverride(ctx: AuthContext): { api_key?: string };
+}
 
-// Bun's native Postgres client (Bun >= 1.2). Created once in initAuth().
-let sql: SQL | null = null;
-
-// In-memory cache of all clients keyed by token hash, refreshed on a TTL so
-// rows added/revoked directly in the DB are picked up within CACHE_TTL_MS.
+const INTERNAL_HEADER = "x-apollo-internal";
 const CACHE_TTL_MS = 60_000;
-let clientCache: Map<string, Client> | null = null;
-let cacheTs = 0;
-
-const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+const DENY_ALL: Lookup = () => null;
 
 /** SHA-256 hex of a bearer token. Must match services/_instance_auth/hash_token.py. */
 export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-async function loadClients(): Promise<Map<string, Client>> {
-  const rows = (await sql!`
-    SELECT name, auth_token_hash, anthropic_api_key FROM lightning_clients
-  `) as Array<{
-    name: string;
-    auth_token_hash: string;
-    anthropic_api_key: string | null;
-  }>;
-  const map = new Map<string, Client>();
-  for (const row of rows) {
-    map.set(row.auth_token_hash, {
-      name: row.name,
-      anthropicKey: row.anthropic_api_key,
-    });
-  }
-  return map;
+function secretsMatch(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  return ab.length === bb.length && timingSafeEqual(ab, bb);
 }
 
-async function dbLookup(hash: string): Promise<Client | null> {
-  // Auth is on but the lookup never came up — reject (fail closed).
-  if (!dbReady || !sql) return null;
-  const now = Date.now();
-  if (!clientCache || now - cacheTs > CACHE_TTL_MS) {
-    clientCache = await loadClients();
-    cacheTs = now;
-  }
-  return clientCache.get(hash) ?? null;
+/**
+ * DB-backed lookup with a TTL cache, single-flight refresh, and serve-stale on
+ * error. The cache decouples request rate from DB rate (one query per TTL window
+ * per process); a transient DB blip serves the last good data rather than
+ * rejecting valid clients.
+ */
+export function createDbLookup(sql: any): Lookup {
+  let cache: Map<string, Client> | null = null;
+  let cacheTs = 0;
+  let inflight: Promise<Map<string, Client>> | null = null;
+
+  const load = async (): Promise<Map<string, Client>> => {
+    const rows = (await sql`
+      SELECT name, auth_token_hash, anthropic_api_key FROM lightning_clients
+    `) as Array<{ name: string; auth_token_hash: string; anthropic_api_key: string | null }>;
+    return new Map(
+      rows.map((r) => [r.auth_token_hash, { name: r.name, anthropicKey: r.anthropic_api_key }])
+    );
+  };
+
+  const clients = (): Promise<Map<string, Client>> => {
+    if (cache && Date.now() - cacheTs <= CACHE_TTL_MS) return Promise.resolve(cache);
+    if (inflight) return inflight;
+    inflight = load()
+      .then((map) => {
+        cache = map;
+        cacheTs = Date.now();
+        return map;
+      })
+      .catch((err) => {
+        if (cache) {
+          console.error("Apollo instance auth: cache refresh failed; serving stale.", err);
+          return cache;
+        }
+        throw err;
+      })
+      .finally(() => {
+        inflight = null;
+      });
+    return inflight;
+  };
+
+  return async (hash) => {
+    try {
+      return (await clients()).get(hash) ?? null;
+    } catch (err) {
+      // Lookup unavailable and no cache to fall back on: fail closed (reject).
+      console.error("Apollo instance auth: client lookup failed; rejecting.", err);
+      return null;
+    }
+  };
 }
 
-/** Whether the INSTANCE_AUTH env var opts this instance into auth. */
 function authOptIn(): boolean {
   const v = (process.env.INSTANCE_AUTH ?? "").trim().toLowerCase();
   return v === "1" || v === "true" || v === "yes" || v === "on";
 }
 
 /**
- * Decide once at startup whether instance auth is active. The INSTANCE_AUTH env
- * var is the master switch: unset/falsey leaves /services/* open as before.
- * When set, auth is enabled and tokens are looked up in the lightning_clients
- * table (via POSTGRES_URL). If that table can't be reached, auth stays enabled
- * but the gate fails CLOSED (rejects every external caller) — an explicit
- * opt-in must never silently fall back to open.
+ * Resolve auth config from the environment at startup. INSTANCE_AUTH is the
+ * master switch; when unset, /services/* stays open. When set, tokens are looked
+ * up in lightning_clients via POSTGRES_URL — and if the DB, table, or runtime
+ * isn't usable, the gate fails CLOSED (deny-all) rather than silently opening.
+ * Bun.SQL requires Bun >= 1.2, so it's imported lazily and checked here.
  */
-export async function initAuth(): Promise<void> {
-  enabled = authOptIn();
-  if (!enabled) {
-    dbReady = false;
-    console.warn(
-      "Apollo instance auth DISABLED: INSTANCE_AUTH not set — /services/* is open to all callers."
-    );
-    return;
+export async function resolveAuthConfigFromEnv(): Promise<AuthConfig> {
+  if (!authOptIn()) {
+    console.warn("Apollo instance auth DISABLED: INSTANCE_AUTH not set.");
+    return { enabled: false, internalSecret: "", lookup: DENY_ALL };
   }
 
-  const url = process.env.POSTGRES_URL;
-  if (!url) {
-    dbReady = false;
+  let internalSecret = (process.env.APOLLO_INTERNAL_SECRET ?? "").trim();
+  if (!internalSecret) {
+    // Generate one; spawned Python services inherit it via the environment, so
+    // internal calls authenticate automatically with no operator config.
+    internalSecret = randomBytes(32).toString("hex");
+    process.env.APOLLO_INTERNAL_SECRET = internalSecret;
+    console.log("Apollo instance auth: generated an ephemeral internal secret.");
+  }
+
+  const failClosed = (reason: string): AuthConfig => {
     console.error(
-      "Apollo instance auth ENABLED but POSTGRES_URL is not set — clients cannot be looked up. /services/* will REJECT all external callers until this is fixed."
+      `Apollo instance auth ENABLED but ${reason} — /services/* will REJECT all external callers.`
     );
-    return;
+    return { enabled: true, internalSecret, lookup: DENY_ALL };
+  };
+
+  const url = process.env.POSTGRES_URL;
+  if (!url) return failClosed("POSTGRES_URL is not set");
+
+  const { SQL } = (await import("bun")) as any;
+  if (typeof SQL !== "function") {
+    return failClosed("this Bun runtime lacks Bun.SQL (requires Bun >= 1.2; see .tool-versions)");
   }
 
   try {
-    sql = new SQL(url);
+    const sql = new SQL(url);
     const rows = (await sql`
       SELECT to_regclass('public.lightning_clients') AS t
     `) as Array<{ t: string | null }>;
-    if (rows?.[0]?.t) {
-      dbReady = true;
-      clientCache = null; // force a fresh load on the first request
-      console.log(
-        "Apollo instance auth ENABLED (INSTANCE_AUTH set; lightning_clients table present)."
-      );
-    } else {
-      dbReady = false;
-      console.error(
-        "Apollo instance auth ENABLED but the lightning_clients table was not found — /services/* will REJECT all external callers. Run services/_instance_auth/schema.sql to provision it."
-      );
+    if (!rows?.[0]?.t) {
+      return failClosed("the lightning_clients table is missing (run services/_instance_auth/schema.sql)");
     }
+    console.log("Apollo instance auth ENABLED.");
+    return { enabled: true, internalSecret, lookup: createDbLookup(sql) };
   } catch (err) {
-    dbReady = false;
-    console.error(
-      "Apollo instance auth ENABLED but the lightning_clients table could not be verified — /services/* will REJECT all external callers.",
-      err
-    );
+    console.error("Apollo instance auth ENABLED but the lightning_clients table could not be verified.", err);
+    return { enabled: true, internalSecret, lookup: DENY_ALL };
   }
 }
 
-function unauthorized(ctx: any): ApolloError {
-  ctx.set.status = 401;
-  return { code: 401, type: "UNAUTHORIZED", message: "Missing or invalid API token" };
-}
-
 /**
- * Elysia onBeforeHandle hook scoped to the /services group. Returning a value
- * short-circuits the request with that value as the response body.
- * On success it stashes the resolved client on the context for apiKeyOverride.
+ * The /services gate. Internal calls (matching the shared secret, never trusted
+ * by network address) pass through untouched, preserving a parent-forwarded
+ * api_key. External calls require a valid bearer token; the resolved client is
+ * stashed on the context for the payload layer.
  */
-export async function authGate(ctx: any): Promise<ApolloError | void> {
-  if (!enabled) return;
+export function createInstanceAuth(config: AuthConfig): InstanceAuth {
+  const unauthorized = (ctx: AuthContext): ApolloError => {
+    ctx.set.status = 401;
+    return { code: 401, type: "UNAUTHORIZED", message: "Missing or invalid API token" };
+  };
 
-  // Exempt loopback callers — internal service-to-service apollo() calls hit
-  // 127.0.0.1. Synthetic requests (app.handle) have no peer address, so the
-  // gate is enforced for them (which is what the test suite relies on).
-  const address = ctx.server?.requestIP?.(ctx.request)?.address;
-  if (address && LOOPBACK.has(address)) return;
+  const isInternal = (ctx: AuthContext): boolean => {
+    if (!config.internalSecret) return false;
+    const provided = ctx.request.headers.get(INTERNAL_HEADER) ?? "";
+    return provided.length > 0 && secretsMatch(provided, config.internalSecret);
+  };
 
-  const header = ctx.request?.headers?.get?.("authorization") ?? "";
-  const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
-  if (!token) return unauthorized(ctx);
+  return {
+    async gate(ctx) {
+      if (!config.enabled) return;
+      if (isInternal(ctx)) {
+        ctx.internalCall = true;
+        return;
+      }
+      const header = ctx.request.headers.get("authorization") ?? "";
+      const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
+      if (!token) return unauthorized(ctx);
+      const client = await config.lookup(hashToken(token));
+      if (!client) return unauthorized(ctx);
+      ctx.lightningClient = client;
+    },
 
-  const lookup = lookupOverride ?? dbLookup;
-  const client = await lookup(hashToken(token));
-  if (!client) return unauthorized(ctx);
+    isExternalClient(ctx) {
+      return !!ctx.lightningClient;
+    },
 
-  ctx.lightningClient = client;
-}
-
-/**
- * Returns an { api_key } override to merge into a service payload so Apollo
- * uses the client's own Anthropic key. Returns {} when auth is off or the
- * client has no stored key, leaving the payload untouched (Python then falls
- * back to the global ANTHROPIC_API_KEY).
- */
-export function apiKeyOverride(ctx: any): { api_key?: string } {
-  const client = ctx?.lightningClient as Client | undefined;
-  return client?.anthropicKey ? { api_key: client.anthropicKey } : {};
-}
-
-/** Test seam: pass a fake lookup to enable auth without a DB, or null to disable. */
-export function __setAuthForTest(provider: Lookup | null): void {
-  if (provider) {
-    enabled = true;
-    lookupOverride = provider;
-  } else {
-    enabled = false;
-    lookupOverride = null;
-  }
+    // The single place provider/model routing will grow later; today a matched
+    // client's stored key is used, else the service falls back to the env key.
+    apiKeyOverride(ctx) {
+      const key = ctx.lightningClient?.anthropicKey;
+      return key ? { api_key: key } : {};
+    },
+  };
 }

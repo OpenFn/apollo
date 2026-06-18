@@ -7,7 +7,7 @@ import describeModules, {
   type ModuleDescription,
 } from "../util/describe-modules";
 import { isApolloError } from "../util/errors";
-import { authGate, apiKeyOverride } from "./auth";
+import type { InstanceAuth } from "./auth";
 
 const callService = (
   m: ModuleDescription,
@@ -24,13 +24,31 @@ const callService = (
   }
 };
 
-export default async (app: Elysia, port: number) => {
+export default async (app: Elysia, port: number, auth: InstanceAuth) => {
   console.log("Loading routes:");
   const modules = await describeModules(path.resolve("./services"));
+
+  // Build the service payload, applying instance auth. For an authenticated
+  // external client we drop any caller-supplied api_key (they may not bring
+  // their own key) and inject the resolved one. Internal calls and the
+  // auth-disabled case pass the body through untouched, preserving a
+  // parent-forwarded api_key.
+  //
+  // NOTE: handlers must reference `ctx.body` directly. Elysia decides whether to
+  // parse the request body by statically inspecting the handler; hiding the
+  // reference makes it skip parsing and the service receives an empty body.
+  const buildPayload = (ctx: any, body: any) => {
+    const payload = { ...(body ?? {}) };
+    if (auth.isExternalClient(ctx)) {
+      delete (payload as any).api_key;
+    }
+    return { ...payload, session_id: ctx.uuid, ...auth.apiKeyOverride(ctx) };
+  };
+
   app.group("/services", (app) => {
-    // Gate every /services/* route on a valid instance token (no-op when
-    // instance auth is disabled). Loopback/internal calls are exempted.
-    app.onBeforeHandle(authGate);
+    // Gate every /services/* route (no-op when auth is disabled). Internal
+    // service-to-service calls authenticate via the shared secret.
+    app.onBeforeHandle((ctx) => auth.gate(ctx as any));
 
     modules.forEach((m) => {
       const { name, readme } = m;
@@ -39,11 +57,7 @@ export default async (app: Elysia, port: number) => {
       // simple post
       app.post(name, async (ctx) => {
         console.log(`POST /services/${name}: ${ctx.uuid}`);
-        const payload = {
-          ...(ctx.body ?? {}),
-          session_id: ctx.uuid,
-          ...apiKeyOverride(ctx),
-        };
+        const payload = buildPayload(ctx, ctx.body);
         const result = await callService(m, port, payload as any);
 
         if (isApolloError(result)) {
@@ -61,11 +75,7 @@ export default async (app: Elysia, port: number) => {
       // HTTP streaming
       app.post(`${name}/stream`, async (ctx) => {
         console.log(`STREAM START /services/${name}: ${ctx.uuid}`);
-        const payload = {
-          ...(ctx.body ?? {}),
-          session_id: ctx.uuid,
-          ...apiKeyOverride(ctx),
-        };
+        const payload = buildPayload(ctx, ctx.body);
 
         const stream = new ReadableStream({
           async start(controller) {
@@ -144,7 +154,7 @@ export default async (app: Elysia, port: number) => {
         // per-client Anthropic key injection is only wired into the POST and
         // /stream paths (the chat transports Lightning uses); WS payloads pass
         // through as-is.
-        beforeHandle: authGate,
+        beforeHandle: (ctx) => auth.gate(ctx as any),
         open() {
           console.log(`Websocket connected  at /services/${name}`);
         },

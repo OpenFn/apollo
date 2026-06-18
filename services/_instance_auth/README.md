@@ -15,17 +15,20 @@ router). It is just the schema and a helper script; the actual gate lives in
   an optional `anthropic_api_key`.
 - On every `/services/*` request the server reads `Authorization: Bearer <token>`,
   hashes it, and looks for a matching row. No match → `401 UNAUTHORIZED`.
-- On a match, the client's `anthropic_api_key` (if set) is injected into the
-  request payload as `api_key`, so all LLM usage for that request bills to the
-  client. If the column is `NULL`, Apollo falls back to its global
-  `ANTHROPIC_API_KEY`.
+- On a match, any caller-supplied `api_key` is dropped and the client's
+  `anthropic_api_key` (if set) is injected into the request payload as `api_key`.
+  If the column is `NULL`, Apollo falls back to its global `ANTHROPIC_API_KEY`.
 - **Opt-in / backward compatible:** auth is active only when the `INSTANCE_AUTH`
   environment variable is set (e.g. `INSTANCE_AUTH=true`). Otherwise the server
-  stays open exactly as before. When auth is enabled but this table can't be
-  reached, the gate **fails closed** (every external caller gets `401`) rather
-  than silently opening up.
-- Loopback callers (`127.0.0.1`/`::1`) and the health endpoints (`/livez`,
-  `/status`, `/`) are exempt.
+  stays open exactly as before. Enabling it requires **Bun >= 1.2** (`Bun.SQL`).
+  When auth is enabled but this table can't be reached, the gate **fails closed**
+  (every external caller gets `401`) rather than silently opening up.
+- **Internal service-to-service calls** (the `apollo()` helper) authenticate with
+  an `APOLLO_INTERNAL_SECRET` header and pass through untouched. Apollo
+  auto-generates this secret at startup (spawned services inherit it via the
+  environment), so internal auth works with no configuration, and the gate never
+  trusts a caller by network address — a same-host reverse proxy cannot bypass it.
+- The health endpoints (`/livez`, `/status`, `/`) are exempt.
 
 ## Enabling it
 
@@ -57,6 +60,11 @@ router). It is just the schema and a helper script; the actual gate lives in
 5. Set `INSTANCE_AUTH=true` in Apollo's environment and restart. The startup log
    shows `Apollo instance auth ENABLED`. (If `INSTANCE_AUTH` is set but the table
    is missing, the log warns and every external caller is rejected.)
+
+6. (Optional) Pin `APOLLO_INTERNAL_SECRET` to a fixed value. By default Apollo
+   generates one at startup and spawned services inherit it, so internal calls
+   already authenticate automatically. Pin it only if you want a stable value or
+   run Python services outside Apollo's process.
 
 ## Managing clients
 

@@ -96,7 +96,15 @@ def apollo(name: str, payload: dict) -> dict:
     :return: JSON response.
     """
     url = f"http://127.0.0.1:{apollo_port}/services/{name}"
-    r = requests.post(url, json=payload)
+    # Identify as an internal service-to-service call. Apollo sets this secret in
+    # the environment when instance auth is on, and child service processes inherit
+    # it, so the gate trusts the call by secret (never by network address). No-op
+    # when auth is disabled (the env var is unset and no header is sent).
+    headers = {}
+    internal_secret = os.environ.get("APOLLO_INTERNAL_SECRET")
+    if internal_secret:
+        headers["x-apollo-internal"] = internal_secret
+    r = requests.post(url, json=payload, headers=headers)
     return r.json()
 
 
