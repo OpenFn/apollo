@@ -96,55 +96,6 @@ function authOptIn(): boolean {
   return v === "1" || v === "true" || v === "yes" || v === "on";
 }
 
-/** Whether APOLLO_AUTH_DEBUG opts into per-request logging (read live each call). */
-function debugEnabled(): boolean {
-  const v = (process.env.APOLLO_AUTH_DEBUG ?? "").trim().toLowerCase();
-  return v === "1" || v === "true" || v === "yes" || v === "on";
-}
-
-/**
- * Opt-in logging of the shape of every /services/* request, for debugging what
- * callers (e.g. Lightning) actually send. Enable with APOLLO_AUTH_DEBUG=true.
- * Secrets are never printed raw: the inbound api_key (the credential) is shown
- * as its SHA-256 hash — exactly the value lightning_clients.auth_token_hash
- * stores, so you can paste it straight into the table to allow-list a client.
- * The internal token is shown only as present/absent and body values are
- * omitted (just the top-level key names). Wrapped so it can never break a
- * request if something is unexpectedly shaped.
- */
-function debugLogRequest(ctx: any): void {
-  if (!debugEnabled()) return;
-  try {
-    const req = ctx.request;
-    const ip = ctx.server?.requestIP?.(req)?.address ?? "(no peer address)";
-    const headers: Record<string, string> = {};
-    req?.headers?.forEach?.((value: string, key: string) => {
-      if (key === "authorization") {
-        const token = value.startsWith("Bearer ") ? value.slice(7).trim() : "";
-        headers[key] = token ? `Bearer <sha256:${hashToken(token)}>` : "<malformed>";
-      } else if (key === INTERNAL_HEADER) {
-        headers[key] = "<present>";
-      } else {
-        headers[key] = value;
-      }
-    });
-    const bodyKeys =
-      ctx.body && typeof ctx.body === "object" ? Object.keys(ctx.body) : [];
-    const rawKey =
-      typeof ctx.body?.api_key === "string" ? ctx.body.api_key.trim() : "";
-    const apiKeyHash = rawKey ? `sha256:${hashToken(rawKey)}` : "(none)";
-    const pathname = req?.url ? new URL(req.url).pathname : "(no url)";
-    console.log(
-      `[auth-debug] ${req?.method} ${pathname} from ${ip} | auth ${enabled ? "ON" : "OFF"}\n` +
-        `[auth-debug]   headers: ${JSON.stringify(headers)}\n` +
-        `[auth-debug]   body keys: ${JSON.stringify(bodyKeys)}\n` +
-        `[auth-debug]   api_key (credential): ${apiKeyHash}`
-    );
-  } catch (err) {
-    console.log("[auth-debug] failed to log request:", err);
-  }
-}
-
 /**
  * Decide once at startup whether instance auth is active. The INSTANCE_AUTH env
  * var is the master switch: unset/falsey leaves /services/* open as before.
@@ -209,7 +160,6 @@ function unauthorized(ctx: any): ApolloError {
  * On success it stashes the resolved client on the context for apiKeyOverride.
  */
 export async function authGate(ctx: any): Promise<ApolloError | void> {
-  debugLogRequest(ctx);
   if (!enabled) return;
 
   // Apollo calling itself: the bridge's Python children echo back the internal

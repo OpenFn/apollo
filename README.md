@@ -193,14 +193,17 @@ for that client's requests.
   `lightning_clients` table via `POSTGRES_URL`; if auth is enabled but that table
   can't be reached, the gate **fails closed** (rejects all external callers)
   rather than silently opening up.
-- Clients authenticate with `Authorization: Bearer <token>`. Apollo stores only a
-  SHA-256 hash of the token; an unknown/missing token gets
-  `401 { "code": 401, "type": "UNAUTHORIZED" }`.
-- On a match, the client's stored Anthropic key is injected into the request, so
-  LLM usage bills to that client (falls back to the global `ANTHROPIC_API_KEY` if
-  the client has no key).
-- Health/root endpoints (`/livez`, `/status`, `/`) and loopback/internal
-  service-to-service calls are exempt.
+- The credential is the **`api_key` the caller already sends in the request
+  body** — there is no bearer token, no `Authorization` header, and no
+  Lightning-side change. Apollo stores only a SHA-256 hash of it; an
+  unknown/missing key gets `401 { "code": 401, "type": "UNAUTHORIZED" }`.
+- On a match, the inbound `api_key` is treated purely as a credential and is
+  **never** forwarded to the LLM: it is replaced with the client's stored
+  Anthropic key (so LLM usage bills to that client), or stripped — falling back
+  to the global `ANTHROPIC_API_KEY` — if the client has no stored key.
+- Health/root endpoints (`/livez`, `/status`, `/`) are outside `/services/*` and
+  never gated. Internal Apollo-to-Apollo `apollo()` calls are exempt via a
+  per-process internal token (`APOLLO_INTERNAL_TOKEN`), not by network position.
 
 To enable it and provision clients, see
 [`services/_instance_auth/`](services/_instance_auth/README.md).
