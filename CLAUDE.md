@@ -53,10 +53,18 @@ TypeScript) service modules.
   unknown key is rejected with `401`. The inbound `api_key` is treated purely as
   a credential and is **never** forwarded to the LLM: on a match it is replaced
   with the matched client's stored `anthropic_api_key`, or stripped (falling back
-  to the global `ANTHROPIC_API_KEY`) when that column is `NULL`. Lookups are
+  to the global `ANTHROPIC_API_KEY`) when that column is `NULL`. The stored
+  `anthropic_api_key` may be plaintext or AES-256-GCM-encrypted (`enc:v1:`
+  values, decrypted with `APOLLO_ENC_KEY`; see
+  `platform/src/util/instance-key-crypto.ts` and
+  `services/_instance_auth/encrypt_key.ts`). Lookups are
   cached in memory (~60s TTL), so the DB is hit at most once per minute per
-  process, not per request. If auth is enabled but the table can't be reached,
-  the gate fails closed (rejects all external callers). The gate is scoped to
+  process, not per request. The refresh is single-flight with
+  stale-while-revalidate, so a burst of requests at the TTL boundary shares one
+  DB read (cold start awaits it; a warm-but-stale cache is served while one
+  background refresh runs) rather than stampeding the DB. If auth is enabled but
+  the table can't be reached, the gate fails closed (rejects all external
+  callers). The gate is scoped to
   `/services/*`, so health/root endpoints outside that group are unaffected.
   Internal Apollo-to-Apollo `apollo()` calls are exempt via a per-process
   internal token (`APOLLO_INTERNAL_TOKEN`, minted at startup, injected into the

@@ -1,6 +1,7 @@
 import { SQL } from "bun";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { ApolloError } from "../util/errors";
+import { ENC_PREFIX, decryptKey, parseEncKey } from "../util/instance-key-crypto";
 
 // A row from the lightning_clients table, as used at runtime.
 type Client = { name: string; anthropicKey: string | null };
@@ -32,6 +33,20 @@ const CACHE_TTL_MS = 60_000;
 let clientCache: Map<string, Client> | null = null;
 let cacheTs = 0;
 
+// Single-flight handle for the cache refresh. Concurrent refreshes (e.g. a burst
+// of requests hitting the TTL boundary at once) all share THIS one promise, so a
+// refresh can never trigger more than one DB read no matter the concurrency.
+let refreshInFlight: Promise<Map<string, Client>> | null = null;
+
+// Master key (32 bytes) for decrypting stored anthropic_api_key values, parsed
+// from APOLLO_ENC_KEY in initAuth. Null when unset — plaintext rows still work,
+// but any "enc:v1:" row can't be decrypted and its client is omitted.
+let encKey: Buffer | null = null;
+
+// When set (by tests), this replaces loadClients in the refresh path so the
+// single-flight/stale-while-revalidate behaviour can be exercised without a DB.
+let loaderOverride: (() => Promise<Map<string, Client>>) | null = null;
+
 // A per-process secret that identifies genuine Apollo-to-Apollo calls. The
 // bridge spawns Python services as child processes that inherit this process's
 // env, so exporting the token here lets services/util.py apollo() echo it back
@@ -61,6 +76,58 @@ export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
+// Sentinel returned by decryptStoredKey when an encrypted value can't be
+// decrypted. Such a client is omitted from the cache (fail closed) rather than
+// silently falling back to the global key, which would mis-bill its usage.
+const DECRYPT_FAILED = Symbol("decrypt-failed");
+
+/**
+ * Resolve the anthropic_api_key column to the plaintext key Apollo should use.
+ *  - null            → null (intentional: this client uses the global env key)
+ *  - "enc:v1:…"      → AES-256-GCM decrypt with encKey; DECRYPT_FAILED on error
+ *  - anything else   → legacy plaintext, used as-is (backward compatible)
+ */
+function decryptStoredKey(
+  stored: string | null,
+  clientName: string
+): string | null | typeof DECRYPT_FAILED {
+  if (stored === null) return null;
+  if (!stored.startsWith(ENC_PREFIX)) return stored;
+  if (!encKey) {
+    console.error(
+      `Apollo instance auth: client "${clientName}" has an encrypted anthropic_api_key but APOLLO_ENC_KEY is unset/invalid — omitting this client (fail closed).`
+    );
+    return DECRYPT_FAILED;
+  }
+  try {
+    return decryptKey(stored, encKey);
+  } catch (err) {
+    console.error(
+      `Apollo instance auth: could not decrypt anthropic_api_key for client "${clientName}" — omitting this client (fail closed).`,
+      err
+    );
+    return DECRYPT_FAILED;
+  }
+}
+
+/** Build the hash→client map from raw rows, decrypting keys and dropping any
+ *  client whose encrypted key can't be decrypted. Exported for tests. */
+export function buildClientMap(
+  rows: Array<{
+    name: string;
+    auth_token_hash: string;
+    anthropic_api_key: string | null;
+  }>
+): Map<string, Client> {
+  const map = new Map<string, Client>();
+  for (const row of rows) {
+    const key = decryptStoredKey(row.anthropic_api_key, row.name);
+    if (key === DECRYPT_FAILED) continue;
+    map.set(row.auth_token_hash, { name: row.name, anthropicKey: key });
+  }
+  return map;
+}
+
 async function loadClients(): Promise<Map<string, Client>> {
   const rows = (await sql!`
     SELECT name, auth_token_hash, anthropic_api_key FROM lightning_clients
@@ -69,25 +136,53 @@ async function loadClients(): Promise<Map<string, Client>> {
     auth_token_hash: string;
     anthropic_api_key: string | null;
   }>;
-  const map = new Map<string, Client>();
-  for (const row of rows) {
-    map.set(row.auth_token_hash, {
-      name: row.name,
-      anthropicKey: row.anthropic_api_key,
+  return buildClientMap(rows);
+}
+
+/**
+ * Refresh the client cache, collapsing concurrent callers onto a single DB read
+ * (single-flight). The in-flight promise is cleared in finally so a failed
+ * refresh never wedges the cache — the next caller retries.
+ */
+function refreshClients(): Promise<Map<string, Client>> {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (loaderOverride ?? loadClients)()
+    .then((map) => {
+      clientCache = map;
+      cacheTs = Date.now();
+      return map;
+    })
+    .finally(() => {
+      refreshInFlight = null;
     });
-  }
-  return map;
+  return refreshInFlight;
 }
 
 async function dbLookup(hash: string): Promise<Client | null> {
   // Auth is on but the lookup never came up — reject (fail closed).
-  if (!dbReady || !sql) return null;
-  const now = Date.now();
-  if (!clientCache || now - cacheTs > CACHE_TTL_MS) {
-    clientCache = await loadClients();
-    cacheTs = now;
+  if (!dbReady) return null;
+  if (!loaderOverride && !sql) return null;
+
+  const fresh = clientCache !== null && Date.now() - cacheTs <= CACHE_TTL_MS;
+  if (!fresh) {
+    if (clientCache !== null) {
+      // Warm but stale: serve the current map now and refresh once in the
+      // background. Errors are swallowed so a DB blip keeps serving stale (and
+      // retries next request, since cacheTs only advances on success) instead
+      // of 500ing every caller. The single-flight handle guarantees one read.
+      void refreshClients().catch(() => {});
+    } else {
+      // Cold start: nothing to serve yet. Every concurrent caller awaits the
+      // ONE shared load rather than each firing its own. On failure leave the
+      // cache null and reject (fail closed).
+      try {
+        await refreshClients();
+      } catch {
+        return null;
+      }
+    }
   }
-  return clientCache.get(hash) ?? null;
+  return clientCache?.get(hash) ?? null;
 }
 
 /** Whether the INSTANCE_AUTH env var opts this instance into auth. */
@@ -112,6 +207,16 @@ export async function initAuth(): Promise<void> {
       "Apollo instance auth DISABLED: INSTANCE_AUTH not set — /services/* is open to all callers."
     );
     return;
+  }
+
+  // Parse the at-rest encryption key for stored anthropic_api_key values.
+  // Optional: when unset, plaintext rows keep working; only "enc:v1:" rows need
+  // it. When set but malformed, warn loudly — encrypted clients will be rejected.
+  encKey = parseEncKey(process.env.APOLLO_ENC_KEY);
+  if (process.env.APOLLO_ENC_KEY && !encKey) {
+    console.error(
+      "Apollo instance auth: APOLLO_ENC_KEY is set but is not valid base64 of 32 bytes — encrypted client keys cannot be decrypted and those clients will be REJECTED."
+    );
   }
 
   const url = process.env.POSTGRES_URL;
@@ -213,4 +318,36 @@ export function __setAuthForTest(provider: Lookup | null): void {
     enabled = false;
     lookupOverride = null;
   }
+}
+
+/**
+ * Test seam: drive the real dbLookup (single-flight + stale-while-revalidate)
+ * with a fake table loader instead of Postgres. Passing a loader enables auth on
+ * the dbLookup path (lookupOverride cleared) and resets cache state; null tears
+ * it back down.
+ */
+export function __setLoaderForTest(
+  loader: (() => Promise<Map<string, Client>>) | null
+): void {
+  loaderOverride = loader;
+  clientCache = null;
+  cacheTs = 0;
+  refreshInFlight = null;
+  if (loader) {
+    enabled = true;
+    dbReady = true;
+    lookupOverride = null;
+  } else {
+    dbReady = false;
+  }
+}
+
+/** Test seam: mark the cache stale without touching its contents. */
+export function __expireCacheForTest(): void {
+  cacheTs = 0;
+}
+
+/** Test seam: set the at-rest decryption key (or null) without running initAuth. */
+export function __setEncKeyForTest(key: Buffer | null): void {
+  encKey = key;
 }

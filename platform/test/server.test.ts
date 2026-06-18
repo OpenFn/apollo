@@ -1,10 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { randomBytes } from "node:crypto";
 import setup from "../src/server";
 import {
+  __expireCacheForTest,
   __setAuthForTest,
+  __setEncKeyForTest,
+  __setLoaderForTest,
+  authGate,
+  buildClientMap,
   hashToken,
   internalAuthHeader,
 } from "../src/middleware/auth";
+import { encryptKey } from "../src/util/instance-key-crypto";
 
 const port = 9865;
 
@@ -228,5 +235,154 @@ describe("Instance authentication", () => {
       const res = await app.handle(req);
       expect(res.status).toBe(401);
     });
+  });
+});
+
+describe("Instance auth cache refresh", () => {
+  // Drive the real dbLookup (single-flight + stale-while-revalidate) with a fake
+  // table loader so we can assert how many DB reads a request burst causes.
+  // authGate is called directly with a minimal ctx to avoid spawning the echo
+  // service for every request in the burst.
+  const ALPHA = "lightning-cred-alpha";
+  const mapWith = (anthropicKey: string | null) =>
+    new Map([[hashToken(ALPHA), { name: "alpha", anthropicKey }]]);
+  const fakeCtx = (apiKey?: string) =>
+    ({
+      request: { headers: { get: () => null } },
+      body: apiKey ? { api_key: apiKey } : {},
+      set: { status: 200 },
+    }) as any;
+  const tick = () => new Promise((r) => setTimeout(r, 10));
+  const settle = () => new Promise((r) => setTimeout(r, 40));
+
+  afterEach(() => {
+    __setLoaderForTest(null);
+    __setAuthForTest(null);
+  });
+
+  it("collapses a cold-start burst into a single DB read", async () => {
+    let calls = 0;
+    __setLoaderForTest(async () => {
+      calls++;
+      await tick();
+      return mapWith("sk-ant-stored-alpha");
+    });
+
+    const ctxs = Array.from({ length: 50 }, () => fakeCtx(ALPHA));
+    await Promise.all(ctxs.map((c) => authGate(c)));
+
+    expect(calls).toBe(1);
+    for (const c of ctxs) {
+      expect(c.lightningClient?.anthropicKey).toBe("sk-ant-stored-alpha");
+    }
+  });
+
+  it("serves the stale list while one background refresh runs", async () => {
+    let calls = 0;
+    let current = mapWith("sk-ant-v1");
+    __setLoaderForTest(async () => {
+      calls++;
+      await tick();
+      return current;
+    });
+
+    // Cold start awaits the one load and warms the cache with v1.
+    const warm = fakeCtx(ALPHA);
+    await authGate(warm);
+    expect(calls).toBe(1);
+    expect(warm.lightningClient?.anthropicKey).toBe("sk-ant-v1");
+
+    // New data lands in the DB; mark the cache stale.
+    current = mapWith("sk-ant-v2");
+    __expireCacheForTest();
+
+    // The burst is served immediately from the stale v1 map and triggers
+    // exactly one background refresh (not one per request).
+    const ctxs = Array.from({ length: 25 }, () => fakeCtx(ALPHA));
+    await Promise.all(ctxs.map((c) => authGate(c)));
+    expect(calls).toBe(2);
+    for (const c of ctxs) {
+      expect(c.lightningClient?.anthropicKey).toBe("sk-ant-v1");
+    }
+
+    // Once the background refresh settles, the new value is visible — with no
+    // further DB reads.
+    await settle();
+    const after = fakeCtx(ALPHA);
+    await authGate(after);
+    expect(after.lightningClient?.anthropicKey).toBe("sk-ant-v2");
+    expect(calls).toBe(2);
+  });
+
+  it("keeps serving stale when the refresh fails, then recovers", async () => {
+    let calls = 0;
+    let fail = false;
+    __setLoaderForTest(async () => {
+      calls++;
+      if (fail) throw new Error("db down");
+      return mapWith("sk-ant-v1");
+    });
+
+    const warm = fakeCtx(ALPHA);
+    await authGate(warm);
+    expect(warm.lightningClient?.anthropicKey).toBe("sk-ant-v1");
+
+    // Refresh now fails; stale callers are still authenticated (no 500/empty).
+    fail = true;
+    __expireCacheForTest();
+    const ctxs = Array.from({ length: 10 }, () => fakeCtx(ALPHA));
+    await Promise.all(ctxs.map((c) => authGate(c)));
+    for (const c of ctxs) {
+      expect(c.lightningClient?.anthropicKey).toBe("sk-ant-v1");
+    }
+
+    // Recover once the DB is back.
+    fail = false;
+    __expireCacheForTest();
+    const ok = fakeCtx(ALPHA);
+    await authGate(ok);
+    expect(ok.lightningClient?.anthropicKey).toBe("sk-ant-v1");
+  });
+});
+
+describe("Instance auth key encryption", () => {
+  afterEach(() => __setEncKeyForTest(null));
+
+  it("round-trips encrypted, plaintext, and null keys through buildClientMap", () => {
+    const key = randomBytes(32);
+    __setEncKeyForTest(key);
+    const enc = encryptKey("sk-ant-secret", key);
+
+    const map = buildClientMap([
+      { name: "enc", auth_token_hash: "h-enc", anthropic_api_key: enc },
+      { name: "plain", auth_token_hash: "h-plain", anthropic_api_key: "sk-ant-plain" },
+      { name: "none", auth_token_hash: "h-none", anthropic_api_key: null },
+    ]);
+
+    expect(map.get("h-enc")?.anthropicKey).toBe("sk-ant-secret");
+    expect(map.get("h-plain")?.anthropicKey).toBe("sk-ant-plain");
+    expect(map.get("h-none")?.anthropicKey).toBeNull();
+  });
+
+  it("omits a client whose encrypted key can't be decrypted (wrong key)", () => {
+    const enc = encryptKey("sk-ant-secret", randomBytes(32)); // encrypted with key A
+    __setEncKeyForTest(randomBytes(32)); // server holds a different key
+
+    const map = buildClientMap([
+      { name: "bad", auth_token_hash: "h-bad", anthropic_api_key: enc },
+    ]);
+
+    expect(map.has("h-bad")).toBe(false);
+  });
+
+  it("omits an encrypted key when APOLLO_ENC_KEY is not configured", () => {
+    __setEncKeyForTest(null);
+    const enc = encryptKey("sk-ant-secret", randomBytes(32));
+
+    const map = buildClientMap([
+      { name: "bad", auth_token_hash: "h-bad", anthropic_api_key: enc },
+    ]);
+
+    expect(map.has("h-bad")).toBe(false);
   });
 });
