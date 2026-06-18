@@ -184,6 +184,10 @@ Each item in `code_edits`:
 - {"action": "replace", "old_code": "<exact code to find>", "new_code": "<replacement>"}
 - {"action": "rewrite", "new_code": "<complete new code>"}
 
+If the current job is EMPTY (no code at all), you MUST use the "rewrite" action
+with the complete code. There is nothing to "replace" in an empty job, so a
+"replace" edit will not apply.
+
 <code editing rules>
 - old_code must match the user's code EXACTLY, including all whitespace and indentation.
 - Edits apply sequentially — later edits work on the already-modified code.

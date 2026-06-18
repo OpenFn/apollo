@@ -315,12 +315,13 @@ class AnthropicClient:
 
             if suggest_code is True and tool_code_edits:
                 job_code = context.get("expression") if isinstance(context, dict) else None
-                if job_code:
-                    with sentry_sdk.start_span(description="apply_code_edits"):
-                        suggested_code, diff = self.apply_code_edits(
-                            content=content, text_answer=text_response,
-                            original_code=job_code, code_edits=tool_code_edits,
-                        )
+                # Apply edits even for an empty job: it's just the blank-file
+                # case. See https://github.com/OpenFn/apollo/issues/539.
+                with sentry_sdk.start_span(description="apply_code_edits"):
+                    suggested_code, diff = self.apply_code_edits(
+                        content=content, text_answer=text_response,
+                        original_code=job_code or "", code_edits=tool_code_edits,
+                    )
                 # If the model called the tool but emitted no prose, give the user
                 # a short confirmation so the response isn't empty.
                 if not text_response and suggested_code:
@@ -421,10 +422,10 @@ class AnthropicClient:
             text_answer = response_data.get("text_answer", "").strip()
             code_edits = response_data.get("code_edits", [])
             
-            if not code_edits or not original_code:
+            if not code_edits:
                 return text_answer, None, None
-            
-            suggested_code, diff = self.apply_code_edits(content=content, text_answer=text_answer, original_code=original_code, code_edits=code_edits)
+
+            suggested_code, diff = self.apply_code_edits(content=content, text_answer=text_answer, original_code=original_code or "", code_edits=code_edits)
             return text_answer, suggested_code, diff
             
         except json.JSONDecodeError as e:
@@ -472,7 +473,16 @@ class AnthropicClient:
         })
 
         action = edit.get("action")
-        
+
+        # Empty job: there is nothing to edit against, so the new code IS the
+        # result regardless of action (replace vs rewrite). Handling this here
+        # keeps correctness independent of which action the model picks.
+        # See https://github.com/OpenFn/apollo/issues/539.
+        if not code.strip():
+            new_code = edit.get("new_code")
+            if new_code:
+                return new_code, True, None
+
         if action == "replace":
             old_code = edit.get("old_code")
             new_code = edit.get("new_code")
