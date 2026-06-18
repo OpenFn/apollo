@@ -1,5 +1,13 @@
 # apollo
 
+## 1.3.3
+
+### Patch Changes
+
+- 824b99f: Fix an issue in job_chat where no code is returned if an an empty job
+  expression is sent
+- e5daf45: update dependencies
+
 ## 1.3.2
 
 ### Patch Changes
