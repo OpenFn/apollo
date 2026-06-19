@@ -188,16 +188,7 @@ file.
 
 ### Create the DB
 
-```
- set -a; . ./.env; set +a
-  u="${POSTGRES_URL#*://}"; cred="${u%%@*}"; hostpart="${u#*@}"
-  PGUSER="${cred%%:*}"; PGPASSWORD="${cred#*:}"
-  PGPORT="${hostpart#*:}"; PGPORT="${PGPORT%%/*}"
-  PGDB="${hostpart##*/}"; PGDB="${PGDB%%\?*}"
-  docker run -d --name apollo-pg -p "${PGPORT}:5432" \
-    -e POSTGRES_USER="$PGUSER" -e POSTGRES_PASSWORD="$PGPASSWORD" -e POSTGRES_DB="$PGDB" \
-    -v apollo-pg-data:/var/lib/postgresql/data postgres:16
-```
+Create a Postgres DB matching your POSTGRES_URL from the `.env` file
 
 ### To reset the DB
 
