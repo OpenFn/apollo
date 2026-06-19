@@ -19,9 +19,9 @@ const baseUrl = `http://localhost:${port}`;
 
 const app = await setup(port);
 
-// setup() runs initAuth(), which enables auth if the dev's .env sets
-// INSTANCE_AUTH. Force auth off so the suite is deterministic; the auth block
-// below opts back in via the test seam.
+// setup() runs initAuth(), which would enable auth if the dev's .env sets
+// INSTANCE_AUTH. Force it off so the suite is deterministic; the auth block below
+// opts back in via the test seam.
 __setAuthForTest(null);
 
 const get = (path: string) => {
@@ -149,11 +149,8 @@ describe("Python Services", () => {
 });
 
 describe("Instance authentication", () => {
-  // The credential is the api_key the client sends in the body. Clients are
-  // keyed by the SHA-256 of that credential (no real DB — this is the seam).
-  // ALPHA has a stored Anthropic key (Apollo swaps it in); BETA has none (the
-  // credential is stripped and Apollo falls back to its global key). Neither
-  // credential may ever pass through to the LLM call.
+  // No real DB — the seam keys clients by SHA-256 of the api_key they send. ALPHA
+  // has a stored Anthropic key (swapped in); BETA has none (credential stripped).
   const ALPHA = "lightning-cred-alpha";
   const BETA = "lightning-cred-beta";
   const clients: Record<string, { name: string; anthropicKey: string | null }> = {
@@ -165,7 +162,6 @@ describe("Instance authentication", () => {
     post(path, { ...data, ...(apiKey ? { api_key: apiKey } : {}) });
 
   afterEach(() => {
-    // Restore the open state the rest of the suite expects.
     __setAuthForTest(null);
   });
 
@@ -185,7 +181,6 @@ describe("Instance authentication", () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.x).toBe(1);
-      // The stored key replaces the credential; the credential never passes through.
       expect(body.api_key).toBe("sk-ant-stored-alpha");
       expect(body.api_key).not.toBe(ALPHA);
     });
@@ -237,10 +232,8 @@ describe("Instance authentication", () => {
     });
 
     it("passes a forwarded api_key through on internal self-calls untouched", async () => {
-      // An internal apollo() call was already authenticated upstream, so any
-      // api_key the calling service forwards (e.g. the resolved per-client key)
-      // must survive into the payload rather than being stripped to the global
-      // key. Echo back what the service actually received.
+      // Already authenticated upstream, so a forwarded api_key must survive into
+      // the payload rather than being stripped to the global key.
       const req = new Request(`${baseUrl}/services/echo`, {
         method: "POST",
         body: JSON.stringify({ x: 9, api_key: "sk-ant-forwarded" }),
@@ -253,9 +246,8 @@ describe("Instance authentication", () => {
     });
 
     it("rejects an unauthenticated WebSocket upgrade", async () => {
-      // The WS upgrade carries no body, so it has no api_key to validate; the
-      // beforeHandle gate must reject it rather than let it bypass auth. (Real
-      // clients use POST/stream, which is where the credential lives.)
+      // The WS upgrade carries no body, so no api_key to validate; the gate must
+      // reject it rather than let it bypass auth.
       const req = new Request(`${baseUrl}/services/echo`, {
         method: "GET",
         headers: {
@@ -272,10 +264,8 @@ describe("Instance authentication", () => {
 });
 
 describe("Instance auth cache refresh", () => {
-  // Drive the real dbLookup (single-flight + stale-while-revalidate) with a fake
-  // table loader so we can assert how many DB reads a request burst causes.
-  // authGate is called directly with a minimal ctx to avoid spawning the echo
-  // service for every request in the burst.
+  // Drive the real dbLookup with a fake loader so we can count DB reads per burst.
+  // authGate is called directly with a minimal ctx (no echo service spawned).
   const ALPHA = "lightning-cred-alpha";
   const mapWith = (anthropicKey: string | null) =>
     new Map([[hashToken(ALPHA), { name: "alpha", anthropicKey }]]);

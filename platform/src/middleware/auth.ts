@@ -3,64 +3,44 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { ApolloError } from "../util/errors";
 import { ENC_PREFIX, decryptKey, parseEncKey } from "../util/instance-key-crypto";
 
-// A row from the lightning_clients table, as used at runtime.
 type Client = { name: string; anthropicKey: string | null };
-
-// A lookup resolves a token hash to a client, or null if unknown.
 type Lookup = (hash: string) => Promise<Client | null> | Client | null;
 
-// Instance auth is opt-in via the INSTANCE_AUTH env var (see initAuth). When it
-// is unset/falsey, /services/* is open exactly as before. When set, every
-// /services/* request must carry an api_key (in the body) that matches a known
-// client.
+// Opt-in via INSTANCE_AUTH (see initAuth); when off, /services/* is open as before.
 let enabled = false;
 
-// True once the lightning_clients lookup is actually usable. When auth is
-// enabled but the DB/table can't be reached, this stays false and the gate
-// fails CLOSED (rejects every external caller) rather than silently opening up.
+// False until the lightning_clients lookup is usable. Auth-on but unusable DB =>
+// the gate fails CLOSED (rejects every external caller) rather than opening up.
 let dbReady = false;
 
-// When set (by tests), this replaces the DB-backed lookup so the suite can
-// enable auth with a known token set without a real Postgres.
 let lookupOverride: Lookup | null = null;
-
-// Bun's native Postgres client (Bun >= 1.2). Created once in initAuth().
 let sql: SQL | null = null;
 
-// In-memory cache of all clients keyed by token hash, refreshed on a TTL so
-// rows added/revoked directly in the DB are picked up within CACHE_TTL_MS.
+// In-memory client cache (keyed by token hash), refreshed on a TTL so DB changes
+// are picked up within CACHE_TTL_MS.
 const CACHE_TTL_MS = 60_000;
 let clientCache: Map<string, Client> | null = null;
 let cacheTs = 0;
 
-// Single-flight handle for the cache refresh. Concurrent refreshes (e.g. a burst
-// of requests hitting the TTL boundary at once) all share THIS one promise, so a
-// refresh can never trigger more than one DB read no matter the concurrency.
+// Single-flight handle: concurrent refreshes share this one promise, so a refresh
+// can never trigger more than one DB read no matter the concurrency.
 let refreshInFlight: Promise<Map<string, Client>> | null = null;
 
-// Master key (32 bytes) for decrypting stored anthropic_api_key values, parsed
-// from APOLLO_ENC_KEY in initAuth. Null when unset — plaintext rows still work,
-// but any "enc:v1:" row can't be decrypted and its client is omitted.
+// Master key for decrypting stored anthropic_api_key values (APOLLO_ENC_KEY). Null
+// when unset — plaintext rows still work, but "enc:v1:" rows can't be decrypted.
 let encKey: Buffer | null = null;
 
-// When set (by tests), this replaces loadClients in the refresh path so the
-// single-flight/stale-while-revalidate behaviour can be exercised without a DB.
 let loaderOverride: (() => Promise<Map<string, Client>>) | null = null;
 
-// A per-process secret that identifies genuine Apollo-to-Apollo calls. The
-// bridge spawns Python services as child processes that inherit this process's
-// env, so exporting the token here lets services/util.py apollo() echo it back
-// via the X-Apollo-Internal header. authGate exempts any request carrying it,
-// so "Apollo calling itself" skips auth without trusting network position (the
-// old loopback exemption trusted any local caller, including Lightning).
-// Honour an operator-provided value; otherwise mint a fresh random one.
+// Per-process secret identifying genuine Apollo-to-Apollo calls. The bridge spawns
+// Python children that inherit this env, so services/util.py apollo() echoes it back
+// via the internal header; authGate exempts requests carrying it without trusting
+// network position. Honour an operator-provided value, else mint a random one.
 //
-// MULTI-PROCESS DEPLOYMENTS: when unset, each process mints its OWN random
-// token. apollo() self-calls target 127.0.0.1:{port}, so they normally hit the
-// same process and the minted token matches. But if several processes share a
-// port (e.g. SO_REUSEPORT / clustering), a self-call can land on a sibling
-// whose token differs and get a spurious 401. Set APOLLO_INTERNAL_TOKEN to the
-// SAME value across all processes in that case so they recognise each other.
+// MULTI-PROCESS: when unset, each process mints its OWN token. apollo() self-calls
+// hit 127.0.0.1:{port} and normally land on the same process, but if processes
+// share a port (SO_REUSEPORT / clustering) a self-call can hit a sibling and 401.
+// Set APOLLO_INTERNAL_TOKEN to the SAME value across processes in that case.
 export const INTERNAL_HEADER = "x-apollo-internal";
 const INTERNAL_TOKEN =
   process.env.APOLLO_INTERNAL_TOKEN ?? randomBytes(32).toString("hex");
@@ -73,27 +53,22 @@ function safeEqual(a: string, b: string): boolean {
   return ab.length === bb.length && timingSafeEqual(ab, bb);
 }
 
-/** Header set marking a request as an internal apollo() self-call (used by tests). */
 export function internalAuthHeader(): Record<string, string> {
   return { [INTERNAL_HEADER]: INTERNAL_TOKEN };
 }
 
-/** SHA-256 hex of a client credential (the api_key). Must match services/_instance_auth/hash_token.py. */
+/** SHA-256 hex of a client credential. Must match services/_instance_auth/hash_token.py. */
 export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-// Sentinel returned by decryptStoredKey when an encrypted value can't be
-// decrypted. Such a client is omitted from the cache (fail closed) rather than
-// silently falling back to the global key, which would mis-bill its usage.
+// Returned when an encrypted key can't be decrypted: that client is omitted from
+// the cache (fail closed) rather than falling back to the global key, which would
+// mis-bill its usage.
 const DECRYPT_FAILED = Symbol("decrypt-failed");
 
-/**
- * Resolve the anthropic_api_key column to the plaintext key Apollo should use.
- *  - null            → null (intentional: this client uses the global env key)
- *  - "enc:v1:…"      → AES-256-GCM decrypt with encKey; DECRYPT_FAILED on error
- *  - anything else   → legacy plaintext, used as-is (backward compatible)
- */
+// null => global env key; "enc:v1:…" => AES-256-GCM decrypt (DECRYPT_FAILED on
+// error); anything else => legacy plaintext.
 function decryptStoredKey(
   stored: string | null,
   clientName: string
@@ -117,8 +92,8 @@ function decryptStoredKey(
   }
 }
 
-/** Build the hash→client map from raw rows, decrypting keys and dropping any
- *  client whose encrypted key can't be decrypted. Exported for tests. */
+/** Build the hash→client map, dropping any client whose encrypted key can't be
+ *  decrypted (fail closed). Exported for tests. */
 export function buildClientMap(
   rows: Array<{
     name: string;
@@ -146,11 +121,8 @@ async function loadClients(): Promise<Map<string, Client>> {
   return buildClientMap(rows);
 }
 
-/**
- * Refresh the client cache, collapsing concurrent callers onto a single DB read
- * (single-flight). The in-flight promise is cleared in finally so a failed
- * refresh never wedges the cache — the next caller retries.
- */
+// Single-flight refresh; the in-flight handle is cleared in finally so a failed
+// refresh never wedges the cache (the next caller retries).
 function refreshClients(): Promise<Map<string, Client>> {
   if (refreshInFlight) return refreshInFlight;
   refreshInFlight = (loaderOverride ?? loadClients)()
@@ -166,22 +138,19 @@ function refreshClients(): Promise<Map<string, Client>> {
 }
 
 async function dbLookup(hash: string): Promise<Client | null> {
-  // Auth is on but the lookup never came up — reject (fail closed).
-  if (!dbReady) return null;
+  if (!dbReady) return null; // auth on but lookup never came up -> fail closed
   if (!loaderOverride && !sql) return null;
 
   const fresh = clientCache !== null && Date.now() - cacheTs <= CACHE_TTL_MS;
   if (!fresh) {
     if (clientCache !== null) {
       // Warm but stale: serve the current map now and refresh once in the
-      // background. Errors are swallowed so a DB blip keeps serving stale (and
-      // retries next request, since cacheTs only advances on success) instead
-      // of 500ing every caller. The single-flight handle guarantees one read.
+      // background. Errors are swallowed so a DB blip keeps serving stale (cacheTs
+      // only advances on success, so the next request retries).
       void refreshClients().catch(() => {});
     } else {
-      // Cold start: nothing to serve yet. Every concurrent caller awaits the
-      // ONE shared load rather than each firing its own. On failure leave the
-      // cache null and reject (fail closed).
+      // Cold start: every concurrent caller awaits the one shared load. On failure
+      // leave the cache null and fail closed.
       try {
         await refreshClients();
       } catch {
@@ -192,20 +161,14 @@ async function dbLookup(hash: string): Promise<Client | null> {
   return clientCache?.get(hash) ?? null;
 }
 
-/** Whether the INSTANCE_AUTH env var opts this instance into auth. */
 function authOptIn(): boolean {
   const v = (process.env.INSTANCE_AUTH ?? "").trim().toLowerCase();
   return v === "1" || v === "true" || v === "yes" || v === "on";
 }
 
-/**
- * Decide once at startup whether instance auth is active. The INSTANCE_AUTH env
- * var is the master switch: unset/falsey leaves /services/* open as before.
- * When set, auth is enabled and tokens are looked up in the lightning_clients
- * table (via POSTGRES_URL). If that table can't be reached, auth stays enabled
- * but the gate fails CLOSED (rejects every external caller) — an explicit
- * opt-in must never silently fall back to open.
- */
+// Decide once at startup whether auth is active. When INSTANCE_AUTH is set but the
+// lightning_clients table can't be reached, auth stays on and the gate fails CLOSED
+// — an explicit opt-in must never silently fall back to open.
 export async function initAuth(): Promise<void> {
   enabled = authOptIn();
   if (!enabled) {
@@ -216,9 +179,6 @@ export async function initAuth(): Promise<void> {
     return;
   }
 
-  // Parse the at-rest encryption key for stored anthropic_api_key values.
-  // Optional: when unset, plaintext rows keep working; only "enc:v1:" rows need
-  // it. When set but malformed, warn loudly — encrypted clients will be rejected.
   encKey = parseEncKey(process.env.APOLLO_ENC_KEY);
   if (process.env.APOLLO_ENC_KEY && !encKey) {
     console.error(
@@ -266,32 +226,26 @@ function unauthorized(ctx: any): ApolloError {
   return { code: 401, type: "UNAUTHORIZED", message: "Missing or invalid API key" };
 }
 
-/**
- * Elysia onBeforeHandle hook scoped to the /services group. Returning a value
- * short-circuits the request with that value as the response body.
- * On success it stashes the resolved client on the context for apiKeyOverride.
- */
+// Elysia onBeforeHandle hook for the /services group. Returning a value
+// short-circuits the request with that body; on success it stashes the resolved
+// client on the context for apiKeyOverride.
 export async function authGate(ctx: any): Promise<ApolloError | void> {
   if (!enabled) return;
 
-  // Apollo calling itself: the bridge's Python children echo back the internal
-  // token (see services/util.py apollo()), so such calls skip the api_key
-  // check. External callers can't forge this — it's a per-process secret that
-  // is never sent to clients.
+  // Apollo calling itself: Python children echo back the internal token (see
+  // services/util.py apollo()), so such calls skip the api_key check. External
+  // callers can't forge it — it's a per-process secret never sent to clients.
   const internal = ctx.request?.headers?.get?.(INTERNAL_HEADER) ?? "";
   if (internal && safeEqual(internal, INTERNAL_TOKEN)) {
-    // Flag the exemption so apiKeyOverride leaves the payload untouched. Without
-    // this, an internal call (which never resolves a lightningClient) would have
-    // any api_key it forwards stripped to the global key — mis-billing a service
-    // that legitimately passes the per-client key down an apollo() hop.
+    // Flag so apiKeyOverride leaves the forwarded api_key untouched rather than
+    // stripping it to the global key — which would mis-bill a per-client key
+    // passed down an apollo() hop.
     ctx.internalCall = true;
     return;
   }
 
-  // The credential is the api_key the client (Lightning) already sends in the
-  // request body — there is no separate bearer token and no Lightning-side
-  // change. Hash it and look for a matching row in lightning_clients; an absent
-  // or unknown key is rejected.
+  // The credential is the api_key the caller sends in the body; hash it and look
+  // for a matching client. Absent or unknown -> 401.
   const apiKey =
     typeof ctx.body?.api_key === "string" ? ctx.body.api_key.trim() : "";
   if (!apiKey) return unauthorized(ctx);
@@ -304,22 +258,10 @@ export async function authGate(ctx: any): Promise<ApolloError | void> {
 }
 
 /**
- * Resolve the api_key for the outgoing service payload. Merged LAST over the
- * request body so it always wins.
- *
- * When auth is OFF, returns {} — the payload is left exactly as the caller sent
- * it (backward compatible; the legacy "client supplies its own key" behaviour).
- *
- * Internal apollo() self-calls (flagged by authGate) also return {} — they were
- * already authenticated upstream, so whatever api_key the calling service chose
- * to forward must pass through unchanged rather than being stripped here.
- *
- * Otherwise (auth ON, external caller) the api_key the client sent is ONLY an
- * auth credential and is NEVER passed through to the LLM. It is always
- * overwritten: with the matched client's stored anthropic_api_key, or — if that
- * client has no stored key — with `undefined`, which drops the field on
- * serialisation so Apollo falls back to its global ANTHROPIC_API_KEY. Either way
- * the inbound credential cannot survive into the payload.
+ * Resolve the api_key for the outgoing payload (merged LAST so it wins). Auth off,
+ * or an internal self-call: return {} (passthrough). Otherwise the inbound
+ * credential is NEVER forwarded to the LLM — it's replaced with the client's stored
+ * key, or undefined (dropped on serialise) so Apollo falls back to its global key.
  */
 export function apiKeyOverride(ctx: any): { api_key?: string } {
   if (!enabled || ctx?.internalCall) return {};
@@ -327,7 +269,8 @@ export function apiKeyOverride(ctx: any): { api_key?: string } {
   return { api_key: client?.anthropicKey ?? undefined };
 }
 
-/** Test seam: pass a fake lookup to enable auth without a DB, or null to disable. */
+// --- Test seams ---
+
 export function __setAuthForTest(provider: Lookup | null): void {
   if (provider) {
     enabled = true;
@@ -338,12 +281,8 @@ export function __setAuthForTest(provider: Lookup | null): void {
   }
 }
 
-/**
- * Test seam: drive the real dbLookup (single-flight + stale-while-revalidate)
- * with a fake table loader instead of Postgres. Passing a loader enables auth on
- * the dbLookup path (lookupOverride cleared) and resets cache state; null tears
- * it back down.
- */
+// Drives the real dbLookup (single-flight + stale-while-revalidate) with a fake
+// loader instead of Postgres; null tears it back down.
 export function __setLoaderForTest(
   loader: (() => Promise<Map<string, Client>>) | null
 ): void {
@@ -360,12 +299,10 @@ export function __setLoaderForTest(
   }
 }
 
-/** Test seam: mark the cache stale without touching its contents. */
 export function __expireCacheForTest(): void {
   cacheTs = 0;
 }
 
-/** Test seam: set the at-rest decryption key (or null) without running initAuth. */
 export function __setEncKeyForTest(key: Buffer | null): void {
   encKey = key;
 }

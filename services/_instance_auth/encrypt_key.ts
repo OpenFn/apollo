@@ -1,13 +1,7 @@
-// Encrypt an Anthropic API key for the lightning_clients.anthropic_api_key
-// column, so the key is not stored in the clear. Run from the repo root so Bun
-// auto-loads .env (that's where APOLLO_ENC_KEY lives); running from anywhere else
-// won't pick up .env and the script will say so:
-//
+// Encrypt an Anthropic API key for lightning_clients.anthropic_api_key. Run from
+// the repo root so Bun auto-loads .env (where APOLLO_ENC_KEY lives):
 //   bun services/_instance_auth/encrypt_key.ts <sk-ant-...>
-//
-// Prints the "enc:v1:…" value to store plus a ready-to-edit INSERT. Apollo
-// decrypts it on cache load using the same APOLLO_ENC_KEY (see
-// platform/src/middleware/auth.ts).
+// Prints the "enc:v1:…" value to store plus a ready-to-edit INSERT.
 import { encryptKey, parseEncKey } from "../../platform/src/util/instance-key-crypto";
 
 const plaintext = process.argv[2];
@@ -19,8 +13,6 @@ if (!plaintext) {
   process.exit(1);
 }
 
-// Bun auto-loads .env, but only from the directory it's run in. If the key is
-// missing it's almost always because this wasn't run from the repo root.
 const key = parseEncKey(process.env.APOLLO_ENC_KEY);
 if (!key) {
   console.error(

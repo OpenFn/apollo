@@ -20,7 +20,6 @@ export default async (port: number | string = 3000) => {
   await setupDir(app);
   await setupServices(app, +port);
 
-  // Decide whether /services/* is gated by an instance token (see auth.ts).
   await initAuth();
 
   console.log("Apollo Server listening on ", port);

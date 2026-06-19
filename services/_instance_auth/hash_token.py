@@ -1,17 +1,13 @@
-"""Hash (or mint) a Lightning client's api_key credential for the lightning_clients table.
-
-Usage (run from the repo root):
+"""Hash (or mint) a Lightning client's api_key credential for lightning_clients.
 
     # Hash the api_key a Lightning instance already sends:
     poetry run python services/_instance_auth/hash_token.py <api-key>
 
-    # Or mint a fresh credential and print its hash + a ready-to-edit INSERT:
+    # Or mint a fresh credential + print its hash and a ready-to-edit INSERT:
     poetry run python services/_instance_auth/hash_token.py
 
-The credential is whatever the client sends as `api_key` in the request body --
-there is no bearer token. Only its SHA-256 hash is stored in the DB. The hash
-here must match the one Apollo computes in platform/src/middleware/auth.ts
-(sha256 over the UTF-8 bytes, lowercase hex) -- it does.
+Only the SHA-256 hash is stored. It must match the hash Apollo computes in
+platform/src/middleware/auth.ts (sha256 over UTF-8 bytes, lowercase hex).
 """
 
 import hashlib

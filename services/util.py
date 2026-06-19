@@ -96,10 +96,9 @@ def apollo(name: str, payload: dict) -> dict:
     :return: JSON response.
     """
     url = f"http://127.0.0.1:{apollo_port}/services/{name}"
-    # Mark this as an internal Apollo-to-Apollo call so it bypasses instance auth
-    # (see platform/src/middleware/auth.ts). The server process injects the token
-    # into the environment and this child process inherits it; absent (auth off
-    # or token unset) the header is simply omitted.
+    # Mark internal Apollo-to-Apollo calls so they bypass instance auth (see
+    # platform/src/middleware/auth.ts). The server injects the token into the env
+    # and this child inherits it; absent (auth off) the header is omitted.
     headers = {}
     internal_token = os.environ.get("APOLLO_INTERNAL_TOKEN")
     if internal_token:

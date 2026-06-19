@@ -1,19 +1,7 @@
-// Provision a Lightning client for the lightning_clients allow-list in ONE step.
-// Given a client name and an Anthropic API key, this:
-//   1. mints a fresh api_key credential for the Lightning instance to send,
-//   2. computes its SHA-256 hash (what gets stored as auth_token_hash), and
-//   3. encrypts the Anthropic key into an "enc:v1:…" value (AES-256-GCM).
-// It then prints all three plus a ready-to-run psql INSERT.
-//
-// Run from the repo root so Bun auto-loads .env (that's where APOLLO_ENC_KEY
-// lives). Running from anywhere else won't pick up .env and the script will say so:
-//
+// Provision a Lightning client in one step: mint an api_key credential, hash it
+// (auth_token_hash), and encrypt the Anthropic key (enc:v1:…). Prints all three
+// plus a ready-to-run INSERT. Run from the repo root so Bun loads .env (APOLLO_ENC_KEY):
 //   bun services/_instance_auth/provision_client.ts <client-name> <sk-ant-...>
-//
-// The minted api_key goes to the Lightning instance (it sends it as `api_key`).
-// Everything else goes into the DB. The hash here matches the one Apollo computes
-// in platform/src/middleware/auth.ts, and the encryption reuses the same crypto
-// module Apollo decrypts with, so the formats can never drift.
 import { createHash, randomBytes } from "node:crypto";
 import { encryptKey, parseEncKey } from "../../platform/src/util/instance-key-crypto";
 
@@ -29,8 +17,6 @@ if (!name || !anthropicKey) {
   process.exit(1);
 }
 
-// Bun auto-loads .env, but only from the directory it's run in. If the key is
-// missing it's almost always because this wasn't run from the repo root.
 const encKey = parseEncKey(process.env.APOLLO_ENC_KEY);
 if (!encKey) {
   console.error(
@@ -44,11 +30,8 @@ if (!encKey) {
   process.exit(1);
 }
 
-// 1. The credential Lightning sends as `api_key`. URL-safe so it travels cleanly.
 const apiKey = randomBytes(32).toString("base64url");
-// 2. What we store: the SHA-256 hash (lowercase hex over UTF-8 bytes).
 const authTokenHash = createHash("sha256").update(apiKey).digest("hex");
-// 3. The Anthropic key, encrypted at rest.
 const encAnthropic = encryptKey(anthropicKey, encKey);
 
 const sqlName = name.replace(/'/g, "''");

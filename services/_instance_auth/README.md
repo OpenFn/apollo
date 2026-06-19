@@ -5,7 +5,7 @@ call them, and makes Apollo use **its own per-client Anthropic API key** for eac
 request rather than trusting anything the caller sends.
 
 This directory is not a mounted service (the leading `_` keeps it off the HTTP
-router). It is just the schema and a helper script; the actual gate lives in
+router). It holds the schema and provisioning scripts; the actual gate lives in
 `platform/src/middleware/auth.ts`.
 
 ## How it works
@@ -40,101 +40,78 @@ router). It is just the schema and a helper script; the actual gate lives in
   are never gated. Internal Apollo-to-Apollo `apollo()` calls are exempt via a
   per-process internal token (`APOLLO_INTERNAL_TOKEN`), not by network position.
 
-## Enabling it
+## Setting up a client
 
-1. Make sure `POSTGRES_URL` is set, then create the table:
+`provision_client.ts` is the canonical way to add a Lightning client: it mints the
+credential, hashes it, and encrypts the client's Anthropic key in one step.
+
+1. Create the table (once):
 
    ```sh
+   set -a; . ./.env; set +a
    psql "$POSTGRES_URL" -f services/_instance_auth/schema.sql
    ```
 
-2. Get the SHA-256 hash of the `api_key` a given Lightning instance sends:
+2. Set a master encryption key in `.env` (once) — `provision_client.ts` uses it to
+   encrypt each client's Anthropic key at rest:
 
    ```sh
-   poetry run python services/_instance_auth/hash_token.py <the-api-key>
+   echo "APOLLO_ENC_KEY=$(openssl rand -base64 32)" >> .env
    ```
 
-   (Run with no argument to instead mint a fresh credential to hand to the
-   instance.) This prints the hash to store and a ready-to-edit `INSERT`.
+3. Provision the client with a name and the Anthropic key Apollo should use for it:
 
-3. Insert the row. Set `name`, the hash, and the Anthropic key Apollo should use
-   for this client (leave `anthropic_api_key` as `NULL` to use Apollo's global
-   key):
-
-   ```sql
-   INSERT INTO lightning_clients (name, auth_token_hash, anthropic_api_key)
-   VALUES ('my-lightning-instance', '<hash>', 'sk-ant-...');
+   ```sh
+   set -a; . ./.env; set +a
+   bun services/_instance_auth/provision_client.ts <client-name> <sk-ant-...>
    ```
 
-   To store the Anthropic key encrypted instead of in the clear, see
-   [Encrypting the stored Anthropic keys](#encrypting-the-stored-anthropic-keys-optional)
-   below and paste the `enc:v1:…` value in place of `'sk-ant-...'`.
+   This prints the `api_key` to give the Lightning instance and a ready-to-run
+   `psql` `INSERT`. Run that `INSERT` to add the row.
 
-4. Set `INSTANCE_AUTH=true` in Apollo's environment and restart. The startup log
-   shows `Apollo instance auth ENABLED`. (If `INSTANCE_AUTH` is set but the table
-   is missing, the log warns and every external caller is rejected.)
+4. Enable auth: set `INSTANCE_AUTH=true` in Apollo's environment and restart. The
+   startup log shows `Apollo instance auth ENABLED`. (If `INSTANCE_AUTH` is set but
+   the table is missing, the log warns and every external caller is rejected.)
 
-No Lightning-side configuration is needed: it keeps sending its `api_key` exactly
-as it does now.
+5. Give the printed `api_key` to the Lightning instance. It keeps sending it as
+   `api_key` exactly as it does today — no other Lightning-side change.
 
 ## Managing clients
 
-There is no CLI — manage rows directly in the DB:
+Manage rows directly in the DB. Changes are picked up within ~60s (the server
+caches the client list briefly); restart Apollo to apply a revocation immediately.
 
-- **Revoke a client:** `DELETE FROM lightning_clients WHERE name = '...';`
-- **Rotate a credential:** hash the new `api_key` with `hash_token.py` and
-  `UPDATE lightning_clients SET auth_token_hash = '<new-hash>' WHERE name = '...';`
-- **Change the Anthropic key Apollo uses for a client:**
-  `UPDATE lightning_clients SET anthropic_api_key = '...' WHERE name = '...';`
+- **Revoke:** `DELETE FROM lightning_clients WHERE name = '...';`
+- **Rotate a credential / change the Anthropic key:** re-run `provision_client.ts`
+  and apply its output as an `UPDATE` for the existing `name` (it prints an
+  `INSERT` — swap the verb).
 
-Changes are picked up within ~60s (the server caches the client list briefly). If
-you need a revocation to take effect immediately, restart Apollo.
+### Lower-level scripts
 
-## Encrypting the stored Anthropic keys (optional)
+`provision_client.ts` is built from two primitives, occasionally useful on their
+own — e.g. to add a client whose `anthropic_api_key` is `NULL` (so it uses Apollo's
+global `ANTHROPIC_API_KEY`), which `provision_client.ts` doesn't cover:
 
-By default `anthropic_api_key` is stored as plaintext. You can instead encrypt it
-at rest with AES-256-GCM so a DB dump/backup/replica leak doesn't expose live
-keys:
+- `hash_token.py <api-key>` — hash (or, with no argument, mint) just the credential.
+- `encrypt_key.ts <sk-ant-...>` — encrypt just an Anthropic key to an `enc:v1:…`
+  value.
 
-1. Generate a 32-byte master key and set it in Apollo's environment:
+## At-rest encryption
 
-   ```sh
-   openssl rand -base64 32          # → put the output in APOLLO_ENC_KEY
-   ```
+`anthropic_api_key` is stored encrypted (AES-256-GCM) when written via
+`provision_client.ts`/`encrypt_key.ts`; plaintext rows are still accepted for
+backward compatibility.
 
-2. Encrypt a key to get the value to store:
-
-   ```sh
-   APOLLO_ENC_KEY=<the-base64-key> \
-     bun services/_instance_auth/encrypt_key.ts sk-ant-...
-   ```
-
-   This prints an `enc:v1:…` blob (and a ready-to-edit `INSERT`). Use it in place
-   of the plaintext key:
-
-   ```sql
-   UPDATE lightning_clients SET anthropic_api_key = 'enc:v1:...' WHERE name = '...';
-   ```
-
-3. Restart Apollo with `APOLLO_ENC_KEY` set. It decrypts each key once per ~60s
-   cache refresh.
-
-Notes:
-
-- **Backward compatible / opt-in.** Plaintext rows keep working; only `enc:v1:`
-  rows need `APOLLO_ENC_KEY`. You can migrate one client at a time.
 - **Fail closed.** If an `enc:v1:` row can't be decrypted (wrong/missing
   `APOLLO_ENC_KEY` or corrupt value), that client is dropped from the allow-list
-  and its requests get `401` — Apollo never silently falls back to the global key
-  for an encrypted-but-undecryptable row. A `NULL` key still means "use the
-  global key" as before.
-- **Rotation** is manual: decrypt and re-encrypt every `enc:v1:` row with the new
-  key, then swap `APOLLO_ENC_KEY` and restart.
-- **What it protects.** The ciphertext is useless without `APOLLO_ENC_KEY`, so
-  this guards DB dumps, backups, read replicas, and accidental `SELECT`s in logs.
-  It does **not** protect a full Apollo host/process compromise: the running
-  process necessarily holds both the key and the decrypted values in memory
-  (Apollo must use the key to call Anthropic). Continue to protect the table at
-  rest (restricted access, DB encryption) regardless.
+  and its requests get `401` — Apollo never falls back to the global key for an
+  encrypted-but-undecryptable row. A `NULL` key still means "use the global key".
+- **Rotation** is manual: re-encrypt every `enc:v1:` row with the new key, then
+  swap `APOLLO_ENC_KEY` and restart.
+- **What it protects.** The ciphertext is useless without `APOLLO_ENC_KEY`, so this
+  guards DB dumps, backups, read replicas, and accidental `SELECT`s in logs. It
+  does **not** protect a full Apollo host/process compromise: the running process
+  necessarily holds both the key and the decrypted values in memory. Protect the
+  table at rest (restricted access, DB encryption) regardless.
 
 The clients' `api_key` credentials are only ever stored and compared as hashes.
