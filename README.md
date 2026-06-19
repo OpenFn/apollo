@@ -181,18 +181,44 @@ instance auth can be enabled (see below).
 Python services are hosted at `/services/<name>`. Each service expects a POST
 request with a JSON body, and will return JSON.
 
+## Database
+
+First, make sure you've configured your desired `POSTGRES_URL` in your `.env`
+file.
+
+### Create the DB
+
+```
+ set -a; . ./.env; set +a
+  u="${POSTGRES_URL#*://}"; cred="${u%%@*}"; hostpart="${u#*@}"
+  PGUSER="${cred%%:*}"; PGPASSWORD="${cred#*:}"
+  PGPORT="${hostpart#*:}"; PGPORT="${PGPORT%%/*}"
+  PGDB="${hostpart##*/}"; PGDB="${PGDB%%\?*}"
+  docker run -d --name apollo-pg -p "${PGPORT}:5432" \
+    -e POSTGRES_USER="$PGUSER" -e POSTGRES_PASSWORD="$PGPASSWORD" -e POSTGRES_DB="$PGDB" \
+    -v apollo-pg-data:/var/lib/postgresql/data postgres:16
+```
+
+### To reset the DB
+
+`set -a; . ./.env; set +a; psql "$POSTGRES_URL" -c "DROP TABLE IF EXISTS lightning_clients, adaptor_function_docs CASCADE;"`
+
+### Run the "migrations" (apply both schemas):
+
+`set -a; . ./.env; set +a; psql "$POSTGRES_URL" -f services/_instance_auth/schema.sql && psql "$POSTGRES_URL" -f services/load_adaptor_docs/schema.sql`
+
 ### Instance authentication (optional)
 
 `/services/*` can be gated so that only known clients (e.g. specific Lightning
-instances) may call it, with Apollo using **each client's own Anthropic API key**
-for that client's requests.
+instances) may call it, with Apollo using **each client's own Anthropic API
+key** for that client's requests.
 
 - It is **opt-in and backward compatible**: auth is active only when the
   `INSTANCE_AUTH` environment variable is set (e.g. `INSTANCE_AUTH=true`).
   Otherwise the server stays fully open as before. Tokens are looked up in the
-  `lightning_clients` table via `POSTGRES_URL`; if auth is enabled but that table
-  can't be reached, the gate **fails closed** (rejects all external callers)
-  rather than silently opening up.
+  `lightning_clients` table via `POSTGRES_URL`; if auth is enabled but that
+  table can't be reached, the gate **fails closed** (rejects all external
+  callers) rather than silently opening up.
 - The credential is the **`api_key` the caller already sends in the request
   body** — there is no bearer token, no `Authorization` header, and no
   Lightning-side change. Apollo stores only a SHA-256 hash of it; an
