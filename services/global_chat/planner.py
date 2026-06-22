@@ -161,23 +161,9 @@ class PlannerAgent:
 
                         logger.info(f"Executing {len(tool_use_blocks)} tool(s): {[b.name for b in tool_use_blocks]}")
 
-                        job_code_blocks = [b for b in tool_use_blocks if b.name == "call_job_code_agent"]
-                        other_blocks = [b for b in tool_use_blocks if b.name != "call_job_code_agent"]
-
-                        tool_results = []
-
-                        for tool_use_block in other_blocks:
-                            stream_manager.send_thinking(self._tool_status_message(tool_use_block))
-                            tool_result = self._execute_tool(tool_use_block, total_usage, tool_calls_meta)
-                            tool_results.append(
-                                {"type": "tool_result", "tool_use_id": tool_use_block.id, "content": tool_result}
-                            )
-
-                        if job_code_blocks:
-                            job_results = self._execute_job_code_tools_parallel(
-                                job_code_blocks, stream_manager, total_usage, tool_calls_meta
-                            )
-                            tool_results.extend(job_results)
+                        tool_results = self._execute_tool_blocks(
+                            tool_use_blocks, stream_manager, total_usage, tool_calls_meta
+                        )
 
                         content_blocks = []
                         for block in response.content:
@@ -464,6 +450,36 @@ class PlannerAgent:
             tool_result = f"Error: Unknown tool {tool_use_block.name}"
 
         return tool_result
+
+    def _execute_tool_blocks(self, tool_use_blocks, stream_manager, total_usage, tool_calls_meta):
+        """Run a batch of tool_use blocks in a deliberate order and collect results.
+
+        Ordering is load-bearing: workflow-structure tools (and any other
+        non-job tools) run FIRST and mutate ``self.current_yaml``, then the
+        job-code tools run against that updated YAML. The prompt tells the
+        planner never to mix call_workflow_agent and call_job_code_agent in one
+        step, but if it does anyway, this order is what keeps job code stitched
+        into the freshly-modified workflow rather than a stale snapshot.
+        """
+        job_code_blocks = [b for b in tool_use_blocks if b.name == "call_job_code_agent"]
+        other_blocks = [b for b in tool_use_blocks if b.name != "call_job_code_agent"]
+
+        tool_results = []
+
+        for tool_use_block in other_blocks:
+            stream_manager.send_thinking(self._tool_status_message(tool_use_block))
+            tool_result = self._execute_tool(tool_use_block, total_usage, tool_calls_meta)
+            tool_results.append(
+                {"type": "tool_result", "tool_use_id": tool_use_block.id, "content": tool_result}
+            )
+
+        if job_code_blocks:
+            job_results = self._execute_job_code_tools_parallel(
+                job_code_blocks, stream_manager, total_usage, tool_calls_meta
+            )
+            tool_results.extend(job_results)
+
+        return tool_results
 
     def _execute_job_code_tools_parallel(self, blocks, stream_manager, total_usage, tool_calls_meta):
         """Execute multiple call_job_code_agent tools with parallel API calls.

@@ -148,6 +148,41 @@ def test_parallel_job_agent_failure_keeps_sibling_results() -> None:
     assert planner.yaml_modified is True
 
 
+def test_tool_blocks_run_workflow_before_job_against_updated_yaml() -> None:
+    """Workflow tools must run first and mutate the YAML before job tools run.
+
+    The job below targets a step that only exists AFTER the workflow agent
+    runs, so it can only be matched/stitched if it sees the updated YAML.
+    """
+    planner = make_planner()
+    new_yaml = WORKFLOW_YAML + "  new-step:\n    name: New Step\n    body: '// Add operations here'\n"
+    call_order = []
+
+    def fake_call_workflow_agent(*_args: object, **_kwargs: object) -> dict:
+        call_order.append("workflow")
+        return {"response": "Added the step.", "response_yaml": new_yaml, "usage": empty_usage()}
+
+    def fake_call_job_agent(_tool_input: dict, workflow_yaml: str, *_args: object, **_kwargs: object) -> dict:
+        call_order.append("job")
+        # Proves the job agent saw the post-workflow YAML, not the snapshot.
+        assert "new-step" in workflow_yaml
+        return {"response": "done", "suggested_code": "newCode();", "usage": empty_usage()}
+
+    blocks = [
+        FakeToolUse("call_job_code_agent", {"message": "m", "job_key": "new-step"}, block_id="tu_job"),
+        FakeToolUse("call_workflow_agent", {"message": "add a step"}, block_id="tu_wf"),
+    ]
+
+    with patch("global_chat.planner.call_workflow_agent", side_effect=fake_call_workflow_agent), \
+         patch("global_chat.planner.call_job_agent", side_effect=fake_call_job_agent):
+        results = planner._execute_tool_blocks(blocks, StubStreamManager(), empty_usage(), [])
+
+    assert call_order == ["workflow", "job"]
+    by_id = {r["tool_use_id"]: r["content"] for r in results}
+    assert "stitched into the workflow" in by_id["tu_job"]
+    assert "newCode();" in planner.current_yaml
+
+
 def test_user_content_names_the_step_being_viewed() -> None:
     planner = make_planner()
 
