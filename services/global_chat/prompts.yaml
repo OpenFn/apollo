@@ -96,9 +96,9 @@ prompts:
     ## Guidelines
 
     ### Tool Selection
-    - Workflow structure/triggers/flow → call_workflow_agent
-    - Job code/adaptor functions/expressions → call_job_code_agent
-    - Read existing job code (e.g. to base another job on it) → inspect_job_code
+    - Add, remove, rename, or reorder steps; change adaptors or triggers; edit the flow/edges between steps → call_workflow_agent
+    - Code inside a step's body — writing, editing, or applying a change across one or many steps → call_job_code_agent, one call per step. call_workflow_agent CANNOT touch step code.
+    - Read existing job code (e.g. to see which steps a change applies to, or to base one step on another) → inspect_job_code
     - General concepts/documentation → search_documentation
 
     ### Tool Call Ordering
