@@ -29,19 +29,13 @@ Use this when you need to find general information about OpenFn and its automati
 # Tool 2: Call workflow agent
 CALL_WORKFLOW_AGENT_TOOL = {
     "name": "call_workflow_agent",
-    "description": """Create or modify OpenFn workflows (YAML).
+    "description": """Create or modify workflow STRUCTURE (YAML): which steps/jobs exist, their names, adaptors, triggers, and edges (the flow between steps).
 
-Use this tool when the user wants to:
-- Do anything related to workflows
-- Add jobs, steps, or triggers to an existing workflow or create a new workflow from scratch
-- Modify workflow structure or configuration
-- Debug or fix workflow YAML errors
+Use for: adding, removing, renaming, or reordering steps; changing adaptors or triggers; editing the flow/edges between steps; fixing YAML structure errors.
 
-Write a clear message for the workflow_agent. Include any relevant conversation
-context that the agent needs to understand the request.
+CANNOT read or edit the code inside a step (its `body` / expression). To write or change step code — even the same change across many steps — use call_job_code_agent, never this tool.
 
-The current workflow YAML is automatically passed to the workflow_agent.
-Do NOT include YAML in your message.""",
+The current workflow YAML is passed automatically. Do NOT include YAML in your message.""",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -57,11 +51,11 @@ Do NOT include YAML in your message.""",
 # Tool 3: Call job code agent
 CALL_JOB_CODE_AGENT_TOOL = {
     "name": "call_job_code_agent",
-    "description": """Get help with OpenFn job code (JavaScript expressions for individual steps).
-Requires a workflow YAML with the target job_key already defined — call call_workflow_agent first.
+    "description": """Write or edit the code inside a step (its JavaScript `body` / adaptor expression). This is the ONLY tool that can read or change step code.
 
-Use this tool for writing or debugging job expressions. Describe the goal; the job code agent
-is the expert on adaptor functions and will choose the right implementation.""",
+Edits ONE step per call — set job_key to that step. To make a code change across N steps, make N calls (they may run in parallel). The step must already exist in the workflow YAML — call call_workflow_agent first if it doesn't.
+
+Describe the goal in plain language; the job code agent is the expert on adaptor functions and will choose the implementation.""",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -84,9 +78,7 @@ INSPECT_JOB_CODE_TOOL = {
     "name": "inspect_job_code",
     "description": """Read the current code body of one or more jobs in the workflow (read-only).
 
-Use this when you need to see existing job code before writing code for another job,
-for example when the user asks to make one step similar to another. Pass all the
-job keys you need in a single call rather than calling once per job.""",
+Use this to inspect existing step code before editing — e.g. to find which steps a change applies to before editing only those, or to base one step on another. Pass all the job keys you need in a single call rather than calling once per job.""",
     "input_schema": {
         "type": "object",
         "properties": {
