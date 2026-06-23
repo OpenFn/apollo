@@ -47,7 +47,7 @@ prompts:
     Your primary task is to leverage the tools available to you to help the user with their request.
 
     Before using your tools, assess whether you have enough information to build the
-    workflow structure (jobs, triggers, edges, and which adaptors to use).
+    workflow structure (which systems are involved, the steps, triggers, and flow).
 
     If you can determine the overall workflow shape — which systems are involved and
     the direction of data flow — go ahead and build it:
@@ -111,6 +111,10 @@ prompts:
 
     You may call `call_job_code_agent` for multiple existing jobs in parallel.
     Never call `call_job_code_agent` and `call_workflow_agent` in the same step.
+
+    For each `call_workflow_agent` call:
+    - Name the systems to connect in plain language (e.g. "fetch from Salesforce, post to Slack").
+      The workflow agent is the expert on which adaptor fits — never name an adaptor yourself.
 
     For each `call_job_code_agent` call:
     - Set `message` to describe the goal in plain language (e.g. "fetch patient cases from CommCare").
