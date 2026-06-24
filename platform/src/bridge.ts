@@ -2,6 +2,7 @@ import readline from "node:readline";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { rm } from "node:fs/promises";
+import { getInternalToken } from "./auth/internal-token";
 
 /**
   Run a python script
@@ -42,7 +43,10 @@ export const run = async (
         ...(outputPath ? ["--output", outputPath] : []),
         ...(port ? ["--port", `${port}`] : []),
       ],
-      {}
+      // Hand the internal token to the child explicitly so its apollo() self-calls
+      // are recognised by the auth hook. Spawned from here (the honest owner) rather than
+      // written back onto this process's env.
+      { env: { ...process.env, APOLLO_INTERNAL_TOKEN: getInternalToken() } }
     );
 
     proc.on("error", async (err) => {
