@@ -11,4 +11,4 @@ planner:
   model: "claude-sonnet"
   max_tokens: 8192
   temperature: 1.0
-  max_tool_calls: 10
+  max_tool_calls: 25

@@ -62,7 +62,7 @@ class PlannerAgent:
         self.model = resolve_model(planner_config.get("model", "claude-sonnet"))
         self.max_tokens = planner_config.get("max_tokens", 8192)
         self.temperature = planner_config.get("temperature", 1.0)
-        self.max_tool_calls = planner_config.get("max_tool_calls", 20)
+        self.max_tool_calls = planner_config.get("max_tool_calls", 25)
 
         self.current_yaml: Optional[str] = None
         self.subagent_results = []

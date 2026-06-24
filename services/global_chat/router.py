@@ -21,7 +21,7 @@ from langfuse import observe
 from util import create_logger, ApolloError, sum_usage
 from global_chat.config_loader import ConfigLoader
 from models import resolve_model
-from global_chat.yaml_utils import get_step_name_from_page, find_job_in_yaml, stitch_job_code
+from global_chat.yaml_utils import get_step_name_from_page, find_job_in_yaml, stitch_job_code, workflow_has_job_code
 
 logger = create_logger(__name__)
 
@@ -207,6 +207,10 @@ class RouterAgent:
 
         if workflow_yaml:
             parts.append(f"\n[Workflow YAML attached, length: {len(workflow_yaml)} chars]")
+            if workflow_has_job_code(workflow_yaml):
+                parts.append("[Steps contain job code]")
+            else:
+                parts.append("[All step bodies are empty/placeholder]")
             parts.append(f"YAML content:\n{workflow_yaml}")
 
         return "\n".join(parts)

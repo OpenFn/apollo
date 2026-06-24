@@ -68,6 +68,30 @@ def find_job_in_yaml(yaml_str: str, step_name: str) -> Tuple[Optional[str], Opti
     return None, None
 
 
+EMPTY_JOB_BODY = "// Add operations here"
+
+
+def workflow_has_job_code(yaml_str: Optional[str]) -> bool:
+    """Return True if any job has a non-empty, non-placeholder body.
+
+    The canonical empty-job marker is ``// Add operations here`` (see
+    workflow_chat); a blank body or that marker means "no code yet". Used to
+    decide whether a "what does this do" question needs the planner (to read the
+    real code) or can take the faster workflow_agent path (structure only).
+    """
+    try:
+        yaml_data = yaml.safe_load(yaml_str)
+    except Exception:
+        return False
+    if not yaml_data or "jobs" not in yaml_data:
+        return False
+    for job_data in yaml_data["jobs"].values():
+        body = (job_data or {}).get("body")
+        if isinstance(body, str) and body.strip() and body.strip() != EMPTY_JOB_BODY:
+            return True
+    return False
+
+
 def redact_job_bodies(yaml_str: str) -> str:
     """Return workflow YAML with job bodies replaced by a placeholder."""
     try:
