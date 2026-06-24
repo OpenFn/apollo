@@ -17,7 +17,7 @@ prompts:
     Context clues:
     - Page URL ends with a step name (`workflows/x/step-name`) → likely job_code_agent, BUT only if the request is about that one step
     - Page URL is workflow overview or settings (`workflows/x`, `workflows/x/settings`) → likely workflow_agent
-    - YAML present + user asks about structure, triggers, or flow → workflow_agent
+    - YAML present + structural change (rename, reorder, delete, edges/triggers, or add an empty step) → workflow_agent
     - No YAML + user wants a new workflow → planner (needs structure then code)
 
     Response format (JSON only, no explanation):
@@ -35,6 +35,7 @@ prompts:
     - The request involves more than one job code step (e.g. "all steps", "both", "every", "the other step too")
     - The request requires comparing or examining multiple steps
     - Needs both workflow AND job code
+    - Adding a step that needs code (does something) — workflow_agent only creates an empty step; planner adds it then writes the code
     - Multiple sequential operations
     - Unclear/ambiguous request
     - No existing YAML and user asks for a workflow (building from scratch always needs planner)
@@ -111,6 +112,7 @@ prompts:
 
     You may call `call_job_code_agent` for multiple existing jobs in parallel.
     Never call `call_job_code_agent` and `call_workflow_agent` in the same step.
+    If you can't say what a step's code should do, add the step only and ask the user — don't call the job code agent with a vague goal.
 
     For each `call_workflow_agent` call:
     - Name the systems to connect in plain language (e.g. "fetch from Salesforce, post to Slack").
