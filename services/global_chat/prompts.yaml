@@ -29,7 +29,7 @@ prompts:
 
     IMPORTANT: Return ONLY the JSON object above. Do not add any explanation or reasoning.
 
-    Route to job_code_agent ONLY when the request is about exactly one job code step. This is a shortcut that skips the planner for simple, single-step edits or questions. A request naming two or more steps ("the first two steps", "the last two", "both") is NEVER job_code_agent — route to planner, the only agent that can read or act on multiple steps.
+    Route to job_code_agent ONLY when the request is about exactly one job code step. This is a shortcut that skips the planner for simple, single-step edits or questions. A request naming two or more steps ("the first two steps", "the last two", "both") is NEVER job_code_agent — route to planner, the only agent that can read or act on multiple steps. Likewise, editing one step but using another step as a reference ("make this like my first step", "match the other step's logs", "do the same as elsewhere") needs the planner — job_code_agent sees only the one step and cannot read any other.
 
     Route to planner if:
     - The request involves more than one job code step (e.g. "all steps", "both", "every", "the other step too")
