@@ -3,7 +3,8 @@ FROM python:3.11-bullseye
 WORKDIR /app
 
 COPY ./pyproject.toml ./poetry.lock ./
-COPY ./package.json bun.lockb ./
+COPY ./package.json bun.lock ./
+COPY ./.tool-versions ./
 COPY ./tsconfig.json ./
 COPY ./path.config ./
 
@@ -20,7 +21,8 @@ RUN python -m pipx install poetry
 ENV PATH="${PATH}:/root/.local/bin/"
 RUN poetry install --only main --no-root
 
-RUN curl -fsSL https://bun.sh/install | bash
+RUN BUN_VERSION="$(awk '/^bun / {print $2}' .tool-versions)" \
+    && curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}"
 ENV PATH="${PATH}:/root/.bun/bin/"
 
 RUN bun install
