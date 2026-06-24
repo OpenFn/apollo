@@ -233,10 +233,16 @@ class PlannerAgent:
         if self.yaml_modified and self.current_yaml:
             attachments.append({"type": "workflow_yaml", "content": self.current_yaml})
 
+        # Return string-content history matching the direct routes, not the
+        # internal block-format messages used by the tool-calling loop.
+        return_history = (history.copy() if history else [])
+        return_history.append({"role": "user", "content": content})
+        return_history.append({"role": "assistant", "content": final_text})
+
         return PlannerResult(
             response=final_text,
             attachments=attachments,
-            history=messages,
+            history=return_history,
             usage=total_usage,
             meta={
                 "agents": agents_used,

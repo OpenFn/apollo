@@ -90,6 +90,8 @@ def extract_page_prefix_from_last_turn(history: List[Dict[str, str]]) -> Optiona
 
     # Second-to-last turn is the last user message
     content = history[-2].get("content", "")
+    if not isinstance(content, str):
+        return None
 
     # Extract [pg:...] prefix if present
     if content.startswith("[pg:") and "]" in content:
