@@ -139,7 +139,7 @@ class Payload:
 @dataclass
 class ChatConfig:
     model: str = _MODEL
-    max_tokens: int = 32768
+    max_tokens: int = 24576
     api_key: Optional[str] = None
 
 
