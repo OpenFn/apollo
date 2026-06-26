@@ -74,6 +74,8 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
       const { name, readme } = m;
       console.log(" - mounted /services/" + name);
 
+      app.head(name, () => new Response(null, { status: 200 }));
+
       // simple post
       app.post(name, async (ctx) => {
         console.log(`POST /services/${name}: ${ctx.uuid}`);

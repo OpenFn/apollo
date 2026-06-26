@@ -4,6 +4,7 @@ import re
 import yaml
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
+import httpx
 from anthropic import (
     Anthropic,
     APIConnectionError,
@@ -18,7 +19,7 @@ from anthropic import (
 import sentry_sdk
 from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
 from langfuse_util import should_track, build_tags
-from util import ApolloError, create_logger, AdaptorSpecifier, add_page_prefix
+from util import ApolloError, create_logger, AdaptorSpecifier, add_page_prefix, APOLLO_VERSION
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
 from streaming_util import (
@@ -138,7 +139,7 @@ class Payload:
 @dataclass
 class ChatConfig:
     model: str = _MODEL
-    max_tokens: int = 16384
+    max_tokens: int = 24576
     api_key: Optional[str] = None
 
 
@@ -288,6 +289,10 @@ class AnthropicClient:
                         max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message,
                         thinking={"type": "adaptive"},
                         output_config=output_config,
+                        # Per-request timeout (same values as the SDK default):
+                        # required for non-streaming calls with max_tokens > ~21k,
+                        # which the SDK otherwise rejects.
+                        timeout=httpx.Timeout(600.0, connect=5.0),
                         **tool_kwargs
                     )
                     message = self.client.messages.create(**create_kwargs)
@@ -668,7 +673,7 @@ def main(data_dict: dict) -> dict:
                 "suggested_code": result.suggested_code,
                 "history": result.history,
                 "usage": result.usage,
-                "meta": {"rag": result.rag}
+                "meta": {"rag": result.rag, "apollo_version": APOLLO_VERSION}
             }
 
             if result.diff:
