@@ -8,6 +8,7 @@ import { InstanceAuth, type Client } from "../src/auth/instance-auth";
 import { hashToken } from "../src/auth/hash";
 import { internalAuthHeader } from "../src/auth/internal-token";
 import { encryptKey } from "../src/util/instance-key-crypto";
+import pkg from "../../package.json";
 
 const port = 9865;
 
@@ -57,6 +58,11 @@ describe("Main server", () => {
     const status = response.status;
 
     expect(status).toBe(200);
+  });
+
+  it("includes X-Api-Version header on every response", async () => {
+    const response = await app.handle(get(""));
+    expect(response.headers.get("X-Api-Version")).toBe(pkg.version);
   });
 
   // send messages through a web socket
