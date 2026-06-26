@@ -1,4 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, setSystemTime, spyOn } from "bun:test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  setSystemTime,
+  spyOn,
+} from "bun:test";
 import { randomBytes } from "node:crypto";
 import { Elysia } from "elysia";
 import setup from "../src/server";
@@ -65,6 +73,14 @@ describe("Main server", () => {
     expect(response.headers.get("X-Api-Version")).toBe(pkg.version);
   });
 
+  it("responds to HEAD at root with 200 and no body", async () => {
+    const response = await app.handle(
+      new Request(`${baseUrl}/`, { method: "HEAD" })
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("");
+  });
+
   // send messages through a web socket
 });
 
@@ -72,6 +88,13 @@ describe("Main server", () => {
 // but we can use the test echo service at least
 describe("Python Services", () => {
   describe("Python echo", () => {
+    it("responds to HEAD with 200 and no body", async () => {
+      const req = new Request(`${baseUrl}/services/echo`, { method: "HEAD" });
+      const response = await app.handle(req);
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe("");
+    });
+
     it("returns a 200", async () => {
       const json = { x: 1 };
       const response = await app.handle(post("services/echo", json));
@@ -127,13 +150,13 @@ describe("Python Services", () => {
       );
 
       expect(response.status).toBe(429);
-      
+
       const body = await response.json();
       expect(body).toEqual({
         code: 429,
         type: "RATE_LIMIT",
         message: "Rate limit exceeded, please try again later",
-        details: { retry_after: 60 }
+        details: { retry_after: 60 },
       });
     });
 
@@ -143,7 +166,7 @@ describe("Python Services", () => {
       );
 
       expect(response.status).toBe(500);
-      
+
       const body = await response.json();
       expect(body.code).toBe(500);
       expect(body.type).toBe("INTERNAL_ERROR");
@@ -167,7 +190,9 @@ describe("Sentry", () => {
   // No SENTRY_DSN is set in the test env, so the helper was never initialised.
   it("captureException is a silent no-op when no DSN is configured", () => {
     expect(() => captureException(new Error("test"))).not.toThrow();
-    expect(() => captureException("not even an error", { foo: 1 })).not.toThrow();
+    expect(() =>
+      captureException("not even an error", { foo: 1 })
+    ).not.toThrow();
   });
 
   // Mirrors the onError hook server.ts registers: report, return nothing, and
@@ -178,7 +203,9 @@ describe("Sentry", () => {
         throw new Error("kaboom");
       });
 
-    const withHook = boom(new Elysia().onError(({ error }) => captureException(error)));
+    const withHook = boom(
+      new Elysia().onError(({ error }) => captureException(error))
+    );
     const without = boom(new Elysia());
 
     const a = await withHook.handle(new Request("http://localhost/boom"));
@@ -235,7 +262,9 @@ describe("Instance authentication", () => {
 
   // Row 3 — unknown but sk-ant-shaped: bring-your-own key, forwarded unchanged.
   it("forwards an unknown sk-ant-shaped key unchanged (bring-your-own)", async () => {
-    const res = await app.handle(postKey("services/echo", { x: 1 }, "sk-ant-byo"));
+    const res = await app.handle(
+      postKey("services/echo", { x: 1 }, "sk-ant-byo")
+    );
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.api_key).toBe("sk-ant-byo");
@@ -244,7 +273,9 @@ describe("Instance authentication", () => {
   // Row 3b — unknown and NOT sk-ant-shaped: a likely Lightning credential; reject
   // rather than forward it to the LLM.
   it("rejects an unknown non-sk-ant- key with 401 (never forwarded)", async () => {
-    const res = await app.handle(postKey("services/echo", { x: 1 }, "lightning-cred-unknown"));
+    const res = await app.handle(
+      postKey("services/echo", { x: 1 }, "lightning-cred-unknown")
+    );
     expect(res.status).toBe(401);
     const body = await res.json();
     expect(body.code).toBe(401);
@@ -261,8 +292,12 @@ describe("Instance authentication", () => {
 
   // Row 1 and row 3 coexist: known-client swap and bring-your-own forward in one run.
   it("serves the known-client swap and the bring-your-own forward side by side", async () => {
-    const swapped = await (await app.handle(postKey("services/echo", { x: 1 }, ALPHA))).json();
-    const forwarded = await (await app.handle(postKey("services/echo", { x: 1 }, "sk-ant-byo"))).json();
+    const swapped = await (
+      await app.handle(postKey("services/echo", { x: 1 }, ALPHA))
+    ).json();
+    const forwarded = await (
+      await app.handle(postKey("services/echo", { x: 1 }, "sk-ant-byo"))
+    ).json();
     expect(swapped.api_key).toBe("sk-ant-stored-alpha");
     expect(forwarded.api_key).toBe("sk-ant-byo");
   });
@@ -285,13 +320,18 @@ describe("Instance authentication", () => {
       const req = new Request(`${baseUrl}/services/echo`, {
         method: "POST",
         body: JSON.stringify({ x: 9 }),
-        headers: { "Content-Type": "application/json", ...internalAuthHeader() },
+        headers: {
+          "Content-Type": "application/json",
+          ...internalAuthHeader(),
+        },
       });
       const res = await app.handle(req);
       expect(res.status).toBe(200);
       // Correct token: the mismatch warn must not fire.
       expect(
-        warn.mock.calls.some(([m]) => String(m).includes("internal token MISMATCH"))
+        warn.mock.calls.some(([m]) =>
+          String(m).includes("internal token MISMATCH")
+        )
       ).toBe(false);
     } finally {
       warn.mockRestore();
@@ -304,7 +344,10 @@ describe("Instance authentication", () => {
       const req = new Request(`${baseUrl}/services/echo`, {
         method: "POST",
         body: JSON.stringify({ x: 9 }),
-        headers: { "Content-Type": "application/json", "x-apollo-internal": "nope" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-apollo-internal": "nope",
+        },
       });
       const res = await app.handle(req);
       expect(res.status).toBe(401);
@@ -325,7 +368,10 @@ describe("Instance authentication", () => {
       const req = new Request(`${baseUrl}/services/echo`, {
         method: "POST",
         body: JSON.stringify({ x: 9 }),
-        headers: { "Content-Type": "application/json", "x-apollo-internal": "nope" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-apollo-internal": "nope",
+        },
       });
       const res = await app.handle(req);
       // Behaviour unchanged: a forged internal header still rejects.
@@ -346,12 +392,17 @@ describe("Instance authentication", () => {
         // ALPHA is a known, otherwise-valid credential; the wrong internal
         // header must still reject it rather than authenticate via api_key.
         body: JSON.stringify({ x: 9, api_key: ALPHA }),
-        headers: { "Content-Type": "application/json", "x-apollo-internal": "nope" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-apollo-internal": "nope",
+        },
       });
       const res = await app.handle(req);
       expect(res.status).toBe(401);
       expect(
-        warn.mock.calls.some(([m]) => String(m).includes("internal token MISMATCH"))
+        warn.mock.calls.some(([m]) =>
+          String(m).includes("internal token MISMATCH")
+        )
       ).toBe(true);
     } finally {
       warn.mockRestore();
@@ -362,10 +413,14 @@ describe("Instance authentication", () => {
     const warn = spyOn(console, "warn").mockImplementation(() => {});
     try {
       // An unknown non-sk-ant- key takes the explicit-fail path (no internal header).
-      const res = await app.handle(postKey("services/echo", { x: 1 }, "lightning-cred-unknown"));
+      const res = await app.handle(
+        postKey("services/echo", { x: 1 }, "lightning-cred-unknown")
+      );
       expect(res.status).toBe(401);
       expect(
-        warn.mock.calls.some(([m]) => String(m).includes("internal token MISMATCH"))
+        warn.mock.calls.some(([m]) =>
+          String(m).includes("internal token MISMATCH")
+        )
       ).toBe(false);
     } finally {
       warn.mockRestore();
@@ -501,7 +556,9 @@ describe("Instance auth — DB-down forward path", () => {
 
   // Row 7
   it("forwards an unknown sk-ant- key when the DB is down", async () => {
-    const res = await app.handle(post("services/echo", { x: 1, api_key: "sk-ant-byo" }));
+    const res = await app.handle(
+      post("services/echo", { x: 1, api_key: "sk-ant-byo" })
+    );
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.api_key).toBe("sk-ant-byo");
@@ -509,7 +566,9 @@ describe("Instance auth — DB-down forward path", () => {
 
   // Row 8
   it("rejects an unknown non-sk-ant- key when the DB is down (never forwarded)", async () => {
-    const res = await app.handle(post("services/echo", { x: 1, api_key: "lightning-cred-unknown" }));
+    const res = await app.handle(
+      post("services/echo", { x: 1, api_key: "lightning-cred-unknown" })
+    );
     expect(res.status).toBe(401);
   });
 });
@@ -525,7 +584,7 @@ describe("Instance auth — lookup never came up (dbReady false)", () => {
       request: { headers: { get: () => null } },
       body: { api_key: apiKey },
       set: { status: 200 },
-    }) as any;
+    } as any);
 
   it("forwards an unknown sk-ant- key via the shape rule (no DB)", async () => {
     const auth = new InstanceAuth();
@@ -562,7 +621,7 @@ describe("Instance auth cache refresh", () => {
       request: { headers: { get: () => null } },
       body: apiKey ? { api_key: apiKey } : {},
       set: { status: 200 },
-    }) as any;
+    } as any);
   const tick = () => new Promise((r) => setTimeout(r, 10));
   const settle = () => new Promise((r) => setTimeout(r, 40));
   const TTL_MS = 60_000;
@@ -771,8 +830,16 @@ describe("Instance auth cache refresh", () => {
       expect(ctx.lightningClient).toBeUndefined();
       // ALPHA is not sk-ant-shaped and the evicted-then-failed lookup could not verify it, so we 503 (our outage) rather than a misleading 401.
       expect(ctx.set.status).toBe(503);
-      expect(warn.mock.calls.some(([m]) => String(m).includes("max-staleness ceiling"))).toBe(true);
-      expect(error.mock.calls.some(([m]) => String(m).includes("client lookup failed"))).toBe(true);
+      expect(
+        warn.mock.calls.some(([m]) =>
+          String(m).includes("max-staleness ceiling")
+        )
+      ).toBe(true);
+      expect(
+        error.mock.calls.some(([m]) =>
+          String(m).includes("client lookup failed")
+        )
+      ).toBe(true);
     } finally {
       warn.mockRestore();
       error.mockRestore();
@@ -893,7 +960,8 @@ describe("Instance auth key encryption", () => {
       auth.rowToClient({ name: "enc", anthropic_api_key: enc })?.anthropicKey
     ).toBe("sk-ant-secret");
     expect(
-      auth.rowToClient({ name: "plain", anthropic_api_key: "sk-ant-plain" })?.anthropicKey
+      auth.rowToClient({ name: "plain", anthropic_api_key: "sk-ant-plain" })
+        ?.anthropicKey
     ).toBe("sk-ant-plain");
     expect(
       auth.rowToClient({ name: "none", anthropic_api_key: null })?.anthropicKey
@@ -906,7 +974,9 @@ describe("Instance auth key encryption", () => {
       const enc = encryptKey("sk-ant-secret", randomBytes(32)); // encrypted with key A
       const auth = new InstanceAuth({ encKey: randomBytes(32) }); // holds a different key
 
-      expect(auth.rowToClient({ name: "bad", anthropic_api_key: enc })).toBeNull();
+      expect(
+        auth.rowToClient({ name: "bad", anthropic_api_key: enc })
+      ).toBeNull();
     } finally {
       error.mockRestore();
     }
@@ -918,7 +988,9 @@ describe("Instance auth key encryption", () => {
       const auth = new InstanceAuth({ encKey: null });
       const enc = encryptKey("sk-ant-secret", randomBytes(32));
 
-      expect(auth.rowToClient({ name: "bad", anthropic_api_key: enc })).toBeNull();
+      expect(
+        auth.rowToClient({ name: "bad", anthropic_api_key: enc })
+      ).toBeNull();
     } finally {
       error.mockRestore();
     }
@@ -935,7 +1007,9 @@ describe("Instance auth key encryption", () => {
       const enc = encryptKey("sk-ant-secret", randomBytes(32));
 
       // Behaviour unchanged: the row still drops to a miss.
-      expect(auth.rowToClient({ name: "missing", anthropic_api_key: enc })).toBeNull();
+      expect(
+        auth.rowToClient({ name: "missing", anthropic_api_key: enc })
+      ).toBeNull();
 
       const extras = capturedExtras(capture, "missing-enc-key");
       expect(extras).toBeDefined();
@@ -954,7 +1028,9 @@ describe("Instance auth key encryption", () => {
       const enc = encryptKey("sk-ant-secret", randomBytes(32)); // encrypted with key A
       const auth = new InstanceAuth({ encKey: randomBytes(32) }); // holds a different key
 
-      expect(auth.rowToClient({ name: "corrupt", anthropic_api_key: enc })).toBeNull();
+      expect(
+        auth.rowToClient({ name: "corrupt", anthropic_api_key: enc })
+      ).toBeNull();
 
       const extras = capturedExtras(capture, "decrypt-error");
       expect(extras).toBeDefined();

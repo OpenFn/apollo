@@ -24,6 +24,8 @@ export default async (app: Elysia) => {
   // jsx templates!
   // https://elysiajs.com/patterns/mvc.html#view
 
+  app.head("/", () => new Response(null, { status: 200 }));
+
   const modules = await describeModules(path.resolve("./services"));
   app.get("/", () => {
     return (
