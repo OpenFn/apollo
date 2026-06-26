@@ -645,11 +645,10 @@ def main(data_dict: dict) -> dict:
 
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
-        tags = build_tags("job_chat", user_info) if tracking else None
         with propagate_attributes(
             session_id=session_id,
             user_id=user_info.get("id") if tracking else None,
-            tags=tags,
+            tags=build_tags("job_chat", user_info) if tracking else None,
             metadata=None if tracking else {"tracing_disabled": "true"},
         ):
             result = client.generate(
@@ -663,9 +662,6 @@ def main(data_dict: dict) -> dict:
                 refresh_rag=should_refresh_rag,
                 current_page=current_page
             )
-
-            if tracking and result.suggested_code:
-                get_langfuse_client().update_current_trace(tags=tags + ["has_code_attachment"])
 
             response_dict = {
                 "response": result.response,
