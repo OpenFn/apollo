@@ -27,7 +27,7 @@ def _should_export_span(span):
     return is_default_export_span(span)
 
 
-langfuse = Langfuse(should_export_span=_should_export_span)
+langfuse = Langfuse(should_export_span=_should_export_span, release=os.getenv("APOLLO_VERSION", "unknown"))
 
 env = os.getenv('ENVIRONMENT', 'unknown')
 trace_rates = {
