@@ -6,6 +6,7 @@ import os
 from typing import List, Dict, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+import httpx
 from anthropic import Anthropic
 import sentry_sdk
 
@@ -59,9 +60,8 @@ class PlannerAgent:
         self.tools = TOOL_DEFINITIONS
 
         planner_config = config_loader.config.get("planner", {})
-        self.model = resolve_model(planner_config.get("model", "claude-sonnet"))
-        self.max_tokens = planner_config.get("max_tokens", 8192)
-        self.temperature = planner_config.get("temperature", 1.0)
+        self.model = resolve_model(planner_config.get("model", "claude-opus"))
+        self.max_tokens = planner_config.get("max_tokens", 24576)
         self.max_tool_calls = planner_config.get("max_tool_calls", 20)
 
         self.current_yaml: Optional[str] = None
@@ -285,6 +285,7 @@ class PlannerAgent:
                 messages=messages,
                 tools=self.tools,
                 thinking={"type": "adaptive"},
+                output_config={"effort": "medium"},
             ) as stream_obj:
                 for event in stream_obj:
                     if event.type == "content_block_delta":
@@ -299,7 +300,11 @@ class PlannerAgent:
                 messages=messages,
                 tools=self.tools,
                 thinking={"type": "adaptive"},
-                output_config={"effort": "high"},
+                output_config={"effort": "medium"},
+                # Per-request timeout (same values as the SDK default):
+                # required for non-streaming calls with max_tokens > ~21k,
+                # which the SDK otherwise rejects.
+                timeout=httpx.Timeout(600.0, connect=5.0),
                 betas=["context-management-2025-06-27"],
                 context_management={
                     "edits": [
