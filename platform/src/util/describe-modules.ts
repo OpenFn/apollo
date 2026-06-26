@@ -13,11 +13,8 @@ export type ModuleDescription = {
   readme?: string;
 };
 
-// TODO this is just a stub right now
 export default async (location: string): Promise<ModuleDescription[]> => {
   const dirs = await readdir(location, { withFileTypes: true });
-  // Skip leading-underscore directories: these are Python/build artefacts left
-  // under services/ (e.g. __pycache__), never mountable services.
   const services = dirs.filter(
     (dirent) => dirent.isDirectory() && !dirent.name.startsWith("_")
   );
