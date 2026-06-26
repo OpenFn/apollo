@@ -1,0 +1,26 @@
+{
+  "_note": "expected_hex is sha256 of the CLEAN token over UTF-8, computed by hand (not from hashToken) so the test cannot be tautological. Every whitespace-padded variant must trim to the clean token and so share its digest. The credential is its trimmed form.",
+  "clean_token": "dGVzdC10b2tlbi1jYW5vbmljYWwtYmFzZTY0dXJs",
+  "vectors": [
+    {
+      "label": "clean base64url token",
+      "input": "dGVzdC10b2tlbi1jYW5vbmljYWwtYmFzZTY0dXJs",
+      "expected_hex": "d6cbc963dbc36ad1c08fc8cc59e65ea0b099b93caea1f306814a8b3880532050"
+    },
+    {
+      "label": "leading space",
+      "input": " dGVzdC10b2tlbi1jYW5vbmljYWwtYmFzZTY0dXJs",
+      "expected_hex": "d6cbc963dbc36ad1c08fc8cc59e65ea0b099b93caea1f306814a8b3880532050"
+    },
+    {
+      "label": "trailing newline",
+      "input": "dGVzdC10b2tlbi1jYW5vbmljYWwtYmFzZTY0dXJs\n",
+      "expected_hex": "d6cbc963dbc36ad1c08fc8cc59e65ea0b099b93caea1f306814a8b3880532050"
+    },
+    {
+      "label": "leading spaces and trailing space + newline",
+      "input": "  dGVzdC10b2tlbi1jYW5vbmljYWwtYmFzZTY0dXJs  \n",
+      "expected_hex": "d6cbc963dbc36ad1c08fc8cc59e65ea0b099b93caea1f306814a8b3880532050"
+    }
+  ]
+}

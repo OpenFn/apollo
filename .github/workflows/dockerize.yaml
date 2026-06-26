@@ -24,6 +24,15 @@ jobs:
           echo Docker Tag: $DOCKER_TAG
 
           echo "DOCKER_TAG=$DOCKER_TAG" >> $GITHUB_ENV
+
+          # Only move :latest for final releases. A version with a hyphen
+          # (e.g. 1.4.0-pre.0) is a pre-release and must not repoint latest.
+          {
+            echo "DOCKER_TAGS<<EOF"
+            echo "openfn/apollo:v${DOCKER_TAG}"
+            [[ "$DOCKER_TAG" != *-* ]] && echo "openfn/apollo:latest"
+            echo "EOF"
+          } >> $GITHUB_ENV
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
       - name: Set up Docker Buildx
@@ -38,6 +47,4 @@ jobs:
         with:
           context: .
           push: ${{ github.event_name != 'pull_request' }}
-          tags: |
-            openfn/apollo:latest
-            openfn/apollo:v${{ env.DOCKER_TAG }}
+          tags: ${{ env.DOCKER_TAGS }}

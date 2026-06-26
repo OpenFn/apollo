@@ -13,7 +13,6 @@ export type ModuleDescription = {
   readme?: string;
 };
 
-// TODO this is just a stub right now
 export default async (location: string): Promise<ModuleDescription[]> => {
   const dirs = await readdir(location, { withFileTypes: true });
   const services = dirs.filter(

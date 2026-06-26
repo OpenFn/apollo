@@ -45,6 +45,47 @@ TypeScript) service modules.
 - **Service discovery**: `platform/src/util/describe-modules.ts` - Auto-mounts
   any `services/<name>/` directory not starting with `_`. Detects service type
   by checking for `<name>.py` (Python) or `<name>.ts` (TypeScript) index file.
+- **Instance auth** (`platform/src/auth/`): `/services/*` uses a
+  map-if-known-else-forward auth hook that is always active (no flag). The auth surface
+  is split into three named concerns: the client-credential authenticate hook and Anthropic-key
+  resolver on the injectable `InstanceAuth` class (`instance-auth.ts`), the
+  internal-call exemption (`internal-token.ts`), and the shared `hashToken`
+  (`hash.ts`). The credential
+  is the `api_key` the caller (Lightning) already sends in the request body —
+  there is no bearer token and no Lightning-side change. Its SHA-256 is looked up
+  in the `lightning_clients` table via `APOLLO_CLIENTS_DB_URL` (falling back to
+  `POSTGRES_URL` when unset, so local dev needs only the one var; staging/prod point
+  `APOLLO_CLIENTS_DB_URL` at a separate credentials DB). The inbound `api_key` is
+  treated purely as a credential and is **never** forwarded to the LLM on a known
+  match: it is replaced with the matched client's stored `anthropic_api_key`, or
+  stripped (falling back to the global `ANTHROPIC_API_KEY`) when that column is
+  `NULL`. An *unknown* key is forwarded unchanged only if it is `sk-ant-`-shaped
+  (bring-your-own key); an unknown non-`sk-ant-` key is rejected with `401`
+  (likely a Lightning credential that must not leak to the LLM). No `api_key`
+  falls back to the global key. The resolver (`InstanceAuth.resolveKey`) returns a
+  tagged `KeyResolution` (`useKey`/`useGlobal`/`forward`/`passthrough`) dispatched
+  by a named switch in `services.ts`. The stored
+  `anthropic_api_key` may be plaintext or AES-256-GCM-encrypted (`enc:v1:`
+  values, decrypted with `APOLLO_ENC_KEY`; see
+  `platform/src/util/instance-key-crypto.ts` and the `client` CLI at
+  `platform/src/auth/client/`). Lookups are
+  cached in memory (~60s TTL), so the DB is hit at most once per minute per
+  process, not per request. The refresh is single-flight with
+  stale-while-revalidate, so a burst of requests at the TTL boundary shares one
+  DB read (cold start awaits it; a warm-but-stale cache is served while one
+  background refresh runs) rather than stampeding the DB. If the table can't be
+  reached, known-client swaps don't resolve and callers degrade to the
+  shape-checked forward path (the same `sk-ant-` rule applies; it does not
+  blanket-reject). The auth hook is scoped to
+  `/services/*`, so health/root endpoints outside that group are unaffected.
+  Internal Apollo-to-Apollo `apollo()` calls are exempt via a per-process
+  internal token (`APOLLO_INTERNAL_TOKEN`, minted at startup; `bridge.ts` injects
+  it into each spawned Python child's env via `getInternalToken()`, and
+  `services/util.py` echoes it back). This replaces the old loopback exemption so a
+  co-located Lightning is still required to authenticate. The authenticate hook and resolver
+  live on a single `InstanceAuth` instance constructed in `server.ts`; tests build
+  their own configured instance rather than poking module globals. Provisioning
+  lives in `platform/src/auth/`.
 
 ### Services Architecture
 

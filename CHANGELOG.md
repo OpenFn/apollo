@@ -1,5 +1,11 @@
 # apollo
 
+## 1.4.0
+
+### Minor Changes
+
+- b3f8f38: Add authorisation to all service routes.
+
 ## 1.3.3
 
 ### Patch Changes
