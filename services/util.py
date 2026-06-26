@@ -7,6 +7,8 @@ from typing import Any
 import psycopg2
 import requests
 
+APOLLO_VERSION = os.getenv("APOLLO_VERSION", "unknown")
+
 # Adaptor parsing constants
 SCOPED_ADAPTOR_MIN_PARTS = 3
 SHORTHAND_ADAPTOR_PARTS = 2
