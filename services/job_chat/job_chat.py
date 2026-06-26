@@ -18,7 +18,7 @@ from anthropic import (
 import sentry_sdk
 from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
 from langfuse_util import should_track, build_tags
-from util import ApolloError, create_logger, AdaptorSpecifier, add_page_prefix
+from util import ApolloError, create_logger, AdaptorSpecifier, add_page_prefix, APOLLO_VERSION
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
 from streaming_util import (
@@ -645,10 +645,11 @@ def main(data_dict: dict) -> dict:
 
         config = ChatConfig(api_key=data.api_key) if data.api_key else None
         client = AnthropicClient(config)
+        tags = build_tags("job_chat", user_info) if tracking else None
         with propagate_attributes(
             session_id=session_id,
             user_id=user_info.get("id") if tracking else None,
-            tags=build_tags("job_chat", user_info) if tracking else None,
+            tags=tags,
             metadata=None if tracking else {"tracing_disabled": "true"},
         ):
             result = client.generate(
@@ -663,12 +664,15 @@ def main(data_dict: dict) -> dict:
                 current_page=current_page
             )
 
+            if tracking and result.suggested_code:
+                get_langfuse_client().update_current_trace(tags=tags + ["has_code_attachment"])
+
             response_dict = {
                 "response": result.response,
                 "suggested_code": result.suggested_code,
                 "history": result.history,
                 "usage": result.usage,
-                "meta": {"rag": result.rag}
+                "meta": {"rag": result.rag, "apollo_version": APOLLO_VERSION}
             }
 
             if result.diff:

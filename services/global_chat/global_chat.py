@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
-from util import ApolloError, create_logger
+from util import ApolloError, create_logger, APOLLO_VERSION
 from langfuse_util import should_track, build_tags
 from global_chat.config_loader import ConfigLoader
 from global_chat.router import RouterAgent
@@ -111,7 +111,10 @@ def main(data_dict: dict) -> dict:
                 "attachments": result.attachments,
                 "history": result.history,
                 "usage": result.usage,
-                "meta": result.meta
+                "meta": {
+                **result.meta,
+                "apollo_version": APOLLO_VERSION
+                }
             }
 
     except ApolloError as e:
