@@ -24,10 +24,20 @@ This directory is on the Python path via `pyproject.toml`
 - `spec_collector.py` — pytest plugin (registered via `pytest_plugins` in the
   repo-root `conftest.py`). Turns each MD spec into a pytest item that builds
   the service payload, calls the service via `ApolloClient`, and runs the judge.
-  Any project YAML in the response (`response_yaml`, `workflow_yaml`,
-  `content_yaml`, or a `workflow_yaml` attachment) is written to a `tmp/`
-  folder next to the spec file (e.g.
-  `services/workflow_chat/tests/acceptance/tmp/<spec_id>.yaml`) for inspection.
+  For inspection, three artifacts are written to a `tmp/` folder next to the
+  spec file:
+  - `<spec_id>.yaml` — any project YAML in the response (`response_yaml`,
+    `workflow_yaml`, `content_yaml`, or a `workflow_yaml` attachment).
+  - `<spec_id>.txt` — the response text, prefixed with the agent path
+    (e.g. `agents: router -> planner -> job_code_agent`).
+  - `<spec_id>.judges.txt` — the judge verdict(s) in the same format printed
+    during the run (per-judge PASS/FAIL header + criteria/flags summary).
+
+  Filenames use `__` as the metadata separator (the spec id and extension only
+  use `.`/`-`), so they stay splittable. Multi-run specs append `__run-N`. Pass
+  `-E <label>` / `--experiment=<label>` to append `__<label>` to every captured
+  filename so runs with different settings or dates don't overwrite each other
+  (e.g. `tmp/<spec_id>__sonnet-2026-06-29.txt`).
 - `apollo_client.py` — `ApolloClient` for dispatching to a chat service.
   Currently a subprocess-based stub; the integration tier will replace its
   internals with a real HTTP client (same `.call()` signature, no test changes).
