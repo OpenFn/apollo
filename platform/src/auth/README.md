@@ -22,21 +22,32 @@ migrations under `platform/migrations/`).
   hashes it, and looks for a matching row. The inbound `api_key` is treated
   **purely as a credential and is never forwarded to the LLM** on a known match.
 - On a match it is replaced with the client's stored `anthropic_api_key`, so all
-  LLM usage for that request bills to the key Apollo controls. If the column is
-  `NULL`, the inbound key is **stripped** and Apollo falls back to its global
-  `ANTHROPIC_API_KEY`. Either way the caller's key cannot pass through.
+  LLM usage for that request bills to the key Apollo controls. A known client
+  **must** have a stored key: a `NULL` `anthropic_api_key` is a server-side
+  misconfiguration, so such a request is rejected with **`500`** (reported to
+  Sentry), never silently billed to the global key. The caller's key never passes
+  through to the LLM.
 - **Performance:** lookups are cached per client on a ~60s TTL with single-flight,
   stale-while-revalidate refresh, so the database is queried at most once per
   minute per process per token, never on the per-request path to Anthropic. The
   per-request cost is a hash plus a map lookup.
-- **Transparent / backward compatible (map-if-known-else-forward):** the auth hook
-  is always active but only swaps in a key when it recognises the caller. An
-  unrecognised key is forwarded unchanged if it is `sk-ant-`-shaped
-  (bring-your-own key) and rejected (`401`) otherwise; a non-`sk-ant-` key is a
-  likely Lightning credential that must not reach the LLM. A request with no
-  `api_key` falls back to the global key. When this table can't be reached,
-  known-client swaps don't resolve and every caller degrades to that forward
-  path; it does **not** blanket-reject.
+- **Known-client-only:** the auth hook is always active. A request that carries an
+  `api_key` must resolve to a known Lightning client or it is **rejected**,
+  whatever the key's shape (`sk-ant-` or not). The rejection splits on whose fault
+  the failure is:
+  - **`401`** when the lookup completes and confirms no such client (a verified
+    unknown key, which must not reach the LLM).
+  - **`503`** when the client store can't be reached (DB never came up, or the
+    read threw). We can't verify the caller, so we don't guess: this is our
+    outage and is retryable, never a misleading `401`.
+  - **`500`** when the lookup finds the client but its stored `anthropic_api_key`
+    is `NULL`. A recognised client with no key is a server-side misconfiguration,
+    reported to Sentry, not a caller error.
+
+  A request with **no `api_key` at all** is served by the global
+  `ANTHROPIC_API_KEY` when one is configured (the field is simply dropped); when
+  no global key is configured there is nothing to serve it, so it is rejected with
+  **`401`**.
 - The health endpoints (`/livez`, `/status`, `/`) sit outside `/services/*` and
   are never subject to the auth hook. Internal Apollo-to-Apollo `apollo()` calls are exempt via a
   per-process internal token (`APOLLO_INTERNAL_TOKEN`), not by network position.
@@ -110,8 +121,9 @@ lands in shell history or `ps`; the client **name** is a positional argument.
 4. The client is active as soon as its row is in the table — there is no flag to
    set or restart needed. The startup log shows `Apollo instance auth:
    lightning_clients lookup ready.` once the DB is reachable. (If the table is
-   missing or the DB is down, the log warns and callers fall to the forward path
-   rather than being rejected; known-client swaps just won't resolve.)
+   missing or the DB is down, the log warns and callers with an `api_key` get a
+   retryable `503` — we can't verify them, so known-client swaps just won't
+   resolve until the DB is back.)
 
 5. Give the printed `api_key` to the Lightning instance. It keeps sending it as
    `api_key` exactly as it does today — no other Lightning-side change.
@@ -126,8 +138,9 @@ lands in shell history or `ps`; the client **name** is a positional argument.
   ```
 
 - **Verify** that a client's stored key resolves under the current `APOLLO_ENC_KEY`
-  — reports `decrypts` / `plaintext` / `global` (NULL) / `DECRYPT_FAILED`, and exits
-  non-zero on failure:
+  — reports `decrypts` / `plaintext` / `DECRYPT_FAILED`, and exits non-zero on
+  failure. A `NULL` stored key is an invalid (keyless) client row, not a usable
+  state:
 
   ```sh
   bun run client verify acme
@@ -140,10 +153,10 @@ lands in shell history or `ps`; the client **name** is a positional argument.
 ### `encrypt` — the lower-level subcommand
 
 `bun run client encrypt` prints the `enc:v1:…` value for the key on stdin and makes
-**no DB write**. Useful for manual SQL / row-seeding — e.g. to add a client whose
-`anthropic_api_key` is `NULL` (so it uses Apollo's global `ANTHROPIC_API_KEY`),
-which `add` doesn't cover. Pair the printed value with an `auth_token_hash` you
-compute yourself:
+**no DB write**. Useful for manual SQL / row-seeding when you need to write the row
+yourself. Every client row needs a non-`NULL` `anthropic_api_key`: a recognised
+client with no stored key is a misconfiguration that the auth hook rejects with
+`500`. Pair the printed value with an `auth_token_hash` you compute yourself:
 
 ```sh
 echo "$KEY" | bun run client encrypt
@@ -158,7 +171,8 @@ compatibility.
 - **Fail closed.** If an `enc:v1:` row can't be decrypted (wrong/missing
   `APOLLO_ENC_KEY` or corrupt value), that client is dropped from the allow-list
   and its requests get `401` — Apollo never falls back to the global key for an
-  encrypted-but-undecryptable row. A `NULL` key still means "use the global key".
+  encrypted-but-undecryptable row. A recognised client must have a usable stored
+  key; a `NULL` `anthropic_api_key` is a misconfiguration that yields `500`.
 - **Rotation** is manual: re-encrypt every `enc:v1:` row with the new key, then
   swap `APOLLO_ENC_KEY` and restart.
 - **What it protects.** The ciphertext is useless without `APOLLO_ENC_KEY`, so this

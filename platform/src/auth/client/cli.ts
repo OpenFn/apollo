@@ -124,9 +124,9 @@ function reportVerify(name: string, status: VerifyStatus): number {
     case "plaintext":
       console.log(`Client "${name}": anthropic_api_key is stored as plaintext (used as-is).`);
       return 0;
-    case "global":
-      console.log(`Client "${name}": anthropic_api_key is NULL, falls back to the global ANTHROPIC_API_KEY.`);
-      return 0;
+    case "no_key":
+      console.error(`Client "${name}": anthropic_api_key is NULL. This is an invalid (keyless) client row; the auth hook will reject every request with 500. Set a key with \`rotate\`.`);
+      return 1;
     case "decrypt_failed":
       console.error(`Client "${name}": DECRYPT_FAILED. The stored enc:v1: key cannot be decrypted with the current APOLLO_ENC_KEY.`);
       return 1;

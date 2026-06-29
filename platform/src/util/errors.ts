@@ -34,3 +34,12 @@ export function serviceUnavailable(ctx: any): ApolloError {
     "Client verification is temporarily unavailable"
   );
 }
+
+export function clientMisconfigured(ctx: any): ApolloError {
+  return apolloError(
+    ctx,
+    500,
+    "CLIENT_MISCONFIGURED",
+    "Client has no API key configured"
+  );
+}
