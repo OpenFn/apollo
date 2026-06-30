@@ -6,6 +6,9 @@ code in this repository.
 **Never chain Bash commands with `&&`, `;`, or `cd ... &&`. Use separate Bash
 calls instead.**
 
+**Do not end single-sentence console/log output strings with a full stop.**
+`console.log("rejected request")` not `console.log("rejected request.")`
+
 ## Commands
 
 ### Development
