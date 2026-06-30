@@ -13,6 +13,7 @@ Each item:
   5. Fails with the judge's reasoning summary if `verdict.passed` is False.
 """
 
+import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -26,6 +27,34 @@ from testing.spec_parser import Spec, parse_spec
 # Verdicts collected across the session for the end-of-run rollup.
 # Each entry is (spec_id, Verdict).
 _session_verdicts: list[tuple[str, judge.Verdict]] = []
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "-E",
+        "--experiment",
+        action="store",
+        default="",
+        help="Optional experiment label appended to captured output filenames "
+        "in tmp/ (e.g. --experiment=sonnet-2026-06-29) so runs with different "
+        "settings/dates don't overwrite each other.",
+    )
+
+
+def _experiment_suffix(config) -> str:
+    """Filesystem-safe `__<experiment>` suffix, or '' if no experiment given.
+
+    `__` is the reserved metadata-boundary separator (the spec id and extension
+    use `.`/`-` but never `__`), so a downstream `name.split("__")` can recover
+    the fields. We collapse any `_` runs in the label to a single `_` so a user
+    label can't inject a false field boundary.
+    """
+    raw = (config.getoption("experiment") or "").strip()
+    if not raw:
+        return ""
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "-", raw)
+    safe = re.sub(r"_+", "_", safe).strip("-_")
+    return f"__{safe}" if safe else ""
 
 
 def pytest_collect_file(parent, file_path):
@@ -69,14 +98,17 @@ class SpecItem(pytest.Item):
         response = client.call(spec.service, payload)
         print("  ✓ service responded")
 
+        tmp_dir = self.path.parent / "tmp"
+        experiment = _experiment_suffix(self.config)
+
         yaml_path = _capture_response_yaml(
-            response, spec.id, self.run_index, spec.runs, self.path.parent / "tmp"
+            response, spec.id, self.run_index, spec.runs, tmp_dir, experiment
         )
         if yaml_path is not None:
             print(f"  ✓ project YAML saved to {yaml_path}")
 
         text_path = _capture_response_text(
-            response, spec.id, self.run_index, spec.runs, self.path.parent / "tmp"
+            response, spec.id, self.run_index, spec.runs, tmp_dir, experiment
         )
         if text_path is not None:
             print(f"  ✓ response text saved to {text_path}")
@@ -101,6 +133,12 @@ class SpecItem(pytest.Item):
             print(f"  {mark} {judge_name}: {'PASS' if v.passed else 'FAIL'} "
                   f"(score={v.score:.2f}, flags={len(v.general_flags)})")
             _session_verdicts.append((spec.id, v))
+
+        judges_path = _capture_judge_verdicts(
+            verdicts, spec.id, self.run_index, spec.runs, tmp_dir, experiment
+        )
+        if judges_path is not None:
+            print(f"  ✓ judge verdicts saved to {judges_path}")
 
         failing = [v for v in verdicts if not v.passed]
         if failing:
@@ -166,11 +204,14 @@ def _capture_response_yaml(
     run_index: int,
     runs: int,
     output_dir: Path,
+    experiment: str = "",
 ) -> Path | None:
     """Write the response's project YAML to `output_dir/<spec_id>.yaml`.
 
     For multi-run specs, appends `__run-N` to the filename so each run is
-    preserved. Returns the written path, or None if no YAML was present.
+    preserved. `experiment` (already a `__<label>` suffix or '') is appended
+    last so runs with different settings don't overwrite each other. Returns
+    the written path, or None if no YAML was present.
     """
     yaml_str = _extract_yaml_from_response(response)
     if yaml_str is None:
@@ -179,7 +220,7 @@ def _capture_response_yaml(
     output_dir.mkdir(parents=True, exist_ok=True)
     suffix = f"__run-{run_index}" if runs > 1 else ""
     safe_id = spec_id.replace("/", "_")
-    path = output_dir / f"{safe_id}{suffix}.yaml"
+    path = output_dir / f"{safe_id}{suffix}{experiment}.yaml"
     path.write_text(yaml_str)
     return path
 
@@ -219,6 +260,7 @@ def _capture_response_text(
     run_index: int,
     runs: int,
     output_dir: Path,
+    experiment: str = "",
 ) -> Path | None:
     """Write the agent path and response text to `output_dir/<spec_id>.txt`."""
     if not isinstance(response, dict):
@@ -233,7 +275,40 @@ def _capture_response_text(
     output_dir.mkdir(parents=True, exist_ok=True)
     suffix = f"__run-{run_index}" if runs > 1 else ""
     safe_id = spec_id.replace("/", "_")
-    path = output_dir / f"{safe_id}{suffix}.txt"
+    path = output_dir / f"{safe_id}{suffix}{experiment}.txt"
+    path.write_text(body)
+    return path
+
+
+def _capture_judge_verdicts(
+    verdicts: list[judge.Verdict],
+    spec_id: str,
+    run_index: int,
+    runs: int,
+    output_dir: Path,
+    experiment: str = "",
+) -> Path | None:
+    """Write the judge verdicts to `output_dir/<spec_id>.judges.txt`.
+
+    Reuses the same formatting printed during the run: a one-line header per
+    judge (`✓ general: PASS (score=..., flags=...)`) followed by that judge's
+    `verdict.summary` block (criteria + reasoning + flags).
+    """
+    if not verdicts:
+        return None
+
+    blocks = []
+    for v in verdicts:
+        mark = "✓" if v.passed else "✗"
+        header = (f"{mark} {v.judge_name}: {'PASS' if v.passed else 'FAIL'} "
+                  f"(score={v.score:.2f}, flags={len(v.general_flags)})")
+        blocks.append(f"{header}\n\n{v.summary}")
+    body = "\n\n===\n\n".join(blocks) + "\n"
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    suffix = f"__run-{run_index}" if runs > 1 else ""
+    safe_id = spec_id.replace("/", "_")
+    path = output_dir / f"{safe_id}.judges{suffix}{experiment}.txt"
     path.write_text(body)
     return path
 
