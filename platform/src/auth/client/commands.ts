@@ -61,20 +61,22 @@ export function encryptValue(encKey: Buffer, plaintext: string): string {
 export type VerifyStatus =
   | "decrypts" // "enc:v1:…" that decrypts cleanly
   | "plaintext" // legacy plaintext, used as-is
-  | "global" // NULL -> falls back to the global ANTHROPIC_API_KEY
+  | "no_key" // NULL -> a misconfigured client row; the auth hook rejects it with 500
   | "decrypt_failed" // "enc:v1:…" with no/wrong key or a corrupt blob
   | "unknown_client"; // no row by that name
 
 /** Classify a stored value the same way instance-auth's decryptStoredKey does, but
  *  reporting the outcome instead of dropping the client. Pure; no DB. The branch
- *  order here (NULL -> global, no-prefix -> plaintext, no-key/decrypt-error ->
+ *  order here (NULL -> no_key, no-prefix -> plaintext, no-key/decrypt-error ->
  *  fail) must track decryptStoredKey in instance-auth.ts: verify exists to predict
- *  the auth hook's behaviour, so the two cannot be allowed to diverge. */
+ *  the auth hook's behaviour, so the two cannot be allowed to diverge. A NULL stored
+ *  key is not a usable state — the auth hook rejects such a client with 500 rather
+ *  than falling back to the global key. */
 export function classifyStoredKey(
   stored: string | null,
   encKey: Buffer | null
 ): VerifyStatus {
-  if (stored === null) return "global";
+  if (stored === null) return "no_key";
   if (!stored.startsWith(ENC_PREFIX)) return "plaintext";
   if (!encKey) return "decrypt_failed";
   try {

@@ -33,11 +33,15 @@ const capturedExtras = (
 
 // The shared listening app gets a synchronous lookup driven by a test-controlled
 // map. Setting `knownClients` per test is how a fresh configuration is applied
-// without any module-global poke seam; an empty/absent map routes everyone by the
-// shape rule, exactly as a down DB would.
+// without any module-global poke seam; an empty/absent map makes every caller
+// resolve as absent, so any present api_key is rejected. hasGlobalKey is forced
+// true so keyless requests on this app take the global-key path (the test env has
+// no real ANTHROPIC_API_KEY); the keyless-without-a-global-key 401 is covered by a
+// dedicated instance below.
 let knownClients: Record<string, Client> | null = null;
 const sharedAuth = new InstanceAuth({
   lookup: (hash) => knownClients?.[hash] ?? null,
+  hasGlobalKey: true,
 });
 
 const app = await setup(port, sharedAuth);
@@ -218,8 +222,9 @@ describe("Sentry", () => {
 
 describe("Instance authentication", () => {
   // No real DB — the seam keys clients by SHA-256 of the api_key they send. ALPHA
-  // has a stored Anthropic key (swapped in); BETA has none (credential stripped).
-  // Any other key is unknown and routed by the shape check.
+  // has a stored Anthropic key (swapped in); BETA is a recognised client whose
+  // stored key is NULL, which is a server-side misconfiguration (500), not a
+  // "use the global key" shortcut. Any other key is unknown and rejected.
   const ALPHA = "lightning-cred-alpha";
   const BETA = "lightning-cred-beta";
   const clients: Record<string, Client> = {
@@ -231,8 +236,8 @@ describe("Instance authentication", () => {
     post(path, { ...data, ...(apiKey ? { api_key: apiKey } : {}) });
 
   // One mode now: the auth hook is always active. Point the shared instance's injected
-  // lookup at the known-client map so rows 1/2 resolve; unknown keys fall to the
-  // shape check regardless.
+  // lookup at the known-client map so rows 1/2 resolve; unknown keys are rejected
+  // (DB reachable -> the lookup confirms absent -> 401).
   beforeEach(() => {
     knownClients = clients;
   });
@@ -251,28 +256,40 @@ describe("Instance authentication", () => {
     expect(body.api_key).not.toBe(ALPHA);
   });
 
-  // Row 2
-  it("strips the credential when the client has no stored key", async () => {
-    const res = await app.handle(postKey("services/echo", { x: 2 }, BETA));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    // No stored key → api_key dropped entirely (Apollo uses its global key).
-    expect(body.api_key).toBeUndefined();
+  // Row 2 — a recognised client whose stored key is NULL is a server-side
+  // misconfiguration: the caller authenticated with a known credential, so we
+  // reject with 500 and report it rather than quietly billing the global key.
+  it("rejects a known client with no stored key as misconfigured (500) and reports it", async () => {
+    const capture = spyOn(sentry, "captureException");
+    try {
+      const res = await app.handle(postKey("services/echo", { x: 2 }, BETA));
+      expect(res.status).toBe(500);
+      const body = await res.json();
+      expect(body.code).toBe(500);
+      expect(body.type).toBe("CLIENT_MISCONFIGURED");
+      // The misconfiguration is reported to Sentry with a non-secret reason/name.
+      const extras = capturedExtras(capture, "client-misconfigured-no-key");
+      expect(extras).toBeDefined();
+      expect(extras?.client).toBe("beta");
+    } finally {
+      capture.mockRestore();
+    }
   });
 
-  // Row 3 — unknown but sk-ant-shaped: bring-your-own key, forwarded unchanged.
-  it("forwards an unknown sk-ant-shaped key unchanged (bring-your-own)", async () => {
+  // Row 3 — an unknown key is rejected regardless of shape. The DB is reachable, so
+  // the lookup confirms there is no such client: 401. An Anthropic-key-shaped key is
+  // treated the same as any other unknown key.
+  it("rejects an unknown Anthropic-key-shaped key with 401", async () => {
     const res = await app.handle(
-      postKey("services/echo", { x: 1 }, "sk-ant-byo")
+      postKey("services/echo", { x: 1 }, "sk-ant-unknown")
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(401);
     const body = await res.json();
-    expect(body.api_key).toBe("sk-ant-byo");
+    expect(body.code).toBe(401);
+    expect(body.type).toBe("UNAUTHORIZED");
   });
 
-  // Row 3b — unknown and NOT sk-ant-shaped: a likely Lightning credential; reject
-  // rather than forward it to the LLM.
-  it("rejects an unknown non-sk-ant- key with 401 (never forwarded)", async () => {
+  it("rejects an unknown non-Anthropic-shaped key with 401", async () => {
     const res = await app.handle(
       postKey("services/echo", { x: 1 }, "lightning-cred-unknown")
     );
@@ -282,24 +299,43 @@ describe("Instance authentication", () => {
     expect(body.type).toBe("UNAUTHORIZED");
   });
 
-  // Row 4 — no api_key at all: forwarded without the field (global key fallback).
-  it("forwards a request with no api_key (no 401), field absent", async () => {
+  // Row 4 — no api_key at all, and a global key is configured: served by the global
+  // key with the field absent. (This app's auth has hasGlobalKey: true.)
+  it("serves a keyless request with the global key (no 401), field absent", async () => {
     const res = await app.handle(post("services/echo", { x: 1 }));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.api_key).toBeUndefined();
   });
 
-  // Row 1 and row 3 coexist: known-client swap and bring-your-own forward in one run.
-  it("serves the known-client swap and the bring-your-own forward side by side", async () => {
-    const swapped = await (
-      await app.handle(postKey("services/echo", { x: 1 }, ALPHA))
-    ).json();
-    const forwarded = await (
-      await app.handle(postKey("services/echo", { x: 1 }, "sk-ant-byo"))
-    ).json();
-    expect(swapped.api_key).toBe("sk-ant-stored-alpha");
-    expect(forwarded.api_key).toBe("sk-ant-byo");
+  // A keyless request when NO global key is configured has nothing to serve it, so
+  // it is rejected with 401. Driven directly against an InstanceAuth built with
+  // hasGlobalKey: false (the shared app forces it true).
+  it("rejects a keyless request with 401 when no global key is configured", async () => {
+    const auth = new InstanceAuth({
+      lookup: () => null,
+      hasGlobalKey: false,
+    });
+    const ctx = {
+      request: { headers: { get: () => null } },
+      body: { x: 1 },
+      set: { status: 200 },
+    } as any;
+    await auth.authenticate(ctx);
+    expect(ctx.set.status).toBe(401);
+    expect(ctx.lightningClient).toBeUndefined();
+  });
+
+  // Row 1 and row 3 coexist: a known client swaps to its stored key while an unknown
+  // key is rejected, in one run.
+  it("swaps a known client's key and rejects an unknown key side by side", async () => {
+    const swap = await app.handle(postKey("services/echo", { x: 1 }, ALPHA));
+    const unknown = await app.handle(
+      postKey("services/echo", { x: 1 }, "sk-ant-unknown")
+    );
+    expect(swap.status).toBe(200);
+    expect((await swap.json()).api_key).toBe("sk-ant-stored-alpha");
+    expect(unknown.status).toBe(401);
   });
 
   it("leaves health and root endpoints open", async () => {
@@ -361,7 +397,7 @@ describe("Instance authentication", () => {
     }
   });
 
-  it("captures the internal-token mismatch and still rejects with 401", async () => {
+  it("rejects an internal-token mismatch with 401 without reporting to Sentry", async () => {
     const warn = spyOn(console, "warn").mockImplementation(() => {});
     const capture = spyOn(sentry, "captureException");
     try {
@@ -374,10 +410,11 @@ describe("Instance authentication", () => {
         },
       });
       const res = await app.handle(req);
-      // Behaviour unchanged: a forged internal header still rejects.
+      // A forged or stale internal header still rejects...
       expect(res.status).toBe(401);
-      // ...and the mismatch is no longer silent.
-      expect(capturedExtras(capture, "internal-token-mismatch")).toBeDefined();
+      // ...but a mismatch is a config/forgery signal, not a code bug, so it
+      // stays out of Sentry (the warn covers it). Don't make Sentry noisy.
+      expect(capturedExtras(capture, "internal-token-mismatch")).toBeUndefined();
     } finally {
       capture.mockRestore();
       warn.mockRestore();
@@ -412,7 +449,7 @@ describe("Instance authentication", () => {
   it("does not emit the mismatch warn on the normal external path (no internal header)", async () => {
     const warn = spyOn(console, "warn").mockImplementation(() => {});
     try {
-      // An unknown non-sk-ant- key takes the explicit-fail path (no internal header).
+      // An unknown key takes the explicit-fail path (no internal header).
       const res = await app.handle(
         postKey("services/echo", { x: 1 }, "lightning-cred-unknown")
       );
@@ -433,20 +470,20 @@ describe("Instance authentication", () => {
     // the payload rather than being stripped to the global key.
     const req = new Request(`${baseUrl}/services/echo`, {
       method: "POST",
-      body: JSON.stringify({ x: 9, api_key: "sk-ant-forwarded" }),
+      body: JSON.stringify({ x: 9, api_key: "sk-ant-internal-hop" }),
       headers: { "Content-Type": "application/json", ...internalAuthHeader() },
     });
     const res = await app.handle(req);
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.api_key).toBe("sk-ant-forwarded");
+    expect(body.api_key).toBe("sk-ant-internal-hop");
   });
 
-  // WS upgrade auth decision via app.handle(): under the forward model a bare
-  // upgrade is no longer rejected. app.handle() never performs a real socket
-  // upgrade (Bun upgrades only through the listening server), so this proves the
-  // auth hook forwarded rather than 401'd, not that the upgrade itself succeeds. The
-  // 101/end-to-end no-regression proof is the live-socket echo test above.
+  // WS upgrade auth decision via app.handle(): a bare upgrade carries no api_key, so
+  // it takes the global-key path and is not rejected. app.handle() never performs a
+  // real socket upgrade (Bun upgrades only through the listening server), so this
+  // proves the auth hook let it through rather than 401'd, not that the upgrade itself
+  // succeeds. The 101/end-to-end no-regression proof is the live-socket echo test above.
   it("passes an unauthenticated WebSocket upgrade through the auth hook", async () => {
     const req = new Request(`${baseUrl}/services/echo`, {
       method: "GET",
@@ -505,10 +542,12 @@ describe("Instance authentication", () => {
     expect(body.ws).toBe(1);
   });
 
-  // AC3 — an unrecognised sk-ant- token on the upgrade connects and forwards as-is.
-  it("forwards an unknown sk-ant- token on a WS upgrade unchanged", async () => {
-    const body = await wsRoundTrip(`?api_key=sk-ant-ws-byo`);
-    expect(body.api_key).toBe("sk-ant-ws-byo");
+  // AC3 — an unrecognised token on the upgrade (any shape) is rejected: the auth hook
+  // returns a 401 from beforeHandle, so the upgrade is refused and the socket never
+  // opens. The round-trip rejects (error/close) rather than completing. Known clients
+  // are unaffected (see the swap test above); an unknown key is rejected whatever its shape.
+  it("rejects an unknown token on a WS upgrade", async () => {
+    await expect(wsRoundTrip(`?api_key=sk-ant-ws-unknown`)).rejects.toBeDefined();
   });
 
   // Internal exemption holds on WS: the upgrade GET carries the internal header, so
@@ -547,32 +586,6 @@ describe("Instance authentication", () => {
   });
 });
 
-describe("Instance auth — DB-down forward path", () => {
-  // No known clients: every caller is "unknown". The shape rule still applies — an
-  // sk-ant- key forwards, a non-sk-ant- key fails explicitly.
-  beforeEach(() => {
-    knownClients = null;
-  });
-
-  // Row 7
-  it("forwards an unknown sk-ant- key when the DB is down", async () => {
-    const res = await app.handle(
-      post("services/echo", { x: 1, api_key: "sk-ant-byo" })
-    );
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.api_key).toBe("sk-ant-byo");
-  });
-
-  // Row 8
-  it("rejects an unknown non-sk-ant- key when the DB is down (never forwarded)", async () => {
-    const res = await app.handle(
-      post("services/echo", { x: 1, api_key: "lightning-cred-unknown" })
-    );
-    expect(res.status).toBe(401);
-  });
-});
-
 describe("Instance auth — lookup never came up (dbReady false)", () => {
   // The shared app injects a `lookup`, so it never reaches lookupClient's dbReady
   // guard. Construct a bare InstanceAuth (no lookup/dbLookup => dbReady stays false)
@@ -586,21 +599,22 @@ describe("Instance auth — lookup never came up (dbReady false)", () => {
       set: { status: 200 },
     } as any);
 
-  it("forwards an unknown sk-ant- key via the shape rule (no DB)", async () => {
+  // When the lookup never came up we cannot verify any caller, whatever the key's
+  // shape — that is our outage, not a bad credential: 503, never a misleading 401.
+  it("returns 503 for an unknown sk-ant- key when the lookup never came up (no DB)", async () => {
     const auth = new InstanceAuth();
-    const ctx = fakeCtx("sk-ant-byo");
+    const ctx = fakeCtx("sk-ant-unknown");
     await auth.authenticate(ctx);
-    expect(ctx.forwardApiKey).toBe("sk-ant-byo");
-    expect(ctx.set.status).toBe(200);
+    expect(ctx.set.status).toBe(503);
+    expect(ctx.lightningClient).toBeUndefined();
   });
 
   it("returns 503 for an unknown non-sk-ant- key when the lookup never came up (no DB)", async () => {
     const auth = new InstanceAuth();
     const ctx = fakeCtx("lightning-cred-unknown");
     await auth.authenticate(ctx);
-    // dbReady is false, so we cannot verify the caller — that is our outage, not a bad credential: 503, never a misleading 401, never a forward.
     expect(ctx.set.status).toBe(503);
-    expect(ctx.forwardApiKey).toBeUndefined();
+    expect(ctx.lightningClient).toBeUndefined();
   });
 });
 
@@ -682,7 +696,7 @@ describe("Instance auth cache refresh", () => {
 
     const first = fakeCtx(UNKNOWN);
     await auth.authenticate(first);
-    // sk-ant-shaped? no -> unknown non-anthropic key is rejected.
+    // The lookup completed and confirmed no such client -> 401 (unknown is unknown).
     expect(first.set.status).toBe(401);
 
     const second = fakeCtx(UNKNOWN);
@@ -822,26 +836,19 @@ describe("Instance auth cache refresh", () => {
     // awaited cold lookup fails, so the request is rejected rather than served stale.
     fail = true;
     advanceClock(OVER_CEILING);
-    const warn = spyOn(console, "warn").mockImplementation(() => {});
     const error = spyOn(console, "error").mockImplementation(() => {});
     try {
       const ctx = fakeCtx(ALPHA);
       await auth.authenticate(ctx);
       expect(ctx.lightningClient).toBeUndefined();
-      // ALPHA is not sk-ant-shaped and the evicted-then-failed lookup could not verify it, so we 503 (our outage) rather than a misleading 401.
+      // The evicted-then-failed lookup could not verify the caller, so we 503 (our outage) rather than a misleading 401.
       expect(ctx.set.status).toBe(503);
-      expect(
-        warn.mock.calls.some(([m]) =>
-          String(m).includes("max-staleness ceiling")
-        )
-      ).toBe(true);
       expect(
         error.mock.calls.some(([m]) =>
           String(m).includes("client lookup failed")
         )
       ).toBe(true);
     } finally {
-      warn.mockRestore();
       error.mockRestore();
     }
   });
@@ -906,7 +913,7 @@ describe("Instance auth cache refresh", () => {
     }
   });
 
-  it("returns 503 (not 401) when a cold DB read fails for a non-sk-ant- caller, capturing the outage", async () => {
+  it("returns 503 (not 401) when a cold DB read fails, capturing the outage", async () => {
     const auth = new InstanceAuth({
       dbLookup: async () => {
         throw new Error("db down");
@@ -915,11 +922,10 @@ describe("Instance auth cache refresh", () => {
     const error = spyOn(console, "error").mockImplementation(() => {});
     const capture = spyOn(sentry, "captureException");
     try {
-      const ctx = fakeCtx(ALPHA); // non-sk-ant-shaped credential
+      const ctx = fakeCtx(ALPHA);
       await auth.authenticate(ctx);
       expect(ctx.set.status).toBe(503);
       expect(ctx.lightningClient).toBeUndefined();
-      expect(ctx.forwardApiKey).toBeUndefined();
 
       const extras = capturedExtras(capture, "client-store-unavailable-503");
       expect(extras).toBeDefined();
@@ -932,7 +938,9 @@ describe("Instance auth cache refresh", () => {
     }
   });
 
-  it("still forwards an sk-ant- caller when a cold DB read fails (BYO key needs no lookup)", async () => {
+  // A failed cold read can't verify an sk-ant-shaped key, so it 503s exactly like any
+  // other unknown key.
+  it("503s an sk-ant- caller too when a cold DB read fails", async () => {
     const auth = new InstanceAuth({
       dbLookup: async () => {
         throw new Error("db down");
@@ -940,10 +948,10 @@ describe("Instance auth cache refresh", () => {
     });
     const error = spyOn(console, "error").mockImplementation(() => {});
     try {
-      const ctx = fakeCtx("sk-ant-byo");
+      const ctx = fakeCtx("sk-ant-unknown");
       await auth.authenticate(ctx);
-      expect(ctx.set.status).toBe(200);
-      expect(ctx.forwardApiKey).toBe("sk-ant-byo");
+      expect(ctx.set.status).toBe(503);
+      expect(ctx.lightningClient).toBeUndefined();
     } finally {
       error.mockRestore();
     }

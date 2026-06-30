@@ -75,8 +75,8 @@ describe("client/commands key-prep (no DB)", () => {
 describe("client/commands classifyStoredKey (no DB)", () => {
   const encKey = randomBytes(32);
 
-  it("NULL -> global", () => {
-    expect(classifyStoredKey(null, encKey)).toBe("global");
+  it("NULL -> no_key", () => {
+    expect(classifyStoredKey(null, encKey)).toBe("no_key");
   });
   it("a non-enc value -> plaintext", () => {
     expect(classifyStoredKey("sk-ant-plain", encKey)).toBe("plaintext");
@@ -127,17 +127,19 @@ describe("addClient -> auth-hook resolution (no DB)", () => {
     expect(gated.resolveKey(ctx)).toEqual({ kind: "useKey", key: "sk-ant-provisioned-secret" });
   });
 
-  it("a different api_key does not resolve the provisioned client", async () => {
+  it("a different api_key does not resolve the provisioned client and is rejected", async () => {
     const encKey = randomBytes(32);
     const sql = captureSql();
     await addClient(sql as any, encKey, "acme", "sk-ant-secret");
     const [{ values }] = sql.calls;
     const gated = gatedFor(encKey, values[1] as string, values[2] as string);
 
+    // The lookup completes and confirms no such client, so the present-but-unknown
+    // key is rejected outright (401).
     const ctx = ctxFor("sk-ant-some-other-key");
     await gated.authenticate(ctx);
     expect(ctx.lightningClient).toBeUndefined();
-    expect(gated.resolveKey(ctx)).toEqual({ kind: "forward" });
+    expect(ctx.set.status).toBe(401);
   });
 });
 

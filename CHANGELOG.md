@@ -1,5 +1,11 @@
 # apollo
 
+## 2.0.0
+
+### Major Changes
+
+- 782b846: Force authorisation on all API keys
+
 ## 1.5.0
 
 ### Minor Changes

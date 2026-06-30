@@ -32,11 +32,11 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
 
   // Apply the resolved key to an outgoing payload with an explicit switch so the
   // inbound-credential-never-forwarded invariant is structural, not positional: a
-  // known client's stored key is swapped in (useKey), a NULL stored key drops the
-  // field so Python uses the global key (useGlobal), and every other caller forwards
-  // the body exactly as received (forward/passthrough). `ctx` is the upgrade-time
-  // context that carries lightningClient/internalCall: on POST the route ctx, on WS
-  // the captured ws.data, never a fresh per-message one.
+  // known client's stored key is swapped in (useKey), a NULL stored key (or a request
+  // with no api_key) drops the field so Python uses the global key (useGlobal), and an
+  // internal apollo() hop forwards the body exactly as received (passthrough). `ctx` is
+  // the upgrade-time context that carries lightningClient/internalCall: on POST the
+  // route ctx, on WS the captured ws.data, never a fresh per-message one.
   const applyKey = (payload: Record<string, any>, ctx: any) => {
     const resolution = auth.resolveKey(ctx);
     switch (resolution.kind) {
@@ -46,7 +46,6 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
       case "useGlobal":
         delete payload.api_key;
         break;
-      case "forward":
       case "passthrough":
         break;
       default: {
@@ -65,9 +64,9 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
     applyKey({ ...(ctx.body ?? {}), session_id: ctx.uuid }, ctx);
 
   app.group("/services", (app) => {
-    // Resolve every /services/* caller: swap a known client's key, forward an
-    // unknown sk-ant- (or absent) key, reject a forged internal header or an
-    // unknown non-sk-ant- key.
+    // Resolve every /services/* caller: swap a known client's key, drop the field for
+    // a no-key request (global key), and reject anything else (forged internal header,
+    // or an api_key that isn't a known client -> 401/503).
     app.onBeforeHandle(auth.authenticate);
 
     modules.forEach((m) => {
@@ -197,14 +196,10 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
                 });
               };
 
-              // The credential rode the upgrade query string, not the message body.
-              // Seed a forwardable unknown key onto the payload so applyKey's
-              // forward case preserves it; a known client's useKey/useGlobal then
-              // overrides or drops it exactly as on POST.
+              // The credential rode the upgrade query string and was resolved by the
+              // auth hook onto ws.data; applyKey reads the resolution off it. A known
+              // client's useKey/useGlobal swaps or drops the field exactly as on POST.
               const base: Record<string, any> = { ...(message.data ?? {}) };
-              if (base.api_key == null && (ws.data as any)?.forwardApiKey) {
-                base.api_key = (ws.data as any).forwardApiKey;
-              }
               const payload = applyKey(base, ws.data);
 
               callService(m, port, payload as any, onLog, onEvent).then(
