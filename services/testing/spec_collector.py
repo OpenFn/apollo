@@ -51,6 +51,14 @@ def pytest_addoption(parser):
         f"(default {DEFAULT_MAX_SPECS}). Above it, pytest asks before spending "
         "on live LLM calls, or refuses when there is no terminal to ask.",
     )
+    parser.addoption(
+        "--no-judge",
+        action="store_true",
+        default=False,
+        help="Skip LLM judge evaluation: call the service and capture its "
+        "output, but don't grade it. Specs always pass. Useful for latency "
+        "profiling, where the judge adds tokens and wall-clock but no signal.",
+    )
 
 
 def pytest_collection_finish(session):
@@ -63,7 +71,7 @@ def pytest_collection_finish(session):
     if len(specs) <= limit:
         return
 
-    judge_calls = sum(len(item.spec.judges) for item in specs)
+    judge_calls = 0 if session.config.getoption("no_judge") else sum(len(item.spec.judges) for item in specs)
     summary = (
         f"About to run {len(specs)} acceptance spec runs: {len(specs)} service "
         f"calls (each fans out to several LLM calls) + {judge_calls} judge calls"
@@ -156,6 +164,10 @@ class SpecItem(pytest.Item):
         )
         if text_path is not None:
             print(f"  ✓ response text saved to {text_path}")
+
+        if self.config.getoption("no_judge"):
+            print("  (judges skipped: --no-judge)")
+            return
 
         # Fetched once per spec; all judges share it. None (no YAML / no DB /
         # no docs) simply omits the block and judges fall back to their

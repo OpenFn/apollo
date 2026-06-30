@@ -67,6 +67,9 @@ Two rules of thumb:
   confirmation first (with the service and judge call counts), or refuses when
   there's no terminal to ask. Pass `--max-specs=<n>` to raise the limit, e.g.
   for a nightly job.
+
+  Pass `--no-judge` to skip judging: the service is still called and its output
+  captured, but nothing is graded and every spec passes.
 - `apollo_client.py` — `ApolloClient` for dispatching to a chat service.
   Currently a subprocess-based stub; the integration tier will replace its
   internals with a real HTTP client (same `.call()` signature, no test changes).
