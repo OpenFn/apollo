@@ -670,6 +670,16 @@ def main(data_dict: dict) -> dict:
                 current_page=current_page
             )
 
+            # Tag the trace when the model actually produced code edits, so we
+            # can filter in Langfuse for "the job-code agent generated code" —
+            # whether job_chat was hit directly or in-process via global_chat.
+            # propagate_attributes merges the tag with the existing trace tags
+            # and sets it on the current (job_chat) span on entry; the empty
+            # body is intentional. (This SDK has no update_current_trace.)
+            if tracking and result.suggested_code:
+                with propagate_attributes(tags=["has_code_attachment"]):
+                    pass
+
             response_dict = {
                 "response": result.response,
                 "suggested_code": result.suggested_code,
