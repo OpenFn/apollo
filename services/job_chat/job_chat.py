@@ -668,6 +668,11 @@ def main(data_dict: dict) -> dict:
                 current_page=current_page
             )
 
+            # Tag the trace when code was generated, so we can filter for it.
+            if tracking and result.suggested_code:
+                with propagate_attributes(tags=["has_code_attachment"]):
+                    pass
+
             response_dict = {
                 "response": result.response,
                 "suggested_code": result.suggested_code,
