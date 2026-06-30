@@ -39,6 +39,14 @@ def pytest_addoption(parser):
         "in tmp/ (e.g. --experiment=sonnet-2026-06-29) so runs with different "
         "settings/dates don't overwrite each other.",
     )
+    parser.addoption(
+        "--no-judge",
+        action="store_true",
+        default=False,
+        help="Skip LLM judge evaluation: call the service and capture its "
+        "output, but don't grade it. Specs always pass. Useful for latency "
+        "profiling, where the judge adds tokens and wall-clock but no signal.",
+    )
 
 
 def _experiment_suffix(config) -> str:
@@ -112,6 +120,10 @@ class SpecItem(pytest.Item):
         )
         if text_path is not None:
             print(f"  ✓ response text saved to {text_path}")
+
+        if self.config.getoption("no_judge"):
+            print("  (judges skipped: --no-judge)")
+            return
 
         # One service call, N judges evaluate the same response in parallel.
         # Consensus: the test passes only if every judge passes.
