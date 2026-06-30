@@ -109,7 +109,9 @@ Request to build a new multi-step workflow from scratch:
 - `response`: The assistant's text response to the user
 - `attachments`: Artifacts produced — currently always
   `{type: "workflow_yaml", content: string}` when YAML was generated or modified
-- `history`: Updated conversation history including the latest exchange
+- `history`: Updated conversation history including the latest exchange. Direct
+  routes return string `content`; the planner path may return `content` as
+  Anthropic content-block arrays (`tool_use`/`tool_result`)
 - `usage`: Aggregated token usage across all agents called during the request
 - `meta.agents`: Ordered list of agents invoked (e.g.
   `["router", "workflow_agent"]` or
@@ -163,18 +165,18 @@ then calls `call_job_code_agent` for each job that needs code. Job code is
 stitched into the workflow YAML immediately after each call.
 
 The loop continues until the model signals it is done (up to a configurable
-maximum of tool calls, default 10).
+maximum of tool calls, default 25).
 
 ## Testing
 
-Run the multi-step planner tests with:
+Run the fast unit tests (no LLM calls):
 
 ```bash
-poetry run pytest global_chat/tests/test_planner_multistep.py -v -s
+poetry run pytest services/global_chat/tests/unit/ -q
 ```
 
-Run all tests for the service:
+Run all tests for the service (some hit live LLM APIs and cost tokens):
 
 ```bash
-poetry run pytest global_chat/tests/ -v -s
+poetry run pytest services/global_chat/tests/ -v -s
 ```
