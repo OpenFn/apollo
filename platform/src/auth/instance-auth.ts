@@ -4,7 +4,11 @@ import {
   serviceUnavailable,
   unauthorized,
 } from "../util/errors";
-import { ENC_PREFIX, decryptKey, parseEncKey } from "../util/instance-key-crypto";
+import {
+  ENC_PREFIX,
+  decryptKey,
+  parseEncKey,
+} from "../util/instance-key-crypto";
 import { clientsDbUrl, getDb } from "../db";
 import { hashToken } from "./hash";
 import { checkInternalHeader } from "./internal-token";
@@ -138,14 +142,14 @@ export class InstanceAuth {
     this.encKey = parseEncKey(process.env.APOLLO_ENC_KEY);
     if (process.env.APOLLO_ENC_KEY && !this.encKey) {
       console.error(
-        "Apollo instance auth: APOLLO_ENC_KEY is set but is not valid base64 of 32 bytes; encrypted client keys cannot be decrypted."
+        "Apollo instance auth: APOLLO_ENC_KEY is set but is not valid base64 of 32 bytes; encrypted client keys cannot be decrypted"
       );
     }
 
     if (!clientsDbUrl()) {
       this.dbReady = false;
       console.warn(
-        "Apollo instance auth: neither APOLLO_CLIENTS_DB_URL nor POSTGRES_URL is set."
+        "Apollo instance auth: neither APOLLO_CLIENTS_DB_URL nor POSTGRES_URL is set"
       );
       return;
     }
@@ -155,11 +159,11 @@ export class InstanceAuth {
       await getDb()`SELECT 1`;
       this.dbReady = true;
       this.clientCache.clear();
-      console.log("Apollo instance auth: lightning_clients lookup ready.");
+      console.log("Apollo instance auth: lightning_clients lookup ready");
     } catch (err) {
       this.dbReady = false;
       console.error(
-        "Apollo instance auth: the database could not be reached.",
+        "Apollo instance auth: the database could not be reached",
         err
       );
     }
@@ -175,7 +179,7 @@ export class InstanceAuth {
     if (!stored.startsWith(ENC_PREFIX)) return stored;
     if (!this.encKey) {
       console.error(
-        `Apollo instance auth: client "${clientName}" has an encrypted anthropic_api_key but APOLLO_ENC_KEY is unset/invalid.`
+        `Apollo instance auth: client "${clientName}" has an encrypted anthropic_api_key but APOLLO_ENC_KEY is unset/invalid`
       );
       captureException(
         new Error(
@@ -254,14 +258,14 @@ export class InstanceAuth {
         // as an unhandledRejection.
         try {
           console.error(
-            "Apollo instance auth: background refresh of a cached client failed; serving until expiry.",
+            "Apollo instance auth: background refresh of a cached client failed; serving until expiry",
             err
           );
           captureException(err, {
             reason: "stale-refresh-error",
             client: entry.kind === "hit" ? entry.client.name : null,
           });
-        } catch { }
+        } catch {}
       });
   }
 
@@ -292,7 +296,7 @@ export class InstanceAuth {
       return toLookupResult(client);
     } catch (err) {
       console.error(
-        "Apollo instance auth: client lookup failed against the database.",
+        "Apollo instance auth: client lookup failed against the database",
         err
       );
       return { kind: "unavailable" };
@@ -306,7 +310,9 @@ export class InstanceAuth {
     // WS upgrade.
     return (
       (typeof ctx.body?.api_key === "string" ? ctx.body.api_key.trim() : "") ||
-      (typeof ctx.query?.api_key === "string" ? ctx.query.api_key.trim() : "") ||
+      (typeof ctx.query?.api_key === "string"
+        ? ctx.query.api_key.trim()
+        : "") ||
       queryParam(ctx, "api_key")
     );
   }
@@ -322,12 +328,13 @@ export class InstanceAuth {
       // external api_key caller, so it can't ride in on a valid body
       // credential.
       console.warn(
-        "Apollo internal token MISMATCH: x-apollo-internal present but does not match; likely a sibling process without a shared APOLLO_INTERNAL_TOKEN, or a forged header. Rejecting with 401."
+        "Apollo internal token MISMATCH: x-apollo-internal present but does not match; likely a sibling process without a shared APOLLO_INTERNAL_TOKEN, or a forged header. Rejecting with 401"
       );
       return unauthorized(ctx);
     }
 
     const apiKey = this.extractApiKey(ctx);
+    console.log(apiKey);
     if (!apiKey) {
       return this.globalKeyConfigured() ? undefined : unauthorized(ctx);
     }
@@ -357,9 +364,7 @@ export class InstanceAuth {
     // absent: lookup confirmed no such client -> 401.
     if (result.kind === "unavailable") {
       captureException(
-        new Error(
-          "Apollo instance auth: client store unavailable"
-        ),
+        new Error("Apollo instance auth: client store unavailable"),
         { reason: "client-store-unavailable-503", tokenHash: hash }
       );
       return serviceUnavailable(ctx);
