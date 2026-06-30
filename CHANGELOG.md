@@ -1,5 +1,17 @@
 # apollo
 
+## 1.5.0
+
+### Minor Changes
+
+- 5cd94ea: upgrade to opus in planner and job chat
+
+### Patch Changes
+
+- 01754a0: Add version metadata to HTTP headers, chat payloads (meta key), and
+  langfuse traces
+- 01754a0: For langfuse traces with code, add a `has_code_attachment` tag
+
 ## 1.4.0
 
 ### Minor Changes

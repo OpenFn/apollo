@@ -11,6 +11,7 @@ import { captureException } from "./util/sentry";
 import { clientsDbUrl, closeDb } from "./db";
 import { runMigrations } from "./db/migrate";
 import { randomUUID } from "node:crypto";
+import pkg from "../../package.json";
 
 export default async (
   port: number | string = 3000,
@@ -23,6 +24,7 @@ export default async (
   app.use(html());
 
   app.derive(() => ({ start: Date.now(), uuid: randomUUID() }));
+  app.onAfterHandle(({ set }) => { set.headers["X-Api-Version"] = pkg.version; });
   app.onAfterHandle(logRequest);
 
   // Report unhandled throws to Sentry, then return nothing so Elysia produces

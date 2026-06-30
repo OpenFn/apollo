@@ -8,7 +8,6 @@ router:
 
 # Planner configuration (complex orchestration)
 planner:
-  model: "claude-sonnet"
-  max_tokens: 8192
-  temperature: 1.0
-  max_tool_calls: 25
+  model: "claude-opus"
+  max_tokens: 24576
+  max_tool_calls: 10

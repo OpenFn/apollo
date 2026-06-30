@@ -43,7 +43,7 @@ from anthropic import (
 import sentry_sdk
 from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
 from langfuse_util import should_track, build_tags
-from util import ApolloError, create_logger, add_page_prefix
+from util import ApolloError, create_logger, add_page_prefix, APOLLO_VERSION
 from .gen_project_prompt import build_prompt
 from workflow_chat.available_adaptors import get_available_adaptors
 from streaming_util import (
@@ -694,7 +694,8 @@ def main(data_dict: dict) -> dict:
                 "response": result.content,
                 "response_yaml": result.content_yaml,
                 "history": result.history,
-                "usage": result.usage
+                "usage": result.usage,
+                "meta": {"apollo_version": APOLLO_VERSION}
             }
 
             return response_dict
