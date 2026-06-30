@@ -215,53 +215,11 @@ the [Contribution Guide](CONTRIBUTING.md) for details.
 ## Services
 
 Each service lives in `services/<name>/` and is auto-mounted by service
-discovery. Every mounted service has its own README with payload specs and
-examples - start there for anything service-specific.
+discovery.
 
-### Chat & orchestration
-
-| Service                                               | What it does                                                                                                                                                                   |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [`global_chat`](services/global_chat/README.md)       | Orchestrator and single entry point for OpenFn AI chat; routes to subagents or escalates to a planner. Also see its [`PAYLOAD_SPEC.md`](services/global_chat/PAYLOAD_SPEC.md). |
-| [`job_chat`](services/job_chat/README.md)             | AI chat for OpenFn job code, with a code-suggestions/auto-patch mode.                                                                                                          |
-| [`workflow_chat`](services/workflow_chat/README.md)   | Generates and edits OpenFn workflow YAML, preserving job code and IDs.                                                                                                         |
-| [`doc_agent_chat`](services/doc_agent_chat/README.md) | Agentic chat over a project's uploaded documents (RAG).                                                                                                                        |
-
-### Docs, search & RAG
-
-| Service                                                   | What it does                                                      |
-| --------------------------------------------------------- | ----------------------------------------------------------------- |
-| [`search_docsite`](services/search_docsite/README.md)     | Semantic search over the OpenFn docs (`docsite` Pinecone index).  |
-| [`embed_docsite`](services/embed_docsite/README.md)       | Downloads and indexes the OpenFn docs into the `docsite` index.   |
-| [`doc_agent_upload`](services/doc_agent_upload/README.md) | Fetches and indexes project documents into the `doc-agent` index. |
-
-### Adaptors
-
-| Service                                                         | What it does                                                        |
-| --------------------------------------------------------------- | ------------------------------------------------------------------- |
-| [`load_adaptor_docs`](services/load_adaptor_docs/README.md)     | Parses adaptor function docs into Postgres.                         |
-| [`search_adaptor_docs`](services/search_adaptor_docs/README.md) | Queries adaptor docs back out of Postgres by version.               |
-| [`latest_adaptors`](services/latest_adaptors/README.md)         | Fetches the latest adaptor versions from the OpenFn repo.           |
-| [`adaptor_apis`](services/adaptor_apis/README.md)               | **TypeScript** service: produces a JSON schema of an adaptor's API. |
-
-### Medical vocab & embeddings
-
-| Service                                                           | What it does                                                                                   |
-| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `vocab_mapper`                                                    | Maps medical vocabularies (LOINC/SNOMED) against the `apollo-mappings` index. (No README yet.) |
-| [`embeddings`](services/embeddings/README.md)                     | Vector-store wrapper used by the vocab services.                                               |
-| [`embed_loinc_dataset`](services/embed_loinc_dataset/README.md)   | Embeds the LOINC dataset into `apollo-mappings`.                                               |
-| [`embed_snomed_dataset`](services/embed_snomed_dataset/README.md) | Embeds the SNOMED dataset into `apollo-mappings`.                                              |
-| [`embeddings_demo`](services/embeddings_demo/README.md)           | Standalone embeddings demo (Zilliz).                                                           |
-
-### Utilities & support
-
-| Service                                 | What it does                                                                                                           |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| [`status`](services/status/README.md)   | Health check: validates Anthropic, OpenAI and Pinecone keys.                                                           |
-| [`echo`](services/echo/README.md)       | Test service that returns its input; useful for verifying the pipeline.                                                |
-| [`auth`](platform/src/auth/README.md)   | Instance-auth hook + provisioning (server layer, under `platform/`, not a mounted service). See [Database](#database). |
-| [`testing`](services/testing/README.md) | Shared acceptance-test harness (not a mounted service).                                                                |
+Start the server with `bun start` and head to `http://localhost:3000` to see an
+overview of active services. Or go to `https://apollo.openfn.org` to see the
+production services.
 
 ## Database
 
@@ -275,7 +233,7 @@ them is safe:
 
 - [`services/load_adaptor_docs/schema.sql`](services/load_adaptor_docs/schema.sql)
   - `adaptor_function_docs`. This table is also created lazily the first time
-  `load_adaptor_docs` runs, so applying it by hand is optional.
+    `load_adaptor_docs` runs, so applying it by hand is optional.
 - `lightning_clients` - created and kept current by the migration runner
   (`platform/src/db/migrate.ts`, migrations under
   [`platform/migrations/`](platform/migrations/)). It is applied automatically
