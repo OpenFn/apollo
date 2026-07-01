@@ -14,6 +14,7 @@ The stub is deliberately minimal:
 """
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -23,6 +24,24 @@ from typing import Any
 
 _ENTRY_PY = Path(__file__).parent.parent / "entry.py"
 _SERVICES_DIR = Path(__file__).parent.parent
+_BOOTSTRAP_DIR = Path(__file__).parent / "_bootstrap"
+
+
+def _child_env() -> dict | None:
+    """Env for the service subprocess.
+
+    Returns None (inherit parent env unchanged) unless APOLLO_TIMING is set, in
+    which case we prepend the timing bootstrap dir to PYTHONPATH so the child's
+    sitecustomize installs span timing. Off by default, zero effect otherwise.
+    """
+    if not os.environ.get("APOLLO_TIMING"):
+        return None
+    env = os.environ.copy()
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (
+        f"{_BOOTSTRAP_DIR}{os.pathsep}{existing}" if existing else str(_BOOTSTRAP_DIR)
+    )
+    return env
 
 
 class ApolloClient:
@@ -55,6 +74,7 @@ class ApolloClient:
                 capture_output=True,
                 text=True,
                 cwd=_SERVICES_DIR,
+                env=_child_env(),
             )
             # Forward the subprocess's stdout/stderr to the test runner so
             # logger output from the service is visible under `pytest -s`.
