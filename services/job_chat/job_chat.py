@@ -91,6 +91,8 @@ def extract_page_prefix_from_last_turn(history: List[Dict[str, str]]) -> Optiona
 
     # Second-to-last turn is the last user message
     content = history[-2].get("content", "")
+    if not isinstance(content, str):
+        return None
 
     # Extract [pg:...] prefix if present
     if content.startswith("[pg:") and "]" in content:
@@ -667,6 +669,11 @@ def main(data_dict: dict) -> dict:
                 refresh_rag=should_refresh_rag,
                 current_page=current_page
             )
+
+            # Tag the trace when code was generated, so we can filter for it.
+            if tracking and result.suggested_code:
+                with propagate_attributes(tags=["has_code_attachment"]):
+                    pass
 
             response_dict = {
                 "response": result.response,

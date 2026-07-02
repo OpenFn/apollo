@@ -26,7 +26,7 @@ from streaming_util import (
 from global_chat.config_loader import ConfigLoader
 from models import resolve_model
 from global_chat.tools.tool_definitions import TOOL_DEFINITIONS
-from global_chat.yaml_utils import stitch_job_code, redact_job_bodies, find_job_in_yaml
+from global_chat.yaml_utils import stitch_job_code, redact_job_bodies, find_job_in_yaml, get_step_name_from_page
 from tools.search_documentation.search_documentation import search_documentation_tool
 from global_chat.subagent_caller import call_workflow_agent, call_job_agent, format_subagent_result_for_llm
 
@@ -96,7 +96,7 @@ class PlannerAgent:
         logger.info("Planner.run() called")
 
         stream_manager = StreamManager(model=self.model, stream=stream)
-        if self.current_yaml:
+        if workflow_yaml:
             stream_manager.send_thinking(STATUS_REVIEWING_WORKFLOW + STATUS_PLANNING)
         else:
             stream_manager.send_thinking(STATUS_NEW_WORKFLOW + STATUS_PLANNING)
@@ -110,13 +110,7 @@ class PlannerAgent:
 
         messages = history.copy() if history else []
 
-        # Give planner visibility into existing workflow structure (bodies redacted)
-        user_content = content
-        if self.current_yaml:
-            redacted = redact_job_bodies(self.current_yaml)
-            user_content = f"{content}\n\nExisting workflow structure (job code redacted):\n{redacted}"
-
-        messages.append({"role": "user", "content": user_content})
+        messages.append({"role": "user", "content": self._build_user_content(content, page)})
 
         tool_call_count = 0
         tool_calls_meta = []
@@ -167,23 +161,9 @@ class PlannerAgent:
 
                         logger.info(f"Executing {len(tool_use_blocks)} tool(s): {[b.name for b in tool_use_blocks]}")
 
-                        job_code_blocks = [b for b in tool_use_blocks if b.name == "call_job_code_agent"]
-                        other_blocks = [b for b in tool_use_blocks if b.name != "call_job_code_agent"]
-
-                        tool_results = []
-
-                        for tool_use_block in other_blocks:
-                            stream_manager.send_thinking(self._tool_status_message(tool_use_block))
-                            tool_result = self._execute_tool(tool_use_block, total_usage, tool_calls_meta)
-                            tool_results.append(
-                                {"type": "tool_result", "tool_use_id": tool_use_block.id, "content": tool_result}
-                            )
-
-                        if job_code_blocks:
-                            job_results = self._execute_job_code_tools_parallel(
-                                job_code_blocks, stream_manager, total_usage, tool_calls_meta
-                            )
-                            tool_results.extend(job_results)
+                        tool_results = self._execute_tool_blocks(
+                            tool_use_blocks, stream_manager, total_usage, tool_calls_meta
+                        )
 
                         content_blocks = []
                         for block in response.content:
@@ -253,10 +233,16 @@ class PlannerAgent:
         if self.yaml_modified and self.current_yaml:
             attachments.append({"type": "workflow_yaml", "content": self.current_yaml})
 
+        # Return string-content history matching the direct routes, not the
+        # internal block-format messages used by the tool-calling loop.
+        return_history = (history.copy() if history else [])
+        return_history.append({"role": "user", "content": content})
+        return_history.append({"role": "assistant", "content": final_text})
+
         return PlannerResult(
             response=final_text,
             attachments=attachments,
-            history=messages,
+            history=return_history,
             usage=total_usage,
             meta={
                 "agents": agents_used,
@@ -266,6 +252,27 @@ class PlannerAgent:
                 "total_tool_calls": tool_call_count,
             },
         )
+
+    def _build_user_content(self, content: str, page: Optional[str]) -> str:
+        """Augment the user message with the step the user is viewing ("this step")
+        and the existing workflow structure (bodies redacted)."""
+        user_content = content
+
+        if page:
+            step_name = get_step_name_from_page(page)
+            if step_name and self.current_yaml:
+                matched_key, _ = find_job_in_yaml(self.current_yaml, step_name)
+                step_name = matched_key or step_name
+            if step_name:
+                user_content += f"\n\n(The user is currently viewing the step '{step_name}' — \"this step\" refers to it.)"
+            else:
+                user_content += f"\n\n(The user is currently viewing: {page})"
+
+        if self.current_yaml:
+            redacted = redact_job_bodies(self.current_yaml)
+            user_content += f"\n\nExisting workflow structure (job code redacted):\n{redacted}"
+
+        return user_content
 
     def _call_api(self, system_prompt, messages, stream):
         """Make Claude API call. When streaming, buffers text deltas for the caller to flush.
@@ -332,13 +339,18 @@ class PlannerAgent:
             tool_calls_meta.append({"tool": "search_documentation", "input": tool_use_block.input})
 
         elif tool_use_block.name == "call_workflow_agent":
-            subagent_result = call_workflow_agent(
-                tool_use_block.input,
-                workflow_yaml=self.current_yaml,
-                api_key=self.api_key,
-                user=self._user,
-                metrics_opt_in=self._metrics_opt_in,
-            )
+            try:
+                subagent_result = call_workflow_agent(
+                    tool_use_block.input,
+                    workflow_yaml=self.current_yaml,
+                    api_key=self.api_key,
+                    user=self._user,
+                    metrics_opt_in=self._metrics_opt_in,
+                )
+            except Exception as e:
+                logger.exception("call_workflow_agent failed")
+                tool_calls_meta.append({"tool": "call_workflow_agent", "input": tool_use_block.input, "error": str(e)})
+                return f"ERROR: The workflow agent failed: {e}. The workflow was not changed."
 
             if "usage" in subagent_result:
                 total_usage.update(sum_usage(total_usage, subagent_result["usage"]))
@@ -352,10 +364,15 @@ class PlannerAgent:
 
             tool_result = format_subagent_result_for_llm(subagent_result)
 
-            # Give planner a fresh structural view after each workflow change
-            if self.current_yaml:
+            # Give planner a fresh structural view after each workflow change.
+            # If no YAML came back, nothing changed — say so instead of re-sending
+            # the unchanged structure (a conversational reply or a failed YAML
+            # parse would otherwise read as a successful edit).
+            if subagent_result.get("response_yaml"):
                 redacted = redact_job_bodies(self.current_yaml)
                 tool_result += f"\n\nUpdated workflow structure:\n{redacted}"
+            else:
+                tool_result += "\n\n[No workflow changes were made — no YAML was produced.]"
 
             tool_calls_meta.append({"tool": "call_workflow_agent", "input": tool_use_block.input})
 
@@ -377,13 +394,18 @@ class PlannerAgent:
                     )
                     return tool_result
 
-            subagent_result = call_job_agent(
-                tool_use_block.input,
-                workflow_yaml=self.current_yaml,
-                api_key=self.api_key,
-                user=self._user,
-                metrics_opt_in=self._metrics_opt_in,
-            )
+            try:
+                subagent_result = call_job_agent(
+                    tool_use_block.input,
+                    workflow_yaml=self.current_yaml,
+                    api_key=self.api_key,
+                    user=self._user,
+                    metrics_opt_in=self._metrics_opt_in,
+                )
+            except Exception as e:
+                logger.exception("call_job_code_agent failed")
+                tool_calls_meta.append({"tool": "call_job_code_agent", "input": tool_use_block.input, "error": str(e)})
+                return f"ERROR: The job code agent failed: {e}. No code was generated for this job."
 
             if "usage" in subagent_result:
                 total_usage.update(sum_usage(total_usage, subagent_result["usage"]))
@@ -393,30 +415,44 @@ class PlannerAgent:
             # (case, hyphens vs underscores, or the job's name field), and
             # stitch_job_code does an exact key match.
             suggested_code = subagent_result.get("suggested_code")
+            stitched = False
             if matched_job_key and suggested_code and self.current_yaml:
                 self.current_yaml = stitch_job_code(self.current_yaml, matched_job_key, suggested_code)
                 self.yaml_modified = True
+                stitched = True
                 logger.info(f"Stitched code for job '{matched_job_key}' into current_yaml")
 
             self.subagent_results.append(subagent_result)
             tool_result = format_subagent_result_for_llm(subagent_result)
-            if suggested_code:
+            if stitched:
                 tool_result += "\n\n[Job code generated and stitched into the workflow.]"
+            elif suggested_code:
+                tool_result += "\n\n[Job code was generated but NOT added to the workflow — no job_key matched. Retry with the exact job key.]"
             else:
                 tool_result += "\n\n[No job code was generated.]"
 
             tool_calls_meta.append({"tool": "call_job_code_agent", "input": tool_use_block.input})
 
         elif tool_use_block.name == "inspect_job_code":
-            job_key = tool_use_block.input.get("job_key")
+            # Accept job_keys (list); tolerate legacy single job_key
+            job_keys = tool_use_block.input.get("job_keys") or []
+            single_key = tool_use_block.input.get("job_key")
+            if single_key:
+                job_keys.append(single_key)
+
             if not self.current_yaml:
                 tool_result = "No workflow available to inspect."
+            elif not job_keys:
+                tool_result = "ERROR: No job keys provided."
             else:
-                _, job_data = find_job_in_yaml(self.current_yaml, job_key)
-                if job_data and job_data.get("body"):
-                    tool_result = f"Job code for '{job_key}':\n\n{job_data['body']}"
-                else:
-                    tool_result = f"No code found for job '{job_key}'."
+                parts = []
+                for job_key in job_keys:
+                    _, job_data = find_job_in_yaml(self.current_yaml, job_key)
+                    if job_data and job_data.get("body"):
+                        parts.append(f"Job code for '{job_key}':\n\n{job_data['body']}")
+                    else:
+                        parts.append(f"No code found for job '{job_key}'.")
+                tool_result = "\n\n".join(parts)
 
             tool_calls_meta.append({"tool": "inspect_job_code", "input": tool_use_block.input})
 
@@ -425,6 +461,36 @@ class PlannerAgent:
             tool_result = f"Error: Unknown tool {tool_use_block.name}"
 
         return tool_result
+
+    def _execute_tool_blocks(self, tool_use_blocks, stream_manager, total_usage, tool_calls_meta):
+        """Run a batch of tool_use blocks in a deliberate order and collect results.
+
+        Ordering is load-bearing: workflow-structure tools (and any other
+        non-job tools) run FIRST and mutate ``self.current_yaml``, then the
+        job-code tools run against that updated YAML. The prompt tells the
+        planner never to mix call_workflow_agent and call_job_code_agent in one
+        step, but if it does anyway, this order is what keeps job code stitched
+        into the freshly-modified workflow rather than a stale snapshot.
+        """
+        job_code_blocks = [b for b in tool_use_blocks if b.name == "call_job_code_agent"]
+        other_blocks = [b for b in tool_use_blocks if b.name != "call_job_code_agent"]
+
+        tool_results = []
+
+        for tool_use_block in other_blocks:
+            stream_manager.send_thinking(self._tool_status_message(tool_use_block))
+            tool_result = self._execute_tool(tool_use_block, total_usage, tool_calls_meta)
+            tool_results.append(
+                {"type": "tool_result", "tool_use_id": tool_use_block.id, "content": tool_result}
+            )
+
+        if job_code_blocks:
+            job_results = self._execute_job_code_tools_parallel(
+                job_code_blocks, stream_manager, total_usage, tool_calls_meta
+            )
+            tool_results.extend(job_results)
+
+        return tool_results
 
     def _execute_job_code_tools_parallel(self, blocks, stream_manager, total_usage, tool_calls_meta):
         """Execute multiple call_job_code_agent tools with parallel API calls.
@@ -481,16 +547,24 @@ class PlannerAgent:
                 }
                 for future in as_completed(futures):
                     block = futures[future]
-                    parallel_results[block.id] = future.result()
+                    try:
+                        parallel_results[block.id] = future.result()
+                    except Exception as e:
+                        logger.exception("call_job_code_agent failed")
+                        parallel_results[block.id] = {"_error": str(e)}
         elif to_run:
             block = to_run[0]
-            parallel_results[block.id] = call_job_agent(
-                block.input,
-                self.current_yaml,
-                self.api_key,
-                self._user,
-                self._metrics_opt_in,
-            )
+            try:
+                parallel_results[block.id] = call_job_agent(
+                    block.input,
+                    self.current_yaml,
+                    self.api_key,
+                    self._user,
+                    self._metrics_opt_in,
+                )
+            except Exception as e:
+                logger.exception("call_job_code_agent failed")
+                parallel_results[block.id] = {"_error": str(e)}
 
         # Stitch results and update state sequentially
         tool_results = []
@@ -502,21 +576,33 @@ class PlannerAgent:
                 continue
 
             subagent_result = parallel_results[block.id]
+            if "_error" in subagent_result:
+                tool_calls_meta.append({"tool": "call_job_code_agent", "input": block.input, "error": subagent_result["_error"]})
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": f"ERROR: The job code agent failed: {subagent_result['_error']}. No code was generated for this job.",
+                })
+                continue
             matched_job_key = matched_keys.get(block.id)
 
             if "usage" in subagent_result:
                 total_usage.update(sum_usage(total_usage, subagent_result["usage"]))
 
             suggested_code = subagent_result.get("suggested_code")
+            stitched = False
             if matched_job_key and suggested_code and self.current_yaml:
                 self.current_yaml = stitch_job_code(self.current_yaml, matched_job_key, suggested_code)
                 self.yaml_modified = True
+                stitched = True
                 logger.info(f"Stitched code for job '{matched_job_key}' into current_yaml")
 
             self.subagent_results.append(subagent_result)
             tool_result = format_subagent_result_for_llm(subagent_result)
-            if suggested_code:
+            if stitched:
                 tool_result += "\n\n[Job code generated and stitched into the workflow.]"
+            elif suggested_code:
+                tool_result += "\n\n[Job code was generated but NOT added to the workflow — no job_key matched. Retry with the exact job key.]"
             else:
                 tool_result += "\n\n[No job code was generated.]"
 
@@ -551,10 +637,11 @@ class PlannerAgent:
             return "Writing job code..."
 
         if name == "inspect_job_code":
-            job_key = inputs.get("job_key")
-            display_name = self._display_name_for_job(job_key)
-            if display_name:
-                return f"Reading code for \"{display_name}\"..."
+            job_keys = inputs.get("job_keys") or ([inputs["job_key"]] if inputs.get("job_key") else [])
+            display_names = [n for n in (self._display_name_for_job(k) for k in job_keys) if n]
+            if display_names:
+                joined = ", ".join(f"\"{n}\"" for n in display_names)
+                return f"Reading code for {joined}..."
             return "Reading job code..."
 
         return f"Running {name}..."

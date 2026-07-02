@@ -6,6 +6,7 @@ Routes requests to workflow_chat, job_chat, or planner based on user intent.
 
 import os
 import json
+import yaml
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 from anthropic import Anthropic
@@ -20,7 +21,7 @@ from langfuse import observe
 from util import create_logger, ApolloError, sum_usage
 from global_chat.config_loader import ConfigLoader
 from models import resolve_model
-from global_chat.yaml_utils import get_step_name_from_page, find_job_in_yaml, stitch_job_code
+from global_chat.yaml_utils import get_step_name_from_page, find_job_in_yaml, stitch_job_code, workflow_has_job_code
 
 logger = create_logger(__name__)
 
@@ -206,6 +207,10 @@ class RouterAgent:
 
         if workflow_yaml:
             parts.append(f"\n[Workflow YAML attached, length: {len(workflow_yaml)} chars]")
+            if workflow_has_job_code(workflow_yaml):
+                parts.append("[Steps contain job code]")
+            else:
+                parts.append("[All step bodies are empty/placeholder]")
             parts.append(f"YAML content:\n{workflow_yaml}")
 
         return "\n".join(parts)
@@ -295,8 +300,25 @@ class RouterAgent:
                     matched_job_key, job_data = find_job_in_yaml(workflow_yaml, page_step)
 
         if matched_job_key is None:
+            # Distinguish the failure modes so the cause is visible in logs:
+            # no YAML sent vs. a YAML shape we can't read (e.g. Lightning's
+            # project format nests jobs under `workflows:` rather than a
+            # top-level `jobs:`) vs. YAML present but the job name not found.
+            if not workflow_yaml:
+                reason = "no workflow_yaml was provided in the request"
+            else:
+                try:
+                    parsed = yaml.safe_load(workflow_yaml)
+                    if not isinstance(parsed, dict):
+                        reason = "workflow_yaml did not parse to a mapping"
+                    elif "jobs" not in parsed:
+                        reason = f"workflow_yaml has no top-level 'jobs' key (top-level keys: {list(parsed.keys())})"
+                    else:
+                        reason = f"job not found among keys {list(parsed['jobs'].keys())}"
+                except Exception as e:
+                    reason = f"workflow_yaml failed to parse: {e}"
             logger.warning(
-                f"No job found in YAML for router_job_key='{router_job_key}' or page='{page}'",
+                f"No job matched for router_job_key='{router_job_key}' or page='{page}': {reason}"
             )
 
         if job_data:
@@ -324,21 +346,17 @@ class RouterAgent:
         result = job_chat_main(payload)
         total_usage = sum_usage(self.routing_usage, result["usage"])
 
-        # Stitch suggested_code back into workflow YAML
-        updated_yaml = None
-        if result.get("suggested_code") and workflow_yaml and matched_job_key:
-            updated_yaml = stitch_job_code(workflow_yaml, matched_job_key, result["suggested_code"])
-        elif result.get("suggested_code") and not matched_job_key:
-            logger.warning(f"suggested_code generated but no job matched for page '{page}' - YAML not updated")
-
+        # Stitch suggested_code back into the workflow YAML. The full YAML is
+        # the only artifact returned — no separate job_code attachment.
         attachments = []
         if result.get("suggested_code"):
-            job_code_attachment = {"type": "job_code", "content": result["suggested_code"]}
-            if matched_job_key:
-                job_code_attachment["job_key"] = matched_job_key
-            attachments.append(job_code_attachment)
-        if updated_yaml:
-            attachments.append({"type": "workflow_yaml", "content": updated_yaml})
+            if workflow_yaml and matched_job_key:
+                updated_yaml = stitch_job_code(workflow_yaml, matched_job_key, result["suggested_code"])
+                attachments.append({"type": "workflow_yaml", "content": updated_yaml})
+            else:
+                logger.warning(
+                    f"suggested_code generated but no job matched for page '{page}' - code dropped from response"
+                )
 
         return RouterResult(
             response=result["response"],
