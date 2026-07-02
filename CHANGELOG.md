@@ -1,5 +1,11 @@
 # apollo
 
+## 3.0.1
+
+### Patch Changes
+
+- removed debug log line
+
 ## 3.0.0
 
 ### Major Changes

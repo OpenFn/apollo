@@ -334,7 +334,6 @@ export class InstanceAuth {
     }
 
     const apiKey = this.extractApiKey(ctx);
-    console.log(apiKey);
     if (!apiKey) {
       return this.globalKeyConfigured() ? undefined : unauthorized(ctx);
     }
