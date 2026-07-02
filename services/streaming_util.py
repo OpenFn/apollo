@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from models import CLAUDE_SONNET
+from util import get_job_writer
 
 # Shared status message pools for user-facing progress indicators.
 # Services compose from these to build context-specific pools.
@@ -130,9 +131,15 @@ class StreamManager:
             event_type: SSE event type (e.g., 'message_start', 'content_block_delta')
             data: Event data dictionary
         """
-        # Use EVENT: prefix format that bridge.ts expects
-        # Bridge will convert this to proper SSE format
-        if self.stream:
+        if not self.stream:
+            return
+        # In the worker, the context writer sends an EVENT message over the socket
+        # (it attaches this job's job_id). Standalone (bun py / CLI) there is no
+        # writer, so fall back to the EVENT: stdout protocol bridge.ts parses.
+        writer = get_job_writer()
+        if writer is not None:
+            writer({"type": "EVENT", "event": event_type, "data": data})
+        else:
             print(f"EVENT:{event_type}:{json.dumps(data)}", flush=True)  # noqa: T201
 
     def start_stream(self) -> None:

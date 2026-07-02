@@ -11,6 +11,7 @@ import { captureException } from "./util/sentry";
 import { clientsDbUrl, closeDb } from "./db";
 import { runMigrations } from "./db/migrate";
 import { randomUUID } from "node:crypto";
+import { startWorker, stopWorker } from "./bridge";
 import pkg from "../../package.json";
 
 export default async (
@@ -56,11 +57,16 @@ export default async (
   logInternalTokenProvenance(false);
   await auth.init();
 
-  // No stop path exists otherwise; close the DB pool so a graceful pod termination
-  // (or Ctrl-C in dev) exits cleanly without orphaned Postgres connections. In-flight
-  // requests, open SSE streams, and spawned Python children are intentionally not
-  // drained — termination drops them rather than waiting them out.
+  // Boot the single long-lived Python worker: Bun creates/owns the socket, then
+  // spawns the child that connects to it.
+  await startWorker();
+
+  // No stop path exists otherwise; kill the worker (no orphan), close the DB pool
+  // so a graceful pod termination (or Ctrl-C in dev) exits cleanly without orphaned
+  // Postgres connections. In-flight requests and open SSE streams are intentionally
+  // not drained — termination drops them rather than waiting them out.
   const shutdown = async () => {
+    await stopWorker();
     await closeDb();
     process.exit(0);
   };
