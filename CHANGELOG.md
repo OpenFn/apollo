@@ -1,5 +1,15 @@
 # apollo
 
+## 3.0.0
+
+### Major Changes
+
+- 57e49f0: enable global assistant multi step changes
+
+### Patch Changes
+
+- d46943e: add langfuse tag for job code generation
+
 ## 2.0.0
 
 ### Major Changes
