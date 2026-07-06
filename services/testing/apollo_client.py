@@ -27,12 +27,15 @@ _SERVICES_DIR = Path(__file__).parent.parent
 _BOOTSTRAP_DIR = Path(__file__).parent / "_bootstrap"
 
 
-def _child_env() -> dict | None:
+def _child_env(timing_file: "str | Path | None" = None) -> dict | None:
     """Env for the service subprocess.
 
     Returns None (inherit parent env unchanged) unless APOLLO_TIMING is set, in
     which case we prepend the timing bootstrap dir to PYTHONPATH so the child's
-    sitecustomize installs span timing. Off by default, zero effect otherwise.
+    sitecustomize installs span timing, and point APOLLO_TIMING_FILE at
+    `timing_file` (if given) so the waterfall is saved somewhere durable rather
+    than next to the throwaway --output tempfile. Off by default, zero effect
+    otherwise.
     """
     if not os.environ.get("APOLLO_TIMING"):
         return None
@@ -41,6 +44,8 @@ def _child_env() -> dict | None:
     env["PYTHONPATH"] = (
         f"{_BOOTSTRAP_DIR}{os.pathsep}{existing}" if existing else str(_BOOTSTRAP_DIR)
     )
+    if timing_file:
+        env["APOLLO_TIMING_FILE"] = str(timing_file)
     return env
 
 
@@ -51,9 +56,16 @@ class ApolloClient:
     Future (integration tier): POSTs to a long-lived bun server.
     """
 
-    def call(self, service_name: str, payload: dict) -> dict[str, Any]:
+    def call(
+        self,
+        service_name: str,
+        payload: dict,
+        timing_file: "str | Path | None" = None,
+    ) -> dict[str, Any]:
         """Invoke `service_name` with `payload`. Returns the parsed JSON response.
 
+        `timing_file` sets where the child saves its span-timing waterfall;
+        only meaningful when APOLLO_TIMING is set (ignored otherwise).
         Raises RuntimeError if the service exits non-zero.
         """
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as input_file:
@@ -74,7 +86,7 @@ class ApolloClient:
                 capture_output=True,
                 text=True,
                 cwd=_SERVICES_DIR,
-                env=_child_env(),
+                env=_child_env(timing_file),
             )
             # Forward the subprocess's stdout/stderr to the test runner so
             # logger output from the service is visible under `pytest -s`.

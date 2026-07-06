@@ -1,12 +1,14 @@
 import time
 from typing import Dict, List, Any
 import sentry_sdk
+from langfuse import observe
 from util import create_logger, ApolloError, AdaptorSpecifier, get_db_connection
 from load_adaptor_docs.load_adaptor_docs import load_adaptor_docs
 
 logger = create_logger("search_adaptor_docs")
 
 
+@observe(name="ensure_adaptor_docs_loaded")
 def ensure_docs_loaded(adaptor: AdaptorSpecifier, conn, skip_if_exists: bool = True) -> None:
     """
     Ensure adaptor documentation is loaded into the database.
@@ -56,6 +58,7 @@ def fetch_function_list(adaptor: AdaptorSpecifier, conn, auto_load: bool = False
         return [row[0] for row in rows]
 
 
+@observe(name="fetch_adaptor_signatures")
 def fetch_signatures(adaptor: AdaptorSpecifier, conn, auto_load: bool = False) -> dict:
     """Fetch function names with their signatures."""
     if auto_load:

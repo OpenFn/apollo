@@ -14,6 +14,7 @@ from dataclasses import dataclass
 # Import utilities from services directory
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
+from langfuse import observe
 from util import create_logger, ApolloError
 from search_docsite.search_docsite import DocsiteSearch
 
@@ -94,6 +95,7 @@ def main(data: Dict) -> Dict:
         raise ApolloError(500, f"Documentation search failed: {str(e)}")
 
 
+@observe(name="search_documentation_tool")
 def search_documentation_tool(tool_input: Dict) -> str:
     """
     Anthropic tool calling pattern - returns formatted string for LLM.

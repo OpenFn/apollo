@@ -13,6 +13,7 @@ Each item:
   5. Fails with the judge's reasoning summary if `verdict.passed` is False.
 """
 
+import os
 import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -102,12 +103,21 @@ class SpecItem(pytest.Item):
         payload = _build_payload(spec)
         client = ApolloClient()
 
-        print(f"  calling {spec.service}...", flush=True)
-        response = client.call(spec.service, payload)
-        print("  ✓ service responded")
-
         tmp_dir = self.path.parent / "tmp"
         experiment = _experiment_suffix(self.config)
+
+        # When APOLLO_TIMING is set, the service subprocess saves its span
+        # waterfall here (same tmp/ and naming as the yaml/txt captures).
+        run_suffix = f"__run-{self.run_index}" if spec.runs > 1 else ""
+        timing_file = tmp_dir / f"{spec.id.replace('/', '_')}{run_suffix}{experiment}.timing.txt"
+        if os.environ.get("APOLLO_TIMING"):
+            tmp_dir.mkdir(parents=True, exist_ok=True)
+
+        print(f"  calling {spec.service}...", flush=True)
+        response = client.call(spec.service, payload, timing_file=timing_file)
+        print("  ✓ service responded")
+        if os.environ.get("APOLLO_TIMING") and timing_file.exists():
+            print(f"  ✓ span timing saved to {timing_file}")
 
         yaml_path = _capture_response_yaml(
             response, spec.id, self.run_index, spec.runs, tmp_dir, experiment
