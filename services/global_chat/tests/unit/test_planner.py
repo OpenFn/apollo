@@ -22,6 +22,7 @@ def make_planner() -> PlannerAgent:
     planner.current_yaml = WORKFLOW_YAML
     planner.yaml_modified = False
     planner.subagent_results = []
+    planner._segments = []
     planner.api_key = "test-key"
     planner._user = None
     planner._metrics_opt_in = None

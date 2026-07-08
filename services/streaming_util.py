@@ -164,7 +164,7 @@ class StreamManager:
         self,
         thinking_text: str | list[str],
         signature: str | None = "signature_filler",
-    ) -> None:
+    ) -> str:
         """
         Send a thinking block with the given text.
         Creates a new content block, sends the thinking, and closes it.
@@ -174,6 +174,10 @@ class StreamManager:
                 one entry is picked at random — convenient for rotating
                 through status message pools.
             signature: Optional signature to include with the thinking
+
+        Returns:
+            The text that was sent (the picked entry when a list was passed),
+            so callers can record what the client actually saw.
         """
         if self.stream_ended:
             raise RuntimeError("Stream already ended")
@@ -213,6 +217,8 @@ class StreamManager:
         })
 
         self._close_block(block)
+
+        return thinking_text
 
     def start_thinking_block(self) -> None:
         """

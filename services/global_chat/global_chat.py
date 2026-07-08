@@ -108,6 +108,7 @@ def main(data_dict: dict) -> dict:
             # 5. Return structured response
             return {
                 "response": result.response,
+                "response_segments": result.response_segments,
                 "attachments": result.attachments,
                 "history": result.history,
                 "usage": result.usage,

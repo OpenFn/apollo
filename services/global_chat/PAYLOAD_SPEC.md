@@ -84,7 +84,12 @@ This document defines the input and output payload structure for the Global Agen
 
 ```json
 {
-  "response": "string",                  // Main text response
+  "response": "string",                  // Main text response (final answer)
+
+  "response_segments": [                 // Full transcript of the turn, in stream order
+    { "type": "status", "content": "Reviewing the workflow..." },
+    { "type": "text",   "content": "..." }
+  ],
 
   "attachments": [                       // Artifacts produced this turn
     {
@@ -96,8 +101,8 @@ This document defines the input and output payload structure for the Global Agen
   "history": [                           // Conversation history including this turn
     {
       "role": "user|assistant",
-      "content": "string | array"        // string for direct routes; array of content
-    }                                    // blocks (text, tool_use, tool_result) for planner path
+      "content": "string"
+    }
   ],
 
   "usage": {                             // Token usage (aggregated across all agents)
@@ -125,11 +130,17 @@ This document defines the input and output payload structure for the Global Agen
 
 ### Field Descriptions
 
-- **`response`** (string): The main text response from the agent.
+- **`response`** (string): The main text response from the agent — the final answer. On the planner path this is the text of the planner's last round only (narration from earlier rounds is not included).
+
+- **`response_segments`** (array): The full transcript of the turn in the order it was streamed, as `{"type", "content"}` objects. Two segment types:
+  - `text` — a text block from the model. On the planner path there is one per round of the tool-calling loop; the last one equals `response`.
+  - `status` — a user-facing status message ("Reviewing the workflow...", "Writing code for \"Fetch Patients\"...") exactly as it was shown in the stream (status pools are picked randomly, so this records the actual pick).
+
+  This lets the frontend persist and re-render the woven stream view after a page reload without reconstructing it from stream events. On direct routes (workflow_agent, job_code_agent) it is a single `text` segment wrapping `response` — statuses emitted internally by those subagents are not captured.
 
 - **`attachments`** (array): Artifacts produced during this turn. Each entry has a `type` and `content` field. An empty list `[]` means no artifacts were produced (e.g. a purely informational response). The only supported type is `workflow_yaml`: the full workflow YAML with any job code changes stitched in. Job code edits are never returned separately — the YAML is the single source of truth, which allows multi-step changes in one response.
 
-- **`history`** (array): Updated conversation history including the latest exchange. On direct routes (workflow_agent, job_code_agent), each entry has `content` as a string. On the planner path, entries may have `content` as an array of content blocks (`text`, `tool_use`, `tool_result`) — this is the raw Anthropic messages format from the tool-calling loop.
+- **`history`** (array): Updated conversation history including the latest exchange. Each entry has `content` as a string on every route. On the planner path the assistant entry contains only the final answer text — the pre-tool narration segments in `response` are not persisted to history.
 
 - **`usage`** (object): Token usage aggregated across all agents invoked (router + planner + sub-agents).
 
