@@ -86,9 +86,10 @@ This document defines the input and output payload structure for the Global Agen
 {
   "response": "string",                  // Main text response (final answer)
 
-  "response_segments": [                 // Full transcript of the turn, in stream order
-    { "type": "status", "content": "Reviewing the workflow..." },
-    { "type": "text",   "content": "..." }
+  "response_segments": [                 // Durable transcript of the turn, in stream order
+    { "type": "text",   "content": "I'll add the step..." },
+    { "type": "status", "content": "Edited workflow structure" },
+    { "type": "text",   "content": "Done! I added..." }
   ],
 
   "attachments": [                       // Artifacts produced this turn
@@ -132,11 +133,20 @@ This document defines the input and output payload structure for the Global Agen
 
 - **`response`** (string): The main text response from the agent — the final answer. On the planner path this is the text of the planner's last round only (narration from earlier rounds is not included).
 
-- **`response_segments`** (array): The full transcript of the turn in the order it was streamed, as `{"type", "content"}` objects. Two segment types:
+- **`response_segments`** (array): The durable transcript of the turn in the order it was streamed, as `{"type", "content"}` objects. Two segment types:
   - `text` — a text block from the model. On the planner path there is one per round of the tool-calling loop; the last one equals `response`.
-  - `status` — a user-facing status message ("Reviewing the workflow...", "Writing code for \"Fetch Patients\"...") exactly as it was shown in the stream (status pools are picked randomly, so this records the actual pick).
+  - `status` — a completed-action status line ("Edited workflow structure", "Wrote code for \"Fetch Patients\""). Only these settled lines are recorded; the transient "...ing" spinners shown while an action runs are never persisted.
 
-  This lets the frontend persist and re-render the woven stream view after a page reload without reconstructing it from stream events. On direct routes (workflow_agent, job_code_agent) it is a single `text` segment wrapping `response` — statuses emitted internally by those subagents are not captured.
+  This lets the frontend persist and re-render the woven view after a page reload without reconstructing it from stream events. On direct routes (workflow_agent, job_code_agent) it is a single `text` segment wrapping `response` — statuses emitted internally by those subagents are not captured.
+
+#### Streaming status events (planner path)
+
+Apollo classifies status messages by event type so the client never has to infer their meaning from the text:
+
+- **`thinking` events** (standard Anthropic thinking blocks) — transient progress spinners ("Reviewing the workflow...", "Writing code for \"X\"..."). Render live; each new status replaces the previous one; drop when the next text block starts. Never persist these.
+- **`status` events** (custom event, like `changes`) — completed-action lines. Payload is `{"type": "status", "content": "Edited workflow structure"}`, identical to a `response_segments` entry, so live events and reloaded segments render through the same code path. Persist these (they resolve the preceding spinner).
+
+Each tool beat streams as: `thinking` spinner → `changes` (if the workflow was modified) → `status` settled line → narration text.
 
 - **`attachments`** (array): Artifacts produced during this turn. Each entry has a `type` and `content` field. An empty list `[]` means no artifacts were produced (e.g. a purely informational response). The only supported type is `workflow_yaml`: the full workflow YAML with any job code changes stitched in. Job code edits are never returned separately — the YAML is the single source of truth, which allows multi-step changes in one response.
 

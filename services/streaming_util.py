@@ -164,7 +164,7 @@ class StreamManager:
         self,
         thinking_text: str | list[str],
         signature: str | None = "signature_filler",
-    ) -> str:
+    ) -> None:
         """
         Send a thinking block with the given text.
         Creates a new content block, sends the thinking, and closes it.
@@ -174,10 +174,6 @@ class StreamManager:
                 one entry is picked at random — convenient for rotating
                 through status message pools.
             signature: Optional signature to include with the thinking
-
-        Returns:
-            The text that was sent (the picked entry when a list was passed),
-            so callers can record what the client actually saw.
         """
         if self.stream_ended:
             raise RuntimeError("Stream already ended")
@@ -315,6 +311,24 @@ class StreamManager:
 
         self._close_open_blocks()
         self._emit_event('changes', changes_data)
+
+    def send_status(self, content: str) -> None:
+        """
+        Send a completed-action status ("Edited workflow structure") as a
+        custom `status` SSE event.
+
+        This is deliberately a different event type from the transient
+        spinners sent via send_thinking: thinking events are live progress
+        that the client replaces and never persists, while `status` events
+        are durable facts about what happened, which the client keeps. The
+        payload matches the `response_segments` entry shape so the client
+        can render live events and reloaded segments with the same code.
+        """
+        if not self.stream_started:
+            self.start_stream()
+
+        self._close_open_blocks()
+        self._emit_event('status', {"type": "status", "content": content})
 
     def end_stream(self, stop_reason: str = "end_turn") -> None:
         """

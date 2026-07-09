@@ -101,14 +101,13 @@ class PlannerAgent:
         self.yaml_modified = False
         self._user = user
         self._metrics_opt_in = metrics_opt_in
-        self._sent_yaml: Optional[str] = None
         self._segments: List[Dict] = []
 
         stream_manager = StreamManager(model=self.model, stream=stream)
         if workflow_yaml:
-            self._send_status(stream_manager, STATUS_REVIEWING_WORKFLOW + STATUS_PLANNING)
+            self._send_spinner(stream_manager, STATUS_REVIEWING_WORKFLOW + STATUS_PLANNING)
         else:
-            self._send_status(stream_manager, STATUS_NEW_WORKFLOW + STATUS_PLANNING)
+            self._send_spinner(stream_manager, STATUS_NEW_WORKFLOW + STATUS_PLANNING)
 
         system_prompt = self._build_system_prompt()
 
@@ -147,11 +146,6 @@ class PlannerAgent:
                         self._segments.append({"type": "text", "content": round_text})
 
                     if response.stop_reason == "end_turn":
-                        # Covers non-streaming mode and the no-text edge case;
-                        # when streaming, the YAML was already sent before the
-                        # first text delta.
-                        self._send_pending_yaml(stream_manager)
-
                         messages.append({"role": "assistant", "content": round_text})
                         logger.info(f"Tool loop completed. Total calls: {tool_call_count}")
                         break
@@ -314,7 +308,7 @@ class PlannerAgent:
             ) as stream_obj:
                 for event in stream_obj:
                     if event.type == "content_block_delta" and event.delta.type == "text_delta":
-                        self._forward_text_delta(event.delta.text, stream_manager)
+                        stream_manager.send_text(event.delta.text)
                 return stream_obj.get_final_message()
         else:
             response = self.client.beta.messages.create(
@@ -344,42 +338,46 @@ class PlannerAgent:
             )
             return response
 
-    def _forward_text_delta(self, text: str, stream_manager) -> None:
-        """Stream one text delta, sending any pending YAML first.
+    def _send_yaml(self, stream_manager) -> None:
+        """Stream the current YAML as a changes event.
 
-        The client renders workflow changes before the text that references
-        them, so any YAML modified since the last send goes out first.
+        Called wherever the YAML is actually updated (workflow edit, job-code
+        stitch), so each change reaches the client the moment it happens — e.g.
+        a newly added step renders before its code is written. No-op in
+        non-streaming mode, where the final payload's attachment carries the
+        YAML instead.
         """
-        self._send_pending_yaml(stream_manager)
-        stream_manager.send_text(text)
+        stream_manager.send_changes({"yaml": self.current_yaml})
 
-    def _send_pending_yaml(self, stream_manager) -> None:
-        """Send the current YAML as a changes event if it hasn't been sent yet."""
-        if self.yaml_modified and self.current_yaml and self.current_yaml != self._sent_yaml:
-            stream_manager.send_changes({"yaml": self.current_yaml})
-            self._sent_yaml = self.current_yaml
+    def _send_spinner(self, stream_manager, status: str | list[str]) -> None:
+        """Send a transient "...ing" spinner as a thinking event.
 
-    def _send_status(self, stream_manager, status: str | list[str] | None, record: bool = False) -> None:
-        """Send a status message.
-
-        Spinners ("...ing") are sent live but NOT recorded (record=False): the
-        client collapses consecutive statuses, so each spinner is replaced by
-        the settled past-tense line sent once the action finishes. Only the
-        settled line is recorded (record=True), so `response_segments` carries
-        just those lines and re-renders the same collapsed view on reload. A
-        None status is a no-op (an action that left nothing worth showing).
+        Thinking events are live progress only: the client replaces each one
+        with the next status and never persists them, so spinners are not
+        recorded in the transcript.
         """
-        if status is None:
+        stream_manager.send_thinking(status)
+
+    def _send_settled(self, stream_manager, content: str | None) -> None:
+        """Send a completed-action line ("Edited workflow structure") as a
+        custom `status` event and record it in the transcript.
+
+        Unlike spinners, these are durable facts about what happened: the
+        client persists them (they resolve the preceding spinner), and they
+        are recorded in `response_segments` so a page reload re-renders the
+        same view. None means the action left nothing worth showing (e.g. a
+        consult that changed nothing) — nothing is sent or recorded.
+        """
+        if not content:
             return
-        sent = stream_manager.send_thinking(status)
-        if record:
-            self._segments.append({"type": "status", "content": sent})
+        stream_manager.send_status(content)
+        self._segments.append({"type": "status", "content": content})
 
     def _find_all_tool_uses(self, content):
         """Find all tool_use blocks in response content."""
         return [block for block in content if block.type == "tool_use"]
 
-    def _execute_tool(self, tool_use_block, total_usage, tool_calls_meta) -> str:
+    def _execute_tool(self, tool_use_block, stream_manager, total_usage, tool_calls_meta) -> str:
         """Execute a single tool call and return the result string."""
         if tool_use_block.name == "search_documentation":
             tool_result = search_documentation_tool(tool_use_block.input)
@@ -403,10 +401,11 @@ class PlannerAgent:
             if "usage" in subagent_result:
                 total_usage.update(sum_usage(total_usage, subagent_result["usage"]))
 
-            # Update live state eagerly
+            # Update live state and stream the change in the same breath
             if subagent_result.get("response_yaml"):
                 self.current_yaml = subagent_result["response_yaml"]
                 self.yaml_modified = True
+                self._send_yaml(stream_manager)
 
             self.subagent_results.append(subagent_result)
 
@@ -468,6 +467,7 @@ class PlannerAgent:
                 self.current_yaml = stitch_job_code(self.current_yaml, matched_job_key, suggested_code)
                 self.yaml_modified = True
                 stitched = True
+                self._send_yaml(stream_manager)
                 logger.info(f"Stitched code for job '{matched_job_key}' into current_yaml")
 
             self.subagent_results.append(subagent_result)
@@ -526,12 +526,10 @@ class PlannerAgent:
         tool_results = []
 
         for tool_use_block in other_blocks:
-            self._send_status(stream_manager, self._tool_status_message(tool_use_block))
+            self._send_spinner(stream_manager, self._tool_status_message(tool_use_block))
             yaml_before = self.current_yaml
-            tool_result = self._execute_tool(tool_use_block, total_usage, tool_calls_meta)
-            self._send_status(
-                stream_manager, self._settled_status_message(tool_use_block, yaml_before), record=True
-            )
+            tool_result = self._execute_tool(tool_use_block, stream_manager, total_usage, tool_calls_meta)
+            self._send_settled(stream_manager, self._settled_status_message(tool_use_block, yaml_before))
             tool_results.append(
                 {"type": "tool_result", "tool_use_id": tool_use_block.id, "content": tool_result}
             )
@@ -558,7 +556,7 @@ class PlannerAgent:
             status = f"Writing code for {joined}..."
         else:
             status = "Writing job code..."
-        self._send_status(stream_manager, status)
+        self._send_spinner(stream_manager, status)
 
         # Validate and prepare — skip invalid ones before launching threads.
         # matched_keys carries the YAML key resolved by find_job_in_yaml's
@@ -666,11 +664,12 @@ class PlannerAgent:
             )
 
         # Settle the spinner with the steps that were actually applied (drop any
-        # that failed to stitch); nothing recorded if none applied.
-        applied = [n for n in stitched_names if n]
-        if applied:
-            joined = ", ".join(f"\"{n}\"" for n in applied)
-            self._send_status(stream_manager, f"Wrote code for {joined}", record=True)
+        # that failed to stitch); nothing sent if none applied. One YAML send
+        # covers the whole batch, mirroring the one combined status.
+        if stitched_names:
+            self._send_yaml(stream_manager)
+            joined = ", ".join(f"\"{n}\"" for n in stitched_names)
+            self._send_settled(stream_manager, f"Wrote code for {joined}")
 
         return tool_results
 
