@@ -359,10 +359,21 @@ class PlannerAgent:
             stream_manager.send_changes({"yaml": self.current_yaml})
             self._sent_yaml = self.current_yaml
 
-    def _send_status(self, stream_manager, status: str | list[str]) -> None:
-        """Send a status message and record it as a response segment."""
+    def _send_status(self, stream_manager, status: str | list[str] | None, record: bool = False) -> None:
+        """Send a status message.
+
+        Spinners ("...ing") are sent live but NOT recorded (record=False): the
+        client collapses consecutive statuses, so each spinner is replaced by
+        the settled past-tense line sent once the action finishes. Only the
+        settled line is recorded (record=True), so `response_segments` carries
+        just those lines and re-renders the same collapsed view on reload. A
+        None status is a no-op (an action that left nothing worth showing).
+        """
+        if status is None:
+            return
         sent = stream_manager.send_thinking(status)
-        self._segments.append({"type": "status", "content": sent})
+        if record:
+            self._segments.append({"type": "status", "content": sent})
 
     def _find_all_tool_uses(self, content):
         """Find all tool_use blocks in response content."""
@@ -516,7 +527,11 @@ class PlannerAgent:
 
         for tool_use_block in other_blocks:
             self._send_status(stream_manager, self._tool_status_message(tool_use_block))
+            yaml_before = self.current_yaml
             tool_result = self._execute_tool(tool_use_block, total_usage, tool_calls_meta)
+            self._send_status(
+                stream_manager, self._settled_status_message(tool_use_block, yaml_before), record=True
+            )
             tool_results.append(
                 {"type": "tool_result", "tool_use_id": tool_use_block.id, "content": tool_result}
             )
@@ -605,6 +620,7 @@ class PlannerAgent:
 
         # Stitch results and update state sequentially
         tool_results = []
+        stitched_names = []
         for block in blocks:
             if block.id in skipped:
                 tool_results.append(
@@ -632,6 +648,7 @@ class PlannerAgent:
                 self.current_yaml = stitch_job_code(self.current_yaml, matched_job_key, suggested_code)
                 self.yaml_modified = True
                 stitched = True
+                stitched_names.append(self._display_name_for_job(matched_job_key))
                 logger.info(f"Stitched code for job '{matched_job_key}' into current_yaml")
 
             self.subagent_results.append(subagent_result)
@@ -648,6 +665,13 @@ class PlannerAgent:
                 {"type": "tool_result", "tool_use_id": block.id, "content": tool_result}
             )
 
+        # Settle the spinner with the steps that were actually applied (drop any
+        # that failed to stitch); nothing recorded if none applied.
+        applied = [n for n in stitched_names if n]
+        if applied:
+            joined = ", ".join(f"\"{n}\"" for n in applied)
+            self._send_status(stream_manager, f"Wrote code for {joined}", record=True)
+
         return tool_results
 
     def _tool_status_message(self, tool_use_block) -> str:
@@ -663,7 +687,7 @@ class PlannerAgent:
 
         if name == "call_workflow_agent":
             if self.current_yaml:
-                return "Editing workflow..."
+                return "Reviewing the workflow..."
             return "Building workflow outline..."
 
         if name == "call_job_code_agent":
@@ -682,6 +706,38 @@ class PlannerAgent:
             return "Reading job code..."
 
         return f"Running {name}..."
+
+    def _settled_status_message(self, tool_use_block, yaml_before: str | None) -> str | None:
+        """Past-tense line that resolves the spinner for a finished tool call.
+
+        Counterpart to _tool_status_message. For workflow edits the outcome is
+        read from whether the YAML actually changed: an unchanged workflow means
+        the agent only advised (or errored), so it settles to "Analyzed the
+        workflow" rather than claiming an edit. Returns None when there's
+        nothing worth persisting. Job-code settling is handled where the code is
+        stitched, since it depends on which steps were applied.
+        """
+        name = tool_use_block.name
+        inputs = tool_use_block.input or {}
+
+        if name == "call_workflow_agent":
+            if self.current_yaml == yaml_before:
+                return "Analyzed the workflow"
+            return "Edited workflow structure" if yaml_before else "Built workflow outline"
+
+        if name == "search_documentation":
+            query = inputs.get("query")
+            return f"Searched documentation for \"{query}\"" if query else "Searched documentation"
+
+        if name == "inspect_job_code":
+            job_keys = inputs.get("job_keys") or ([inputs["job_key"]] if inputs.get("job_key") else [])
+            names = [n for n in (self._display_name_for_job(k) for k in job_keys) if n]
+            if names:
+                joined = ", ".join(f"\"{n}\"" for n in names)
+                return f"Read code for {joined}"
+            return "Read code"
+
+        return None
 
     def _display_name_for_job(self, job_key: str | None) -> str | None:
         """Look up a human-readable display name for a job key.
