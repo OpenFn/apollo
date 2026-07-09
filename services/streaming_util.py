@@ -214,8 +214,6 @@ class StreamManager:
 
         self._close_block(block)
 
-        return thinking_text
-
     def start_thinking_block(self) -> None:
         """
         Start a new thinking block for incremental streaming.
