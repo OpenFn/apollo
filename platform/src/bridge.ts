@@ -67,6 +67,10 @@ function resetReady() {
     resolveReady = res;
     rejectReady = rej;
   });
+  // The circuit breaker rejects this even when no request is awaiting it; a no-op
+  // catch keeps that from surfacing as an unhandled rejection (real awaiters
+  // attach their own handler via withTimeout)
+  workerReady.catch(() => {});
 }
 resetReady();
 
