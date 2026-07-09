@@ -48,6 +48,7 @@ testpaths = [
     "services/global_chat/tests",
     "services/workflow_chat/tests",
     "services/job_chat/tests",
+    "services/latest_adaptors/tests",
     "services/search_docsite/tests",
     "services/tools",
 ]
