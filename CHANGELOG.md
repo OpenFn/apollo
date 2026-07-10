@@ -1,5 +1,12 @@
 # apollo
 
+## 3.0.2
+
+### Patch Changes
+
+- 7939e6a: add incremental cache update in latest adaptors service
+- 5b2ab52: Security updates
+
 ## 3.0.1
 
 ### Patch Changes
