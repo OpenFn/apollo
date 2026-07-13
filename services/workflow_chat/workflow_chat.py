@@ -42,7 +42,7 @@ from anthropic import (
 )
 import sentry_sdk
 from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
-from langfuse_util import should_track, build_tags
+from langfuse_util import should_track, build_tags, build_generation_diff
 from util import ApolloError, create_logger, add_page_prefix, APOLLO_VERSION
 from .gen_project_prompt import build_prompt
 from workflow_chat.available_adaptors import get_available_adaptors
@@ -688,6 +688,15 @@ def main(data_dict: dict) -> dict:
                 current_page=current_page,
                 read_only=data.read_only
             )
+
+            if tracking:
+                diff_meta = build_generation_diff(
+                    original=data.existing_yaml,
+                    generated=result.content_yaml,
+                    yaml_mode=True,
+                )
+                if diff_meta:
+                    langfuse.update_current_span(metadata=diff_meta)
 
             # Build response
             response_dict = {

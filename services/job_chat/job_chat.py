@@ -18,7 +18,7 @@ from anthropic import (
 )
 import sentry_sdk
 from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
-from langfuse_util import should_track, build_tags
+from langfuse_util import should_track, build_tags, build_generation_diff
 from util import ApolloError, create_logger, AdaptorSpecifier, add_page_prefix, APOLLO_VERSION
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
@@ -674,6 +674,14 @@ def main(data_dict: dict) -> dict:
             if tracking and result.suggested_code:
                 with propagate_attributes(tags=["has_code_attachment"]):
                     pass
+
+            if tracking:
+                diff_meta = build_generation_diff(
+                    original=data.context.get("expression"),
+                    generated=result.suggested_code,
+                )
+                if diff_meta:
+                    langfuse.update_current_span(metadata=diff_meta)
 
             response_dict = {
                 "response": result.response,
