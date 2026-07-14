@@ -17,6 +17,7 @@ ThreadingInstrumentor().instrument()
 
 from langfuse import Langfuse
 from langfuse.span_filter import is_default_export_span
+from langfuse_util import mask_secrets
 
 
 def _should_export_span(span):
@@ -27,7 +28,11 @@ def _should_export_span(span):
     return is_default_export_span(span)
 
 
-langfuse = Langfuse(should_export_span=_should_export_span, release=os.getenv("APOLLO_VERSION", "unknown"))
+langfuse = Langfuse(
+    should_export_span=_should_export_span,
+    mask=mask_secrets,
+    release=os.getenv("APOLLO_VERSION", "unknown"),
+)
 
 env = os.getenv('ENVIRONMENT', 'unknown')
 trace_rates = {
