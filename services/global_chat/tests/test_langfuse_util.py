@@ -5,7 +5,7 @@ from pathlib import Path
 services_dir = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(services_dir))
 
-from langfuse_util import should_track, build_tags, build_generation_diff  # noqa: E402, I001
+from langfuse_util import should_track, build_tags, build_generation_diff, mask_secrets  # noqa: E402, I001
 
 
 def test_metrics_opt_in_true_is_tracked() -> None:
@@ -90,3 +90,36 @@ def test_yaml_mode_falls_back_to_raw_diff_on_invalid_yaml() -> None:
     meta = build_generation_diff("{not: valid: yaml", "still generated", yaml_mode=True)
     assert meta is not None
     assert "+still generated" in meta["generation_diff"]
+def test_mask_redacts_api_key_at_any_depth() -> None:
+    # Shape of @observe-captured input: {"args": [...], "kwargs": {...}}
+    data = {"args": ["question"], "kwargs": {"api_key": "sk-ant-abc123", "code": "fn(s => s);"}}
+    masked = mask_secrets(data)
+    assert masked["kwargs"]["api_key"] == "[REDACTED]"
+    assert masked["kwargs"]["code"] == "fn(s => s);"
+    assert masked["args"] == ["question"]
+
+
+def test_mask_redacts_all_secret_key_names() -> None:
+    data = {"anthropic_api_key": "abc", "Authorization": "Bearer xyz", "model": "claude"}
+    masked = mask_secrets(data)
+    assert masked["anthropic_api_key"] == "[REDACTED]"
+    assert masked["Authorization"] == "[REDACTED]"
+    assert masked["model"] == "claude"
+
+
+def test_mask_redacts_key_shaped_strings_in_free_text() -> None:
+    masked = mask_secrets("client = Anthropic(api_key='sk-ant-api03-xYz_9')")
+    assert "sk-ant" not in masked
+    assert masked == "client = Anthropic(api_key='[REDACTED]')"
+
+
+def test_mask_preserves_none_and_non_string_values() -> None:
+    assert mask_secrets({"api_key": None}) == {"api_key": None}
+    assert mask_secrets({"usage": {"input_tokens": 5}}) == {"usage": {"input_tokens": 5}}
+    number = 42
+    assert mask_secrets(number) == number
+
+
+def test_mask_traverses_lists() -> None:
+    data = [{"api_key": "secret"}, "plain text"]
+    assert mask_secrets(data) == [{"api_key": "[REDACTED]"}, "plain text"]
