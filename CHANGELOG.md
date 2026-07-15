@@ -1,5 +1,13 @@
 # apollo
 
+## 3.0.3
+
+### Patch Changes
+
+- c7ff646: bump openai, langchain, nltk, langfuse, ruff
+- dfb1d86: add generation diff metadata for langfuse
+- 2549840: clean up langfuse keys
+
 ## 3.0.2
 
 ### Patch Changes
