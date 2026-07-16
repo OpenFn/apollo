@@ -4,6 +4,7 @@ import json
 import sentry_sdk
 from langfuse import observe
 from util import create_logger, ApolloError, AdaptorSpecifier, get_db_connection
+from yaml_utils import redact_job_bodies
 from .retrieve_docs import retrieve_knowledge
 from search_adaptor_docs.search_adaptor_docs import fetch_signatures
 
@@ -165,6 +166,28 @@ step by step. Focus on one bit at a time. For example, when uploading from CommC
 </workflow guide>
 """
 
+# Appended in subagent mode only (when job_chat is called from global_chat).
+subagent_mode_instructions = """
+<subagent_mode>
+You are the job-code specialist inside a single unified OpenFn assistant. The
+user sees one assistant, so never mention routing, agents, or internal
+mechanics. NEVER say you cannot see the workflow, a step, or the job code, and
+never tell the user to navigate to another page or paste something in — this
+overrides any earlier instruction to send the user to the workflow overview.
+
+If the request is not something you can complete from here, call the
+`handover` tool as your VERY FIRST action, before writing any reply text, with
+a one-sentence reason. Hand over when the request:
+- is chiefly about workflow structure (adding, removing, renaming, or
+  reordering steps; triggers; edges; changing adaptors), or
+- needs code changes in a step other than the focused one, or in several steps.
+
+Otherwise answer as normal. You may READ other steps' code with the
+`inspect_job_code` tool (when available) to answer questions that reference
+them — do this instead of saying you can't see a step.
+</subagent_mode>
+"""
+
 # Response contract, appended last in the system message.
 output_format = """
 <response_format>
@@ -261,7 +284,8 @@ class Context:
         return hasattr(self, key) and getattr(self, key) is not None
 
 
-def generate_system_message(context_dict, search_results, download_adaptor_docs=True, stream_manager=None):
+def generate_system_message(context_dict, search_results, download_adaptor_docs=True, stream_manager=None,
+                            workflow_yaml=None, subagent=False):
     context = context_dict if isinstance(context_dict, Context) else Context(**(context_dict or {}))
 
     message = [system_role]
@@ -353,6 +377,30 @@ and system information. When debugging, analyze these logs carefully to identify
 ```{context.log}```
 </run_logs>""")
 
+    if subagent:
+        message.append(subagent_mode_instructions)
+        if workflow_yaml:
+            focused = context.job_key if context.has("job_key") else (
+                context.page_name if context.has("page_name") else None)
+            if focused:
+                focused_line = (
+                    f"The focused step — the one <user_code> belongs to and the ONLY one "
+                    f"you can edit — is '{focused}'."
+                )
+            else:
+                focused_line = (
+                    "No focused step could be resolved for this request. You may READ any "
+                    "step with `inspect_job_code` to answer questions, but code edits "
+                    "cannot be applied — if the user wants code changed, call `handover`."
+                )
+            redacted = redact_job_bodies(workflow_yaml)
+            message.append(
+                f"<workflow_structure>\nThe user's full workflow is shown below with job "
+                f"code bodies redacted. {focused_line} Use the `inspect_job_code` tool to "
+                f"read the code of other steps when the request refers to them.\n\n"
+                f"{redacted}\n</workflow_structure>"
+            )
+
     # Output contract goes LAST so it is the final, most prominent instruction.
     message.append(output_format)
 
@@ -365,7 +413,8 @@ def format_search_results(search_results):
     ])
 
 @observe(name="job_chat_build_prompt")
-def build_prompt(content, history, context, rag=None, api_key=None, stream_manager=None, download_adaptor_docs=True, refresh_rag=False):
+def build_prompt(content, history, context, rag=None, api_key=None, stream_manager=None, download_adaptor_docs=True, refresh_rag=False,
+                 workflow_yaml=None, subagent=False):
     retrieved_knowledge = {
         "search_results": [],
         "search_results_sections": [],
@@ -398,7 +447,9 @@ def build_prompt(content, history, context, rag=None, api_key=None, stream_manag
         context_dict=context,
         search_results=retrieved_knowledge.get("search_results") if retrieved_knowledge is not None else None,
         download_adaptor_docs=download_adaptor_docs,
-        stream_manager=stream_manager)
+        stream_manager=stream_manager,
+        workflow_yaml=workflow_yaml,
+        subagent=subagent)
 
     prompt = []
     prompt.extend(history)
@@ -407,9 +458,15 @@ def build_prompt(content, history, context, rag=None, api_key=None, stream_manag
     # only remind the model to route an actual code change through `edit_job`.
     # Added only to the message sent to the model; the stored history (built in
     # generate() from the raw content) omits it, so it never accumulates.
+    reminder = "Reply in text. If this requires changing the job code, also call the `edit_job` tool to apply the change."
+    if subagent:
+        reminder += (
+            " If it references other steps, read them with `inspect_job_code`; if it is"
+            " not about this step's code at all, call `handover` first instead of replying."
+        )
     prompt.append({
         "role": "user",
-        "content": f"{content}\n\nReply in text. If this requires changing the job code, also call the `edit_job` tool to apply the change.",
+        "content": f"{content}\n\n{reminder}",
     })
 
     return (system_message, prompt, retrieved_knowledge)

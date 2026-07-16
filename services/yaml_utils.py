@@ -1,14 +1,15 @@
 """
-Shared YAML utility functions for working with workflow YAML strings.
+Shared utility functions for working with workflow YAML strings.
 
-Used by router and subagent caller for job extraction and code stitching.
+Used by global_chat (router, planner, subagent caller) and by job_chat in
+subagent mode for job extraction, code stitching, and step inspection.
 """
 import re
+
 import yaml
-from typing import Dict, Optional, Tuple
 
 
-def get_step_name_from_page(page: Optional[str]) -> Optional[str]:
+def get_step_name_from_page(page: str | None) -> str | None:
     """
     Extract step name from page URL.
 
@@ -32,7 +33,7 @@ def normalize_name(name: str) -> str:
     return re.sub(r'[^a-z0-9]', '-', name.lower()).strip('-')
 
 
-def find_job_in_yaml(yaml_str: str, step_name: str) -> Tuple[Optional[str], Optional[Dict]]:
+def find_job_in_yaml(yaml_str: str, step_name: str) -> tuple[str | None, dict | None]:
     """
     Find a job in the workflow YAML by step name.
 
@@ -71,7 +72,7 @@ def find_job_in_yaml(yaml_str: str, step_name: str) -> Tuple[Optional[str], Opti
 EMPTY_JOB_BODY = "// Add operations here"
 
 
-def workflow_has_job_code(yaml_str: Optional[str]) -> bool:
+def workflow_has_job_code(yaml_str: str | None) -> bool:
     """Return True if any job has a non-empty, non-placeholder body.
 
     The canonical empty-job marker is ``// Add operations here`` (see
@@ -121,3 +122,42 @@ def stitch_job_code(yaml_str: str, job_key: str, new_code: str) -> str:
         pass
 
     return yaml_str
+
+
+# Read-only step inspection, shared by the planner and job_chat (subagent
+# mode) so both agents explore the workflow with the exact same tool.
+
+INSPECT_JOB_CODE_TOOL = {
+    "name": "inspect_job_code",
+    "description": """Read the current code body of one or more jobs in the workflow (read-only).
+
+Use this to inspect existing step code before editing — e.g. to find which steps a change applies to before editing only those, or to base one step on another. Pass all the job keys you need in a single call rather than calling once per job.""",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "job_keys": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "The job keys to inspect (e.g. ['fetch-patients', 'load-dhis2'])",
+            },
+        },
+        "required": ["job_keys"],
+    },
+}
+
+
+def inspect_job_code(yaml_str: str | None, job_keys: list[str]) -> str:
+    """Execute the inspect_job_code tool: return the named jobs' code bodies."""
+    if not yaml_str:
+        return "No workflow available to inspect."
+    if not job_keys:
+        return "ERROR: No job keys provided."
+
+    parts = []
+    for job_key in job_keys:
+        _, job_data = find_job_in_yaml(yaml_str, job_key)
+        if job_data and job_data.get("body"):
+            parts.append(f"Job code for '{job_key}':\n\n{job_data['body']}")
+        else:
+            parts.append(f"No code found for job '{job_key}'.")
+    return "\n\n".join(parts)
