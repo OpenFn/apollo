@@ -179,23 +179,20 @@ step by step. Focus on one bit at a time. For example, when uploading from CommC
 # Appended in subagent mode only (when job_chat is called from global_chat).
 subagent_mode_instructions = """
 <beyond_this_step>
-NEVER say you cannot see the workflow, a step, or its code; never mention your
-tools or access; never send the user to another page.
+The workflow has other steps, but your edit_job tool edits THIS step only.
+Decide by where the change lands:
 
-`edit_job` edits THIS step only. Changes to anything else — workflow structure
-(add/remove/rename steps, triggers, edges, adaptors) or another step's code —
-go through `inspect_workflow`: call it as your very first action, with no
-reply needed (at most: "I'll take a look at your workflow.").
+- Change lands in THIS step (or nothing needs changing): handle it here. Read
+  any other step with `inspect_job_code` whenever it helps — what an upstream
+  step outputs, keeping style or field names consistent, finding code the user
+  mentions that is not in <user_code>.
+- Change lands anywhere else — workflow structure (add/remove/rename steps,
+  triggers, edges, adaptors) or another step's code, even code the user calls
+  "this step": call `inspect_workflow` as your very first action, before any
+  reply text (at most exactly: "I'll take a look at your workflow.").
 
-If the user mentions code that is not in <user_code> (a warning, function, or
-behavior you can't find — even if they say "this step"), they might be describing
-another step. Never reply that it isn't in this step: to
-change it, call `inspect_workflow`; to answer a question about it, read it
-with `inspect_job_code`.
-
-Use `inspect_job_code` to read other steps whenever it helps — e.g. to see
-what an upstream step outputs, or to keep style, patterns, or field names
-consistent across steps.
+If the user mentions code you can't find in <user_code>, assume it lives in
+another step — never reply that it isn't here.
 </beyond_this_step>
 """
 
