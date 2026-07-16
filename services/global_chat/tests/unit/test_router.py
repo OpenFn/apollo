@@ -2,7 +2,7 @@
 
 from unittest.mock import patch
 
-from global_chat.router import RouterAgent, RouterResult
+from global_chat.router import RouterAgent, RouterDecision, RouterResult
 from yaml_utils import workflow_has_job_code
 
 EMPTY_YAML = """\
@@ -34,6 +34,7 @@ def make_router() -> RouterAgent:
     router._user = None
     router._metrics_opt_in = None
     router._stream_manager = None
+    router.model = "claude-test"
     return router
 
 
@@ -126,8 +127,8 @@ def test_job_route_handover_reroutes_to_planner() -> None:
 
     planner_mock.assert_called_once()
     assert result.response == "planner answer"
-    assert result.meta["handover_from"] == "job_code_agent"
-    assert result.meta["handover_reason"] == "needs structure changes"
+    # Reroute diagnostics stay out of the response meta (Langfuse-only)
+    assert "handover_from" not in result.meta
     # Usage from the aborted job_chat call is kept on top of the planner's
     assert result.usage["input_tokens"] == 17
 
@@ -146,5 +147,34 @@ def test_workflow_route_handover_reroutes_to_planner() -> None:
         )
 
     planner_mock.assert_called_once()
-    assert result.meta["handover_from"] == "workflow_agent"
+    assert "handover_from" not in result.meta
     assert result.usage["input_tokens"] == 13
+
+
+def test_low_confidence_direct_route_goes_to_planner() -> None:
+    router = make_router()
+    decision = RouterDecision(destination="job_code_agent", confidence=2, job_key="fetch-patients")
+
+    with patch.object(RouterAgent, "_make_routing_decision", return_value=decision), \
+         patch.object(RouterAgent, "_route_to_planner", return_value=make_planner_result()) as planner_mock, \
+         patch.object(RouterAgent, "_route_to_job_chat") as job_mock:
+        result = router.route_and_execute("edit this", WORKFLOW_YAML, None, [], False)
+
+    planner_mock.assert_called_once()
+    job_mock.assert_not_called()
+    assert result.response == "planner answer"
+
+
+def test_confident_direct_route_is_not_gated() -> None:
+    router = make_router()
+    decision = RouterDecision(destination="job_code_agent", confidence=3, job_key="fetch-patients")
+    job_result = RouterResult(response="job answer", attachments=[], history=[], usage={}, meta={})
+
+    with patch.object(RouterAgent, "_make_routing_decision", return_value=decision), \
+         patch.object(RouterAgent, "_route_to_planner") as planner_mock, \
+         patch.object(RouterAgent, "_route_to_job_chat", return_value=job_result) as job_mock:
+        result = router.route_and_execute("edit this", WORKFLOW_YAML, None, [], False)
+
+    job_mock.assert_called_once()
+    planner_mock.assert_not_called()
+    assert result.response == "job answer"

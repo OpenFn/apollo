@@ -83,29 +83,44 @@ _EDIT_TOOL = {
     },
 }
 
-# Subagent mode only (job_chat called from global_chat): hand the request back
-# to the caller, which reroutes it to an agent that can complete it.
-_HANDOVER_TOOL = {
-    "name": "handover",
+# Subagent mode only (job_chat called from global_chat): escalation disguised
+# as a capability. Calling it hands the request back to the caller, which
+# reroutes to the planner — so if the model narrates before calling, the
+# narration ("I'll take a look at your workflow") matches what happens next.
+_INSPECT_WORKFLOW_TOOL = {
+    "name": "inspect_workflow",
     "description": (
-        "Hand this request over to a more capable assistant. Call this — as your "
-        "VERY FIRST action, with no reply text before it — when the request is not "
-        "something you can complete from here: it is chiefly about workflow "
-        "structure (adding/removing/reordering steps, triggers, edges, adaptors), "
-        "or it needs code changes in a step other than the focused one or in "
-        "several steps. Never apologise for missing context; hand over instead."
+        "Open the full workflow to work on anything beyond this step's code: "
+        "workflow structure (add/remove/rename steps, triggers, edges, adaptors) "
+        "or code changes in other steps. Call this as your VERY FIRST action, "
+        "with no reply text before it. To merely READ another step's code, use "
+        "inspect_job_code instead."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
-            "reason": {
+            "goal": {
                 "type": "string",
-                "description": "One sentence explaining what the request needs",
+                "description": "One sentence: what needs to be done",
             }
         },
-        "required": ["reason"],
+        "required": ["goal"],
         "additionalProperties": False,
     },
+}
+
+# The planner's inspect tool (same name, schema, and executor via yaml_utils),
+# with the description rewritten for job_chat: unlike the planner, job_chat can
+# only edit the focused step, so reading must never look like a way to act.
+_INSPECT_JOB_CODE_TOOL = {
+    **INSPECT_JOB_CODE_TOOL,
+    "description": (
+        "Read the current code of one or more other steps in the workflow. "
+        "Use it when seeing another step's code helps you answer a question or "
+        "edit the focused step — e.g. to match its pattern, or to see the state "
+        "shape it produces. To change another step's code, call inspect_workflow "
+        "instead. Pass all the job keys you need in a single call."
+    ),
 }
 
 # Max API rounds in one generate() call: enough for a couple of
@@ -283,9 +298,9 @@ class AnthropicClient:
             if suggest_code:
                 tools.append(_EDIT_TOOL)
             if subagent:
-                tools.append(_HANDOVER_TOOL)
+                tools.append(_INSPECT_WORKFLOW_TOOL)
                 if workflow_yaml:
-                    tools.append(INSPECT_JOB_CODE_TOOL)
+                    tools.append(_INSPECT_JOB_CODE_TOOL)
             tool_kwargs = {"tools": tools, "tool_choice": {"type": "auto"}} if tools else {}
 
             # Without the subagent tools this loop runs exactly once: edit_job
@@ -370,9 +385,9 @@ class AnthropicClient:
 
                     tool_uses = [b for b in message.content if getattr(b, "type", None) == "tool_use"]
 
-                    handover_block = next((b for b in tool_uses if b.name == "handover"), None)
+                    handover_block = next((b for b in tool_uses if b.name == "inspect_workflow"), None)
                     if handover_block:
-                        handover_reason = (handover_block.input or {}).get("reason") or "handover requested"
+                        handover_reason = (handover_block.input or {}).get("goal") or "handover requested"
                         break
 
                     inspect_blocks = [b for b in tool_uses if b.name == "inspect_job_code"]
