@@ -19,9 +19,10 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from langfuse import observe
 from util import create_logger, ApolloError, sum_usage
+from streaming_util import StreamManager
 from global_chat.config_loader import ConfigLoader
 from models import resolve_model
-from global_chat.yaml_utils import get_step_name_from_page, find_job_in_yaml, stitch_job_code, workflow_has_job_code
+from yaml_utils import get_step_name_from_page, find_job_in_yaml, stitch_job_code, workflow_has_job_code
 
 logger = create_logger(__name__)
 
@@ -110,6 +111,10 @@ class RouterAgent:
         self._input_attachments = attachments or []
         self._user = user
         self._metrics_opt_in = metrics_opt_in
+        # One stream manager shared by whichever agents serve this request, so
+        # a handed-over request continues the same stream instead of starting
+        # a second message lifecycle.
+        self._stream_manager = StreamManager(model=self.model, stream=stream)
 
         try:
             decision = self._make_routing_decision(content, workflow_yaml, page, history)
@@ -121,7 +126,7 @@ class RouterAgent:
             decision = RouterDecision(destination="planner", confidence=1)
 
         if decision.destination == "workflow_agent":
-            result = self._route_to_workflow_chat(content, workflow_yaml, history, stream, decision.confidence)
+            result = self._route_to_workflow_chat(content, workflow_yaml, page, history, stream, decision.confidence)
         elif decision.destination == "job_code_agent":
             result = self._route_to_job_chat(
                 content, workflow_yaml, page, history, stream, decision.confidence, decision.job_key
@@ -228,7 +233,7 @@ class RouterAgent:
         return "\n".join(parts)
 
     def _route_to_workflow_chat(
-        self, content: str, workflow_yaml: Optional[str], history: List[Dict], stream: bool, confidence: int
+        self, content: str, workflow_yaml: Optional[str], page: Optional[str], history: List[Dict], stream: bool, confidence: int
     ) -> RouterResult:
         """Route directly to workflow_chat."""
         from workflow_chat.workflow_chat import main as workflow_chat_main
@@ -246,9 +251,17 @@ class RouterAgent:
             "api_key": self.api_key,
             "meta": {"user": self._user} if self._user else None,
             "metrics_opt_in": self._metrics_opt_in,
+            "subagent": True,
+            "_stream_manager": self._stream_manager,
         }
 
         result = workflow_chat_main(payload)
+
+        if result.get("handover"):
+            return self._handover_to_planner(
+                "workflow_agent", result, content, workflow_yaml, page, history, stream, confidence
+            )
+
         total_usage = sum_usage(self.routing_usage, result["usage"])
 
         attachments = []
@@ -328,6 +341,9 @@ class RouterAgent:
                 job_context["adaptor"] = job_data["adaptor"]
             if job_data.get("name"):
                 job_context["page_name"] = job_data["name"]
+        if matched_job_key:
+            # Tells job_chat's subagent prompt which step is focused/editable
+            job_context["job_key"] = matched_job_key
 
         clean_history = [{"role": t["role"], "content": t["content"]} for t in history]
         enriched_content = self._format_attachments_for_content(content)
@@ -341,9 +357,18 @@ class RouterAgent:
             "api_key": self.api_key,
             "meta": {"user": self._user} if self._user else None,
             "metrics_opt_in": self._metrics_opt_in,
+            "subagent": True,
+            "workflow_yaml": workflow_yaml,
+            "_stream_manager": self._stream_manager,
         }
 
         result = job_chat_main(payload)
+
+        if result.get("handover"):
+            return self._handover_to_planner(
+                "job_code_agent", result, content, workflow_yaml, page, history, stream, confidence
+            )
+
         total_usage = sum_usage(self.routing_usage, result["usage"])
 
         # Stitch suggested_code back into the workflow YAML. The full YAML is
@@ -365,6 +390,33 @@ class RouterAgent:
             usage=total_usage,
             meta={"agents": ["router", "job_code_agent"], "router_confidence": confidence},
         )
+
+    def _handover_to_planner(
+        self,
+        from_agent: str,
+        subagent_result: Dict,
+        content: str,
+        workflow_yaml: Optional[str],
+        page: Optional[str],
+        history: List[Dict],
+        stream: bool,
+        confidence: int,
+    ) -> RouterResult:
+        """Reroute a handed-over request to the planner.
+
+        A direct-routed subagent signalled it cannot complete the request
+        (wrong route or missing capability). The planner never hands over, so
+        this retries at most once. The shared stream manager means the user
+        never sees the aborted attempt.
+        """
+        reason = subagent_result["handover"]
+        logger.warning(f"{from_agent} handed over: {reason}. Rerouting to planner")
+
+        planner_result = self._route_to_planner(content, workflow_yaml, page, history, stream, confidence)
+        planner_result.usage = sum_usage(planner_result.usage, subagent_result.get("usage", {}))
+        planner_result.meta["handover_from"] = from_agent
+        planner_result.meta["handover_reason"] = reason
+        return planner_result
 
     def _route_to_planner(
         self,
@@ -392,6 +444,7 @@ class RouterAgent:
             stream=stream,
             user=self._user,
             metrics_opt_in=self._metrics_opt_in,
+            stream_manager=self._stream_manager,
         )
 
         total_usage = sum_usage(self.routing_usage, planner_result.usage)
