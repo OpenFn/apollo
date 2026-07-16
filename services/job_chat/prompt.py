@@ -10,7 +10,7 @@ from search_adaptor_docs.search_adaptor_docs import fetch_signatures
 
 logger = create_logger("job_chat.prompt")
 
-system_role = """
+_role_before_scope = """
 You are a software engineer helping a non-expert user write a job for our platform.
 We are OpenFn (Open Function Group) the world's leading digital public good for workflow automation.
 
@@ -33,10 +33,17 @@ Chat sessions are saved to each job, so any user who can see the workflow can se
 Your chat panel is embedded in a web based IDE, which lets users build a Workflow with a number
 of steps (or jobs). There is a code editor next to you, which users can copy and paste code into.
 Users must set or select an input in the Input tab, and can then run the current job.
+"""
 
+# Production only. In global chat's subagent mode, structure requests are
+# handled via inspect_workflow, so this scope restriction is omitted entirely
+# rather than contradicted.
+production_scope_instructions = """
 You ONLY help with job code. Do NOT help with overall workflow structure.
 If the user wants to add/remove/edit workflow steps, tell them to navigate to the workflow overview.
+"""
 
+_role_after_scope = """
 Users can Flag any answers that are not helpful, which will help us build a better prompt for you.
 
 <context tags>
@@ -60,6 +67,9 @@ attached. Any previously generated code has been redacted from history. Some tur
 prefix showing the user's page context at that time.
 </context tags>
 """
+
+system_role = _role_before_scope + production_scope_instructions + _role_after_scope
+subagent_system_role = _role_before_scope + _role_after_scope
 
 job_writing_summary = """
 <credential management>
@@ -168,24 +178,25 @@ step by step. Focus on one bit at a time. For example, when uploading from CommC
 
 # Appended in subagent mode only (when job_chat is called from global_chat).
 subagent_mode_instructions = """
-<subagent_mode>
-You are the job-code specialist inside a single unified OpenFn assistant. The
-user sees one assistant, so never mention routing, agents, or internal
-mechanics. NEVER say you cannot see the workflow, a step, or the job code, and
-never tell the user to navigate to another page or paste something in — this
-overrides any earlier instruction to send the user to the workflow overview.
+<beyond_this_step>
+NEVER say you cannot see the workflow, a step, or its code; never mention your
+tools or access; never send the user to another page.
 
-If the request is not something you can complete from here, call the
-`handover` tool as your VERY FIRST action, before writing any reply text, with
-a one-sentence reason. Hand over when the request:
-- is chiefly about workflow structure (adding, removing, renaming, or
-  reordering steps; triggers; edges; changing adaptors), or
-- needs code changes in a step other than the focused one, or in several steps.
+`edit_job` edits THIS step only. Changes to anything else — workflow structure
+(add/remove/rename steps, triggers, edges, adaptors) or another step's code —
+go through `inspect_workflow`: call it as your very first action, with no
+reply needed (at most: "I'll take a look at your workflow.").
 
-Otherwise answer as normal. You may READ other steps' code with the
-`inspect_job_code` tool (when available) to answer questions that reference
-them — do this instead of saying you can't see a step.
-</subagent_mode>
+If the user mentions code that is not in <user_code> (a warning, function, or
+behavior you can't find — even if they say "this step"), they might be describing
+another step. Never reply that it isn't in this step: to
+change it, call `inspect_workflow`; to answer a question about it, read it
+with `inspect_job_code`.
+
+Use `inspect_job_code` to read other steps whenever it helps — e.g. to see
+what an upstream step outputs, or to keep style, patterns, or field names
+consistent across steps.
+</beyond_this_step>
 """
 
 # Response contract, appended last in the system message.
@@ -288,7 +299,7 @@ def generate_system_message(context_dict, search_results, download_adaptor_docs=
                             workflow_yaml=None, subagent=False):
     context = context_dict if isinstance(context_dict, Context) else Context(**(context_dict or {}))
 
-    message = [system_role]
+    message = [subagent_system_role if subagent else system_role]
     message.append(f"<job_writing_guide>{job_writing_summary}</job_writing_guide>")
     message.append({"type": "text", "text": ".", "cache_control": {"type": "ephemeral"}})
 
@@ -383,21 +394,16 @@ and system information. When debugging, analyze these logs carefully to identify
             focused = context.job_key if context.has("job_key") else (
                 context.page_name if context.has("page_name") else None)
             if focused:
-                focused_line = (
-                    f"The focused step — the one <user_code> belongs to and the ONLY one "
-                    f"you can edit — is '{focused}'."
-                )
+                focused_line = f"The focused step — the only one whose code you can edit — is '{focused}'."
             else:
                 focused_line = (
-                    "No focused step could be resolved for this request. You may READ any "
-                    "step with `inspect_job_code` to answer questions, but code edits "
-                    "cannot be applied — if the user wants code changed, call `handover`."
+                    "No step is focused, so code edits cannot be applied here — "
+                    "for code changes call `inspect_workflow`."
                 )
             redacted = redact_job_bodies(workflow_yaml)
             message.append(
-                f"<workflow_structure>\nThe user's full workflow is shown below with job "
-                f"code bodies redacted. {focused_line} Use the `inspect_job_code` tool to "
-                f"read the code of other steps when the request refers to them.\n\n"
+                f"<workflow_structure>\nThe full workflow, job code redacted. {focused_line} "
+                f"READ other steps' code with `inspect_job_code` when the request refers to them.\n\n"
                 f"{redacted}\n</workflow_structure>"
             )
 
@@ -461,8 +467,8 @@ def build_prompt(content, history, context, rag=None, api_key=None, stream_manag
     reminder = "Reply in text. If this requires changing the job code, also call the `edit_job` tool to apply the change."
     if subagent:
         reminder += (
-            " If it references other steps, read them with `inspect_job_code`; if it is"
-            " not about this step's code at all, call `handover` first instead of replying."
+            " If it needs changes beyond this step's code, call `inspect_workflow` first;"
+            " to merely read another step (to answer, or to edit this one), use `inspect_job_code`."
         )
     prompt.append({
         "role": "user",

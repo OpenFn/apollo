@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent))
 
-from langfuse import observe
+from langfuse import observe, get_client as get_langfuse_client
 from util import create_logger, ApolloError, sum_usage
 from streaming_util import StreamManager
 from global_chat.config_loader import ConfigLoader
@@ -124,6 +124,16 @@ class RouterAgent:
         except Exception as e:
             logger.warning(f"Routing decision failed: {e}. Defaulting to planner for safety.")
             decision = RouterDecision(destination="planner", confidence=1)
+
+        # Direct routes are a fast path for clear-cut requests; when the router
+        # itself is unsure, take the path that can't be wrong. Costs nothing:
+        # the confidence comes back in the same routing call.
+        if decision.destination in ("workflow_agent", "job_code_agent") and decision.confidence < 3:
+            logger.warning(
+                f"Low router confidence ({decision.confidence}) for {decision.destination} — routing to planner instead"
+            )
+            self._track_reroute({"low_confidence_reroute": decision.destination})
+            decision = RouterDecision(destination="planner", confidence=decision.confidence)
 
         if decision.destination == "workflow_agent":
             result = self._route_to_workflow_chat(content, workflow_yaml, page, history, stream, decision.confidence)
@@ -411,12 +421,25 @@ class RouterAgent:
         """
         reason = subagent_result["handover"]
         logger.warning(f"{from_agent} handed over: {reason}. Rerouting to planner")
+        self._track_reroute({"handover_from": from_agent, "handover_reason": reason})
 
         planner_result = self._route_to_planner(content, workflow_yaml, page, history, stream, confidence)
         planner_result.usage = sum_usage(planner_result.usage, subagent_result.get("usage", {}))
-        planner_result.meta["handover_from"] = from_agent
-        planner_result.meta["handover_reason"] = reason
         return planner_result
+
+    def _track_reroute(self, metadata: Dict) -> None:
+        """Record reroute diagnostics on the Langfuse trace (opt-in per request).
+
+        Deliberately kept out of the response meta: the frontend does nothing
+        with these, they are for Langfuse analysis only. Server logs carry the
+        same information when tracking is off.
+        """
+        if not self._metrics_opt_in:
+            return
+        try:
+            get_langfuse_client().update_current_span(metadata=metadata)
+        except Exception:
+            logger.warning("Failed to record reroute metadata in Langfuse")
 
     def _route_to_planner(
         self,

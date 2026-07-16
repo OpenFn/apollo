@@ -94,10 +94,17 @@ def workflow_has_job_code(yaml_str: str | None) -> bool:
 
 
 def redact_job_bodies(yaml_str: str) -> str:
-    """Return workflow YAML with job bodies replaced by a placeholder."""
+    """Return workflow YAML with job bodies replaced by a placeholder and id
+    fields removed.
+
+    This is the read-only structural view shown to the planner and to job_chat
+    in subagent mode. It never round-trips back into a real workflow, so the
+    UUID ids are pure noise to the model — dropping them saves tokens.
+    """
     try:
         yaml_data = yaml.safe_load(yaml_str)
         if yaml_data and "jobs" in yaml_data:
+            _remove_ids(yaml_data)
             for job_data in yaml_data["jobs"].values():
                 if "body" in job_data:
                     job_data["body"] = "# [use inspect_job_code to view]"
@@ -105,6 +112,17 @@ def redact_job_bodies(yaml_str: str) -> str:
     except Exception:
         pass
     return yaml_str
+
+
+def _remove_ids(obj: object) -> None:
+    """Recursively remove 'id' keys from a parsed YAML structure."""
+    if isinstance(obj, dict):
+        obj.pop("id", None)
+        for value in obj.values():
+            _remove_ids(value)
+    elif isinstance(obj, list):
+        for item in obj:
+            _remove_ids(item)
 
 
 def stitch_job_code(yaml_str: str, job_key: str, new_code: str) -> str:
