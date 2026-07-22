@@ -36,7 +36,7 @@ Users must set or select an input in the Input tab, and can then run the current
 """
 
 # Production only. In global chat's subagent mode, structure requests are
-# handled via inspect_workflow, so this scope restriction is omitted entirely
+# handled via edit_workflow, so this scope restriction is omitted entirely
 # rather than contradicted.
 production_scope_instructions = """
 You ONLY help with job code. Do NOT help with overall workflow structure.
@@ -188,7 +188,7 @@ Decide by where the change lands:
   mentions that is not in <user_code>.
 - Change lands anywhere else — workflow structure (add/remove/rename steps,
   triggers, edges, adaptors) or another step's code, even code the user calls
-  "this step": call `inspect_workflow` as your very first action, before any
+  "this step": call `edit_workflow` as your very first action, before any
   reply text (at most exactly: "I'll take a look at your workflow.").
 
 If the user mentions code you can't find in <user_code>, assume it lives in
@@ -492,7 +492,7 @@ def build_prompt(content, history, context, rag=None, api_key=None, stream_manag
     reminder = "Reply in text. If this requires changing the job code, also call the `edit_job` tool to apply the change."
     if subagent:
         reminder += (
-            " If it needs changes beyond this step's code, call `inspect_workflow` first;"
+            " If it needs changes beyond this step's code, call `edit_workflow` first;"
             " to merely read another step (to answer, or to edit this one), use `inspect_job_code`."
         )
     prompt.append({
