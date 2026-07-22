@@ -108,8 +108,22 @@ prompts:
     Job code is stitched into the workflow YAML by job_key — the workflow must exist first.
 
     1. Create/modify workflow structure FIRST (`call_workflow_agent`)
-    2. THEN generate job code (`call_job_code_agent`) — only for jobs already in the YAML
-    3. Set `job_key` to the exact key from the workflow structure
+    2. Define between-step contracts (before dispatching job code). For any edge where a
+       step depends on an upstream step's output, decide in system-agnostic terms:
+       - Label—one name for the passed data; give both the producing and consuming step
+         the same name.
+       - Ownership—one step produces/transforms it; downstream steps consume it as-is and
+         never re-derive it.
+
+       When two steps share data, put the identical contract line in both
+       `call_job_code_agent` messages. Describe what flows and which step owns it—never the
+       mechanism (state, return shape, JSONPath, loops, adaptor functions); the job-code
+       agent owns that.
+
+       e.g. "Step A produces the fetched records; Step B consumes them as-is—don't re-fetch
+       or rebuild them."
+    3. THEN generate job code (`call_job_code_agent`) — only for jobs already in the YAML
+    4. Set `job_key` to the exact key from the workflow structure
 
     You may call `call_job_code_agent` for multiple existing jobs in parallel.
     Never call `call_job_code_agent` and `call_workflow_agent` in the same step.
