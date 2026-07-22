@@ -9,23 +9,44 @@ import re
 import yaml
 
 
+def get_page_view(page: str | None) -> tuple[str | None, str | None]:
+    """
+    Classify what the user has on screen from the `page` breadcrumb — the single
+    parser for that URL (get_step_name_from_page delegates to this).
+
+    Shapes (names are raw, may contain spaces):
+      workflows/<workflow>/<job>  -> ("step", "<job>")     job code page
+      workflows/<workflow>        -> ("overview", None)     workflow canvas
+      settings / absent / anything else -> (None, None)
+
+    Because a name may itself contain "/", the returned step name is a
+    best-effort candidate — the caller must validate it against the workflow
+    YAML rather than trust it.
+    """
+    if not page:
+        return None, None
+    parts = page.strip("/").split("/")
+    if parts[0] != "workflows":
+        return None, None
+    if len(parts) == 2:
+        return "overview", None
+    if len(parts) == 3 and parts[2] != "settings":
+        return "step", parts[2]
+    return None, None
+
+
 def get_step_name_from_page(page: str | None) -> str | None:
     """
-    Extract step name from page URL.
+    Extract the focused step name from a job-code page URL, or None for the
+    canvas, settings, or an unrecognized value.
 
     Examples:
       workflows/my-workflow/fetch-patients -> "fetch-patients"
       workflows/my-workflow                -> None
       workflows/my-workflow/settings       -> None
     """
-    if not page:
-        return None
-
-    parts = page.strip("/").split("/")
-    if len(parts) == 3 and parts[0] == "workflows" and parts[2] != "settings":
-        return parts[2]
-
-    return None
+    view, step = get_page_view(page)
+    return step if view == "step" else None
 
 
 def normalize_name(name: str) -> str:

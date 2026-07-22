@@ -284,7 +284,7 @@ class PlannerAgent:
                 matched_key, _ = find_job_in_yaml(self.current_yaml, step_name)
                 step_name = matched_key or step_name
             if step_name:
-                user_content += f"\n\n(The user is currently viewing the step '{step_name}' — \"this step\" refers to it.)"
+                user_content += f"\n\n(The user is currently viewing the step '{step_name}'.)"
             else:
                 user_content += f"\n\n(The user is currently viewing: {page})"
 

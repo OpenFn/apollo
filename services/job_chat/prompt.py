@@ -4,7 +4,7 @@ import json
 import sentry_sdk
 from langfuse import observe
 from util import create_logger, ApolloError, AdaptorSpecifier, get_db_connection
-from yaml_utils import redact_job_bodies
+from yaml_utils import redact_job_bodies, normalize_name
 from .retrieve_docs import retrieve_knowledge
 from search_adaptor_docs.search_adaptor_docs import fetch_signatures
 
@@ -292,6 +292,32 @@ class Context:
         return hasattr(self, key) and getattr(self, key) is not None
 
 
+def build_focus_line(viewing, focused):
+    """One sentence orienting the model to what the user has on screen, and which
+    step it can edit when that differs.
+
+    `viewing` (router-only) is the on-screen step name, the literal "canvas", or
+    None when the caller can't tell; `focused` is the editable step. When both
+    are a step and coincide (the common case) they fuse into one clause; they
+    diverge only when the request targets a step other than the one open.
+
+    Returns "" when there is nothing worth stating (no viewing info): the model
+    works from <user_code> and the tools, and we avoid narrating editing plumbing
+    the model could echo back to the user.
+    """
+    if viewing and viewing != "canvas":
+        if not focused:
+            return f"The user has the '{viewing}' step's code open."
+        if normalize_name(viewing) == normalize_name(focused):
+            return f"The user has the '{viewing}' step's code open — that's the step you're currently editing."
+        return f"The user has the '{viewing}' step open, but the step you're editing is '{focused}' — likely what their request is about."
+    if viewing == "canvas":
+        if focused:
+            return f"The user is viewing the workflow canvas, not a specific step; the '{focused}' step is the one you're currently editing."
+        return "The user is viewing the workflow canvas."
+    return ""
+
+
 def generate_system_message(context_dict, search_results, download_adaptor_docs=True, stream_manager=None,
                             workflow_yaml=None, subagent=False):
     context = context_dict if isinstance(context_dict, Context) else Context(**(context_dict or {}))
@@ -388,20 +414,22 @@ and system information. When debugging, analyze these logs carefully to identify
     if subagent:
         message.append(subagent_mode_instructions)
         if workflow_yaml:
+            # `focused` is the editable step; `viewing` (router-only) is what the
+            # user actually has on screen — a step's code or the literal "canvas".
+            # Grounding focus in their view lets a bare "this step" resolve to
+            # what they're looking at. Both may be absent (planner/prod, or an
+            # unresolved page), in which case build_focus_line returns "".
             focused = context.job_key if context.has("job_key") else (
                 context.page_name if context.has("page_name") else None)
-            if focused:
-                focused_line = f"The focused step — the only one whose code you can edit — is '{focused}'."
-            else:
-                focused_line = (
-                    "No step is focused, so code edits cannot be applied here — "
-                    "for code changes call `inspect_workflow`."
-                )
+            viewing = context.viewing if context.has("viewing") else None
+            focus = build_focus_line(viewing, focused)
+            header = ["The full workflow, job code redacted."]
+            if focus:
+                header.append(focus)
+            header.append("READ other steps' code with `inspect_job_code` when the request refers to them.")
             redacted = redact_job_bodies(workflow_yaml)
             message.append(
-                f"<workflow_structure>\nThe full workflow, job code redacted. {focused_line} "
-                f"READ other steps' code with `inspect_job_code` when the request refers to them.\n\n"
-                f"{redacted}\n</workflow_structure>"
+                f"<workflow_structure>\n{' '.join(header)}\n\n{redacted}\n</workflow_structure>"
             )
 
     # Output contract goes LAST so it is the final, most prominent instruction.
