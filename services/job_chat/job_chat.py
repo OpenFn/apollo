@@ -92,9 +92,8 @@ _INSPECT_WORKFLOW_TOOL = {
     "description": (
         "Open the full workflow to work on anything beyond this step's code: "
         "workflow structure (add/remove/rename steps, triggers, edges, adaptors) "
-        "or code changes in other steps. Call this as your VERY FIRST action, "
-        "with no reply text before it. To merely READ another step's code, use "
-        "inspect_job_code instead."
+        "or code changes in other steps. Call this as your VERY FIRST action. "
+        "To merely READ another step's code, use inspect_job_code instead."
     ),
     "input_schema": {
         "type": "object",
@@ -384,6 +383,11 @@ class AnthropicClient:
                             text_parts.append(content_block.text)
 
                     tool_uses = [b for b in message.content if getattr(b, "type", None) == "tool_use"]
+                    if tool_uses:
+                        logger.info(
+                            "job_chat round %d: model called %s",
+                            round_index, ", ".join(b.name for b in tool_uses),
+                        )
 
                     handover_block = next((b for b in tool_uses if b.name == "inspect_workflow"), None)
                     if handover_block:
@@ -401,7 +405,9 @@ class AnthropicClient:
                     tool_results = []
                     for block in tool_uses:
                         if block.name == "inspect_job_code":
-                            result_text = inspect_job_code(workflow_yaml, (block.input or {}).get("job_keys") or [])
+                            job_keys = (block.input or {}).get("job_keys") or []
+                            logger.info("job_chat inspect_job_code: reading %s", job_keys)
+                            result_text = inspect_job_code(workflow_yaml, job_keys)
                         else:
                             result_text = (
                                 "Not applied. Finish inspecting, then write your final reply "
@@ -807,6 +813,12 @@ def main(data_dict: dict) -> dict:
             # Tag the trace when code was generated, so we can filter for it.
             if tracking and result.suggested_code:
                 with propagate_attributes(tags=["has_code_attachment"]):
+                    pass
+
+            # Tag the trace when the request was handed back for rerouting to
+            # the planner, so we can filter for handovers.
+            if tracking and result.handover:
+                with propagate_attributes(tags=["handover"]):
                     pass
 
             if tracking:

@@ -762,6 +762,12 @@ def main(data_dict: dict) -> dict:
                 if diff_meta:
                     langfuse.update_current_span(metadata=diff_meta)
 
+            # Tag the trace when the request was handed back for rerouting to
+            # the planner, so we can filter for handovers.
+            if tracking and result.handover:
+                with propagate_attributes(tags=["handover"]):
+                    pass
+
             # Build response
             response_dict = {
                 "response": result.content,
