@@ -22,7 +22,7 @@ from util import create_logger, ApolloError, sum_usage
 from streaming_util import StreamManager
 from global_chat.config_loader import ConfigLoader
 from models import resolve_model
-from yaml_utils import get_step_name_from_page, find_job_in_yaml, stitch_job_code, workflow_has_job_code
+from yaml_utils import get_step_name_from_page, get_page_view, find_job_in_yaml, stitch_job_code, workflow_has_job_code
 
 logger = create_logger(__name__)
 
@@ -354,6 +354,19 @@ class RouterAgent:
         if matched_job_key:
             # Tells job_chat's subagent prompt which step is focused/editable
             job_context["job_key"] = matched_job_key
+
+        # What the user actually has on screen, independent of which step we
+        # focus for editing: a specific step's code, or the workflow canvas.
+        # Only the router knows this (planner/prod calls omit it, so the prompt
+        # grounding line stays off). Fail safe: only claim a step the page name
+        # resolves to a real job — a mis-split name simply yields no line.
+        page_view, page_step = get_page_view(page)
+        if page_view == "step" and workflow_yaml:
+            _, viewed_job = find_job_in_yaml(workflow_yaml, page_step)
+            if viewed_job and viewed_job.get("name"):
+                job_context["viewing"] = viewed_job["name"]
+        elif page_view == "overview":
+            job_context["viewing"] = "canvas"
 
         clean_history = [{"role": t["role"], "content": t["content"]} for t in history]
         enriched_content = self._format_attachments_for_content(content)
