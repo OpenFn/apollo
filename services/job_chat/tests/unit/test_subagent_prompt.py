@@ -24,7 +24,7 @@ def test_production_prompt_keeps_navigate_instruction():
     # subagent sections appear
     assert "tell them to navigate to the workflow overview" in text
     assert "Do NOT help with overall workflow structure" in text
-    assert "inspect_workflow" not in text
+    assert "edit_workflow" not in text
     assert "<workflow_structure>" not in text
 
 
@@ -37,7 +37,7 @@ def test_subagent_prompt_strips_navigate_instruction():
     assert "navigate to the workflow overview" not in text
     assert "Do NOT help with overall workflow structure" not in text
     assert "ONLY help with job code" not in text
-    assert "inspect_workflow" in text
+    assert "edit_workflow" in text
     assert "<workflow_structure>" in text
 
 

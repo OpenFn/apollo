@@ -87,8 +87,8 @@ _EDIT_TOOL = {
 # as a capability. Calling it hands the request back to the caller, which
 # reroutes to the planner — so if the model narrates before calling, the
 # narration ("I'll take a look at your workflow") matches what happens next.
-_INSPECT_WORKFLOW_TOOL = {
-    "name": "inspect_workflow",
+_EDIT_WORKFLOW_TOOL = {
+    "name": "edit_workflow",
     "description": (
         "Open the full workflow to work on anything beyond this step's code: "
         "workflow structure (add/remove/rename steps, triggers, edges, adaptors) "
@@ -117,7 +117,7 @@ _INSPECT_JOB_CODE_TOOL = {
         "Read the current code of one or more other steps in the workflow. "
         "Use it when seeing another step's code helps you answer a question or "
         "edit the focused step — e.g. to match its pattern, or to see the state "
-        "shape it produces. To change another step's code, call inspect_workflow "
+        "shape it produces. To change another step's code, call edit_workflow "
         "instead. Pass all the job keys you need in a single call."
     ),
 }
@@ -297,7 +297,7 @@ class AnthropicClient:
             if suggest_code:
                 tools.append(_EDIT_TOOL)
             if subagent:
-                tools.append(_INSPECT_WORKFLOW_TOOL)
+                tools.append(_EDIT_WORKFLOW_TOOL)
                 if workflow_yaml:
                     tools.append(_INSPECT_JOB_CODE_TOOL)
             tool_kwargs = {"tools": tools, "tool_choice": {"type": "auto"}} if tools else {}
@@ -389,7 +389,7 @@ class AnthropicClient:
                             round_index, ", ".join(b.name for b in tool_uses),
                         )
 
-                    handover_block = next((b for b in tool_uses if b.name == "inspect_workflow"), None)
+                    handover_block = next((b for b in tool_uses if b.name == "edit_workflow"), None)
                     if handover_block:
                         handover_reason = (handover_block.input or {}).get("goal") or "handover requested"
                         break
