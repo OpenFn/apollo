@@ -192,7 +192,7 @@ def test_search_docs_returns_general_docs_only():
     from job_chat.retrieve_docs import search_docs
 
     queries = [{"query": "http adaptor merge() function"}]
-    results = search_docs(queries, top_k=3, threshold=0.5)
+    results = search_docs(queries, top_k=3)
     print(results)
 
     assert isinstance(results, list), "Should return a list"
