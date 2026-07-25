@@ -153,6 +153,7 @@ class DocsiteSearch:
             AND text_search @@ plainto_tsquery('english', %(query)s)
             AND (%(doc_title)s IS NULL OR doc_title = %(doc_title)s)
             AND (%(docs_type)s IS NULL OR docs_type = %(docs_type)s)
+          ORDER BY rnk
           LIMIT %(candidate_k)s
         )
         SELECT COALESCE(s.text, k.text) AS text,
