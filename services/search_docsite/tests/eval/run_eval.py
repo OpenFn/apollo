@@ -24,7 +24,7 @@ def compute_recall_at_k(retrieved_titles: list, expected_titles: list) -> bool:
     return bool(set(retrieved_titles) & set(expected_titles))
 
 
-def run_eval(golden_queries: list, backend_cls, strategy: str, top_k: int = 5) -> dict:  # noqa: ANN001
+def run_eval(golden_queries: list, backend_cls, strategy: str, top_k: int = 5) -> dict:
     """Run every golden query against one backend/strategy and return a report dict."""
     backend = backend_cls()
     per_query = []
@@ -76,16 +76,16 @@ def run_eval(golden_queries: list, backend_cls, strategy: str, top_k: int = 5) -
 
 
 def main() -> None:
-    with open(GOLDEN_QUERIES_PATH) as f:  # noqa: PTH123
+    with open(GOLDEN_QUERIES_PATH) as f:
         golden_queries = yaml.safe_load(f)["queries"]
 
     postgres_report = run_eval(golden_queries, DocsiteSearch, strategy="hybrid")
     pinecone_report = run_eval(golden_queries, LegacyPineconeDocsiteSearch, strategy="semantic")
 
-    print(f"Postgres (hybrid):  recall@5={postgres_report['recall_at_k']} "  # noqa: T201
+    print(f"Postgres (hybrid):  recall@5={postgres_report['recall_at_k']} "
           f"(scored={postgres_report['queries_scored']}, skipped={postgres_report['queries_skipped']}) "
           f"p50={postgres_report['p50_latency_s']:.3f}s p95={postgres_report['p95_latency_s']:.3f}s")
-    print(f"Pinecone (semantic): recall@5={pinecone_report['recall_at_k']} "  # noqa: T201
+    print(f"Pinecone (semantic): recall@5={pinecone_report['recall_at_k']} "
           f"(scored={pinecone_report['queries_scored']}, skipped={pinecone_report['queries_skipped']}) "
           f"p50={pinecone_report['p50_latency_s']:.3f}s p95={pinecone_report['p95_latency_s']:.3f}s")
 
