@@ -1,131 +1,186 @@
 import os
 from dotenv import load_dotenv
-from pinecone import Pinecone
-from langchain_pinecone import PineconeVectorStore
 from langchain_openai import OpenAIEmbeddings
-from util import create_logger, ApolloError
+from pgvector.psycopg2 import register_vector
+from util import create_logger, ApolloError, get_db_connection
 from embeddings.embeddings import SearchResult
+
 logger = create_logger("DocsiteSearch")
+
+
+def register_vector_type(conn):
+    """Register the pgvector adapter on this connection."""
+    register_vector(conn)
 
 
 class DocsiteSearch:
     """
-    Initialize the docsite vectorstore and search it with optional metadata filters.
-    
-    :param collection_name: Vectorstore collection name (namespace) to store documents
-    :param index_name: Vectorstore index name (default: docsite)
+    Search embedded docsite chunks in Postgres using semantic (pgvector cosine),
+    keyword (Postgres full-text search), or hybrid (Reciprocal Rank Fusion) strategies.
+
+    :param batch_id: Explicit batch to search. If None, resolves to the newest 'complete' batch.
     :param default_top_k: Default number of results to return (default: 5)
-    :param embeddings: LangChain embedding type (default: OpenAIEmbeddings())
     """
-    def __init__(self, collection_name=None, index_name="docsite", default_top_k=5, embeddings=OpenAIEmbeddings()):
-        self.index_client = index_name
+
+    def __init__(self, batch_id=None, default_top_k=5):
         self.default_top_k = default_top_k
+        self._explicit_batch_id = batch_id
+        self._embeddings = None
 
-        if collection_name is None:
-            logger.info("Collection name not provided; retrieving the most recent collection name.")
-            collection_name = self._get_most_recent_namespace()
+    @property
+    def embeddings(self):
+        if self._embeddings is None:
+            self._embeddings = OpenAIEmbeddings()
+        return self._embeddings
 
-        self.collection_name = collection_name
-        self.vectorstore = PineconeVectorStore(index_name=index_name, namespace=collection_name, embedding=embeddings)
-    
     def search(self, query, top_k=None, threshold=None, strategy='semantic', doc_title=None, docs_type=None):
         """
-        Search database with optional filters.
+        Search docsite_chunks with optional filters.
 
         :param query: Search query string
         :param top_k: Number of results to return
-        :param threshold: Score threshold for semantic search
-        :param strategy: Search strategy (default: 'semantic')
+        :param threshold: Score threshold (only meaningful for strategy='semantic')
+        :param strategy: 'semantic' | 'keyword' | 'hybrid' (default: 'semantic')
         :param doc_title: Filter by document title
         :param docs_type: Filter by document type
         :return: List of SearchResult objects
         """
-        filters = self._build_filter(doc_title=doc_title, docs_type=docs_type)
-        logger.info("Metadata filters built")
+        conn = get_db_connection()
+        register_vector_type(conn)
+        try:
+            batch_id = self._explicit_batch_id or self._resolve_current_batch(conn)
 
-        if strategy == 'semantic':
-            return self._semantic_search(query=query, top_k=top_k, threshold=threshold, filters=filters)
+            if strategy == 'semantic':
+                return self._semantic_search(conn, batch_id, query, top_k, threshold, doc_title, docs_type)
+            if strategy == 'keyword':
+                return self._keyword_search(conn, batch_id, query, top_k, doc_title, docs_type)
+            if strategy == 'hybrid':
+                return self._hybrid_search(conn, batch_id, query, top_k, doc_title, docs_type)
 
-    def _semantic_search(self, query, top_k=None, threshold=None, filters=None):
-        """Search the vectorstore using semantic search."""
+            raise ApolloError(400, f"Unknown search strategy: {strategy}", type="BAD_REQUEST")
+        finally:
+            conn.close()
+
+    def _resolve_current_batch(self, conn):
+        """Find the newest complete batch id."""
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM docsite_batches WHERE status = 'complete' ORDER BY id DESC LIMIT 1")
+            row = cur.fetchone()
+        if row is None:
+            raise ApolloError(404, "No complete docsite batch found", type="NOT_FOUND")
+        return row[0]
+
+    def _semantic_search(self, conn, batch_id, query, top_k, threshold, doc_title, docs_type):
         if top_k is None and threshold is None:
             top_k = self.default_top_k
-        
         max_k = top_k or 50
-        
-        scored_docs = self.vectorstore.similarity_search_with_score(
-            query=query,
-            k=max_k,
-            filter=filters
-        )
-        
-        logger.info(f"Similar documents retrieved: {len(scored_docs)}")
-        
+
+        query_embedding = self.embeddings.embed_query(query)
+
+        sql = """
+        SELECT text, doc_title, docs_type, 1 - (embedding <=> %(query_embedding)s) AS score
+        FROM docsite_chunks
+        WHERE batch_id = %(batch_id)s
+          AND (%(doc_title)s IS NULL OR doc_title = %(doc_title)s)
+          AND (%(docs_type)s IS NULL OR docs_type = %(docs_type)s)
+        ORDER BY embedding <=> %(query_embedding)s
+        LIMIT %(max_k)s
+        """
+        params = {
+            "query_embedding": query_embedding, "batch_id": batch_id,
+            "doc_title": doc_title, "docs_type": docs_type, "max_k": max_k,
+        }
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+
         results = []
-        for doc, score in scored_docs:
+        for text, title, dtype, score in rows:
             if threshold is not None and score < threshold:
                 continue
-                
-            # If we've reached top_k docs and no threshold is set, stop
             if top_k is not None and len(results) >= top_k and threshold is None:
                 break
-                
-            results.append(SearchResult(doc.page_content, doc.metadata, score))
-            
-        logger.info(f"Filtered to {len(results)} results")
+            results.append(SearchResult(text, {"doc_title": title, "docs_type": dtype}, score))
+
+        logger.info(f"Semantic search returned {len(results)} results")
         return results
-    
-    def _build_filter(self, **kwargs):
-            """Build filter conditions to search the vectorstore."""
-            conditions = []
 
-            # Add exact match conditions
-            if kwargs.get('doc_title'):
-                conditions.append({"doc_title": {"$eq": kwargs['doc_title']}})
-            
+    def _keyword_search(self, conn, batch_id, query, top_k, doc_title, docs_type):
+        max_k = top_k or self.default_top_k
 
-            if kwargs.get('docs_type'):
-                conditions.append({"docs_type": {"$eq": kwargs['docs_type']}})
-            
-            # If no conditions were added, return None
-            if not conditions:
-                return None
-            
-            # If only one condition, return it directly
-            if len(conditions) == 1:
-                return conditions[0]
-            
-            # If multiple conditions, combine them with $and
-            return {"$and": conditions}
-    
-    def _get_most_recent_namespace(self):
-            """Retrieve the most recent docsite upload by collection name from Pinecone."""
-            
-            pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY"))
-            index = pc.Index("docsite")
-            index_stats = index.describe_index_stats()
-            namespaces = index_stats.get('namespaces', {}).keys()
+        sql = """
+        SELECT text, doc_title, docs_type,
+               ts_rank_cd(text_search, plainto_tsquery('english', %(query)s)) AS score
+        FROM docsite_chunks
+        WHERE batch_id = %(batch_id)s
+          AND text_search @@ plainto_tsquery('english', %(query)s)
+          AND (%(doc_title)s IS NULL OR doc_title = %(doc_title)s)
+          AND (%(docs_type)s IS NULL OR docs_type = %(docs_type)s)
+        ORDER BY score DESC
+        LIMIT %(max_k)s
+        """
+        params = {"query": query, "batch_id": batch_id, "doc_title": doc_title, "docs_type": docs_type, "max_k": max_k}
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            rows = cur.fetchall()
 
-            valid_namespaces = sorted(
-                (ns for ns in namespaces if ns.startswith("docsite-") and ns[8:].isdigit() and len(ns) == 16),
-                reverse=True
-            )
+        results = [SearchResult(text, {"doc_title": title, "docs_type": dtype}, score) for text, title, dtype, score in rows]
+        logger.info(f"Keyword search returned {len(results)} results")
+        return results
 
-            if not valid_namespaces:
-                raise ApolloError(404, "No valid namespaces found in the index.", type="NOT_FOUND")
+    def _hybrid_search(self, conn, batch_id, query, top_k, doc_title, docs_type):
+        max_k = top_k or self.default_top_k
+        candidate_k = 50
 
-            most_recent_namespace = valid_namespaces[0]
-            logger.info(f"Most recent docsite collection name found: {most_recent_namespace}")
-            return most_recent_namespace
+        query_embedding = self.embeddings.embed_query(query)
+
+        sql = """
+        WITH semantic AS (
+          SELECT id, text, doc_title, docs_type,
+                 ROW_NUMBER() OVER (ORDER BY embedding <=> %(query_embedding)s) AS rnk
+          FROM docsite_chunks
+          WHERE batch_id = %(batch_id)s
+            AND (%(doc_title)s IS NULL OR doc_title = %(doc_title)s)
+            AND (%(docs_type)s IS NULL OR docs_type = %(docs_type)s)
+          ORDER BY embedding <=> %(query_embedding)s
+          LIMIT %(candidate_k)s
+        ),
+        keyword AS (
+          SELECT id, text, doc_title, docs_type,
+                 ROW_NUMBER() OVER (ORDER BY ts_rank_cd(text_search, plainto_tsquery('english', %(query)s)) DESC) AS rnk
+          FROM docsite_chunks
+          WHERE batch_id = %(batch_id)s
+            AND text_search @@ plainto_tsquery('english', %(query)s)
+            AND (%(doc_title)s IS NULL OR doc_title = %(doc_title)s)
+            AND (%(docs_type)s IS NULL OR docs_type = %(docs_type)s)
+          LIMIT %(candidate_k)s
+        )
+        SELECT COALESCE(s.text, k.text) AS text,
+               COALESCE(s.doc_title, k.doc_title) AS doc_title,
+               COALESCE(s.docs_type, k.docs_type) AS docs_type,
+               COALESCE(1.0 / (60 + s.rnk), 0) + COALESCE(1.0 / (60 + k.rnk), 0) AS score
+        FROM semantic s FULL OUTER JOIN keyword k ON s.id = k.id
+        ORDER BY score DESC
+        LIMIT %(max_k)s
+        """
+        params = {
+            "query_embedding": query_embedding, "query": query, "batch_id": batch_id,
+            "doc_title": doc_title, "docs_type": docs_type, "candidate_k": candidate_k, "max_k": max_k,
+        }
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+
+        results = [SearchResult(text, {"doc_title": title, "docs_type": dtype}, score) for text, title, dtype, score in rows]
+        logger.info(f"Hybrid search returned {len(results)} results")
+        return results
 
 
 def main(data):
     logger.info("Starting...")
 
     required_fields = ["query"]
-
     missing = [field for field in required_fields if field not in data]
-    
     if missing:
         logger.error(f"Missing required fields in data: {', '.join(missing)}")
         return
@@ -133,9 +188,8 @@ def main(data):
     index_params = {}
     search_params = {"query": data["query"]}
 
-    # Add optional parameters
     optional_search_params = ["docs_type", "doc_title", "top_k", "threshold", "strategy"]
-    optional_index_params = ["collection_name", "index_name", "default_top_k", "embeddings"]
+    optional_index_params = ["batch_id", "default_top_k"]
 
     for key in optional_search_params:
         if key in data:
@@ -145,30 +199,18 @@ def main(data):
         if key in data:
             index_params[key] = data[key]
 
-    # Set API keys
     load_dotenv(override=True)
-    OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
-    PINECONE_API_KEY = os.environ.get('PINECONE_API_KEY')
-
-    # Check for missing keys
-    missing_keys = []
-
-    if not OPENAI_API_KEY:
-        missing_keys.append("OPENAI_API_KEY") 
-    if not PINECONE_API_KEY:
-        missing_keys.append("PINECONE_API_KEY")
-
-    if missing_keys:
-        msg = f"Missing API keys: {', '.join(missing_keys)}"
+    openai_api_key = os.environ.get('OPENAI_API_KEY')
+    if not openai_api_key:
+        msg = "Missing API key: OPENAI_API_KEY"
         logger.error(msg)
-        raise ApolloError(500, f"Missing API keys: {', '.join(missing_keys)}", type="BAD_REQUEST")
+        raise ApolloError(500, msg, type="BAD_REQUEST")
 
-    # Initialize search engine
     docsite_search = DocsiteSearch(**index_params)
-    logger.info("Docsite database initialised")
     results = docsite_search.search(**search_params)
-    
+
     return [result.to_json() for result in results]
 
+
 if __name__ == "__main__":
-    main()
+    main({})
