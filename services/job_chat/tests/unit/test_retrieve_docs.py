@@ -15,7 +15,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from embeddings.embeddings import SearchResult
 from job_chat import retrieve_docs as rd
+from job_chat.retrieve_docs import search_docs
 from util import ApolloError
 
 
@@ -80,11 +82,8 @@ def test_call_llm_wraps_unexpected_error_as_apollo_error():
 
 # --- search_docs (backend flag + shadow mode) -----------------------------------
 
-from job_chat.retrieve_docs import search_docs
-
 
 def _fake_result(title):
-    from embeddings.embeddings import SearchResult
     return SearchResult(f"text for {title}", {"doc_title": title, "docs_type": "general_docs"}, 0.9)
 
 

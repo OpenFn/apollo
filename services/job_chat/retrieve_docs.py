@@ -173,8 +173,10 @@ def search_docs(search_queries, top_k):
     """Search the docsite store using search queries. Defaults to the legacy
     Pinecone backend; set DOCSITE_SEARCH_BACKEND=postgres to switch to the
     Postgres-backed hybrid search. Set DOCSITE_SHADOW_POSTGRES=true to also run
-    the Postgres backend in parallel (non-blocking to the response) and log a
-    comparison against the authoritative backend."""
+    the Postgres backend afterward (synchronously — this adds latency to the
+    response for the duration of the shadow-mode verification window) and log a
+    comparison against the authoritative backend. A future improvement could
+    make this call async/fire-and-forget to remove the added latency."""
     backend = os.environ.get("DOCSITE_SEARCH_BACKEND", "pinecone")
 
     if backend == "postgres":
@@ -197,8 +199,9 @@ def _run_backend_search(backend_cls, strategy, search_queries, top_k):
 
 
 def _log_shadow_comparison(search_queries, top_k, primary_results):
-    """Best-effort: run the Postgres hybrid backend in parallel and log a
-    comparison against the authoritative (Pinecone) results. Never raises."""
+    """Best-effort: run the Postgres hybrid backend synchronously (adds latency
+    to this request while shadow mode is on) and log a comparison against the
+    authoritative (Pinecone) results. Never raises."""
     try:
         start = time.time()
         shadow_results = _run_backend_search(DocsiteSearch, "hybrid", search_queries, top_k)
