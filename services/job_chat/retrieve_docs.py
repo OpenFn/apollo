@@ -1,23 +1,26 @@
-import os
 import json
+import os
+import time
+
 import anthropic
+import sentry_sdk
 from anthropic import (
     APIConnectionError,
-    BadRequestError,
     AuthenticationError,
-    PermissionDeniedError,
-    NotFoundError,
-    UnprocessableEntityError,
-    RateLimitError,
+    BadRequestError,
     InternalServerError,
+    NotFoundError,
+    PermissionDeniedError,
+    RateLimitError,
+    UnprocessableEntityError,
 )
-import sentry_sdk
 from langfuse import observe
-from util import ApolloError, create_logger
 from models import resolve_model
+from search_docsite.pinecone_legacy_search import LegacyPineconeDocsiteSearch
 from search_docsite.search_docsite import DocsiteSearch
+from util import ApolloError, create_logger
+
 from .rag_config_loader import ConfigLoader
-from streaming_util import StreamManager
 
 logger = create_logger("job_chat.retrieve_docs")
 
@@ -74,15 +77,11 @@ def retrieve_knowledge(content, history, code="", adaptor="", api_key=None, stre
                 search_queries, generate_queries_usage = generate_queries(content, client, user_context)
             with sentry_sdk.start_span(description="search_documentation"):
                 try:
-                    search_results = search_docs(
-                        search_queries,
-                        top_k=config["top_k"],
-                        threshold=config["threshold"]
-                    )
+                    search_results = search_docs(search_queries, top_k=config["top_k"])
                     search_results = list(set(search_results))
                     search_results_sections = list(set(result.metadata["doc_title"] for result in search_results))
                 except Exception as e:
-                    logger.error(f"Pinecone search failed: {e}")
+                    logger.error(f"Docsite search failed: {e}")
                     sentry_sdk.capture_exception(e)
                     # Continue with empty results - chat can still work without docs
                     search_results = []
@@ -170,20 +169,52 @@ def generate_queries(content, client, user_context=""):
 
     return (answer_parsed, usage)
 
-def search_docs(search_queries, top_k, threshold):
-    """Search the docsite vector store using search queries."""
-    docsite_search = DocsiteSearch()
-    search_results = []
+def search_docs(search_queries, top_k):
+    """Search the docsite store using search queries. Defaults to the legacy
+    Pinecone backend; set DOCSITE_SEARCH_BACKEND=postgres to switch to the
+    Postgres-backed hybrid search. Set DOCSITE_SHADOW_POSTGRES=true to also run
+    the Postgres backend in parallel (non-blocking to the response) and log a
+    comparison against the authoritative backend."""
+    backend = os.environ.get("DOCSITE_SEARCH_BACKEND", "pinecone")
+
+    if backend == "postgres":
+        primary_results = _run_backend_search(DocsiteSearch, "hybrid", search_queries, top_k)
+    else:
+        primary_results = _run_backend_search(LegacyPineconeDocsiteSearch, "semantic", search_queries, top_k)
+
+    if os.environ.get("DOCSITE_SHADOW_POSTGRES", "").lower() == "true" and backend != "postgres":
+        _log_shadow_comparison(search_queries, top_k, primary_results)
+
+    return primary_results
+
+
+def _run_backend_search(backend_cls, strategy, search_queries, top_k):
+    searcher = backend_cls()
+    results = []
     for q in search_queries:
-        query_search_result = docsite_search.search(
-            q.get("query"), 
-            top_k=top_k, 
-            threshold=threshold, 
-            docs_type="general_docs"
+        results.extend(searcher.search(q.get("query"), top_k=top_k, strategy=strategy, docs_type="general_docs"))
+    return results
+
+
+def _log_shadow_comparison(search_queries, top_k, primary_results):
+    """Best-effort: run the Postgres hybrid backend in parallel and log a
+    comparison against the authoritative (Pinecone) results. Never raises."""
+    try:
+        start = time.time()
+        shadow_results = _run_backend_search(DocsiteSearch, "hybrid", search_queries, top_k)
+        elapsed = time.time() - start
+
+        primary_titles = {r.metadata.get("doc_title") for r in primary_results}
+        shadow_titles = {r.metadata.get("doc_title") for r in shadow_results}
+        overlap = len(primary_titles & shadow_titles)
+
+        logger.info(
+            "docsite_shadow_comparison "
+            f"primary_count={len(primary_results)} shadow_count={len(shadow_results)} "
+            f"title_overlap={overlap} shadow_latency_s={elapsed:.3f}"
         )
-        search_results.extend(query_search_result)
-    
-    return search_results
+    except Exception as e:
+        logger.warning(f"Shadow Postgres docsite search failed: {e}")
 
 def format_context(adaptor, code, history):
     """Optionally add more context about the user's job for the LLM."""
