@@ -1,0 +1,27 @@
+# Starter set of representative job_chat/general-docs queries. Queries with an
+# empty expected_doc_titles list are still run and reported (so this fixture
+# is usable immediately), but excluded from the recall@k aggregate until a
+# human curates the expected doc title(s) by inspecting real search results
+# against the live docsite content (neither this script's author nor the
+# implementer of this plan has that access).
+queries:
+  - query: "how do I configure a webhook trigger"
+    expected_doc_titles: []
+  - query: "how do I set up a cron trigger"
+    expected_doc_titles: []
+  - query: "what is a run in OpenFn"
+    expected_doc_titles: []
+  - query: "how do I use collections to store state between runs"
+    expected_doc_titles: []
+  - query: "how do I configure a credential for an adaptor"
+    expected_doc_titles: []
+  - query: "what is the difference between a job and a workflow"
+    expected_doc_titles: []
+  - query: "how do I deploy a project using the CLI"
+    expected_doc_titles: []
+  - query: "how do I debug a failed run"
+    expected_doc_titles: []
+  - query: "what adaptors are available for HTTP requests"
+    expected_doc_titles: []
+  - query: "how do I write a data transform function"
+    expected_doc_titles: []
