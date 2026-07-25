@@ -2,16 +2,12 @@ import json
 import os
 import re
 
+import nltk
+
 try:
-    import nltk
-    try:
-        nltk.data.find('tokenizers/punkt_tab')
-    except LookupError:
-        nltk.download('punkt_tab', quiet=True)
-except ModuleNotFoundError:
-    # nltk is not available (e.g., sqlite3 not available in environment)
-    # Fallback is to import it later when actually needed
-    nltk = None
+    nltk.data.find('tokenizers/punkt_tab')
+except LookupError:
+    nltk.download('punkt_tab', quiet=True)
 
 from embed_docsite.github_utils import get_docs
 from util import create_logger
@@ -144,12 +140,9 @@ class DocsiteProcessor:
                 # add overlap
                 if self.docs_type == "adaptor_functions":
                     overlap_sections = " ".join(current_chunk.split("\n")[-overlap:])
-                # Split by sentences (doesn't split code)
-                elif nltk is not None:
-                    overlap_sections = " ".join(nltk.sent_tokenize(current_chunk)[-overlap:])
                 else:
-                    # Fallback if nltk is not available: no overlap
-                    overlap_sections = ""
+                    # Split by sentences (doesn't split code)
+                    overlap_sections = " ".join(nltk.sent_tokenize(current_chunk)[-overlap:])
                 current_chunk = overlap_sections + split  # Start a new chunk
                 last_overlap_length = len(overlap_sections)
             else:
