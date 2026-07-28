@@ -131,31 +131,3 @@ def test_search_docs_switches_to_postgres_backend_when_flagged(monkeypatch):
     )
 
 
-def test_search_docs_shadow_mode_logs_comparison_without_changing_result(monkeypatch):
-    monkeypatch.delenv("DOCSITE_SEARCH_BACKEND", raising=False)
-    monkeypatch.setenv("DOCSITE_SHADOW_POSTGRES", "true")
-
-    with patch.object(rd, "LegacyPineconeDocsiteSearch") as mock_legacy_cls, \
-         patch.object(rd, "DocsiteSearch") as mock_pg_cls:
-        mock_legacy_cls.return_value.search.return_value = [_fake_result("A")]
-        mock_pg_cls.return_value.search.return_value = [_fake_result("A")]
-        results = search_docs([{"query": "q"}], top_k=5)
-
-    # Primary (Pinecone) result is what's returned, unaffected by the shadow call
-    assert [r.metadata["doc_title"] for r in results] == ["A"]
-    mock_pg_cls.return_value.search.assert_called_once_with(
-        "q", top_k=5, threshold=None, strategy="hybrid", docs_type="general_docs"
-    )
-
-
-def test_search_docs_shadow_mode_swallows_postgres_errors(monkeypatch):
-    monkeypatch.delenv("DOCSITE_SEARCH_BACKEND", raising=False)
-    monkeypatch.setenv("DOCSITE_SHADOW_POSTGRES", "true")
-
-    with patch.object(rd, "LegacyPineconeDocsiteSearch") as mock_legacy_cls, \
-         patch.object(rd, "DocsiteSearch") as mock_pg_cls:
-        mock_legacy_cls.return_value.search.return_value = [_fake_result("A")]
-        mock_pg_cls.return_value.search.side_effect = RuntimeError("boom")
-        results = search_docs([{"query": "q"}], top_k=5)  # must not raise
-
-    assert [r.metadata["doc_title"] for r in results] == ["A"]

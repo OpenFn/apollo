@@ -1,6 +1,5 @@
 import json
 import os
-import time
 
 import anthropic
 import sentry_sdk
@@ -172,58 +171,26 @@ def generate_queries(content, client, user_context=""):
 def search_docs(search_queries, top_k, threshold=None):
     """Search the docsite store using search queries. Defaults to the legacy
     Pinecone backend; set DOCSITE_SEARCH_BACKEND=postgres to switch to the
-    Postgres-backed hybrid search. Set DOCSITE_SHADOW_POSTGRES=true to also run
-    the Postgres backend afterward (synchronously — this adds latency to the
-    response for the duration of the shadow-mode verification window) and log a
-    comparison against the authoritative backend. A future improvement could
-    make this call async/fire-and-forget to remove the added latency.
+    Postgres-backed hybrid search.
 
     :param threshold: Score threshold below which results are dropped. Only
         meaningful for the Pinecone/semantic strategy (a cosine-similarity
-        cutoff); the Postgres hybrid strategy ignores it (RRF-fused rank isn't
-        a comparable score), so it's forwarded unconditionally and has no
-        effect there."""
+        cutoff)."""
     backend = os.environ.get("DOCSITE_SEARCH_BACKEND", "pinecone")
 
     if backend == "postgres":
-        primary_results = _run_backend_search(DocsiteSearch, "hybrid", search_queries, top_k, threshold)
-    else:
-        primary_results = _run_backend_search(LegacyPineconeDocsiteSearch, "semantic", search_queries, top_k, threshold)
-
-    if os.environ.get("DOCSITE_SHADOW_POSTGRES", "").lower() == "true" and backend != "postgres":
-        _log_shadow_comparison(search_queries, top_k, primary_results)
-
-    return primary_results
+        return _run_backend_search(DocsiteSearch, "hybrid", search_queries, top_k, threshold)
+    return _run_backend_search(LegacyPineconeDocsiteSearch, "semantic", search_queries, top_k, threshold)
 
 
 def _run_backend_search(backend_cls, strategy, search_queries, top_k, threshold=None):
     searcher = backend_cls()
     results = []
     for q in search_queries:
-        results.extend(searcher.search(q.get("query"), top_k=top_k, threshold=threshold, strategy=strategy, docs_type="general_docs"))
-    return results
-
-
-def _log_shadow_comparison(search_queries, top_k, primary_results):
-    """Best-effort: run the Postgres hybrid backend synchronously (adds latency
-    to this request while shadow mode is on) and log a comparison against the
-    authoritative (Pinecone) results. Never raises."""
-    try:
-        start = time.time()
-        shadow_results = _run_backend_search(DocsiteSearch, "hybrid", search_queries, top_k)
-        elapsed = time.time() - start
-
-        primary_titles = {r.metadata.get("doc_title") for r in primary_results}
-        shadow_titles = {r.metadata.get("doc_title") for r in shadow_results}
-        overlap = len(primary_titles & shadow_titles)
-
-        logger.info(
-            "docsite_shadow_comparison "
-            f"primary_count={len(primary_results)} shadow_count={len(shadow_results)} "
-            f"title_overlap={overlap} shadow_latency_s={elapsed:.3f}"
+        results.extend(
+            searcher.search(q.get("query"), top_k=top_k, threshold=threshold, strategy=strategy, docs_type="general_docs"),
         )
-    except Exception as e:
-        logger.warning(f"Shadow Postgres docsite search failed: {e}")
+    return results
 
 def format_context(adaptor, code, history):
     """Optionally add more context about the user's job for the LLM."""
