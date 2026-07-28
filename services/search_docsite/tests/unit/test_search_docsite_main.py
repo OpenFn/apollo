@@ -1,7 +1,7 @@
-"""Unit tests for search_docsite.main's backend selection.
+"""Unit tests for search_docsite.main's backend selection and resolve_backend.
 
-The `backend` payload field is the shadow-mode replacement: it lets the same
-query be run against both backends on demand for manual comparison.
+The `backend` payload field lets the same query be run against either backend
+on demand for manual comparison.
 """
 
 from unittest.mock import patch

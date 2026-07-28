@@ -19,7 +19,7 @@ class DocsiteIndexer:
 
     A batch is a full, self-consistent snapshot across all docs_types. Batches
     are built invisibly (status='building'), then promoted to 'complete'
-    atomically — replacing Pinecone's timestamped-namespace-per-run pattern.
+    atomically, so readers only ever see a finished batch.
 
     :param chunk_target_length: Target chunk size in characters (default: 1000)
     :param chunk_min_length: Minimum chunk size before merging with the next split (default: 700)
@@ -34,8 +34,8 @@ class DocsiteIndexer:
 
     @property
     def embeddings(self):
-        """Lazily construct the OpenAI embeddings client (avoids eager credential
-        validation at import/instantiation time)."""
+        """Lazily construct the OpenAI embeddings client, so importing this module
+        needs no credentials."""
         if self._embeddings is None:
             self._embeddings = OpenAIEmbeddings()
         return self._embeddings

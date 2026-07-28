@@ -3,10 +3,9 @@
 Usage: poetry run python -m search_docsite.tests.eval.run_eval
 
 Compares the Postgres-backed DocsiteSearch (strategy='hybrid') against
-LegacyPineconeDocsiteSearch (strategy='semantic') over the golden query set,
-per the Phase-1 shadow-mode rollout plan: Postgres must match or beat
-Pinecone's recall@5 (with <=1-query regression tolerance) and p95 latency
-before DOCSITE_SEARCH_BACKEND is flipped to 'postgres' by default.
+LegacyPineconeDocsiteSearch (strategy='semantic') over the golden query set.
+Postgres should match or beat Pinecone's recall@5 and p95 latency before
+DOCSITE_SEARCH_BACKEND is flipped to 'postgres' by default.
 """
 
 import time
@@ -28,8 +27,7 @@ def compute_agreement(report_a, report_b):
     """Doc-title overlap between two backends' result sets, per query and averaged.
 
     Needs no ground truth, so it gives a usable comparison signal before
-    golden_queries.yaml is curated. This is the measure the deleted shadow mode
-    computed on live traffic; it belongs here, offline, instead.
+    golden_queries.yaml is curated.
     """
     per_query = []
     for a, b in zip(report_a["per_query"], report_b["per_query"]):

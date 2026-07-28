@@ -40,9 +40,8 @@ class DocsiteSearch:
 
         :param query: Search query string
         :param top_k: Number of results to return
-        :param threshold: Score threshold. Only valid for strategy='semantic' — the
-            keyword (FTS rank) and hybrid (RRF rank) scores are not on a comparable
-            scale, so passing a threshold with them raises rather than being ignored.
+        :param threshold: Cosine-similarity cutoff. Valid only for
+            strategy='semantic'; raises for other strategies.
         :param strategy: 'semantic' | 'keyword' | 'hybrid' (default: 'semantic')
         :param doc_title: Filter by document title
         :param docs_type: Filter by document type

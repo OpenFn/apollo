@@ -1,13 +1,11 @@
 """Versioned schema migrations for the Python-owned docs database (POSTGRES_URL).
 
-Mirrors platform/src/db/migrate.ts, which owns the TypeScript-side auth database.
-The two runners are deliberately kept separate but symmetrical: .sql files applied
-in lexical order, applied filenames recorded so re-runs are a no-op, and an
-advisory lock so concurrent starters queue rather than collide.
+Applies .sql files in lexical order, records applied filenames so re-runs are a
+no-op, and takes an advisory lock so concurrent starters queue.
 
-The tracking table (_migrations_docs) and lock key (8314_2026) are both distinct
-from the TypeScript runner's, because APOLLO_CLIENTS_DB_URL falls back to
-POSTGRES_URL in local development and both runners can target one database.
+The tracking table (_migrations_docs) and lock key are distinct from the
+TypeScript runner's in platform/src/db/migrate.ts, because APOLLO_CLIENTS_DB_URL
+falls back to POSTGRES_URL locally and both runners can target one database.
 """
 
 from pathlib import Path

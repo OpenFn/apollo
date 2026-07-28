@@ -113,9 +113,7 @@ def get_db_connection() -> "psycopg2.extensions.connection":
     """Get database connection from POSTGRES_URL environment variable.
 
     Applies any pending schema migrations before handing the connection back.
-    bridge.ts spawns a fresh Python process per request, so there is no
-    long-lived process to cache "already migrated" in; the runner's tracking
-    table makes repeat calls a cheap no-op.
+    The runner's tracking table makes repeat calls a cheap no-op.
 
     Returns:
         psycopg2.connection: Database connection
