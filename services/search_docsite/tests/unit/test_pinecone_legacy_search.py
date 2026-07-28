@@ -138,3 +138,25 @@ def test_get_most_recent_namespace_raises_when_none_valid():
         with pytest.raises(ApolloError) as exc:
             ds._get_most_recent_namespace()
     assert exc.value.code == 404
+
+
+# --- strategy guard -------------------------------------------------------------
+
+@pytest.mark.parametrize("strategy", ["hybrid", "keyword", "nonsense"])
+def test_legacy_search_raises_on_unsupported_strategy(strategy):
+    """Previously fell off the end of the method and returned None implicitly,
+    which surfaces downstream as a confusing TypeError. Reachable now that the
+    backend is selectable per request."""
+    ds = make_search()
+    with pytest.raises(ApolloError) as exc:
+        ds.search("query", strategy=strategy)
+    assert exc.value.code == 400
+
+
+def test_legacy_search_still_dispatches_semantic():
+    ds = make_search()
+    ds.vectorstore.similarity_search_with_score.return_value = [(FakeDoc("a"), 0.9)]
+
+    results = ds.search("query", strategy="semantic")
+
+    assert [r.text for r in results] == ["a"]

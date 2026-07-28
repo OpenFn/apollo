@@ -4,6 +4,7 @@ from langchain_openai import OpenAIEmbeddings
 from pgvector.psycopg2 import register_vector
 from util import create_logger, ApolloError, get_db_connection
 from embeddings.embeddings import SearchResult
+from search_docsite.pinecone_legacy_search import LegacyPineconeDocsiteSearch
 
 logger = create_logger("DocsiteSearch")
 
@@ -189,6 +190,12 @@ class DocsiteSearch:
         return results
 
 
+BACKEND_INDEX_PARAMS = {
+    "postgres": ["batch_id", "default_top_k"],
+    "pinecone": ["collection_name", "index_name", "default_top_k", "embeddings"],
+}
+
+
 def main(data):
     logger.info("Starting...")
 
@@ -196,21 +203,23 @@ def main(data):
     missing = [field for field in required_fields if field not in data]
     if missing:
         logger.error(f"Missing required fields in data: {', '.join(missing)}")
-        return
+        return None
 
-    index_params = {}
+    backend = data.get("backend") or os.environ.get("DOCSITE_SEARCH_BACKEND", "pinecone")
+    if backend not in BACKEND_INDEX_PARAMS:
+        raise ApolloError(
+            400,
+            f"Unknown backend '{backend}'. Expected 'pinecone' or 'postgres'",
+            type="BAD_REQUEST",
+        )
+
     search_params = {"query": data["query"]}
-
     optional_search_params = ["docs_type", "doc_title", "top_k", "threshold", "strategy"]
-    optional_index_params = ["batch_id", "default_top_k"]
-
     for key in optional_search_params:
         if key in data:
             search_params[key] = data[key]
 
-    for key in optional_index_params:
-        if key in data:
-            index_params[key] = data[key]
+    index_params = {key: data[key] for key in BACKEND_INDEX_PARAMS[backend] if key in data}
 
     load_dotenv(override=True)
     openai_api_key = os.environ.get('OPENAI_API_KEY')
@@ -219,7 +228,10 @@ def main(data):
         logger.error(msg)
         raise ApolloError(500, msg, type="BAD_REQUEST")
 
-    docsite_search = DocsiteSearch(**index_params)
+    search_cls = DocsiteSearch if backend == "postgres" else LegacyPineconeDocsiteSearch
+    logger.info(f"Searching docsite via the {backend} backend")
+
+    docsite_search = search_cls(**index_params)
     results = docsite_search.search(**search_params)
 
     return [result.to_json() for result in results]

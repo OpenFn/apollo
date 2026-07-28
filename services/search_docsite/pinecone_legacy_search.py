@@ -35,8 +35,14 @@ class LegacyPineconeDocsiteSearch:
         filters = self._build_filter(doc_title=doc_title, docs_type=docs_type)
         logger.info("Metadata filters built")
 
-        if strategy == 'semantic':
-            return self._semantic_search(query=query, top_k=top_k, threshold=threshold, filters=filters)
+        if strategy != 'semantic':
+            raise ApolloError(
+                400,
+                f"The Pinecone backend only supports strategy='semantic', got '{strategy}'",
+                type="BAD_REQUEST",
+            )
+
+        return self._semantic_search(query=query, top_k=top_k, threshold=threshold, filters=filters)
 
     def _semantic_search(self, query, top_k=None, threshold=None, filters=None):
         if top_k is None and threshold is None:
