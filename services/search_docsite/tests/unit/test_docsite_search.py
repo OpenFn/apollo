@@ -5,6 +5,8 @@ Postgres connection is made. The OpenAI embeddings client is mocked via the
 lazy `_embeddings` attribute, matching the DocsiteIndexer test pattern.
 """
 
+import json
+from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -134,3 +136,29 @@ def test_hybrid_search_runs_rrf_query_and_returns_results():
     params = cur.execute.call_args[0][1]
     assert params["candidate_k"] == 50
     assert params["max_k"] == 5
+
+
+def test_hybrid_search_score_is_json_serializable_float():
+    """Postgres returns RRF as `numeric`, which psycopg2 hands back as Decimal.
+    Decimal is not JSON-serializable, and entry.py's json.dump sits outside its
+    try/except — so this would kill the process, not return a 500."""
+    conn, cur = make_conn()
+    cur.fetchall.return_value = [("a", "Doc A", "general_docs", Decimal("0.032"))]
+    ds = make_search()
+
+    results = ds._hybrid_search(conn, batch_id=1, query="webhook", top_k=5, doc_title=None, docs_type="general_docs")
+
+    assert isinstance(results[0].score, float)
+    json.dumps(results[0].to_json())  # must not raise
+
+
+def test_hybrid_search_casts_rrf_to_float8_in_sql():
+    """Belt and braces: the SQL itself must not produce numeric in the first place."""
+    conn, cur = make_conn()
+    cur.fetchall.return_value = []
+    ds = make_search()
+
+    ds._hybrid_search(conn, batch_id=1, query="webhook", top_k=5, doc_title=None, docs_type=None)
+
+    sql = cur.execute.call_args[0][0]
+    assert "float8" in sql
