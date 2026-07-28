@@ -7,16 +7,16 @@ Can be called:
 """
 import os
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict
+from dataclasses import dataclass
 
 # Import utilities from services directory
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from search_docsite.pinecone_legacy_search import LegacyPineconeDocsiteSearch
+from util import create_logger, ApolloError
 from search_docsite.search_docsite import DocsiteSearch
-from util import ApolloError, create_logger
+from search_docsite.pinecone_legacy_search import LegacyPineconeDocsiteSearch
 
 logger = create_logger(__name__)
 
@@ -54,12 +54,15 @@ def _search_implementation(query: str, num_results: int) -> Dict:
     # service and run_eval for evaluation.
     backend = os.environ.get("DOCSITE_SEARCH_BACKEND", "pinecone")
     search_cls = DocsiteSearch if backend == "postgres" else LegacyPineconeDocsiteSearch
+    # Initialize docsite search
     docsite_search = search_cls()
+
+    # Search with threshold for quality results
     search_results = docsite_search.search(
         query=query,
         top_k=num_results,
         threshold=0.7,  # Only return relevant results
-        strategy='semantic',
+        strategy='semantic'
     )
 
     logger.info(f"Found {len(search_results)} documentation results")
