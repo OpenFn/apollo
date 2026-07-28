@@ -4,7 +4,6 @@ from dotenv import load_dotenv
 from embed_docsite.docsite_indexer import (
     ALL_DOCS_TYPES,
     DocsiteIndexer,
-    create_table_if_not_exists,
     register_vector_type,
 )
 from embed_docsite.docsite_processor import DocsiteProcessor
@@ -114,8 +113,6 @@ def _upload_to_postgres(
     register_vector_type(conn)
 
     try:
-        create_table_if_not_exists(conn)
-
         batch_id = indexer.start_batch(conn, docs_to_upload)
         chunk_count = indexer.insert_documents(conn, batch_id, documents, metadata_dict)
         copied = indexer.copy_forward_missing_docs_types(conn, batch_id, docs_to_upload)

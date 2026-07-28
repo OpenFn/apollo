@@ -1,7 +1,5 @@
--- services/embed_docsite/schema.sql
--- Schema for docsite chunk storage (Postgres + pgvector).
--- Note: This table is automatically created by the embed_docsite service.
--- See README.md for example queries.
+-- Docsite chunk storage (Postgres + pgvector).
+-- Applied by services/db_migrations.py; recorded in _migrations_docs.
 
 CREATE EXTENSION IF NOT EXISTS vector;
 

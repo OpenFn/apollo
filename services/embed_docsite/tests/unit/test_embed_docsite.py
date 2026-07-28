@@ -19,7 +19,6 @@ def test_main_orchestrates_full_batch_lifecycle_and_returns_summary():
 
     with patch.object(m, "get_db_connection", return_value=fake_conn), \
          patch.object(m, "register_vector_type"), \
-         patch.object(m, "create_table_if_not_exists"), \
          patch.object(m, "DocsiteProcessor", return_value=fake_processor), \
          patch.object(m, "DocsiteIndexer", return_value=fake_indexer), \
          patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
@@ -68,7 +67,6 @@ def test_main_defaults_docs_to_upload_to_all_types():
 
     with patch.object(m, "get_db_connection", return_value=fake_conn), \
          patch.object(m, "register_vector_type"), \
-         patch.object(m, "create_table_if_not_exists"), \
          patch.object(m, "DocsiteProcessor", return_value=fake_processor) as mock_processor_cls, \
          patch.object(m, "DocsiteIndexer", return_value=fake_indexer), \
          patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
