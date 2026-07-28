@@ -10,15 +10,9 @@ logger = create_logger("LegacyPineconeDocsiteSearch")
 
 class LegacyPineconeDocsiteSearch:
     """
-    Legacy Pinecone-backed docsite search, preserved from before the Postgres
-    migration as the rollback path. Since DOCSITE_SEARCH_BACKEND defaults to
-    "pinecone", this implementation is what actually serves search traffic
-    today whenever that flag is unset or explicitly set to "pinecone". It is
-    constructed directly by services/search_docsite/search_docsite.py's
-    main(), services/job_chat/retrieve_docs.py's search_docs(), and
-    services/tools/search_documentation/search_documentation.py's
-    _search_implementation(), each of which select it via the
-    DOCSITE_SEARCH_BACKEND flag.
+    Legacy Pinecone-backed docsite search, still the default backend and the
+    rollback path for the Postgres migration. Selected via resolve_backend()
+    in services/search_docsite/search_docsite.py.
 
     :param collection_name: Vectorstore collection name (namespace) to store documents
     :param index_name: Vectorstore index name (default: docsite)

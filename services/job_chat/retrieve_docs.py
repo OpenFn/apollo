@@ -170,7 +170,13 @@ def generate_queries(content, client, user_context=""):
     return (answer_parsed, usage)
 
 def search_docs(search_queries, top_k, threshold=None):
-    """Search the docsite store using search queries."""
+    """Search the docsite store. Both backends run semantic search, so the
+    threshold applies identically.
+
+    Set DOCSITE_SEARCH_BACKEND=postgres to use Postgres.
+
+    :param threshold: Cosine-similarity cutoff
+    """
     searcher = resolve_backend()()
     search_results = []
     for q in search_queries:
