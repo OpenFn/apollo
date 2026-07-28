@@ -1,16 +1,14 @@
 import json
 import os
 import re
-
 import nltk
+from embed_docsite.github_utils import get_docs
+from util import create_logger
 
 try:
     nltk.data.find('tokenizers/punkt_tab')
 except LookupError:
     nltk.download('punkt_tab', quiet=True)
-
-from embed_docsite.github_utils import get_docs
-from util import create_logger
 
 logger = create_logger("DocsiteProcessor")
 
@@ -48,38 +46,41 @@ class DocsiteProcessor:
         return chunks, metadata_dict
 
     def _chunk_adaptor_docs(self, json_data):
-        """Extract and clean docs from adaptor data, and chunk according to self.target_length/self.min_length."""
+        """Extract and clean docs from adaptor data, and chunk according to a target and minimum chunk sizes."""
         output = []
         metadata_dict = dict()
-
+        
         for item in json_data:
             if isinstance(item, dict) and "docs" in item and "name" in item:
                 if item["name"] in self.docs_to_ignore:
                     continue
-
+                
                 docs = item["docs"]
                 name = item["name"]
 
+                # Decode JSON string
                 try:
                     docs = json.loads(docs)
                 except json.JSONDecodeError:
                     pass
-
+                
                 docs = self._clean_html(docs)
 
-                item["docs"] = docs
+                # Save all fields for adding to metadata later
+                item["docs"] = docs # replace docs with cleaned text
                 metadata_dict[name] = item
 
+                # Split by headers, and where needed, sentences
                 splits = self._split_by_headers(docs)
                 splits = self._split_oversized_chunks(chunks=splits, target_length=self.target_length)
                 chunks = self._accumulate_chunks(splits=splits, target_length=self.target_length, overlap=self.overlap, min_length=self.min_length)
 
                 for chunk in chunks:
                     output.append({"name": name, "docs_type": self.docs_type, "doc_chunk": chunk})
-
+        
         self._write_chunks_to_file(chunks=output, file_name=f"{self.docs_type}_chunks.json")
 
-        return output, metadata_dict
+        return output, metadata_dict      
 
     def _clean_html(self, text):
         """Remove HTML tags while preserving essential formatting."""
@@ -88,7 +89,7 @@ class DocsiteProcessor:
         text = re.sub(r'<\/?strong>', '**', text)  # Convert <strong> to bold
         text = re.sub(r'<[^>]+>', '', text)  # Remove other HTML tags
 
-        return text.rstrip()
+        return text.strip()
 
     def _split_by_headers(self, text):
         """Split text into chunks based on Markdown headers (# and ##) and code blocks."""
@@ -99,7 +100,7 @@ class DocsiteProcessor:
     def _split_oversized_chunks(self, chunks, target_length):
         """Check if chunks are over the target lengths, and split them further if needed."""
         result = []
-
+        
         for chunk in chunks:
             if len(chunk) <= target_length:
                 result.append(chunk)
@@ -107,7 +108,7 @@ class DocsiteProcessor:
                 # Chunk is too big, split by newlines
                 lines = chunk.split('\n')
                 current_chunk = ""
-
+                
                 for line in lines:
                     # If adding this line would exceed target size and we already have content
                     if len(current_chunk) + len(line) + 1 > target_length and current_chunk:
@@ -118,11 +119,11 @@ class DocsiteProcessor:
                         if current_chunk:
                             current_chunk += '\n'
                         current_chunk += line
-
+                
                 # Add the last chunk
                 if current_chunk:
                     result.append(current_chunk)
-
+        
         return result
 
     def _accumulate_chunks(self, splits, target_length, overlap, min_length):
@@ -130,25 +131,25 @@ class DocsiteProcessor:
         accumulated = []
         current_chunk = ""
         last_overlap_length = 0
-
+        
         for split in splits:
             if len(current_chunk) + len(split) <= target_length:
                 current_chunk += split
-            elif len(current_chunk) >= min_length:
-                accumulated.append(current_chunk)  # Store the completed chunk
-
-                # add overlap
-                if self.docs_type == "adaptor_functions":
-                    overlap_sections = " ".join(current_chunk.split("\n")[-overlap:])
-                else:
-                    # Split by sentences (doesn't split code)
-                    overlap_sections = " ".join(nltk.sent_tokenize(current_chunk)[-overlap:])
-                current_chunk = overlap_sections + split  # Start a new chunk
-                last_overlap_length = len(overlap_sections)
             else:
-                # Current chunk is too small, add the next split even though it exceeds target_length
-                current_chunk += split
+                if len(current_chunk) >= min_length:
+                    accumulated.append(current_chunk)  # Store the completed chunk
 
+                    # add overlap
+                    if self.docs_type == "adaptor_functions":
+                        overlap_sections = " ".join(current_chunk.split("\n")[-overlap:])
+                    else:
+                        overlap_sections = " ".join(nltk.sent_tokenize(current_chunk)[-overlap:]) # Split by sentences (doesn't split code)
+                    current_chunk = overlap_sections + split  # Start a new chunk
+                    last_overlap_length = len(overlap_sections)
+                else:
+                    # Current chunk is too small, add the next split even though it exceeds target_length
+                    current_chunk += split
+        
         if current_chunk:
             if len(current_chunk) >= min_length or len(accumulated)==0:
                 accumulated.append(current_chunk)

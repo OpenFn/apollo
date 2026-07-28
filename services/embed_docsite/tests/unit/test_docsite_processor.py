@@ -15,7 +15,7 @@ def make_processor(**kwargs):
 def test_clean_html_converts_tags():
     p = make_processor()
     result = p._clean_html("<p>Hello</p> <code>x</code> <strong>bold</strong> <em>drop</em>")
-    assert result == "\nHello\n `x` **bold** drop"
+    assert result == "Hello\n `x` **bold** drop"
 
 
 def test_split_by_headers_splits_on_markdown_headers():
