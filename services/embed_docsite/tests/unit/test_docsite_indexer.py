@@ -19,17 +19,6 @@ def make_conn():
     return conn, cur
 
 
-def test_create_table_if_not_exists_executes_schema_sql():
-    conn, cur = make_conn()
-    m.create_table_if_not_exists(conn)
-
-    executed_sql = cur.execute.call_args[0][0]
-    assert "CREATE EXTENSION IF NOT EXISTS vector" in executed_sql
-    assert "CREATE TABLE IF NOT EXISTS docsite_batches" in executed_sql
-    assert "CREATE TABLE IF NOT EXISTS docsite_chunks" in executed_sql
-    conn.commit.assert_called_once()
-
-
 def test_register_vector_type_calls_pgvector_register():
     conn = MagicMock()
     with patch.object(m, "register_vector") as mock_register:

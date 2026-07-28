@@ -8,47 +8,6 @@ logger = create_logger("DocsiteIndexer")
 
 ALL_DOCS_TYPES = ["adaptor_docs", "general_docs", "adaptor_functions"]
 
-CREATE_TABLES_SQL = """
-CREATE EXTENSION IF NOT EXISTS vector;
-
-CREATE TABLE IF NOT EXISTS docsite_batches (
-    id                  BIGSERIAL PRIMARY KEY,
-    status              VARCHAR(20) NOT NULL DEFAULT 'building'
-                          CHECK (status IN ('building', 'complete', 'failed')),
-    docs_types          TEXT[] NOT NULL,
-    chunk_target_length INT NOT NULL,
-    chunk_min_length    INT NOT NULL,
-    embedding_model     VARCHAR(100) NOT NULL,
-    chunk_count         INT,
-    started_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    completed_at        TIMESTAMPTZ
-);
-
-CREATE TABLE IF NOT EXISTS docsite_chunks (
-    id           BIGSERIAL PRIMARY KEY,
-    batch_id     BIGINT NOT NULL REFERENCES docsite_batches(id) ON DELETE CASCADE,
-    doc_title    VARCHAR(500) NOT NULL,
-    docs_type    VARCHAR(50) NOT NULL,
-    chunk_index  INT NOT NULL,
-    text         TEXT NOT NULL,
-    embedding    vector(1536) NOT NULL,
-    text_search  tsvector GENERATED ALWAYS AS (to_tsvector('english', text)) STORED,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_docsite_chunks_batch     ON docsite_chunks(batch_id);
-CREATE INDEX IF NOT EXISTS idx_docsite_chunks_doc_title ON docsite_chunks(batch_id, doc_title);
-CREATE INDEX IF NOT EXISTS idx_docsite_chunks_docs_type ON docsite_chunks(batch_id, docs_type);
-CREATE INDEX IF NOT EXISTS idx_docsite_chunks_fts       ON docsite_chunks USING gin(text_search);
-"""
-
-
-def create_table_if_not_exists(conn):
-    """Create the docsite_batches/docsite_chunks tables and pgvector extension if missing."""
-    with conn.cursor() as cur:
-        cur.execute(CREATE_TABLES_SQL)
-        conn.commit()
-
 
 def register_vector_type(conn):
     """Register the pgvector adapter on this connection so Python lists convert to the `vector` type."""

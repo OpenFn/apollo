@@ -112,6 +112,11 @@ def apollo(name: str, payload: dict) -> dict:
 def get_db_connection() -> "psycopg2.extensions.connection":
     """Get database connection from POSTGRES_URL environment variable.
 
+    Applies any pending schema migrations before handing the connection back.
+    bridge.ts spawns a fresh Python process per request, so there is no
+    long-lived process to cache "already migrated" in; the runner's tracking
+    table makes repeat calls a cheap no-op.
+
     Returns:
         psycopg2.connection: Database connection
 
@@ -121,7 +126,13 @@ def get_db_connection() -> "psycopg2.extensions.connection":
     db_url = os.environ.get("POSTGRES_URL")
     if not db_url:
         raise ApolloError(500, "Missing POSTGRES_URL environment variable", type="DATABASE_ERROR")
-    return psycopg2.connect(db_url)
+
+    conn = psycopg2.connect(db_url)
+
+    from db_migrations import run_migrations
+    run_migrations(conn)
+
+    return conn
 
 
 def sum_usage(*usage_objects):
