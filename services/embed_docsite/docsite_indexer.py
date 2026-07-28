@@ -1,4 +1,3 @@
-from typing import Optional
 from psycopg2.extras import execute_values
 from langchain_openai import OpenAIEmbeddings
 from pgvector.psycopg2 import register_vector
@@ -41,7 +40,7 @@ class DocsiteIndexer:
             self._embeddings = OpenAIEmbeddings()
         return self._embeddings
 
-    def start_batch(self, conn, docs_types: list) -> int:
+    def start_batch(self, conn, docs_types):
         """Insert a new 'building' batch row and return its id."""
         sql = """
         INSERT INTO docsite_batches (status, docs_types, chunk_target_length, chunk_min_length, embedding_model)
@@ -55,7 +54,7 @@ class DocsiteIndexer:
         logger.info(f"Started batch {batch_id} for docs_types={docs_types}")
         return batch_id
 
-    def insert_documents(self, conn, batch_id: int, documents: list, metadata_dict: dict) -> int:
+    def insert_documents(self, conn, batch_id, documents, metadata_dict):
         """Embed and bulk-insert chunks for this batch. Returns the number of chunks inserted."""
         if not documents:
             return 0
@@ -82,7 +81,7 @@ class DocsiteIndexer:
         logger.info(f"Inserted {len(rows)} chunks into batch {batch_id}")
         return len(rows)
 
-    def _embed_in_batches(self, texts: list, batch_size: int = 100) -> list:
+    def _embed_in_batches(self, texts, batch_size=100):
         """Call the OpenAI embeddings API in batches of batch_size texts."""
         embeddings = []
         for i in range(0, len(texts), batch_size):
@@ -90,7 +89,7 @@ class DocsiteIndexer:
             embeddings.extend(self.embeddings.embed_documents(batch))
         return embeddings
 
-    def copy_forward_missing_docs_types(self, conn, batch_id: int, docs_types_present: list) -> int:
+    def copy_forward_missing_docs_types(self, conn, batch_id, docs_types_present):
         """Copy chunks for docs_types NOT in this run from the previous complete batch,
         so every complete batch is a full snapshot across all docs_types. Returns rows copied."""
         missing_types = [t for t in ALL_DOCS_TYPES if t not in docs_types_present]
@@ -120,7 +119,7 @@ class DocsiteIndexer:
         logger.info(f"Copied {copied} chunks forward for docs_types={missing_types} from batch {previous_batch_id}")
         return copied
 
-    def build_index(self, conn, batch_id: int) -> None:
+    def build_index(self, conn, batch_id):
         """Build a per-batch partial HNSW index. Runs outside a transaction (autocommit)."""
         conn.autocommit = True
         try:
@@ -137,7 +136,7 @@ class DocsiteIndexer:
             conn.autocommit = False
         logger.info(f"Built HNSW index for batch {batch_id}")
 
-    def promote_batch(self, conn, batch_id: int, chunk_count: int) -> None:
+    def promote_batch(self, conn, batch_id, chunk_count):
         """Flip a batch to 'complete' — the moment it becomes visible to readers."""
         with conn.cursor() as cur:
             cur.execute(
@@ -147,7 +146,7 @@ class DocsiteIndexer:
             conn.commit()
         logger.info(f"Promoted batch {batch_id} ({chunk_count} chunks)")
 
-    def prune_old_batches(self, conn, keep_batches: Optional[int] = None) -> list:
+    def prune_old_batches(self, conn, keep_batches=None):
         """Delete complete batches older than the newest `keep_batches`, dropping their
         partial indexes first. Returns the list of pruned batch ids."""
         keep = keep_batches if keep_batches is not None else self.keep_batches
