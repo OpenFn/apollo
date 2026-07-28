@@ -23,7 +23,7 @@ def test_main_orchestrates_full_batch_lifecycle_and_returns_summary():
          patch.object(m, "DocsiteProcessor", return_value=fake_processor), \
          patch.object(m, "DocsiteIndexer", return_value=fake_indexer), \
          patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
-        result = m.main({"docs_to_upload": ["general_docs"]})
+        result = m.main({"docs_to_upload": ["general_docs"], "target": "postgres"})
 
     fake_indexer.start_batch.assert_called_once_with(fake_conn, ["general_docs"])
     fake_indexer.insert_documents.assert_called_once()
@@ -34,6 +34,7 @@ def test_main_orchestrates_full_batch_lifecycle_and_returns_summary():
     fake_conn.close.assert_called_once()
 
     assert result == {
+        "target": "postgres",
         "batch_id": 7,
         "docs_types": ["general_docs"],
         "chunk_count": 10,
@@ -71,7 +72,49 @@ def test_main_defaults_docs_to_upload_to_all_types():
          patch.object(m, "DocsiteProcessor", return_value=fake_processor) as mock_processor_cls, \
          patch.object(m, "DocsiteIndexer", return_value=fake_indexer), \
          patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
-        m.main({})
+        m.main({"target": "postgres"})
 
     called_docs_types = [call.kwargs["docs_type"] for call in mock_processor_cls.call_args_list]
     assert called_docs_types == m.ALL_DOCS_TYPES
+
+
+def test_main_defaults_to_pinecone_target():
+    """Default must match main's behavior: write to Pinecone, never open Postgres."""
+    fake_indexer = MagicMock()
+    fake_processor = MagicMock()
+    fake_processor.get_preprocessed_docs.return_value = ([], {})
+
+    with patch.object(m, "get_db_connection") as mock_get_conn, \
+         patch.object(m, "DocsiteProcessor", return_value=fake_processor), \
+         patch.object(m, "LegacyPineconeDocsiteIndexer", return_value=fake_indexer) as mock_legacy_cls, \
+         patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test", "PINECONE_API_KEY": "pc-test"}):
+        m.main({"docs_to_upload": ["general_docs"]})
+
+    mock_legacy_cls.assert_called_once()
+    mock_get_conn.assert_not_called()
+
+
+def test_main_pinecone_target_does_not_require_postgres_url():
+    """With target=pinecone the service must not touch Postgres at all, so
+    POSTGRES_URL need not be set — matching main's dependency surface."""
+    fake_processor = MagicMock()
+    fake_processor.get_preprocessed_docs.return_value = ([], {})
+
+    with patch.object(m, "get_db_connection") as mock_get_conn, \
+         patch.object(m, "DocsiteProcessor", return_value=fake_processor), \
+         patch.object(m, "LegacyPineconeDocsiteIndexer"), \
+         patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test", "PINECONE_API_KEY": "pc-test"}, clear=True):
+        m.main({})
+
+    mock_get_conn.assert_not_called()
+
+
+def test_main_rejects_unknown_target():
+    from util import ApolloError
+    import pytest
+
+    with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
+        with pytest.raises(ApolloError) as exc:
+            m.main({"target": "elasticsearch"})
+
+    assert exc.value.code == 400

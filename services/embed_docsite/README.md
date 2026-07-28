@@ -27,14 +27,26 @@ The service uses the DocsiteProcessor to download the documentation and chunk it
 The chunked texts can be viewed in `tmp/split_sections`.
 
 ## Payload Reference
+
+The write target is independent of the read backend (`DOCSITE_SEARCH_BACKEND`),
+so a Postgres batch can be built while Pinecone still serves search traffic.
+
 The input payload is a JSON object. All parameters are optional:
 
 ```js
 {
-    "docs_to_upload": ["adaptor_docs", "general_docs", "adaptor_functions"], // Select from 3 types of documentation to upload
-    "collection_name": "docsite-20250225", // Name of the collection in the vector database (defaults to the current date)
-    "index_name": "docsite", // Name of the index in the vector database (an index contains collections; defaults to docsite)
-    "docs_to_ignore": ["job-examples.md", "release-notes.md"], // Titles of documents that should not be indexed
-    "max_total_collections" : 3 // The max number of collections to keep in the vector database. This will delete older collections by date.
+    "target": "pinecone",             // 'pinecone' | 'postgres'. Defaults to pinecone. Chooses the write destination.
+    "docs_to_upload": ["adaptor_docs", "general_docs", "adaptor_functions"],
+    "docs_to_ignore": ["job-examples.md", "release-notes.md"],
+    "chunk_target_length": 1000,      // Target chunk size in characters
+    "chunk_min_length": 700,          // Minimum chunk size before merging with the next split
+
+    // Pinecone target only:
+    "collection_name": "docsite-20250225",  // Namespace (defaults to the current timestamp)
+    "index_name": "docsite",
+    "max_total_collections": 3,
+
+    // Postgres target only:
+    "keep_batches": 2                 // Number of recent complete batches to retain when pruning
 }
 ```
