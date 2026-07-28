@@ -96,7 +96,25 @@ def test_search_docs_defaults_to_legacy_pinecone_backend(monkeypatch):
         results = search_docs([{"query": "q"}], top_k=5)
 
     assert [r.metadata["doc_title"] for r in results] == ["A"]
-    mock_legacy_cls.return_value.search.assert_called_once_with("q", top_k=5, strategy="semantic", docs_type="general_docs")
+    mock_legacy_cls.return_value.search.assert_called_once_with(
+        "q", top_k=5, threshold=None, strategy="semantic", docs_type="general_docs"
+    )
+
+
+def test_search_docs_passes_threshold_through_to_semantic_backend(monkeypatch):
+    """Threshold is a score cutoff that only makes sense for the Pinecone/semantic
+    path; it must still be forwarded there (this regressed once already when the
+    backend flag was introduced — rag.yaml's threshold silently stopped applying)."""
+    monkeypatch.delenv("DOCSITE_SEARCH_BACKEND", raising=False)
+    monkeypatch.delenv("DOCSITE_SHADOW_POSTGRES", raising=False)
+
+    with patch.object(rd, "LegacyPineconeDocsiteSearch") as mock_legacy_cls:
+        mock_legacy_cls.return_value.search.return_value = [_fake_result("A")]
+        search_docs([{"query": "q"}], top_k=5, threshold=0.8)
+
+    mock_legacy_cls.return_value.search.assert_called_once_with(
+        "q", top_k=5, threshold=0.8, strategy="semantic", docs_type="general_docs"
+    )
 
 
 def test_search_docs_switches_to_postgres_backend_when_flagged(monkeypatch):
@@ -108,7 +126,9 @@ def test_search_docs_switches_to_postgres_backend_when_flagged(monkeypatch):
         results = search_docs([{"query": "q"}], top_k=5)
 
     assert [r.metadata["doc_title"] for r in results] == ["B"]
-    mock_pg_cls.return_value.search.assert_called_once_with("q", top_k=5, strategy="hybrid", docs_type="general_docs")
+    mock_pg_cls.return_value.search.assert_called_once_with(
+        "q", top_k=5, threshold=None, strategy="hybrid", docs_type="general_docs"
+    )
 
 
 def test_search_docs_shadow_mode_logs_comparison_without_changing_result(monkeypatch):
@@ -123,7 +143,9 @@ def test_search_docs_shadow_mode_logs_comparison_without_changing_result(monkeyp
 
     # Primary (Pinecone) result is what's returned, unaffected by the shadow call
     assert [r.metadata["doc_title"] for r in results] == ["A"]
-    mock_pg_cls.return_value.search.assert_called_once_with("q", top_k=5, strategy="hybrid", docs_type="general_docs")
+    mock_pg_cls.return_value.search.assert_called_once_with(
+        "q", top_k=5, threshold=None, strategy="hybrid", docs_type="general_docs"
+    )
 
 
 def test_search_docs_shadow_mode_swallows_postgres_errors(monkeypatch):

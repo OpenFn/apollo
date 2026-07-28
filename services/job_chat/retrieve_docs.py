@@ -77,7 +77,7 @@ def retrieve_knowledge(content, history, code="", adaptor="", api_key=None, stre
                 search_queries, generate_queries_usage = generate_queries(content, client, user_context)
             with sentry_sdk.start_span(description="search_documentation"):
                 try:
-                    search_results = search_docs(search_queries, top_k=config["top_k"])
+                    search_results = search_docs(search_queries, top_k=config["top_k"], threshold=config["threshold"])
                     search_results = list(set(search_results))
                     search_results_sections = list(set(result.metadata["doc_title"] for result in search_results))
                 except Exception as e:
@@ -169,20 +169,26 @@ def generate_queries(content, client, user_context=""):
 
     return (answer_parsed, usage)
 
-def search_docs(search_queries, top_k):
+def search_docs(search_queries, top_k, threshold=None):
     """Search the docsite store using search queries. Defaults to the legacy
     Pinecone backend; set DOCSITE_SEARCH_BACKEND=postgres to switch to the
     Postgres-backed hybrid search. Set DOCSITE_SHADOW_POSTGRES=true to also run
     the Postgres backend afterward (synchronously — this adds latency to the
     response for the duration of the shadow-mode verification window) and log a
     comparison against the authoritative backend. A future improvement could
-    make this call async/fire-and-forget to remove the added latency."""
+    make this call async/fire-and-forget to remove the added latency.
+
+    :param threshold: Score threshold below which results are dropped. Only
+        meaningful for the Pinecone/semantic strategy (a cosine-similarity
+        cutoff); the Postgres hybrid strategy ignores it (RRF-fused rank isn't
+        a comparable score), so it's forwarded unconditionally and has no
+        effect there."""
     backend = os.environ.get("DOCSITE_SEARCH_BACKEND", "pinecone")
 
     if backend == "postgres":
-        primary_results = _run_backend_search(DocsiteSearch, "hybrid", search_queries, top_k)
+        primary_results = _run_backend_search(DocsiteSearch, "hybrid", search_queries, top_k, threshold)
     else:
-        primary_results = _run_backend_search(LegacyPineconeDocsiteSearch, "semantic", search_queries, top_k)
+        primary_results = _run_backend_search(LegacyPineconeDocsiteSearch, "semantic", search_queries, top_k, threshold)
 
     if os.environ.get("DOCSITE_SHADOW_POSTGRES", "").lower() == "true" and backend != "postgres":
         _log_shadow_comparison(search_queries, top_k, primary_results)
@@ -190,11 +196,11 @@ def search_docs(search_queries, top_k):
     return primary_results
 
 
-def _run_backend_search(backend_cls, strategy, search_queries, top_k):
+def _run_backend_search(backend_cls, strategy, search_queries, top_k, threshold=None):
     searcher = backend_cls()
     results = []
     for q in search_queries:
-        results.extend(searcher.search(q.get("query"), top_k=top_k, strategy=strategy, docs_type="general_docs"))
+        results.extend(searcher.search(q.get("query"), top_k=top_k, threshold=threshold, strategy=strategy, docs_type="general_docs"))
     return results
 
 
