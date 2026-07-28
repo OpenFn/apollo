@@ -16,7 +16,9 @@ logger = create_logger("embed_docsite")
 VALID_TARGETS = ("pinecone", "postgres")
 
 
-def _collect_documents(docs_to_upload, docs_to_ignore, chunk_target_length, chunk_min_length):
+def _collect_documents(
+    docs_to_upload: list, docs_to_ignore: list, chunk_target_length: int, chunk_min_length: int,
+) -> tuple[list, dict]:
     """Download and chunk every requested docs_type. Shared by both targets."""
     documents = []
     metadata_dict = {}
@@ -70,7 +72,7 @@ def main(data: dict) -> dict:
     )
 
 
-def _upload_to_pinecone(data, documents, metadata_dict, docs_to_upload):
+def _upload_to_pinecone(data: dict, documents: list, metadata_dict: dict, docs_to_upload: list) -> dict:
     """Legacy write path. Deliberately opens no Postgres connection."""
     pinecone_api_key = data.get("PINECONE_API_KEY") or os.environ.get("PINECONE_API_KEY")
     if not pinecone_api_key:
@@ -95,8 +97,13 @@ def _upload_to_pinecone(data, documents, metadata_dict, docs_to_upload):
 
 
 def _upload_to_postgres(
-    documents, metadata_dict, docs_to_upload, chunk_target_length, chunk_min_length, keep_batches,
-):
+    documents: list,
+    metadata_dict: dict,
+    docs_to_upload: list,
+    chunk_target_length: int,
+    chunk_min_length: int,
+    keep_batches: int,
+) -> dict:
     indexer = DocsiteIndexer(
         chunk_target_length=chunk_target_length,
         chunk_min_length=chunk_min_length,
