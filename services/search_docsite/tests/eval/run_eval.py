@@ -19,12 +19,12 @@ from search_docsite.search_docsite import DocsiteSearch
 GOLDEN_QUERIES_PATH = Path(__file__).parent / "golden_queries.yaml"
 
 
-def compute_recall_at_k(retrieved_titles: list, expected_titles: list) -> bool:
+def compute_recall_at_k(retrieved_titles, expected_titles):
     """True if any expected title appears among the retrieved titles."""
     return bool(set(retrieved_titles) & set(expected_titles))
 
 
-def compute_agreement(report_a: dict, report_b: dict) -> dict:
+def compute_agreement(report_a, report_b):
     """Doc-title overlap between two backends' result sets, per query and averaged.
 
     Needs no ground truth, so it gives a usable comparison signal before
@@ -48,7 +48,7 @@ def compute_agreement(report_a: dict, report_b: dict) -> dict:
     return {"per_query": per_query, "mean_jaccard": mean_jaccard}
 
 
-def run_eval(golden_queries: list, backend_cls, strategy: str, top_k: int = 5) -> dict:
+def run_eval(golden_queries, backend_cls, strategy, top_k=5):
     """Run every golden query against one backend/strategy and return a report dict."""
     backend = backend_cls()
     per_query = []
@@ -99,7 +99,7 @@ def run_eval(golden_queries: list, backend_cls, strategy: str, top_k: int = 5) -
     }
 
 
-def main() -> None:
+def main():
     with open(GOLDEN_QUERIES_PATH) as f:
         golden_queries = yaml.safe_load(f)["queries"]
 

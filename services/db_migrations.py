@@ -29,14 +29,14 @@ CREATE TABLE IF NOT EXISTS _migrations_docs (
 """
 
 
-def _migration_files() -> list:
+def _migration_files():
     """Every .sql file in the migrations directory, in lexical order."""
     if not MIGRATIONS_DIR.is_dir():
         return []
     return sorted(MIGRATIONS_DIR.glob("*.sql"))
 
 
-def run_migrations(conn) -> int:
+def run_migrations(conn):
     """Apply any migrations not yet recorded. Returns the count applied this run.
 
     Everything happens in one transaction: the advisory lock is held for its
