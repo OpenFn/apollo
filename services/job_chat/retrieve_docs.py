@@ -15,8 +15,7 @@ import sentry_sdk
 from langfuse import observe
 from util import ApolloError, create_logger
 from models import resolve_model
-from search_docsite.search_docsite import DocsiteSearch
-from search_docsite.pinecone_legacy_search import LegacyPineconeDocsiteSearch
+from search_docsite.search_docsite import resolve_backend
 from .rag_config_loader import ConfigLoader
 
 logger = create_logger("job_chat.retrieve_docs")
@@ -171,31 +170,20 @@ def generate_queries(content, client, user_context=""):
     return (answer_parsed, usage)
 
 def search_docs(search_queries, top_k, threshold=None):
-    """Search the docsite store using search queries. Defaults to the legacy
-    Pinecone backend; set DOCSITE_SEARCH_BACKEND=postgres to switch to the
-    Postgres-backed search.
-
-    Both backends use semantic search with the same cosine-similarity cutoff, so
-    results are directly comparable and the quality gate survives the cutover.
-    Hybrid (RRF) is deliberately not used here: its score has no calibratable
-    scale, so a threshold cannot be applied to it. It stays available via the
-    search_docsite service and run_eval for evaluation.
-
-    :param threshold: Cosine-similarity cutoff, applied identically by both
-        backends."""
-    backend = os.environ.get("DOCSITE_SEARCH_BACKEND", "pinecone")
-    backend_cls = DocsiteSearch if backend == "postgres" else LegacyPineconeDocsiteSearch
-    return _run_backend_search(backend_cls, "semantic", search_queries, top_k, threshold)
-
-
-def _run_backend_search(backend_cls, strategy, search_queries, top_k, threshold=None):
-    searcher = backend_cls()
-    results = []
+    """Search the docsite store using search queries."""
+    searcher = resolve_backend()()
+    search_results = []
     for q in search_queries:
-        results.extend(
-            searcher.search(q.get("query"), top_k=top_k, threshold=threshold, strategy=strategy, docs_type="general_docs"),
+        query_search_result = searcher.search(
+            q.get("query"),
+            top_k=top_k,
+            threshold=threshold,
+            strategy="semantic",
+            docs_type="general_docs"
         )
-    return results
+        search_results.extend(query_search_result)
+
+    return search_results
 
 def format_context(adaptor, code, history):
     """Optionally add more context about the user's job for the LLM."""
