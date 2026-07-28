@@ -75,3 +75,25 @@ def test_main_routes_collection_name_to_pinecone_only(monkeypatch):
         m.main({"query": "q", "backend": "pinecone", "collection_name": "docsite-202501010000", "batch_id": 9})
 
     mock_legacy_cls.assert_called_once_with(collection_name="docsite-202501010000")
+
+
+def test_resolve_backend_defaults_to_pinecone(monkeypatch):
+    monkeypatch.delenv("DOCSITE_SEARCH_BACKEND", raising=False)
+    assert m.resolve_backend() is m.LegacyPineconeDocsiteSearch
+
+
+def test_resolve_backend_reads_env(monkeypatch):
+    monkeypatch.setenv("DOCSITE_SEARCH_BACKEND", "postgres")
+    assert m.resolve_backend() is m.DocsiteSearch
+
+
+def test_resolve_backend_override_wins_over_env(monkeypatch):
+    monkeypatch.setenv("DOCSITE_SEARCH_BACKEND", "pinecone")
+    assert m.resolve_backend("postgres") is m.DocsiteSearch
+
+
+def test_resolve_backend_rejects_unknown_name(monkeypatch):
+    monkeypatch.delenv("DOCSITE_SEARCH_BACKEND", raising=False)
+    with pytest.raises(ApolloError) as exc:
+        m.resolve_backend("sqlite")
+    assert exc.value.code == 400

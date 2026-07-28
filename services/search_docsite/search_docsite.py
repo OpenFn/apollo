@@ -196,6 +196,17 @@ BACKEND_INDEX_PARAMS = {
 }
 
 
+def resolve_backend(override=None):
+    """Return the search class for the configured backend.
+
+    :param override: Backend name that is prioritised over DOCSITE_SEARCH_BACKEND
+    """
+    name = override or os.environ.get("DOCSITE_SEARCH_BACKEND", "pinecone")
+    if name not in BACKEND_INDEX_PARAMS:
+        raise ApolloError(400, f"Unknown backend '{name}'. Expected 'pinecone' or 'postgres'", type="BAD_REQUEST")
+    return DocsiteSearch if name == "postgres" else LegacyPineconeDocsiteSearch
+
+
 def main(data):
     logger.info("Starting...")
 
@@ -206,12 +217,7 @@ def main(data):
         return None
 
     backend = data.get("backend") or os.environ.get("DOCSITE_SEARCH_BACKEND", "pinecone")
-    if backend not in BACKEND_INDEX_PARAMS:
-        raise ApolloError(
-            400,
-            f"Unknown backend '{backend}'. Expected 'pinecone' or 'postgres'",
-            type="BAD_REQUEST",
-        )
+    search_cls = resolve_backend(backend)
 
     search_params = {"query": data["query"]}
     optional_search_params = ["docs_type", "doc_title", "top_k", "threshold", "strategy"]
@@ -228,7 +234,6 @@ def main(data):
         logger.error(msg)
         raise ApolloError(500, msg, type="BAD_REQUEST")
 
-    search_cls = DocsiteSearch if backend == "postgres" else LegacyPineconeDocsiteSearch
     logger.info(f"Searching docsite via the {backend} backend")
 
     docsite_search = search_cls(**index_params)

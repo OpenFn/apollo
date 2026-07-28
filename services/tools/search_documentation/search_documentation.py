@@ -5,7 +5,6 @@ Can be called:
 1. As a standalone service via entry.py: bun py tools/search_documentation
 2. As a tool by supervisor via search_documentation_tool()
 """
-import os
 import sys
 from pathlib import Path
 from typing import Dict
@@ -15,8 +14,7 @@ from dataclasses import dataclass
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from util import create_logger, ApolloError
-from search_docsite.search_docsite import DocsiteSearch
-from search_docsite.pinecone_legacy_search import LegacyPineconeDocsiteSearch
+from search_docsite.search_docsite import resolve_backend
 
 logger = create_logger(__name__)
 
@@ -52,10 +50,8 @@ def _search_implementation(query: str, num_results: int) -> Dict:
     # its score has no calibratable scale, so it can be neither thresholded nor
     # rendered as a relevance figure. It stays available via the search_docsite
     # service and run_eval for evaluation.
-    backend = os.environ.get("DOCSITE_SEARCH_BACKEND", "pinecone")
-    search_cls = DocsiteSearch if backend == "postgres" else LegacyPineconeDocsiteSearch
     # Initialize docsite search
-    docsite_search = search_cls()
+    docsite_search = resolve_backend()()
 
     # Search with threshold for quality results
     search_results = docsite_search.search(
