@@ -47,13 +47,20 @@ def _search_implementation(query: str, num_results: int) -> Dict:
     """
     logger.info(f"Searching documentation for: {query[:100]}...")
 
+    # Both backends use semantic search with the same cosine-similarity cutoff, so
+    # results are directly comparable. Hybrid (RRF) is deliberately not used here:
+    # its score has no calibratable scale, so it can be neither thresholded nor
+    # rendered as a relevance figure. It stays available via the search_docsite
+    # service and run_eval for evaluation.
     backend = os.environ.get("DOCSITE_SEARCH_BACKEND", "pinecone")
-    if backend == "postgres":
-        docsite_search = DocsiteSearch()
-        search_results = docsite_search.search(query=query, top_k=num_results, strategy='hybrid')
-    else:
-        docsite_search = LegacyPineconeDocsiteSearch()
-        search_results = docsite_search.search(query=query, top_k=num_results, strategy='semantic')
+    search_cls = DocsiteSearch if backend == "postgres" else LegacyPineconeDocsiteSearch
+    docsite_search = search_cls()
+    search_results = docsite_search.search(
+        query=query,
+        top_k=num_results,
+        threshold=0.7,  # Only return relevant results
+        strategy='semantic',
+    )
 
     logger.info(f"Found {len(search_results)} documentation results")
 
