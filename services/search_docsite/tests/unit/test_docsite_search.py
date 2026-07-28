@@ -53,6 +53,29 @@ def test_search_raises_on_unknown_strategy():
     assert exc.value.code == 400
 
 
+@pytest.mark.parametrize("strategy", ["hybrid", "keyword"])
+def test_search_rejects_threshold_for_non_semantic_strategies(strategy):
+    """RRF/FTS scores are not comparable to a cosine cutoff. Silently ignoring a
+    threshold here is a landmine: 0.8 against a 0.033-max score would drop
+    every result with no error."""
+    conn, _ = make_conn()
+    ds = make_search(batch_id=1)
+    with patched(conn)[0], patched(conn)[1]:
+        with pytest.raises(ApolloError) as exc:
+            ds.search("query", threshold=0.8, strategy=strategy)
+    assert exc.value.code == 400
+
+
+@pytest.mark.parametrize("strategy", ["hybrid", "keyword"])
+def test_search_allows_none_threshold_for_non_semantic_strategies(strategy):
+    conn, _ = make_conn()
+    ds = make_search(batch_id=1)
+    with patched(conn)[0], patched(conn)[1], \
+         patch.object(ds, "_keyword_search", return_value=["r"]), \
+         patch.object(ds, "_hybrid_search", return_value=["r"]):
+        assert ds.search("query", threshold=None, strategy=strategy) == ["r"]
+
+
 # --- _resolve_current_batch --------------------------------------------------
 
 def test_resolve_current_batch_returns_newest_complete_batch_id():
