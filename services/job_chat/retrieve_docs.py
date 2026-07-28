@@ -1,24 +1,22 @@
-import json
 import os
-
+import json
 import anthropic
-import sentry_sdk
 from anthropic import (
     APIConnectionError,
-    AuthenticationError,
     BadRequestError,
-    InternalServerError,
-    NotFoundError,
+    AuthenticationError,
     PermissionDeniedError,
-    RateLimitError,
+    NotFoundError,
     UnprocessableEntityError,
+    RateLimitError,
+    InternalServerError,
 )
+import sentry_sdk
 from langfuse import observe
-from models import resolve_model
-from search_docsite.pinecone_legacy_search import LegacyPineconeDocsiteSearch
-from search_docsite.search_docsite import DocsiteSearch
 from util import ApolloError, create_logger
-
+from models import resolve_model
+from search_docsite.search_docsite import DocsiteSearch
+from search_docsite.pinecone_legacy_search import LegacyPineconeDocsiteSearch
 from .rag_config_loader import ConfigLoader
 
 logger = create_logger("job_chat.retrieve_docs")
@@ -76,7 +74,11 @@ def retrieve_knowledge(content, history, code="", adaptor="", api_key=None, stre
                 search_queries, generate_queries_usage = generate_queries(content, client, user_context)
             with sentry_sdk.start_span(description="search_documentation"):
                 try:
-                    search_results = search_docs(search_queries, top_k=config["top_k"], threshold=config["threshold"])
+                    search_results = search_docs(
+                        search_queries,
+                        top_k=config["top_k"],
+                        threshold=config["threshold"]
+                    )
                     search_results = list(set(search_results))
                     search_results_sections = list(set(result.metadata["doc_title"] for result in search_results))
                 except Exception as e:
