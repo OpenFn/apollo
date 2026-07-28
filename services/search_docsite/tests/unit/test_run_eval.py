@@ -3,7 +3,8 @@ Backends are fully faked — no real search/DB/network involved."""
 
 from unittest.mock import MagicMock
 
-from search_docsite.tests.eval.run_eval import compute_recall_at_k, run_eval
+import pytest
+from search_docsite.tests.eval.run_eval import compute_agreement, compute_recall_at_k, run_eval
 
 
 def test_compute_recall_at_k_true_when_any_expected_title_present():
@@ -64,3 +65,50 @@ def test_run_eval_reports_latency_percentiles():
     assert "p50_latency_s" in report
     assert "p95_latency_s" in report
     assert report["p50_latency_s"] >= 0
+
+
+def test_compute_agreement_reports_perfect_overlap():
+    report_a = {"per_query": [{"query": "q", "retrieved_titles": ["A", "B"]}]}
+    report_b = {"per_query": [{"query": "q", "retrieved_titles": ["B", "A"]}]}
+
+    agreement = compute_agreement(report_a, report_b)
+
+    assert agreement["per_query"][0]["overlap"] == 2
+    assert agreement["per_query"][0]["jaccard"] == 1.0
+    assert agreement["mean_jaccard"] == 1.0
+
+
+def test_compute_agreement_reports_partial_overlap():
+    report_a = {"per_query": [{"query": "q", "retrieved_titles": ["A", "B"]}]}
+    report_b = {"per_query": [{"query": "q", "retrieved_titles": ["B", "C"]}]}
+
+    agreement = compute_agreement(report_a, report_b)
+
+    assert agreement["per_query"][0]["overlap"] == 1
+    assert agreement["per_query"][0]["union"] == 3
+    assert agreement["per_query"][0]["jaccard"] == pytest.approx(1 / 3)
+
+
+def test_compute_agreement_handles_both_backends_returning_nothing():
+    report_a = {"per_query": [{"query": "q", "retrieved_titles": []}]}
+    report_b = {"per_query": [{"query": "q", "retrieved_titles": []}]}
+
+    agreement = compute_agreement(report_a, report_b)
+
+    assert agreement["per_query"][0]["jaccard"] == 0.0
+    assert agreement["mean_jaccard"] == 0.0
+
+
+def test_compute_agreement_means_across_queries():
+    report_a = {"per_query": [
+        {"query": "q1", "retrieved_titles": ["A"]},
+        {"query": "q2", "retrieved_titles": ["X"]},
+    ]}
+    report_b = {"per_query": [
+        {"query": "q1", "retrieved_titles": ["A"]},
+        {"query": "q2", "retrieved_titles": ["Y"]},
+    ]}
+
+    agreement = compute_agreement(report_a, report_b)
+
+    assert agreement["mean_jaccard"] == pytest.approx(0.5)
