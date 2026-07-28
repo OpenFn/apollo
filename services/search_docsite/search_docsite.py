@@ -159,7 +159,7 @@ class DocsiteSearch:
         SELECT COALESCE(s.text, k.text) AS text,
                COALESCE(s.doc_title, k.doc_title) AS doc_title,
                COALESCE(s.docs_type, k.docs_type) AS docs_type,
-               COALESCE(1.0 / (60 + s.rnk), 0) + COALESCE(1.0 / (60 + k.rnk), 0) AS score
+               COALESCE(1.0::float8 / (60 + s.rnk), 0) + COALESCE(1.0::float8 / (60 + k.rnk), 0) AS score
         FROM semantic s FULL OUTER JOIN keyword k ON s.id = k.id
         ORDER BY score DESC
         LIMIT %(max_k)s
@@ -172,7 +172,10 @@ class DocsiteSearch:
             cur.execute(sql, params)
             rows = cur.fetchall()
 
-        results = [SearchResult(text, {"doc_title": title, "docs_type": dtype}, score) for text, title, dtype, score in rows]
+        results = [
+            SearchResult(text, {"doc_title": title, "docs_type": dtype}, float(score))
+            for text, title, dtype, score in rows
+        ]
         logger.info(f"Hybrid search returned {len(results)} results")
         return results
 
