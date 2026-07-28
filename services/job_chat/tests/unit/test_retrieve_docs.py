@@ -117,17 +117,19 @@ def test_search_docs_passes_threshold_through_to_semantic_backend(monkeypatch):
     )
 
 
-def test_search_docs_switches_to_postgres_backend_when_flagged(monkeypatch):
+def test_search_docs_uses_semantic_with_threshold_on_postgres_backend(monkeypatch):
+    """Postgres must apply the identical 0.8 cosine gate as Pinecone. Hybrid's RRF
+    score cannot be thresholded, so using it here would silently drop the quality
+    filter at cutover. Semantic returns comparable cosine scores."""
     monkeypatch.setenv("DOCSITE_SEARCH_BACKEND", "postgres")
-    monkeypatch.delenv("DOCSITE_SHADOW_POSTGRES", raising=False)
 
     with patch.object(rd, "DocsiteSearch") as mock_pg_cls:
         mock_pg_cls.return_value.search.return_value = [_fake_result("B")]
-        results = search_docs([{"query": "q"}], top_k=5)
+        results = search_docs([{"query": "q"}], top_k=5, threshold=0.8)
 
     assert [r.metadata["doc_title"] for r in results] == ["B"]
     mock_pg_cls.return_value.search.assert_called_once_with(
-        "q", top_k=5, threshold=None, strategy="hybrid", docs_type="general_docs"
+        "q", top_k=5, threshold=0.8, strategy="semantic", docs_type="general_docs"
     )
 
 

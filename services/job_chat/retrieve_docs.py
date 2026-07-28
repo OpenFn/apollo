@@ -171,16 +171,19 @@ def generate_queries(content, client, user_context=""):
 def search_docs(search_queries, top_k, threshold=None):
     """Search the docsite store using search queries. Defaults to the legacy
     Pinecone backend; set DOCSITE_SEARCH_BACKEND=postgres to switch to the
-    Postgres-backed hybrid search.
+    Postgres-backed search.
 
-    :param threshold: Score threshold below which results are dropped. Only
-        meaningful for the Pinecone/semantic strategy (a cosine-similarity
-        cutoff)."""
+    Both backends use semantic search with the same cosine-similarity cutoff, so
+    results are directly comparable and the quality gate survives the cutover.
+    Hybrid (RRF) is deliberately not used here: its score has no calibratable
+    scale, so a threshold cannot be applied to it. It stays available via the
+    search_docsite service and run_eval for evaluation.
+
+    :param threshold: Cosine-similarity cutoff, applied identically by both
+        backends."""
     backend = os.environ.get("DOCSITE_SEARCH_BACKEND", "pinecone")
-
-    if backend == "postgres":
-        return _run_backend_search(DocsiteSearch, "hybrid", search_queries, top_k, threshold)
-    return _run_backend_search(LegacyPineconeDocsiteSearch, "semantic", search_queries, top_k, threshold)
+    backend_cls = DocsiteSearch if backend == "postgres" else LegacyPineconeDocsiteSearch
+    return _run_backend_search(backend_cls, "semantic", search_queries, top_k, threshold)
 
 
 def _run_backend_search(backend_cls, strategy, search_queries, top_k, threshold=None):
