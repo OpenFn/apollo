@@ -2,6 +2,7 @@ from psycopg2.extras import execute_values
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.document_loaders import DataFrameLoader
 from util import create_logger, ApolloError, is_docsite_collection
+from pgvector import Vector
 from pgvector.psycopg2 import register_vector
 
 logger = create_logger("DocsiteIndexer")
@@ -10,7 +11,12 @@ ALL_DOCS_TYPES = ["adaptor_docs", "general_docs", "adaptor_functions"]
 
 
 def register_vector_type(conn):
-    """Register the pgvector adapter on this connection so Python lists convert to the `vector` type."""
+    """Register pgvector's psycopg2 adapters on this connection.
+
+    Registers `Vector` and `numpy.ndarray` — *not* `list`. A bare list is sent
+    as `numeric[]`, which Postgres will cast on assignment but has no `<=>`
+    operator for, so writes succeed and searches fail.
+    """
     register_vector(conn)
 
 
@@ -69,7 +75,7 @@ class DocsiteIndexer:
             doc_title = doc["name"].removesuffix(".md")
             chunk_index = doc_title_indices.get(doc_title, 0)
             doc_title_indices[doc_title] = chunk_index + 1
-            rows.append((batch_id, doc_title, doc["docs_type"], chunk_index, doc["doc_chunk"], embedding))
+            rows.append((batch_id, doc_title, doc["docs_type"], chunk_index, doc["doc_chunk"], Vector(embedding)))
 
         insert_sql = """
         INSERT INTO docsite_chunks (batch_id, doc_title, docs_type, chunk_index, text, embedding)
