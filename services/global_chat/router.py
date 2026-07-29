@@ -40,6 +40,7 @@ class RouterResult:
     """Result from router or passthrough."""
 
     response: str
+    response_segments: List[Dict]
     attachments: List[Dict]
     history: List[Dict]
     usage: Dict
@@ -258,6 +259,7 @@ class RouterAgent:
 
         return RouterResult(
             response=result["response"],
+            response_segments=[{"type": "text", "content": result["response"]}],
             attachments=attachments,
             history=result["history"].copy(),
             usage=total_usage,
@@ -360,6 +362,7 @@ class RouterAgent:
 
         return RouterResult(
             response=result["response"],
+            response_segments=[{"type": "text", "content": result["response"]}],
             attachments=attachments,
             history=result["history"].copy(),
             usage=total_usage,
@@ -401,6 +404,7 @@ class RouterAgent:
 
         return RouterResult(
             response=planner_result.response,
+            response_segments=planner_result.response_segments,
             attachments=planner_result.attachments,
             history=planner_result.history,
             usage=total_usage,

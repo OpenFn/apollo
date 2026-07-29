@@ -22,6 +22,7 @@ def make_planner() -> PlannerAgent:
     planner.current_yaml = WORKFLOW_YAML
     planner.yaml_modified = False
     planner.subagent_results = []
+    planner._segments = []
     planner.api_key = "test-key"
     planner._user = None
     planner._metrics_opt_in = None
@@ -48,12 +49,18 @@ class StubStreamManager:
     def send_thinking(self, *_args: object, **_kwargs: object) -> None:
         pass
 
+    def send_changes(self, *_args: object, **_kwargs: object) -> None:
+        pass
+
+    def send_status(self, *_args: object, **_kwargs: object) -> None:
+        pass
+
 
 def test_inspect_job_code_accepts_multiple_keys() -> None:
     planner = make_planner()
     block = FakeToolUse("inspect_job_code", {"job_keys": ["fetch-patients", "missing-step"]})
 
-    result = planner._execute_tool(block, empty_usage(), [])
+    result = planner._execute_tool(block, StubStreamManager(), empty_usage(), [])
 
     assert "get('/patients');" in result
     assert "No code found for job 'missing-step'" in result
@@ -65,7 +72,7 @@ def test_job_agent_failure_returns_error_tool_result() -> None:
     meta = []
 
     with patch("global_chat.planner.call_job_agent", side_effect=RuntimeError("boom")):
-        result = planner._execute_tool(block, empty_usage(), meta)
+        result = planner._execute_tool(block, StubStreamManager(), empty_usage(), meta)
 
     assert result.startswith("ERROR: The job code agent failed: boom")
     assert meta[0]["error"] == "boom"
@@ -76,7 +83,7 @@ def test_workflow_agent_failure_returns_error_tool_result() -> None:
     block = FakeToolUse("call_workflow_agent", {"message": "add a step"})
 
     with patch("global_chat.planner.call_workflow_agent", side_effect=RuntimeError("boom")):
-        result = planner._execute_tool(block, empty_usage(), [])
+        result = planner._execute_tool(block, StubStreamManager(), empty_usage(), [])
 
     assert result.startswith("ERROR: The workflow agent failed: boom")
     assert planner.current_yaml == WORKFLOW_YAML
@@ -89,7 +96,7 @@ def test_job_code_without_matched_key_is_reported_as_not_stitched() -> None:
     subagent_result = {"response": "done", "suggested_code": "newCode();", "usage": empty_usage()}
 
     with patch("global_chat.planner.call_job_agent", return_value=subagent_result):
-        result = planner._execute_tool(block, empty_usage(), [])
+        result = planner._execute_tool(block, StubStreamManager(), empty_usage(), [])
 
     assert "NOT added to the workflow" in result
     assert "stitched into the workflow" not in result
@@ -104,7 +111,7 @@ def test_workflow_agent_yaml_response_updates_structure_view() -> None:
     subagent_result = {"response": "Added the step.", "response_yaml": new_yaml, "usage": empty_usage()}
 
     with patch("global_chat.planner.call_workflow_agent", return_value=subagent_result):
-        result = planner._execute_tool(block, empty_usage(), [])
+        result = planner._execute_tool(block, StubStreamManager(), empty_usage(), [])
 
     assert "Updated workflow structure:" in result
     assert "new-step" in result
@@ -118,7 +125,7 @@ def test_workflow_agent_without_yaml_reports_no_change() -> None:
     subagent_result = {"response": "Which DHIS2 instance?", "response_yaml": None, "usage": empty_usage()}
 
     with patch("global_chat.planner.call_workflow_agent", return_value=subagent_result):
-        result = planner._execute_tool(block, empty_usage(), [])
+        result = planner._execute_tool(block, StubStreamManager(), empty_usage(), [])
 
     assert "[No workflow changes were made — no YAML was produced.]" in result
     assert "Updated workflow structure:" not in result

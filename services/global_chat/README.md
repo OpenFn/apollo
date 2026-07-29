@@ -70,6 +70,12 @@ Request to build a new multi-step workflow from scratch:
 ```json
 {
   "response": "I've created a workflow that fetches patient data from CommCare and loads it to DHIS2. The first job retrieves patient records via the CommCare REST API, and the second job maps and uploads them to DHIS2.",
+  "response_segments": [
+    { "type": "text", "content": "I'll build the workflow structure first." },
+    { "type": "status", "content": "Built workflow outline" },
+    { "type": "status", "content": "Wrote code for \"Fetch from CommCare\", \"Load to DHIS2\"" },
+    { "type": "text", "content": "I've created a workflow that fetches patient data from CommCare and loads it to DHIS2..." }
+  ],
   "attachments": [
     {
       "type": "workflow_yaml",
@@ -106,12 +112,18 @@ Request to build a new multi-step workflow from scratch:
 
 **Response Fields:**
 
-- `response`: The assistant's text response to the user
+- `response`: The assistant's text response to the user — the final answer. On
+  the planner path this is the last round's text only; earlier narration lives
+  in `response_segments`
+- `response_segments`: The durable transcript of the turn in stream order —
+  `text` segments woven with settled `status` lines ("Edited workflow
+  structure"). Transient "...ing" spinners are not included. See
+  `PAYLOAD_SPEC.md` for the full streaming event contract
 - `attachments`: Artifacts produced — currently always
   `{type: "workflow_yaml", content: string}` when YAML was generated or modified
-- `history`: Updated conversation history including the latest exchange. Direct
-  routes return string `content`; the planner path may return `content` as
-  Anthropic content-block arrays (`tool_use`/`tool_result`)
+- `history`: Updated conversation history including the latest exchange.
+  `content` is a string on every route; on the planner path the assistant entry
+  contains only the final answer text
 - `usage`: Aggregated token usage across all agents called during the request
 - `meta.agents`: Ordered list of agents invoked (e.g.
   `["router", "workflow_agent"]` or
@@ -151,7 +163,7 @@ For straightforward requests, the router calls subagents directly:
 
 ### Planner
 
-For complex requests, the `PlannerAgent` (Claude Sonnet) runs an agentic
+For complex requests, the `PlannerAgent` (Claude Opus) runs an agentic
 tool-calling loop with access to four tools:
 
 - **`call_workflow_agent`** — create or modify workflow YAML structure
@@ -165,7 +177,7 @@ then calls `call_job_code_agent` for each job that needs code. Job code is
 stitched into the workflow YAML immediately after each call.
 
 The loop continues until the model signals it is done (up to a configurable
-maximum of tool calls, default 25).
+maximum of tool calls, currently 10 in `config.yaml`).
 
 ## Testing
 

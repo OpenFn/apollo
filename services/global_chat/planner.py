@@ -38,6 +38,7 @@ class PlannerResult:
     """Result from planner run."""
 
     response: str
+    response_segments: List[Dict]
     attachments: List[Dict]
     history: List[Dict]
     usage: Dict
@@ -66,6 +67,7 @@ class PlannerAgent:
 
         self.current_yaml: Optional[str] = None
         self.subagent_results = []
+        self._segments: List[Dict] = []
 
         logger.info(f"PlannerAgent initialized with model: {self.model}")
 
@@ -95,16 +97,17 @@ class PlannerAgent:
         """
         logger.info("Planner.run() called")
 
-        stream_manager = StreamManager(model=self.model, stream=stream)
-        if workflow_yaml:
-            stream_manager.send_thinking(STATUS_REVIEWING_WORKFLOW + STATUS_PLANNING)
-        else:
-            stream_manager.send_thinking(STATUS_NEW_WORKFLOW + STATUS_PLANNING)
-
         self.current_yaml = workflow_yaml
         self.yaml_modified = False
         self._user = user
         self._metrics_opt_in = metrics_opt_in
+        self._segments: List[Dict] = []
+
+        stream_manager = StreamManager(model=self.model, stream=stream)
+        if workflow_yaml:
+            self._send_spinner(stream_manager, STATUS_REVIEWING_WORKFLOW + STATUS_PLANNING)
+        else:
+            self._send_spinner(stream_manager, STATUS_NEW_WORKFLOW + STATUS_PLANNING)
 
         system_prompt = self._build_system_prompt()
 
@@ -121,12 +124,10 @@ class PlannerAgent:
             "cache_read_input_tokens": 0,
         }
 
-        final_text = ""
-
         try:
             while tool_call_count < self.max_tool_calls:
                 try:
-                    response, buffered_text = self._call_api(system_prompt, messages, stream)
+                    response = self._call_api(system_prompt, messages, stream, stream_manager)
 
                     for field in [
                         "input_tokens",
@@ -138,17 +139,14 @@ class PlannerAgent:
 
                     logger.info(f"Claude API call {tool_call_count + 1}: stop_reason={response.stop_reason}")
 
+                    # Text from every round is part of the answer the user saw
+                    # (tool rounds may narrate before calling tools).
+                    round_text = self._extract_text(response)
+                    if round_text:
+                        self._segments.append({"type": "text", "content": round_text})
+
                     if response.stop_reason == "end_turn":
-                        # Send final YAML before text, matching workflow_chat/job_chat pattern
-                        if self.yaml_modified and self.current_yaml:
-                            stream_manager.send_changes({"yaml": self.current_yaml})
-
-                        # Flush buffered text chunks
-                        for chunk in buffered_text:
-                            stream_manager.send_text(chunk)
-
-                        final_text = self._extract_text(response)
-                        messages.append({"role": "assistant", "content": final_text})
+                        messages.append({"role": "assistant", "content": round_text})
                         logger.info(f"Tool loop completed. Total calls: {tool_call_count}")
                         break
 
@@ -196,10 +194,19 @@ class PlannerAgent:
                     raise ApolloError(500, f"Tool execution error: {str(e)}")
 
             if response.stop_reason != "end_turn":
-                final_text = self._extract_text(response)
                 logger.warning(f"Loop exited without end_turn (reason: {response.stop_reason})")
         finally:
             stream_manager.end_stream()
+
+        # The full transcript in stream order: text segments (one per round)
+        # interleaved with the status messages shown between them, so the
+        # client can persist and re-render the woven view.
+        response_segments = self._segments
+
+        # response and history keep only the last round's text (the actual
+        # answer), matching the direct routes and what was saved before
+        # narration was streamed. The narration survives in response_segments.
+        final_text = round_text
 
         if not final_text:
             stop_reason = getattr(response, "stop_reason", None)
@@ -241,6 +248,7 @@ class PlannerAgent:
 
         return PlannerResult(
             response=final_text,
+            response_segments=response_segments,
             attachments=attachments,
             history=return_history,
             usage=total_usage,
@@ -274,8 +282,14 @@ class PlannerAgent:
 
         return user_content
 
-    def _call_api(self, system_prompt, messages, stream):
-        """Make Claude API call. When streaming, buffers text deltas for the caller to flush.
+    def _call_api(self, system_prompt, messages, stream, stream_manager):
+        """Make Claude API call. When streaming, forwards text deltas live.
+
+        All text blocks stream to the client as they generate — including the
+        narration the model writes before tool calls. Each round's text lands
+        in its own content block (the status and changes events sent between
+        rounds close the open text block), so the client can weave text and
+        status events with its own formatting.
 
         Adaptive thinking is enabled for better reasoning but thinking content
         is not streamed to the client — it exposes internal details like tool
@@ -283,8 +297,6 @@ class PlannerAgent:
         task-specific status messages sent before each tool execution.
         """
         if stream:
-            buffered_text = []
-
             with self.client.messages.stream(
                 model=self.model,
                 max_tokens=self.max_tokens,
@@ -295,10 +307,9 @@ class PlannerAgent:
                 output_config={"effort": "medium"},
             ) as stream_obj:
                 for event in stream_obj:
-                    if event.type == "content_block_delta":
-                        if event.delta.type == "text_delta":
-                            buffered_text.append(event.delta.text)
-                return stream_obj.get_final_message(), buffered_text
+                    if event.type == "content_block_delta" and event.delta.type == "text_delta":
+                        stream_manager.send_text(event.delta.text)
+                return stream_obj.get_final_message()
         else:
             response = self.client.beta.messages.create(
                 model=self.model,
@@ -325,13 +336,48 @@ class PlannerAgent:
                     ]
                 },
             )
-            return response, []
+            return response
+
+    def _send_yaml(self, stream_manager) -> None:
+        """Stream the current YAML as a changes event.
+
+        Called wherever the YAML is actually updated (workflow edit, job-code
+        stitch), so each change reaches the client the moment it happens — e.g.
+        a newly added step renders before its code is written. No-op in
+        non-streaming mode, where the final payload's attachment carries the
+        YAML instead.
+        """
+        stream_manager.send_changes({"yaml": self.current_yaml})
+
+    def _send_spinner(self, stream_manager, status: str | list[str]) -> None:
+        """Send a transient "...ing" spinner as a thinking event.
+
+        Thinking events are live progress only: the client replaces each one
+        with the next status and never persists them, so spinners are not
+        recorded in the transcript.
+        """
+        stream_manager.send_thinking(status)
+
+    def _send_settled(self, stream_manager, content: str | None) -> None:
+        """Send a completed-action line ("Edited workflow structure") as a
+        custom `status` event and record it in the transcript.
+
+        Unlike spinners, these are durable facts about what happened: the
+        client persists them (they resolve the preceding spinner), and they
+        are recorded in `response_segments` so a page reload re-renders the
+        same view. None means the action left nothing worth showing (e.g. a
+        consult that changed nothing) — nothing is sent or recorded.
+        """
+        if not content:
+            return
+        stream_manager.send_status(content)
+        self._segments.append({"type": "status", "content": content})
 
     def _find_all_tool_uses(self, content):
         """Find all tool_use blocks in response content."""
         return [block for block in content if block.type == "tool_use"]
 
-    def _execute_tool(self, tool_use_block, total_usage, tool_calls_meta) -> str:
+    def _execute_tool(self, tool_use_block, stream_manager, total_usage, tool_calls_meta) -> str:
         """Execute a single tool call and return the result string."""
         if tool_use_block.name == "search_documentation":
             tool_result = search_documentation_tool(tool_use_block.input)
@@ -355,10 +401,11 @@ class PlannerAgent:
             if "usage" in subagent_result:
                 total_usage.update(sum_usage(total_usage, subagent_result["usage"]))
 
-            # Update live state eagerly
+            # Update live state and stream the change in the same breath
             if subagent_result.get("response_yaml"):
                 self.current_yaml = subagent_result["response_yaml"]
                 self.yaml_modified = True
+                self._send_yaml(stream_manager)
 
             self.subagent_results.append(subagent_result)
 
@@ -420,6 +467,7 @@ class PlannerAgent:
                 self.current_yaml = stitch_job_code(self.current_yaml, matched_job_key, suggested_code)
                 self.yaml_modified = True
                 stitched = True
+                self._send_yaml(stream_manager)
                 logger.info(f"Stitched code for job '{matched_job_key}' into current_yaml")
 
             self.subagent_results.append(subagent_result)
@@ -478,8 +526,10 @@ class PlannerAgent:
         tool_results = []
 
         for tool_use_block in other_blocks:
-            stream_manager.send_thinking(self._tool_status_message(tool_use_block))
-            tool_result = self._execute_tool(tool_use_block, total_usage, tool_calls_meta)
+            self._send_spinner(stream_manager, self._tool_status_message(tool_use_block))
+            yaml_before = self.current_yaml
+            tool_result = self._execute_tool(tool_use_block, stream_manager, total_usage, tool_calls_meta)
+            self._send_settled(stream_manager, self._settled_status_message(tool_use_block, yaml_before))
             tool_results.append(
                 {"type": "tool_result", "tool_use_id": tool_use_block.id, "content": tool_result}
             )
@@ -506,7 +556,7 @@ class PlannerAgent:
             status = f"Writing code for {joined}..."
         else:
             status = "Writing job code..."
-        stream_manager.send_thinking(status)
+        self._send_spinner(stream_manager, status)
 
         # Validate and prepare — skip invalid ones before launching threads.
         # matched_keys carries the YAML key resolved by find_job_in_yaml's
@@ -568,6 +618,7 @@ class PlannerAgent:
 
         # Stitch results and update state sequentially
         tool_results = []
+        stitched_names = []
         for block in blocks:
             if block.id in skipped:
                 tool_results.append(
@@ -595,6 +646,7 @@ class PlannerAgent:
                 self.current_yaml = stitch_job_code(self.current_yaml, matched_job_key, suggested_code)
                 self.yaml_modified = True
                 stitched = True
+                stitched_names.append(self._display_name_for_job(matched_job_key))
                 logger.info(f"Stitched code for job '{matched_job_key}' into current_yaml")
 
             self.subagent_results.append(subagent_result)
@@ -611,6 +663,14 @@ class PlannerAgent:
                 {"type": "tool_result", "tool_use_id": block.id, "content": tool_result}
             )
 
+        # Settle the spinner with the steps that were actually applied (drop any
+        # that failed to stitch); nothing sent if none applied. One YAML send
+        # covers the whole batch, mirroring the one combined status.
+        if stitched_names:
+            self._send_yaml(stream_manager)
+            joined = ", ".join(f"\"{n}\"" for n in stitched_names)
+            self._send_settled(stream_manager, f"Wrote code for {joined}")
+
         return tool_results
 
     def _tool_status_message(self, tool_use_block) -> str:
@@ -626,7 +686,7 @@ class PlannerAgent:
 
         if name == "call_workflow_agent":
             if self.current_yaml:
-                return "Editing workflow..."
+                return "Reviewing the workflow..."
             return "Building workflow outline..."
 
         if name == "call_job_code_agent":
@@ -645,6 +705,38 @@ class PlannerAgent:
             return "Reading job code..."
 
         return f"Running {name}..."
+
+    def _settled_status_message(self, tool_use_block, yaml_before: str | None) -> str | None:
+        """Past-tense line that resolves the spinner for a finished tool call.
+
+        Counterpart to _tool_status_message. For workflow edits the outcome is
+        read from whether the YAML actually changed: an unchanged workflow means
+        the agent only advised (or errored), so it settles to "Analyzed the
+        workflow" rather than claiming an edit. Returns None when there's
+        nothing worth persisting. Job-code settling is handled where the code is
+        stitched, since it depends on which steps were applied.
+        """
+        name = tool_use_block.name
+        inputs = tool_use_block.input or {}
+
+        if name == "call_workflow_agent":
+            if self.current_yaml == yaml_before:
+                return "Analyzed the workflow"
+            return "Edited workflow structure" if yaml_before else "Built workflow outline"
+
+        if name == "search_documentation":
+            query = inputs.get("query")
+            return f"Searched documentation for \"{query}\"" if query else "Searched documentation"
+
+        if name == "inspect_job_code":
+            job_keys = inputs.get("job_keys") or ([inputs["job_key"]] if inputs.get("job_key") else [])
+            names = [n for n in (self._display_name_for_job(k) for k in job_keys) if n]
+            if names:
+                joined = ", ".join(f"\"{n}\"" for n in names)
+                return f"Read code for {joined}"
+            return "Read code"
+
+        return None
 
     def _display_name_for_job(self, job_key: str | None) -> str | None:
         """Look up a human-readable display name for a job key.
@@ -668,12 +760,8 @@ class PlannerAgent:
         return name.replace("-", " ").replace("_", " ").title()
 
     def _extract_text(self, response):
-        """Extract text from response content."""
-        text = ""
-        for block in response.content:
-            if block.type == "text":
-                text += block.text
-        return text
+        """Extract text from response content, concatenated as it was streamed."""
+        return "".join(block.text for block in response.content if block.type == "text")
 
     def _build_system_prompt(self) -> list:
         """Build system prompt for planner with cache control."""
