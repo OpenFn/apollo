@@ -154,6 +154,42 @@ def test_postgres_upload_marks_batch_failed_and_reraises():
     fake_conn.close.assert_called_once()
 
 
+def test_prune_failure_after_promote_does_not_mark_batch_failed():
+    """Pruning cleans up OLDER, unrelated batches. If it throws after the new
+    batch was already promoted, the new batch must stay 'complete' — it must
+    not be retroactively marked 'failed', and the call must still succeed."""
+    fake_conn = MagicMock()
+    fake_indexer = MagicMock()
+    fake_indexer.start_batch.return_value = 7
+    fake_indexer.insert_documents.return_value = 10
+    fake_indexer.copy_forward_missing_docs_types.return_value = 3
+    fake_indexer.prune_old_batches.side_effect = RuntimeError("lock conflict on DROP INDEX CONCURRENTLY")
+    fake_processor = MagicMock()
+    fake_processor.get_preprocessed_docs.return_value = ([{"name": "a.md", "docs_type": "general_docs", "doc_chunk": "x"}], {"a.md": {}})
+
+    with patch.object(m, "get_db_connection", return_value=fake_conn), \
+         patch.object(m, "run_migrations"), \
+         patch.object(m, "register_vector_type"), \
+         patch.object(m, "DocsiteProcessor", return_value=fake_processor), \
+         patch.object(m, "DocsiteIndexer", return_value=fake_indexer), \
+         patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
+        result = m.main({"docs_to_upload": ["general_docs"], "target": "postgres"})
+
+    fake_indexer.promote_batch.assert_called_once_with(fake_conn, 7, 13)
+    fake_indexer.fail_batch.assert_not_called()
+    fake_conn.close.assert_called_once()
+
+    assert result == {
+        "target": "postgres",
+        "batch_id": 7,
+        "docs_types": ["general_docs"],
+        "chunk_count": 10,
+        "copied_forward": 3,
+        "pruned_batches": [],
+        "promoted": True,
+    }
+
+
 def test_failed_marking_never_masks_the_original_error():
     """Bookkeeping must not become the reported failure — the operator needs to
     see what actually broke."""
