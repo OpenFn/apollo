@@ -108,6 +108,7 @@ def test_job_route_sends_subagent_payload() -> None:
 def make_planner_result() -> RouterResult:
     return RouterResult(
         response="planner answer",
+        response_segments=[{"type": "text", "content": "planner answer"}],
         attachments=[],
         history=[],
         usage={"input_tokens": 10},
@@ -168,7 +169,14 @@ def test_low_confidence_direct_route_goes_to_planner() -> None:
 def test_confident_direct_route_is_not_gated() -> None:
     router = make_router()
     decision = RouterDecision(destination="job_code_agent", confidence=3, job_key="fetch-patients")
-    job_result = RouterResult(response="job answer", attachments=[], history=[], usage={}, meta={})
+    job_result = RouterResult(
+        response="job answer",
+        response_segments=[{"type": "text", "content": "job answer"}],
+        attachments=[],
+        history=[],
+        usage={},
+        meta={},
+    )
 
     with patch.object(RouterAgent, "_make_routing_decision", return_value=decision), \
          patch.object(RouterAgent, "_route_to_planner") as planner_mock, \
