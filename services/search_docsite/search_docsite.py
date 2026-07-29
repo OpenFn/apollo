@@ -2,6 +2,7 @@ import os
 import psycopg2
 from dotenv import load_dotenv
 from langchain_openai import OpenAIEmbeddings
+from pgvector import Vector
 from pgvector.psycopg2 import register_vector
 from util import create_logger, ApolloError, get_db_connection
 from embeddings.embeddings import SearchResult
@@ -107,7 +108,10 @@ class DocsiteSearch:
             top_k = self.default_top_k
         max_k = top_k or 50
 
-        query_embedding = self.embeddings.embed_query(query)
+        # Vector, not list: psycopg2 registers adapters for Vector and ndarray
+        # only, and a bare list arrives as numeric[], for which `<=>` has no
+        # operator.
+        query_embedding = Vector(self.embeddings.embed_query(query))
 
         sql = """
         SELECT text, doc_title, docs_type, 1 - (embedding <=> %(query_embedding)s) AS score
@@ -164,7 +168,7 @@ class DocsiteSearch:
         max_k = top_k or self.default_top_k
         candidate_k = 50
 
-        query_embedding = self.embeddings.embed_query(query)
+        query_embedding = Vector(self.embeddings.embed_query(query))
 
         sql = """
         WITH semantic AS (

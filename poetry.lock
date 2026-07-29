@@ -1822,18 +1822,15 @@ xml = ["lxml (>=4.9.2)"]
 
 [[package]]
 name = "pgvector"
-version = "0.3.6"
+version = "0.5.0"
 description = "pgvector support for Python"
 optional = false
-python-versions = ">=3.8"
+python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "pgvector-0.3.6-py3-none-any.whl", hash = "sha256:f6c269b3c110ccb7496bac87202148ed18f34b390a0189c783e351062400a75a"},
-    {file = "pgvector-0.3.6.tar.gz", hash = "sha256:31d01690e6ea26cea8a633cde5f0f55f5b246d9c8292d68efdef8c22ec994ade"},
+    {file = "pgvector-0.5.0-py3-none-any.whl", hash = "sha256:fedc9800894e6da2be51358d7b7c574bf34f247ca741a5a09513622135f5964f"},
+    {file = "pgvector-0.5.0.tar.gz", hash = "sha256:07a9dcf735696879406983afc6eba9a787cef7c0cf6c367ca1a5779f036dee74"},
 ]
-
-[package.dependencies]
-numpy = "*"
 
 [[package]]
 name = "pinecone"
@@ -3760,4 +3757,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = "3.11.*"
-content-hash = "8e4463c369e05f92ff1c77750943b311f4af4699d23c487b032e7836166242ca"
+content-hash = "e0f7dc02320564ac4dc7929bf5ff747716b4ab90810f4acc421db052f49014cc"

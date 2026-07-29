@@ -13,6 +13,7 @@ import psycopg2
 import pytest
 
 import search_docsite.search_docsite as m
+from pgvector import Vector
 from util import ApolloError
 
 
@@ -224,3 +225,30 @@ def test_search_maps_missing_docsite_tables_to_503():
 
     assert exc.value.code == 503
     assert "embed_docsite" in exc.value.message
+
+
+# --- vector binding ----------------------------------------------------------
+
+def test_semantic_search_binds_the_embedding_as_a_vector():
+    """psycopg2 has no adapter for list, so a list is sent as numeric[] and
+    `vector <=> numeric[]` resolves to no operator. Only Vector and ndarray are
+    registered by pgvector."""
+    conn, cur = make_conn()
+    cur.fetchall.return_value = []
+    ds = make_search()
+
+    ds._semantic_search(conn, batch_id=1, query="q", top_k=5, threshold=None, doc_title=None, docs_type=None)
+
+    params = cur.execute.call_args[0][1]
+    assert params["query_embedding"] == Vector([0.1, 0.2, 0.3])
+
+
+def test_hybrid_search_binds_the_embedding_as_a_vector():
+    conn, cur = make_conn()
+    cur.fetchall.return_value = []
+    ds = make_search()
+
+    ds._hybrid_search(conn, batch_id=1, query="q", top_k=5, doc_title=None, docs_type=None)
+
+    params = cur.execute.call_args[0][1]
+    assert params["query_embedding"] == Vector([0.1, 0.2, 0.3])

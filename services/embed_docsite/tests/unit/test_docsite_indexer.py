@@ -10,6 +10,7 @@ patched out.
 from unittest.mock import MagicMock, patch
 
 import embed_docsite.docsite_indexer as m
+from pgvector import Vector
 
 
 def make_conn():
@@ -60,8 +61,8 @@ def test_insert_documents_embeds_and_bulk_inserts():
     assert count == 2
     indexer._embeddings.embed_documents.assert_called_once_with(["chunk one", "chunk two"])
     rows = mock_execute_values.call_args[0][2]
-    assert rows[0] == (7, "doc-a", "general_docs", 0, "chunk one", [0.1, 0.2])
-    assert rows[1] == (7, "doc-a", "general_docs", 1, "chunk two", [0.3, 0.4])
+    assert rows[0] == (7, "doc-a", "general_docs", 0, "chunk one", Vector([0.1, 0.2]))
+    assert rows[1] == (7, "doc-a", "general_docs", 1, "chunk two", Vector([0.3, 0.4]))
     conn.commit.assert_called_once()
 
 
