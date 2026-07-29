@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+
 from psycopg2.extras import execute_values
 from langchain_openai import OpenAIEmbeddings
 from pgvector import Vector
@@ -7,6 +9,23 @@ from util import create_logger
 logger = create_logger("DocsiteIndexer")
 
 ALL_DOCS_TYPES = ["adaptor_docs", "general_docs", "adaptor_functions"]
+
+
+@contextmanager
+def autocommit(conn):
+    """Run DDL that cannot execute inside a transaction (CREATE/DROP INDEX
+    CONCURRENTLY).
+
+    Commits first: psycopg2 refuses to change autocommit while a transaction is
+    open, and a preceding SELECT is enough to open one.
+    """
+    previous = conn.autocommit
+    conn.commit()
+    conn.autocommit = True
+    try:
+        yield
+    finally:
+        conn.autocommit = previous
 
 
 def register_vector_type(conn):
@@ -126,9 +145,8 @@ class DocsiteIndexer:
         return copied
 
     def build_index(self, conn, batch_id):
-        """Build a per-batch partial HNSW index. Runs outside a transaction (autocommit)."""
-        conn.autocommit = True
-        try:
+        """Build a per-batch partial HNSW index."""
+        with autocommit(conn):
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
@@ -138,8 +156,6 @@ class DocsiteIndexer:
                     WHERE batch_id = {batch_id}
                     """
                 )
-        finally:
-            conn.autocommit = False
         logger.info(f"Built HNSW index for batch {batch_id}")
 
     def promote_batch(self, conn, batch_id, chunk_count):
@@ -151,6 +167,19 @@ class DocsiteIndexer:
             )
             conn.commit()
         logger.info(f"Promoted batch {batch_id} ({chunk_count} chunks)")
+
+    def fail_batch(self, conn, batch_id):
+        """Mark a batch 'failed' after an aborted build.
+
+        Rolls back first: the connection is in an aborted transaction from
+        whatever error got us here, so any statement would raise
+        InFailedSqlTransaction.
+        """
+        conn.rollback()
+        with conn.cursor() as cur:
+            cur.execute("UPDATE docsite_batches SET status = 'failed' WHERE id = %s", (batch_id,))
+            conn.commit()
+        logger.info(f"Marked batch {batch_id} failed")
 
     def prune_old_batches(self, conn, keep_batches=None):
         """Delete complete batches older than the newest `keep_batches`, dropping their
@@ -165,12 +194,9 @@ class DocsiteIndexer:
             old_batch_ids = [row[0] for row in cur.fetchall()]
 
         for batch_id in old_batch_ids:
-            conn.autocommit = True
-            try:
+            with autocommit(conn):
                 with conn.cursor() as cur:
                     cur.execute(f"DROP INDEX CONCURRENTLY IF EXISTS idx_docsite_chunks_hnsw_{batch_id}")
-            finally:
-                conn.autocommit = False
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM docsite_batches WHERE id = %s", (batch_id,))
                 conn.commit()

@@ -94,6 +94,14 @@ def _upload_to_pinecone(data, documents, metadata_dict, docs_to_upload):
     }
 
 
+def _mark_failed(indexer, conn, batch_id):
+    """Best-effort bookkeeping: never let it replace the error that caused it."""
+    try:
+        indexer.fail_batch(conn, batch_id)
+    except Exception as exc:
+        logger.error(f"Could not mark batch {batch_id} failed: {exc}")
+
+
 def _upload_to_postgres(documents, metadata_dict, docs_to_upload, chunk_target_length, chunk_min_length, keep_batches):
     indexer = DocsiteIndexer(
         chunk_target_length=chunk_target_length,
@@ -107,6 +115,7 @@ def _upload_to_postgres(documents, metadata_dict, docs_to_upload, chunk_target_l
     run_migrations(conn)
     register_vector_type(conn)
 
+    batch_id = None
     try:
         batch_id = indexer.start_batch(conn, docs_to_upload)
         chunk_count = indexer.insert_documents(conn, batch_id, documents, metadata_dict)
@@ -124,6 +133,10 @@ def _upload_to_postgres(documents, metadata_dict, docs_to_upload, chunk_target_l
             "pruned_batches": pruned,
             "promoted": True,
         }
+    except Exception:
+        if batch_id is not None:
+            _mark_failed(indexer, conn, batch_id)
+        raise
     finally:
         conn.close()
 
