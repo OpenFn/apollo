@@ -5,7 +5,7 @@ available and a role permitted to CREATE EXTENSION:
 
     docker run -d --name apollo-pgvector-test -e POSTGRES_PASSWORD=postgres \
         -p 5433:5432 pgvector/pgvector:pg16
-    export POSTGRES_TEST_URL=postgresql://postgres:postgres@localhost:5433/postgres
+    export POSTGRES_TEST_URL=postgresql://postgres:postgres@127.0.0.1:5433/postgres
 
 The repo-root conftest blocks psycopg2.connect for `unit` tests only, so this
 tier connects normally.
