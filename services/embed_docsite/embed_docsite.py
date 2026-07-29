@@ -1,5 +1,6 @@
 import os
 
+from db_migrations import run_migrations
 from dotenv import load_dotenv
 from embed_docsite.docsite_indexer import (
     ALL_DOCS_TYPES,
@@ -101,6 +102,9 @@ def _upload_to_postgres(documents, metadata_dict, docs_to_upload, chunk_target_l
     )
 
     conn = get_db_connection()
+    # Order matters: register_vector looks up pgvector's type oid, so the
+    # extension must exist before we register.
+    run_migrations(conn)
     register_vector_type(conn)
 
     try:

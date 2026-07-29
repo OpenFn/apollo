@@ -112,8 +112,10 @@ def apollo(name: str, payload: dict) -> dict:
 def get_db_connection() -> "psycopg2.extensions.connection":
     """Get database connection from POSTGRES_URL environment variable.
 
-    Applies any pending schema migrations before handing the connection back.
-    The runner's tracking table makes repeat calls a cheap no-op.
+    Returns a plain connection. Schema migrations belong to the indexer and are
+    run explicitly by embed_docsite: applying them here would put CREATE
+    EXTENSION in the path of every reader, including deployments that never use
+    the Postgres docsite backend and roles without the privilege to run it.
 
     Returns:
         psycopg2.connection: Database connection
@@ -125,12 +127,7 @@ def get_db_connection() -> "psycopg2.extensions.connection":
     if not db_url:
         raise ApolloError(500, "Missing POSTGRES_URL environment variable", type="DATABASE_ERROR")
 
-    conn = psycopg2.connect(db_url)
-
-    from db_migrations import run_migrations
-    run_migrations(conn)
-
-    return conn
+    return psycopg2.connect(db_url)
 
 
 def sum_usage(*usage_objects):
