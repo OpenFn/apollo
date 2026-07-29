@@ -1,4 +1,5 @@
 import os
+import psycopg2
 from dotenv import load_dotenv
 from langchain_openai import OpenAIEmbeddings
 from pgvector.psycopg2 import register_vector
@@ -7,6 +8,10 @@ from embeddings.embeddings import SearchResult
 from search_docsite.pinecone_legacy_search import LegacyPineconeDocsiteSearch
 
 logger = create_logger("DocsiteSearch")
+
+SCHEMA_MISSING_MESSAGE = (
+    "Docsite schema not initialised — run embed_docsite with target=postgres"
+)
 
 
 def register_vector_type(conn):
@@ -34,6 +39,22 @@ class DocsiteSearch:
             self._embeddings = OpenAIEmbeddings()
         return self._embeddings
 
+    def _connect(self):
+        """Open a connection with pgvector registered.
+
+        A database the indexer has never touched fails here rather than at the
+        query: register_vector looks up pgvector's type oid and raises if the
+        extension is absent. 503, not 500 — it resolves by running the indexer,
+        with no redeploy.
+        """
+        conn = get_db_connection()
+        try:
+            register_vector_type(conn)
+        except psycopg2.ProgrammingError as exc:
+            conn.close()
+            raise ApolloError(503, SCHEMA_MISSING_MESSAGE, type="DATABASE_ERROR") from exc
+        return conn
+
     def search(self, query, top_k=None, threshold=None, strategy='semantic', doc_title=None, docs_type=None):
         """
         Search docsite_chunks with optional filters.
@@ -54,8 +75,7 @@ class DocsiteSearch:
                 type="BAD_REQUEST",
             )
 
-        conn = get_db_connection()
-        register_vector_type(conn)
+        conn = self._connect()
         try:
             batch_id = self._explicit_batch_id or self._resolve_current_batch(conn)
 
@@ -72,9 +92,12 @@ class DocsiteSearch:
 
     def _resolve_current_batch(self, conn):
         """Find the newest complete batch id."""
-        with conn.cursor() as cur:
-            cur.execute("SELECT id FROM docsite_batches WHERE status = 'complete' ORDER BY id DESC LIMIT 1")
-            row = cur.fetchone()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM docsite_batches WHERE status = 'complete' ORDER BY id DESC LIMIT 1")
+                row = cur.fetchone()
+        except psycopg2.errors.UndefinedTable as exc:
+            raise ApolloError(503, SCHEMA_MISSING_MESSAGE, type="DATABASE_ERROR") from exc
         if row is None:
             raise ApolloError(404, "No complete docsite batch found", type="NOT_FOUND")
         return row[0]

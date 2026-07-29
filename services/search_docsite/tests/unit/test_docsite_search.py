@@ -9,6 +9,7 @@ import json
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
+import psycopg2
 import pytest
 
 import search_docsite.search_docsite as m
@@ -185,3 +186,41 @@ def test_hybrid_search_casts_rrf_to_float8_in_sql():
 
     sql = cur.execute.call_args[0][0]
     assert "float8" in sql
+
+
+# --- missing schema ----------------------------------------------------------
+
+def test_search_maps_missing_pgvector_extension_to_503():
+    """register_vector raises ProgrammingError('vector type not found in the
+    database') when CREATE EXTENSION has not run. Since migrations moved to the
+    indexer, that is the first thing a reader hits on an un-indexed database."""
+    conn, _ = make_conn()
+    ds = make_search(batch_id=1)
+
+    with patch.object(m, "get_db_connection", return_value=conn), \
+         patch.object(m, "register_vector_type",
+                      side_effect=psycopg2.ProgrammingError("vector type not found in the database")):
+        with pytest.raises(ApolloError) as exc:
+            ds.search("query")
+
+    assert exc.value.code == 503
+    assert "embed_docsite" in exc.value.message
+    conn.close.assert_called_once()
+
+
+def test_search_maps_missing_docsite_tables_to_503():
+    """Extension present, tables absent — the second way a database can be
+    un-indexed."""
+    conn, cur = make_conn()
+    cur.execute.side_effect = psycopg2.errors.UndefinedTable(
+        'relation "docsite_batches" does not exist',
+    )
+    ds = make_search()
+
+    with patch.object(m, "get_db_connection", return_value=conn), \
+         patch.object(m, "register_vector_type"):
+        with pytest.raises(ApolloError) as exc:
+            ds.search("query")
+
+    assert exc.value.code == 503
+    assert "embed_docsite" in exc.value.message
