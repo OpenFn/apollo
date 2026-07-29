@@ -100,15 +100,12 @@ class PlannerAgent:
         """
         logger.info("Planner.run() called")
 
-<<<<<<< HEAD
-=======
         stream_manager = stream_manager or StreamManager(model=self.model, stream=stream)
         if workflow_yaml:
             stream_manager.send_thinking(STATUS_REVIEWING_WORKFLOW + STATUS_PLANNING)
         else:
             stream_manager.send_thinking(STATUS_NEW_WORKFLOW + STATUS_PLANNING)
 
->>>>>>> d8fec45 (add subagent mode and inspect tool)
         self.current_yaml = workflow_yaml
         self.yaml_modified = False
         self._user = user
