@@ -102,6 +102,17 @@ def _mark_failed(indexer, conn, batch_id):
         logger.error(f"Could not mark batch {batch_id} failed: {exc}")
 
 
+def _prune_old_batches(indexer, conn):
+    """Best-effort cleanup of OLDER, unrelated batches. Runs after the new
+    batch is already promoted, so a failure here must never retroactively
+    invalidate that batch or fail the whole call."""
+    try:
+        return indexer.prune_old_batches(conn)
+    except Exception as exc:
+        logger.error(f"Could not prune old batches: {exc}")
+        return []
+
+
 def _upload_to_postgres(documents, metadata_dict, docs_to_upload, chunk_target_length, chunk_min_length, keep_batches):
     indexer = DocsiteIndexer(
         chunk_target_length=chunk_target_length,
@@ -110,19 +121,28 @@ def _upload_to_postgres(documents, metadata_dict, docs_to_upload, chunk_target_l
     )
 
     conn = get_db_connection()
-    # Order matters: register_vector looks up pgvector's type oid, so the
-    # extension must exist before we register.
-    run_migrations(conn)
-    register_vector_type(conn)
-
-    batch_id = None
     try:
-        batch_id = indexer.start_batch(conn, docs_to_upload)
-        chunk_count = indexer.insert_documents(conn, batch_id, documents, metadata_dict)
-        copied = indexer.copy_forward_missing_docs_types(conn, batch_id, docs_to_upload)
-        indexer.build_index(conn, batch_id)
-        indexer.promote_batch(conn, batch_id, chunk_count + copied)
-        pruned = indexer.prune_old_batches(conn)
+        # Order matters: register_vector looks up pgvector's type oid, so the
+        # extension must exist before we register.
+        run_migrations(conn)
+        register_vector_type(conn)
+
+        batch_id = None
+        try:
+            batch_id = indexer.start_batch(conn, docs_to_upload)
+            chunk_count = indexer.insert_documents(conn, batch_id, documents, metadata_dict)
+            copied = indexer.copy_forward_missing_docs_types(conn, batch_id, docs_to_upload)
+            indexer.build_index(conn, batch_id)
+            indexer.promote_batch(conn, batch_id, chunk_count + copied)
+        except Exception:
+            if batch_id is not None:
+                _mark_failed(indexer, conn, batch_id)
+            raise
+
+        # The new batch is already promoted and visible to readers. Pruning
+        # only touches older, unrelated batches, so its failure must not be
+        # attributed to the batch we just built.
+        pruned = _prune_old_batches(indexer, conn)
 
         return {
             "target": "postgres",
@@ -133,10 +153,6 @@ def _upload_to_postgres(documents, metadata_dict, docs_to_upload, chunk_target_l
             "pruned_batches": pruned,
             "promoted": True,
         }
-    except Exception:
-        if batch_id is not None:
-            _mark_failed(indexer, conn, batch_id)
-        raise
     finally:
         conn.close()
 
