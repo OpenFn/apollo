@@ -127,3 +127,51 @@ def test_postgres_upload_runs_migrations_before_registering_vector_type():
         m.main({"docs_to_upload": ["general_docs"], "target": "postgres"})
 
     assert calls == ["migrate", "register"]
+
+
+def test_postgres_upload_marks_batch_failed_and_reraises():
+    """Schema allows status='failed' and nothing ever set it, so an interrupted
+    index run left a 'building' row that no later run could interpret."""
+    import pytest
+
+    fake_conn = MagicMock()
+    fake_indexer = MagicMock()
+    fake_indexer.start_batch.return_value = 7
+    fake_indexer.insert_documents.side_effect = RuntimeError("embedding API down")
+    fake_processor = MagicMock()
+    fake_processor.get_preprocessed_docs.return_value = ([], {})
+
+    with patch.object(m, "get_db_connection", return_value=fake_conn), \
+         patch.object(m, "run_migrations"), \
+         patch.object(m, "register_vector_type"), \
+         patch.object(m, "DocsiteProcessor", return_value=fake_processor), \
+         patch.object(m, "DocsiteIndexer", return_value=fake_indexer), \
+         patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
+        with pytest.raises(RuntimeError, match="embedding API down"):
+            m.main({"docs_to_upload": ["general_docs"], "target": "postgres"})
+
+    fake_indexer.fail_batch.assert_called_once_with(fake_conn, 7)
+    fake_conn.close.assert_called_once()
+
+
+def test_failed_marking_never_masks_the_original_error():
+    """Bookkeeping must not become the reported failure — the operator needs to
+    see what actually broke."""
+    import pytest
+
+    fake_conn = MagicMock()
+    fake_indexer = MagicMock()
+    fake_indexer.start_batch.return_value = 7
+    fake_indexer.insert_documents.side_effect = RuntimeError("embedding API down")
+    fake_indexer.fail_batch.side_effect = RuntimeError("connection already gone")
+    fake_processor = MagicMock()
+    fake_processor.get_preprocessed_docs.return_value = ([], {})
+
+    with patch.object(m, "get_db_connection", return_value=fake_conn), \
+         patch.object(m, "run_migrations"), \
+         patch.object(m, "register_vector_type"), \
+         patch.object(m, "DocsiteProcessor", return_value=fake_processor), \
+         patch.object(m, "DocsiteIndexer", return_value=fake_indexer), \
+         patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
+        with pytest.raises(RuntimeError, match="embedding API down"):
+            m.main({"docs_to_upload": ["general_docs"], "target": "postgres"})
