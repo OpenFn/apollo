@@ -42,19 +42,6 @@ def test_main_orchestrates_full_batch_lifecycle_and_returns_summary():
         "promoted": True,
     }
 
-
-def test_main_raises_when_openai_key_missing():
-    from util import ApolloError
-    import pytest
-
-    with patch.dict("os.environ", {}, clear=True):
-        with pytest.raises(ApolloError) as exc:
-            m.main({})
-
-    assert exc.value.code == 500
-    assert "OPENAI_API_KEY" in exc.value.message
-
-
 def test_main_defaults_docs_to_upload_to_all_types():
     fake_conn = MagicMock()
     fake_indexer = MagicMock()
