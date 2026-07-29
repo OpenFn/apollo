@@ -116,3 +116,27 @@ def test_main_rejects_unknown_target():
             m.main({"target": "elasticsearch"})
 
     assert exc.value.code == 400
+
+
+def test_postgres_upload_runs_migrations_before_registering_vector_type():
+    """Order is load-bearing, not incidental: register_vector runs
+    to_regtype('vector') and raises unless CREATE EXTENSION has already run."""
+    calls = []
+    fake_conn = MagicMock()
+    fake_indexer = MagicMock()
+    fake_indexer.start_batch.return_value = 7
+    fake_indexer.insert_documents.return_value = 1
+    fake_indexer.copy_forward_missing_docs_types.return_value = 0
+    fake_indexer.prune_old_batches.return_value = []
+    fake_processor = MagicMock()
+    fake_processor.get_preprocessed_docs.return_value = ([], {})
+
+    with patch.object(m, "get_db_connection", return_value=fake_conn), \
+         patch.object(m, "run_migrations", side_effect=lambda _conn: calls.append("migrate")), \
+         patch.object(m, "register_vector_type", side_effect=lambda _conn: calls.append("register")), \
+         patch.object(m, "DocsiteProcessor", return_value=fake_processor), \
+         patch.object(m, "DocsiteIndexer", return_value=fake_indexer), \
+         patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
+        m.main({"docs_to_upload": ["general_docs"], "target": "postgres"})
+
+    assert calls == ["migrate", "register"]

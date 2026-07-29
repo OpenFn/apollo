@@ -107,3 +107,18 @@ def test_run_migrations_commits_once_at_the_end(tmp_path):
         m.run_migrations(conn)
 
     conn.commit.assert_called_once()
+
+
+def test_get_db_connection_does_not_run_migrations():
+    """Migrations belong to the indexer, not to every reader. CREATE EXTENSION
+    needs privileges managed Postgres withholds, so a reader that triggers it
+    500s on a deployment that never enabled the Postgres docsite backend."""
+    import util
+
+    with patch.object(util, "psycopg2") as mock_psycopg2, \
+         patch.object(m, "run_migrations") as mock_run, \
+         patch.dict("os.environ", {"POSTGRES_URL": "postgresql://user@host/db"}):
+        conn = util.get_db_connection()
+
+    assert conn is mock_psycopg2.connect.return_value
+    mock_run.assert_not_called()
