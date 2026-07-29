@@ -2,16 +2,22 @@
 
 Usage: poetry run python -m search_docsite.tests.eval.run_eval
 
-Compares the Postgres-backed DocsiteSearch (strategy='hybrid') against
-LegacyPineconeDocsiteSearch (strategy='semantic') over the golden query set.
-Postgres should match or beat Pinecone's recall@5 and p95 latency before
-DOCSITE_SEARCH_BACKEND is flipped to 'postgres' by default.
+Compares the Postgres-backed DocsiteSearch against LegacyPineconeDocsiteSearch
+over the golden query set. Both run strategy='semantic'. Postgres should match 
+or beat Pinecone's recall@5 and p95 latency before DOCSITE_SEARCH_BACKEND is 
+flipped to 'postgres' by default.
 """
 
 import time
 from pathlib import Path
 
 import yaml
+from dotenv import load_dotenv
+
+# Needed as LegacyPineconeDocsiteSearch evaluates OpenAIEmbeddings() as a 
+# default argument.
+load_dotenv()
+
 from search_docsite.pinecone_legacy_search import LegacyPineconeDocsiteSearch
 from search_docsite.search_docsite import DocsiteSearch
 
@@ -101,10 +107,10 @@ def main():
     with open(GOLDEN_QUERIES_PATH) as f:
         golden_queries = yaml.safe_load(f)["queries"]
 
-    postgres_report = run_eval(golden_queries, DocsiteSearch, strategy="hybrid")
+    postgres_report = run_eval(golden_queries, DocsiteSearch, strategy="semantic")
     pinecone_report = run_eval(golden_queries, LegacyPineconeDocsiteSearch, strategy="semantic")
 
-    print(f"Postgres (hybrid):  recall@5={postgres_report['recall_at_k']} "
+    print(f"Postgres (semantic): recall@5={postgres_report['recall_at_k']} "
           f"(scored={postgres_report['queries_scored']}, skipped={postgres_report['queries_skipped']}) "
           f"p50={postgres_report['p50_latency_s']:.3f}s p95={postgres_report['p95_latency_s']:.3f}s")
     print(f"Pinecone (semantic): recall@5={pinecone_report['recall_at_k']} "

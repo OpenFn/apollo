@@ -93,8 +93,11 @@ class LegacyPineconeDocsiteSearch:
         index_stats = index.describe_index_stats()
         namespaces = index_stats.get('namespaces', {}).keys()
 
+        # The indexer names namespaces docsite-%Y%m%d%H%M (20 chars); namespaces
+        # created by hand use docsite-%Y%m%d (16). Accept both, so a namespace the
+        # indexer just wrote is discoverable.
         valid_namespaces = sorted(
-            (ns for ns in namespaces if ns.startswith("docsite-") and ns[8:].isdigit() and len(ns) == 16),
+            (ns for ns in namespaces if ns.startswith("docsite-") and ns[8:].isdigit() and len(ns) in (16, 20)),
             reverse=True
         )
 
