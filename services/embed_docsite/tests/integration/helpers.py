@@ -21,9 +21,7 @@ class StubEmbeddings:
     """Deterministic stand-in for OpenAIEmbeddings.
 
     Identical text yields an identical vector, so querying a chunk's exact text
-    puts that chunk at cosine distance 0 and therefore rank 1. Stubbing costs no
-    coverage here: `operator does not exist: vector <=> numeric[]` is raised
-    from the bound parameter's type, never its content.
+    puts that chunk at cosine distance 0 and therefore rank 1.
     """
 
     model = "stub-embedding-model"
