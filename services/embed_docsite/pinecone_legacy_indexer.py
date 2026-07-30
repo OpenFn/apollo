@@ -25,10 +25,10 @@ class LegacyPineconeDocsiteIndexer:
     :param dimension: Embedding dimension (default: 1536 for OpenAI Embeddings)
     :param max_total_collections: Max total collections in index. Delete old collections by date if exceeded after a new upload (default: 50)
     """
-    def __init__(self, collection_name=None, index_name="docsite", embeddings=OpenAIEmbeddings(), dimension=1536, max_total_collections=50):
+    def __init__(self, collection_name=None, index_name="docsite", embeddings=None, dimension=1536, max_total_collections=50):
         self.collection_name = collection_name if collection_name is not None else f"docsite-{datetime.now().strftime('%Y%m%d%H%M')}"
         self.index_name = index_name
-        self.embeddings = embeddings
+        self.embeddings = embeddings if embeddings is not None else OpenAIEmbeddings()
         self.dimension = dimension
         self.max_total_collections = max_total_collections
         self.pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY"))
@@ -37,7 +37,7 @@ class LegacyPineconeDocsiteIndexer:
             self.create_index()
 
         self.index = self.pc.Index(self.index_name)
-        self.vectorstore = PineconeVectorStore(index_name=index_name, namespace=self.collection_name, embedding=embeddings)
+        self.vectorstore = PineconeVectorStore(index_name=index_name, namespace=self.collection_name, embedding=self.embeddings)
 
     def insert_documents(self, inputs, metadata_dict):
         """

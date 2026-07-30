@@ -20,16 +20,17 @@ class LegacyPineconeDocsiteSearch:
     :param default_top_k: Default number of results to return (default: 5)
     :param embeddings: LangChain embedding type (default: OpenAIEmbeddings())
     """
-    def __init__(self, collection_name=None, index_name="docsite", default_top_k=5, embeddings=OpenAIEmbeddings()):
+    def __init__(self, collection_name=None, index_name="docsite", default_top_k=5, embeddings=None):
         self.index_client = index_name
         self.default_top_k = default_top_k
+        self.embeddings = embeddings if embeddings is not None else OpenAIEmbeddings()
 
         if collection_name is None:
             logger.info("Collection name not provided; retrieving the most recent collection name.")
             collection_name = self._get_most_recent_namespace()
 
         self.collection_name = collection_name
-        self.vectorstore = PineconeVectorStore(index_name=index_name, namespace=collection_name, embedding=embeddings)
+        self.vectorstore = PineconeVectorStore(index_name=index_name, namespace=collection_name, embedding=self.embeddings)
 
     def search(self, query, top_k=None, threshold=None, strategy='semantic', doc_title=None, docs_type=None):
         filters = self._build_filter(doc_title=doc_title, docs_type=docs_type)

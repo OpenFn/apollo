@@ -92,7 +92,7 @@ def main(data: Dict) -> Dict:
         raise
     except Exception as e:
         logger.exception("Error in search_documentation service")
-        raise ApolloError(500, f"Documentation search failed: {str(e)}")
+        raise ApolloError(500, f"Documentation search failed: {str(e)}") from e
 
 
 def search_documentation_tool(tool_input: Dict) -> str:
@@ -141,4 +141,4 @@ You can now synthesize this information into a helpful response."""
 
     except Exception as e:
         logger.exception("Error in search_documentation tool")
-        raise ApolloError(500, f"Documentation search failed: {str(e)}")
+        raise ApolloError(500, f"Documentation search failed: {str(e)}") from e
