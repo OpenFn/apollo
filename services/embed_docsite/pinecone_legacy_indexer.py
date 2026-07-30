@@ -7,7 +7,7 @@ from langchain_community.document_loaders import DataFrameLoader
 from langchain_openai import OpenAIEmbeddings
 from langchain_pinecone import PineconeVectorStore
 from pinecone import Pinecone, ServerlessSpec
-from util import ApolloError, create_logger
+from util import create_logger
 
 logger = create_logger("LegacyPineconeDocsiteIndexer")
 
@@ -113,7 +113,7 @@ class LegacyPineconeDocsiteIndexer:
             index_stats = index.describe_index_stats()
             namespaces = index_stats.get('namespaces', {}).keys()
             valid_namespaces = sorted(
-                (ns for ns in namespaces if ns.startswith("docsite-") and ns[8:].isdigit() and len(ns) == 16),
+                (ns for ns in namespaces if ns.startswith("docsite-") and ns[8:].isdigit() and len(ns) in (16, 20)),
                 reverse=False
             )
             if len(valid_namespaces) > max_total_collections:
