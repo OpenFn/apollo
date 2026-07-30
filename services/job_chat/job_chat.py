@@ -20,6 +20,7 @@ import sentry_sdk
 from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
 from langfuse_util import should_track, build_tags, build_generation_diff
 from util import ApolloError, create_logger, AdaptorSpecifier, add_page_prefix, APOLLO_VERSION
+from yaml_utils import INSPECT_JOB_CODE_TOOL, inspect_job_code
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
 from streaming_util import (
@@ -82,6 +83,49 @@ _EDIT_TOOL = {
     },
 }
 
+# Subagent mode only (job_chat called from global_chat): escalation disguised
+# as a capability. Calling it hands the request back to the caller, which
+# reroutes to the planner — so if the model narrates before calling, the
+# narration ("I'll take a look at your workflow") matches what happens next.
+_EDIT_WORKFLOW_TOOL = {
+    "name": "edit_workflow",
+    "description": (
+        "Open the full workflow to work on anything beyond this step's code: "
+        "workflow structure (add/remove/rename steps, triggers, edges, adaptors) "
+        "or code changes in other steps. Call this as your VERY FIRST action. "
+        "To merely READ another step's code, use inspect_job_code instead."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "goal": {
+                "type": "string",
+                "description": "One sentence: what needs to be done",
+            }
+        },
+        "required": ["goal"],
+        "additionalProperties": False,
+    },
+}
+
+# The planner's inspect tool (same name, schema, and executor via yaml_utils),
+# with the description rewritten for job_chat: unlike the planner, job_chat can
+# only edit the focused step, so reading must never look like a way to act.
+_INSPECT_JOB_CODE_TOOL = {
+    **INSPECT_JOB_CODE_TOOL,
+    "description": (
+        "Read the current code of one or more other steps in the workflow. "
+        "Use it when seeing another step's code helps you answer a question or "
+        "edit the focused step — e.g. to match its pattern, or to see the state "
+        "shape it produces. To change another step's code, call edit_workflow "
+        "instead. Pass all the job keys you need in a single call."
+    ),
+}
+
+# Max API rounds in one generate() call: enough for a couple of
+# inspect_job_code round-trips plus the final answer.
+_MAX_TOOL_ROUNDS = 4
+
 
 # Helper function for page navigation
 def extract_page_prefix_from_last_turn(history: List[Dict[str, str]]) -> Optional[str]:
@@ -116,6 +160,11 @@ class Payload:
     download_adaptor_docs: Optional[bool] = True
     refresh_rag: Optional[bool] = False
     metrics_opt_in: Optional[bool] = None
+    # Subagent mode: set only when called from global_chat, never by direct
+    # production callers. workflow_yaml additionally enables the
+    # inspect_job_code tool.
+    workflow_yaml: Optional[str] = None
+    subagent: Optional[bool] = False
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
@@ -135,6 +184,8 @@ class Payload:
             download_adaptor_docs=data.get("download_adaptor_docs", True),
             refresh_rag=data.get("refresh_rag", False),
             metrics_opt_in=data.get("metrics_opt_in"),
+            workflow_yaml=data.get("workflow_yaml"),
+            subagent=data.get("subagent", False),
         )
 
 
@@ -153,6 +204,8 @@ class ChatResponse:
     usage: Dict[str, Any]
     rag: Dict[str, Any]
     diff: Optional[Dict[str, Any]] = None
+    # Subagent mode only: reason the request was handed back to the caller
+    handover: Optional[str] = None
 
 class AnthropicClient:
     def __init__(self, config: Optional[ChatConfig] = None):
@@ -186,17 +239,25 @@ class AnthropicClient:
         stream: Optional[bool] = False,
         download_adaptor_docs: Optional[bool] = True,
         refresh_rag: Optional[bool] = False,
-        current_page: Optional[dict] = None
+        current_page: Optional[dict] = None,
+        workflow_yaml: Optional[str] = None,
+        subagent: Optional[bool] = False,
+        stream_manager: Optional[StreamManager] = None,
     ) -> ChatResponse:
         """
         Generate a response using the Claude API with optional streaming.
+
+        In subagent mode (called from global_chat) the model can also read
+        other steps' code via inspect_job_code and hand the request back via
+        handover. A stream_manager may be injected by the caller so a handed-
+        over request continues on the same stream.
         """
         sentry_sdk.set_tag("prompt_type", "code_suggestions" if suggest_code else "no_code_suggestions")
 
         with sentry_sdk.start_transaction(name="chat_generation") as transaction:
             history = history.copy() if history else []
 
-            stream_manager = StreamManager(model=self.config.model, stream=stream)
+            stream_manager = stream_manager or StreamManager(model=self.config.model, stream=stream)
             if context and context.get("expression"):
                 stream_manager.send_thinking(STATUS_REVIEWING_CODE)
             else:
@@ -212,7 +273,9 @@ class AnthropicClient:
                         api_key=self.api_key,
                         stream_manager=stream_manager,
                         download_adaptor_docs=download_adaptor_docs,
-                        refresh_rag=refresh_rag
+                        refresh_rag=refresh_rag,
+                        workflow_yaml=workflow_yaml,
+                        subagent=subagent
                     )
 
                 else:
@@ -230,74 +293,148 @@ class AnthropicClient:
             # tool. tool_choice stays "auto": the model answers in text
             # and only calls the tool when it actually wants to change the job.
             output_config = {"effort": "medium"}
-            tool_kwargs = (
-                {"tools": [_EDIT_TOOL], "tool_choice": {"type": "auto"}}
-                if suggest_code else {}
-            )
+            tools = []
+            if suggest_code:
+                tools.append(_EDIT_TOOL)
+            if subagent:
+                tools.append(_EDIT_WORKFLOW_TOOL)
+                if workflow_yaml:
+                    tools.append(_INSPECT_JOB_CODE_TOOL)
+            tool_kwargs = {"tools": tools, "tool_choice": {"type": "auto"}} if tools else {}
+
+            # Without the subagent tools this loop runs exactly once: edit_job
+            # is terminal (its input IS the output), so only inspect_job_code
+            # triggers another round and only handover exits early.
+            messages = prompt
+            handover_reason = None
+            text_parts = []
+            usage_events = []
 
             with sentry_sdk.start_span(description="anthropic_api_call"):
-                if stream:
-                    logger.info("Making streaming API call")
-                    text_started = False
-                    sent_length = 0
-                    accumulated_response = ""
-                    self._stream_applied = False
-                    self._stream_suggested_code = None
-                    self._stream_diff = None
+                for round_index in range(_MAX_TOOL_ROUNDS):
+                    if stream:
+                        logger.info("Making streaming API call")
+                        text_started = False
+                        sent_length = 0
+                        accumulated_response = ""
+                        self._stream_applied = False
+                        self._stream_suggested_code = None
+                        self._stream_diff = None
 
-                    original_code = context.get("expression") if context and isinstance(context, dict) else None
+                        original_code = context.get("expression") if context and isinstance(context, dict) else None
 
-                    stream_kwargs = dict(
-                        max_tokens=self.config.max_tokens,
-                        messages=prompt,
-                        model=self.config.model,
-                        system=system_message,
-                        thinking={"type": "adaptive"},
-                        output_config=output_config,
-                        **tool_kwargs
-                    )
+                        stream_kwargs = dict(
+                            max_tokens=self.config.max_tokens,
+                            messages=messages,
+                            model=self.config.model,
+                            system=system_message,
+                            thinking={"type": "adaptive"},
+                            output_config=output_config,
+                            **tool_kwargs
+                        )
 
-                    with self.client.messages.stream(**stream_kwargs) as stream_obj:
-                        for event in stream_obj:
-                            if event.type == "message_start":
-                                stream_manager.send_thinking(STATUS_WORKING)
-                            # The edit_job tool block starts after the text ends; its
-                            # input (the code) streams silently, so show a status here.
-                            elif event.type == "content_block_start" and getattr(getattr(event, "content_block", None), "type", None) == "tool_use":
-                                stream_manager.send_thinking(STATUS_WRITING_CODE)
-                            accumulated_response, text_started, sent_length = self.process_stream_event(
-                                event,
-                                accumulated_response,
-                                suggest_code,
-                                text_started,
-                                sent_length,
-                                stream_manager,
-                                original_code,
-                                content
+                        with self.client.messages.stream(**stream_kwargs) as stream_obj:
+                            for event in stream_obj:
+                                if event.type == "message_start" and round_index == 0:
+                                    stream_manager.send_thinking(STATUS_WORKING)
+                                # The edit_job tool block starts after the text ends; its
+                                # input (the code) streams silently, so show a status here.
+                                elif event.type == "content_block_start" and getattr(getattr(event, "content_block", None), "type", None) == "tool_use" and getattr(getattr(event, "content_block", None), "name", None) == "edit_job":
+                                    stream_manager.send_thinking(STATUS_WRITING_CODE)
+                                accumulated_response, text_started, sent_length = self.process_stream_event(
+                                    event,
+                                    accumulated_response,
+                                    suggest_code,
+                                    text_started,
+                                    sent_length,
+                                    stream_manager,
+                                    original_code,
+                                    content
+                                )
+                        message = stream_obj.get_final_message()
+
+                        # Flush any remaining buffered text, stripping JSON closing chars
+                        if suggest_code and text_started:
+                            if sent_length < len(accumulated_response):
+                                remaining = accumulated_response[sent_length:]
+                                remaining = re.sub(r'"\s*}\s*$', '', remaining)
+                                if remaining:
+                                    stream_manager.send_text(self._unescape_json_string(remaining))
+
+                    else:
+                        logger.info("Making non-streaming API call")
+                        create_kwargs = dict(
+                            max_tokens=self.config.max_tokens, messages=messages, model=self.config.model, system=system_message,
+                            thinking={"type": "adaptive"},
+                            output_config=output_config,
+                            # Per-request timeout (same values as the SDK default):
+                            # required for non-streaming calls with max_tokens > ~21k,
+                            # which the SDK otherwise rejects.
+                            timeout=httpx.Timeout(600.0, connect=5.0),
+                            **tool_kwargs
+                        )
+                        message = self.client.messages.create(**create_kwargs)
+
+                    if hasattr(message, "usage"):
+                        usage_events.append(message.usage.model_dump())
+
+                    for content_block in message.content:
+                        if getattr(content_block, "type", None) == "text" and content_block.text:
+                            text_parts.append(content_block.text)
+
+                    tool_uses = [b for b in message.content if getattr(b, "type", None) == "tool_use"]
+                    if tool_uses:
+                        logger.info(
+                            "job_chat round %d: model called %s",
+                            round_index, ", ".join(b.name for b in tool_uses),
+                        )
+
+                    handover_block = next((b for b in tool_uses if b.name == "edit_workflow"), None)
+                    if handover_block:
+                        handover_reason = (handover_block.input or {}).get("goal") or "handover requested"
+                        break
+
+                    inspect_blocks = [b for b in tool_uses if b.name == "inspect_job_code"]
+                    if not inspect_blocks or round_index == _MAX_TOOL_ROUNDS - 1:
+                        break
+
+                    # Answer the inspect calls and let the model continue. An
+                    # edit_job call made in the same round is deferred: the
+                    # model must re-issue it with its final answer.
+                    stream_manager.send_thinking(STATUS_REVIEWING_CODE)
+                    tool_results = []
+                    for block in tool_uses:
+                        if block.name == "inspect_job_code":
+                            job_keys = (block.input or {}).get("job_keys") or []
+                            logger.info("job_chat inspect_job_code: reading %s", job_keys)
+                            result_text = inspect_job_code(workflow_yaml, job_keys)
+                        else:
+                            result_text = (
+                                "Not applied. Finish inspecting, then write your final reply "
+                                "and call edit_job again with the complete edits."
                             )
-                    message = stream_obj.get_final_message()
+                        tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": result_text})
 
-                    # Flush any remaining buffered text, stripping JSON closing chars
-                    if suggest_code and text_started:
-                        if sent_length < len(accumulated_response):
-                            remaining = accumulated_response[sent_length:]
-                            remaining = re.sub(r'"\s*}\s*$', '', remaining)
-                            if remaining:
-                                stream_manager.send_text(self._unescape_json_string(remaining))
+                    messages = messages + [
+                        {"role": "assistant", "content": message.content},
+                        {"role": "user", "content": tool_results},
+                    ]
 
-                else:
-                    logger.info("Making non-streaming API call")
-                    create_kwargs = dict(
-                        max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message,
-                        thinking={"type": "adaptive"},
-                        output_config=output_config,
-                        # Per-request timeout (same values as the SDK default):
-                        # required for non-streaming calls with max_tokens > ~21k,
-                        # which the SDK otherwise rejects.
-                        timeout=httpx.Timeout(600.0, connect=5.0),
-                        **tool_kwargs
-                    )
-                    message = self.client.messages.create(**create_kwargs)
+            if handover_reason:
+                logger.info(f"job_chat handing over: {handover_reason}")
+                # Deliberately do NOT end the stream: the caller reroutes the
+                # request and the next agent continues on the same stream.
+                return ChatResponse(
+                    response="",
+                    suggested_code=None,
+                    history=history,
+                    usage=self.sum_usage(
+                        *usage_events,
+                        *[usage_data for usage_key, usage_data in retrieved_knowledge.get("usage", {}).items()]
+                    ),
+                    rag=retrieved_knowledge,
+                    handover=handover_reason,
+                )
 
             if hasattr(message, "usage"):
                 if message.usage.cache_creation_input_tokens:
@@ -306,15 +443,13 @@ class AnthropicClient:
                     logger.info(f"Cache read: {message.usage.cache_read_input_tokens} tokens")
 
             # The model answers in normal text; it calls the `edit_job` tool only
-            # when it wants to change the user's job. So text = the reply, and the
-            # tool's parsed input carries the code edits (no JSON-in-text parsing).
-            text_parts = []
+            # when it wants to change the user's job. So text = the reply
+            # (accumulated across tool rounds above), and the tool's parsed
+            # input carries the code edits (no JSON-in-text parsing).
             tool_code_edits = None
             for content_block in message.content:
                 if getattr(content_block, "type", None) == "tool_use" and getattr(content_block, "name", None) == "edit_job":
                     tool_code_edits = (content_block.input or {}).get("code_edits") or []
-                elif getattr(content_block, "type", None) == "text":
-                    text_parts.append(content_block.text)
 
             text_response = "\n\n".join(text_parts).strip()
             suggested_code = None
@@ -355,7 +490,7 @@ class AnthropicClient:
             ]
 
             usage = self.sum_usage(
-                message.usage.model_dump() if hasattr(message, "usage") else {},
+                *usage_events,
                 *[usage_data for usage_key, usage_data in retrieved_knowledge.get("usage", {}).items()]
             )
 
@@ -608,7 +743,7 @@ def main(data_dict: dict) -> dict:
     """
     try:
         sentry_sdk.set_context("request_data", {
-            k: v for k, v in data_dict.items() if k != "api_key"
+            k: v for k, v in data_dict.items() if k not in ("api_key", "_stream_manager")
             })
 
         data = Payload.from_dict(data_dict)
@@ -667,12 +802,23 @@ def main(data_dict: dict) -> dict:
                 stream=data.stream,
                 download_adaptor_docs=data.download_adaptor_docs,
                 refresh_rag=should_refresh_rag,
-                current_page=current_page
+                current_page=current_page,
+                workflow_yaml=data.workflow_yaml,
+                subagent=data.subagent,
+                # In-process callers (global_chat) may inject a shared stream
+                # manager so a handed-over request continues the same stream
+                stream_manager=data_dict.get("_stream_manager"),
             )
 
             # Tag the trace when code was generated, so we can filter for it.
             if tracking and result.suggested_code:
                 with propagate_attributes(tags=["has_code_attachment"]):
+                    pass
+
+            # Tag the trace when the request was handed back for rerouting to
+            # the planner, so we can filter for handovers.
+            if tracking and result.handover:
+                with propagate_attributes(tags=["handover"]):
                     pass
 
             if tracking:
@@ -693,6 +839,9 @@ def main(data_dict: dict) -> dict:
 
             if result.diff:
                 response_dict["diff"] = result.diff
+
+            if result.handover:
+                response_dict["handover"] = result.handover
 
             return response_dict
 

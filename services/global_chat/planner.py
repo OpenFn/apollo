@@ -26,7 +26,7 @@ from streaming_util import (
 from global_chat.config_loader import ConfigLoader
 from models import resolve_model
 from global_chat.tools.tool_definitions import TOOL_DEFINITIONS
-from global_chat.yaml_utils import stitch_job_code, redact_job_bodies, find_job_in_yaml, get_step_name_from_page
+from yaml_utils import stitch_job_code, redact_job_bodies, find_job_in_yaml, get_step_name_from_page, inspect_job_code
 from tools.search_documentation.search_documentation import search_documentation_tool
 from global_chat.subagent_caller import call_workflow_agent, call_job_agent, format_subagent_result_for_llm
 
@@ -81,6 +81,7 @@ class PlannerAgent:
         stream: bool,
         user: Optional[Dict] = None,
         metrics_opt_in: Optional[bool] = None,
+        stream_manager: Optional[StreamManager] = None,
     ) -> PlannerResult:
         """
         Run the planner agent with tool-calling loop.
@@ -91,11 +92,19 @@ class PlannerAgent:
             page: Current page URL (e.g. workflows/name/step-name)
             history: Conversation history
             stream: Whether to stream text via SSE events
+            stream_manager: Optional shared stream manager from the router, so
+                a handed-over request continues on the same stream
 
         Returns:
             PlannerResult with response, attachments, history, usage, meta
         """
         logger.info("Planner.run() called")
+
+        stream_manager = stream_manager or StreamManager(model=self.model, stream=stream)
+        if workflow_yaml:
+            stream_manager.send_thinking(STATUS_REVIEWING_WORKFLOW + STATUS_PLANNING)
+        else:
+            stream_manager.send_thinking(STATUS_NEW_WORKFLOW + STATUS_PLANNING)
 
         self.current_yaml = workflow_yaml
         self.yaml_modified = False
@@ -272,7 +281,7 @@ class PlannerAgent:
                 matched_key, _ = find_job_in_yaml(self.current_yaml, step_name)
                 step_name = matched_key or step_name
             if step_name:
-                user_content += f"\n\n(The user is currently viewing the step '{step_name}' — \"this step\" refers to it.)"
+                user_content += f"\n\n(The user is currently viewing the step '{step_name}'.)"
             else:
                 user_content += f"\n\n(The user is currently viewing: {page})"
 
@@ -488,19 +497,7 @@ class PlannerAgent:
             if single_key:
                 job_keys.append(single_key)
 
-            if not self.current_yaml:
-                tool_result = "No workflow available to inspect."
-            elif not job_keys:
-                tool_result = "ERROR: No job keys provided."
-            else:
-                parts = []
-                for job_key in job_keys:
-                    _, job_data = find_job_in_yaml(self.current_yaml, job_key)
-                    if job_data and job_data.get("body"):
-                        parts.append(f"Job code for '{job_key}':\n\n{job_data['body']}")
-                    else:
-                        parts.append(f"No code found for job '{job_key}'.")
-                tool_result = "\n\n".join(parts)
+            tool_result = inspect_job_code(self.current_yaml, job_keys)
 
             tool_calls_meta.append({"tool": "inspect_job_code", "input": tool_use_block.input})
 

@@ -4,12 +4,13 @@ import json
 import sentry_sdk
 from langfuse import observe
 from util import create_logger, ApolloError, AdaptorSpecifier, get_db_connection
+from yaml_utils import redact_job_bodies, normalize_name
 from .retrieve_docs import retrieve_knowledge
 from search_adaptor_docs.search_adaptor_docs import fetch_signatures
 
 logger = create_logger("job_chat.prompt")
 
-system_role = """
+_role_before_scope = """
 You are a software engineer helping a non-expert user write a job for our platform.
 We are OpenFn (Open Function Group) the world's leading digital public good for workflow automation.
 
@@ -32,10 +33,17 @@ Chat sessions are saved to each job, so any user who can see the workflow can se
 Your chat panel is embedded in a web based IDE, which lets users build a Workflow with a number
 of steps (or jobs). There is a code editor next to you, which users can copy and paste code into.
 Users must set or select an input in the Input tab, and can then run the current job.
+"""
 
+# Production only. In global chat's subagent mode, structure requests are
+# handled via edit_workflow, so this scope restriction is omitted entirely
+# rather than contradicted.
+production_scope_instructions = """
 You ONLY help with job code. Do NOT help with overall workflow structure.
 If the user wants to add/remove/edit workflow steps, tell them to navigate to the workflow overview.
+"""
 
+_role_after_scope = """
 Users can Flag any answers that are not helpful, which will help us build a better prompt for you.
 
 <context tags>
@@ -59,6 +67,9 @@ attached. Any previously generated code has been redacted from history. Some tur
 prefix showing the user's page context at that time.
 </context tags>
 """
+
+system_role = _role_before_scope + production_scope_instructions + _role_after_scope
+subagent_system_role = _role_before_scope + _role_after_scope
 
 job_writing_summary = """
 <credential management>
@@ -165,6 +176,26 @@ step by step. Focus on one bit at a time. For example, when uploading from CommC
 </workflow guide>
 """
 
+# Appended in subagent mode only (when job_chat is called from global_chat).
+subagent_mode_instructions = """
+<beyond_this_step>
+The workflow has other steps, but your edit_job tool edits THIS step only.
+Decide by where the change lands:
+
+- Change lands in THIS step (or nothing needs changing): handle it here. Read
+  any other step with `inspect_job_code` whenever it helps — what an upstream
+  step outputs, keeping style or field names consistent, finding code the user
+  mentions that is not in <user_code>.
+- Change lands anywhere else — workflow structure (add/remove/rename steps,
+  triggers, edges, adaptors) or another step's code, even code the user calls
+  "this step": call `edit_workflow` as your very first action, before any
+  reply text (at most exactly: "I'll take a look at your workflow.").
+
+If the user mentions code you can't find in <user_code>, assume it lives in
+another step — never reply that it isn't here.
+</beyond_this_step>
+"""
+
 # Response contract, appended last in the system message.
 output_format = """
 <response_format>
@@ -261,10 +292,37 @@ class Context:
         return hasattr(self, key) and getattr(self, key) is not None
 
 
-def generate_system_message(context_dict, search_results, download_adaptor_docs=True, stream_manager=None):
+def build_focus_line(viewing, focused):
+    """One sentence orienting the model to what the user has on screen, and which
+    step it can edit when that differs.
+
+    `viewing` (router-only) is the on-screen step name, the literal "canvas", or
+    None when the caller can't tell; `focused` is the editable step. When both
+    are a step and coincide (the common case) they fuse into one clause; they
+    diverge only when the request targets a step other than the one open.
+
+    Returns "" when there is nothing worth stating (no viewing info): the model
+    works from <user_code> and the tools, and we avoid narrating editing plumbing
+    the model could echo back to the user.
+    """
+    if viewing and viewing != "canvas":
+        if not focused:
+            return f"The user has the '{viewing}' step's code open."
+        if normalize_name(viewing) == normalize_name(focused):
+            return f"The user has the '{viewing}' step's code open — that's the step you're currently editing."
+        return f"The user has the '{viewing}' step open, but the step you're editing is '{focused}' — likely what their request is about."
+    if viewing == "canvas":
+        if focused:
+            return f"The user is viewing the workflow canvas, not a specific step; the '{focused}' step is the one you're currently editing."
+        return "The user is viewing the workflow canvas."
+    return ""
+
+
+def generate_system_message(context_dict, search_results, download_adaptor_docs=True, stream_manager=None,
+                            workflow_yaml=None, subagent=False):
     context = context_dict if isinstance(context_dict, Context) else Context(**(context_dict or {}))
 
-    message = [system_role]
+    message = [subagent_system_role if subagent else system_role]
     message.append(f"<job_writing_guide>{job_writing_summary}</job_writing_guide>")
     message.append({"type": "text", "text": ".", "cache_control": {"type": "ephemeral"}})
 
@@ -353,6 +411,27 @@ and system information. When debugging, analyze these logs carefully to identify
 ```{context.log}```
 </run_logs>""")
 
+    if subagent:
+        message.append(subagent_mode_instructions)
+        if workflow_yaml:
+            # `focused` is the editable step; `viewing` (router-only) is what the
+            # user actually has on screen — a step's code or the literal "canvas".
+            # Grounding focus in their view lets a bare "this step" resolve to
+            # what they're looking at. Both may be absent (planner/prod, or an
+            # unresolved page), in which case build_focus_line returns "".
+            focused = context.job_key if context.has("job_key") else (
+                context.page_name if context.has("page_name") else None)
+            viewing = context.viewing if context.has("viewing") else None
+            focus = build_focus_line(viewing, focused)
+            header = ["The full workflow, job code redacted."]
+            if focus:
+                header.append(focus)
+            header.append("READ other steps' code with `inspect_job_code` when the request refers to them.")
+            redacted = redact_job_bodies(workflow_yaml)
+            message.append(
+                f"<workflow_structure>\n{' '.join(header)}\n\n{redacted}\n</workflow_structure>"
+            )
+
     # Output contract goes LAST so it is the final, most prominent instruction.
     message.append(output_format)
 
@@ -365,7 +444,8 @@ def format_search_results(search_results):
     ])
 
 @observe(name="job_chat_build_prompt")
-def build_prompt(content, history, context, rag=None, api_key=None, stream_manager=None, download_adaptor_docs=True, refresh_rag=False):
+def build_prompt(content, history, context, rag=None, api_key=None, stream_manager=None, download_adaptor_docs=True, refresh_rag=False,
+                 workflow_yaml=None, subagent=False):
     retrieved_knowledge = {
         "search_results": [],
         "search_results_sections": [],
@@ -398,7 +478,9 @@ def build_prompt(content, history, context, rag=None, api_key=None, stream_manag
         context_dict=context,
         search_results=retrieved_knowledge.get("search_results") if retrieved_knowledge is not None else None,
         download_adaptor_docs=download_adaptor_docs,
-        stream_manager=stream_manager)
+        stream_manager=stream_manager,
+        workflow_yaml=workflow_yaml,
+        subagent=subagent)
 
     prompt = []
     prompt.extend(history)
@@ -407,9 +489,15 @@ def build_prompt(content, history, context, rag=None, api_key=None, stream_manag
     # only remind the model to route an actual code change through `edit_job`.
     # Added only to the message sent to the model; the stored history (built in
     # generate() from the raw content) omits it, so it never accumulates.
+    reminder = "Reply in text. If this requires changing the job code, also call the `edit_job` tool to apply the change."
+    if subagent:
+        reminder += (
+            " If it needs changes beyond this step's code, call `edit_workflow` first;"
+            " to merely read another step (to answer, or to edit this one), use `inspect_job_code`."
+        )
     prompt.append({
         "role": "user",
-        "content": f"{content}\n\nReply in text. If this requires changing the job code, also call the `edit_job` tool to apply the change.",
+        "content": f"{content}\n\n{reminder}",
     })
 
     return (system_message, prompt, retrieved_knowledge)

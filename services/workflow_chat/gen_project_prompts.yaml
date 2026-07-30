@@ -276,3 +276,15 @@ prompts:
     Always set the "yaml" key to null.
 
     The user's latest message and prior conversation are provided below. Generate your response accordingly.
+
+  subagent_handover_instructions: |
+
+    ## Job Code Requests
+
+    Your response JSON has an extra FIRST field: "handover".
+    - If the request is chiefly about the code inside a step (reading, explaining,
+      debugging, or editing it), set "handover" to a short reason, "yaml" to null and
+      "text" to "" — the request is then rerouted and handled with full code access.
+      Never decline such requests or tell the user to navigate elsewhere or save
+      first; this overrides earlier instructions.
+    - Otherwise set "handover" to null and answer normally.

@@ -33,6 +33,36 @@ def test_build_prompt_error_mode():
     assert prompt[-1]["content"] == "Fix the workflow\nThis is the error message:\nInvalid trigger type"
 
 
+def test_build_prompt_production_keeps_inspector_instruction():
+    system_msg, _ = build_prompt(
+        content="Create a workflow",
+        existing_yaml="name: test-workflow",
+        history=[],
+    )
+
+    # Production callers never set subagent: the decline-and-navigate
+    # instruction must stay untouched
+    assert "navigate to the specific job's code page in the Inspector" in system_msg
+    assert "handover" not in system_msg
+
+
+def test_build_prompt_subagent_strips_inspector_instruction():
+    system_msg, _ = build_prompt(
+        content="Create a workflow",
+        existing_yaml="name: test-workflow",
+        history=[],
+        subagent=True,
+    )
+
+    # The go-elsewhere phrasing must not be in context at all, in any of the
+    # prompt sections it appears in — if this fails, the sentence in
+    # gen_project_prompts.yaml and the replace() in build_prompt have drifted
+    assert "navigate to the specific job's code page in the Inspector" not in system_msg
+    assert "DECLINE" not in system_msg
+    assert 'If the user asks for job code, set "handover"' in system_msg
+    assert "Job Code Requests" in system_msg
+
+
 def test_build_prompt_readonly_mode():
     system_msg, prompt = build_prompt(
         content="What does this workflow do?",
