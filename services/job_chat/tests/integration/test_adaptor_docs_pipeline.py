@@ -158,7 +158,7 @@ def test_generate_queries_returns_valid_structure():
     # Step 2: Call generate_queries
     print("\n2. Calling generate_queries...")
     client = get_client()
-    queries, usage = generate_queries(question, client, user_context)
+    queries, _usage = generate_queries(question, client, user_context)
     print(f"   Generated {len(queries)} queries")
 
     # Step 3: Validate structure

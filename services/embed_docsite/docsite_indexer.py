@@ -83,7 +83,7 @@ class DocsiteIndexer:
 
         doc_title_indices = {}
         rows = []
-        for doc, embedding in zip(documents, embeddings):
+        for doc, embedding in zip(documents, embeddings, strict=True):
             doc_title = doc["name"].removesuffix(".md")
             chunk_index = doc_title_indices.get(doc_title, 0)
             doc_title_indices[doc_title] = chunk_index + 1

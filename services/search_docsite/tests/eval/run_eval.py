@@ -36,7 +36,7 @@ def compute_agreement(report_a, report_b):
     golden_queries.yaml is curated.
     """
     per_query = []
-    for a, b in zip(report_a["per_query"], report_b["per_query"]):
+    for a, b in zip(report_a["per_query"], report_b["per_query"], strict=True):
         titles_a = {t for t in a["retrieved_titles"] if t is not None}
         titles_b = {t for t in b["retrieved_titles"] if t is not None}
         union = titles_a | titles_b
