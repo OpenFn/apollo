@@ -17,11 +17,12 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent))
 
-from langfuse import observe
+from langfuse import observe, get_client as get_langfuse_client
 from util import create_logger, ApolloError, sum_usage
+from streaming_util import StreamManager
 from global_chat.config_loader import ConfigLoader
 from models import resolve_model
-from global_chat.yaml_utils import get_step_name_from_page, find_job_in_yaml, stitch_job_code, workflow_has_job_code
+from yaml_utils import get_step_name_from_page, get_page_view, find_job_in_yaml, stitch_job_code, workflow_has_job_code
 
 logger = create_logger(__name__)
 
@@ -40,6 +41,7 @@ class RouterResult:
     """Result from router or passthrough."""
 
     response: str
+    response_segments: List[Dict]
     attachments: List[Dict]
     history: List[Dict]
     usage: Dict
@@ -110,6 +112,10 @@ class RouterAgent:
         self._input_attachments = attachments or []
         self._user = user
         self._metrics_opt_in = metrics_opt_in
+        # One stream manager shared by whichever agents serve this request, so
+        # a handed-over request continues the same stream instead of starting
+        # a second message lifecycle.
+        self._stream_manager = StreamManager(model=self.model, stream=stream)
 
         try:
             decision = self._make_routing_decision(content, workflow_yaml, page, history)
@@ -120,8 +126,18 @@ class RouterAgent:
             logger.warning(f"Routing decision failed: {e}. Defaulting to planner for safety.")
             decision = RouterDecision(destination="planner", confidence=1)
 
+        # Direct routes are a fast path for clear-cut requests; when the router
+        # itself is unsure, take the path that can't be wrong. Costs nothing:
+        # the confidence comes back in the same routing call.
+        if decision.destination in ("workflow_agent", "job_code_agent") and decision.confidence < 3:
+            logger.warning(
+                f"Low router confidence ({decision.confidence}) for {decision.destination} — routing to planner instead"
+            )
+            self._track_reroute({"low_confidence_reroute": decision.destination})
+            decision = RouterDecision(destination="planner", confidence=decision.confidence)
+
         if decision.destination == "workflow_agent":
-            result = self._route_to_workflow_chat(content, workflow_yaml, history, stream, decision.confidence)
+            result = self._route_to_workflow_chat(content, workflow_yaml, page, history, stream, decision.confidence)
         elif decision.destination == "job_code_agent":
             result = self._route_to_job_chat(
                 content, workflow_yaml, page, history, stream, decision.confidence, decision.job_key
@@ -228,7 +244,7 @@ class RouterAgent:
         return "\n".join(parts)
 
     def _route_to_workflow_chat(
-        self, content: str, workflow_yaml: Optional[str], history: List[Dict], stream: bool, confidence: int
+        self, content: str, workflow_yaml: Optional[str], page: Optional[str], history: List[Dict], stream: bool, confidence: int
     ) -> RouterResult:
         """Route directly to workflow_chat."""
         from workflow_chat.workflow_chat import main as workflow_chat_main
@@ -246,9 +262,17 @@ class RouterAgent:
             "api_key": self.api_key,
             "meta": {"user": self._user} if self._user else None,
             "metrics_opt_in": self._metrics_opt_in,
+            "subagent": True,
+            "_stream_manager": self._stream_manager,
         }
 
         result = workflow_chat_main(payload)
+
+        if result.get("handover"):
+            return self._handover_to_planner(
+                "workflow_agent", result, content, workflow_yaml, page, history, stream, confidence
+            )
+
         total_usage = sum_usage(self.routing_usage, result["usage"])
 
         attachments = []
@@ -258,6 +282,7 @@ class RouterAgent:
 
         return RouterResult(
             response=result["response"],
+            response_segments=[{"type": "text", "content": result["response"]}],
             attachments=attachments,
             history=result["history"].copy(),
             usage=total_usage,
@@ -328,6 +353,22 @@ class RouterAgent:
                 job_context["adaptor"] = job_data["adaptor"]
             if job_data.get("name"):
                 job_context["page_name"] = job_data["name"]
+        if matched_job_key:
+            # Tells job_chat's subagent prompt which step is focused/editable
+            job_context["job_key"] = matched_job_key
+
+        # What the user actually has on screen, independent of which step we
+        # focus for editing: a specific step's code, or the workflow canvas.
+        # Only the router knows this (planner/prod calls omit it, so the prompt
+        # grounding line stays off). Fail safe: only claim a step the page name
+        # resolves to a real job — a mis-split name simply yields no line.
+        page_view, page_step = get_page_view(page)
+        if page_view == "step" and workflow_yaml:
+            _, viewed_job = find_job_in_yaml(workflow_yaml, page_step)
+            if viewed_job and viewed_job.get("name"):
+                job_context["viewing"] = viewed_job["name"]
+        elif page_view == "overview":
+            job_context["viewing"] = "canvas"
 
         clean_history = [{"role": t["role"], "content": t["content"]} for t in history]
         enriched_content = self._format_attachments_for_content(content)
@@ -341,9 +382,18 @@ class RouterAgent:
             "api_key": self.api_key,
             "meta": {"user": self._user} if self._user else None,
             "metrics_opt_in": self._metrics_opt_in,
+            "subagent": True,
+            "workflow_yaml": workflow_yaml,
+            "_stream_manager": self._stream_manager,
         }
 
         result = job_chat_main(payload)
+
+        if result.get("handover"):
+            return self._handover_to_planner(
+                "job_code_agent", result, content, workflow_yaml, page, history, stream, confidence
+            )
+
         total_usage = sum_usage(self.routing_usage, result["usage"])
 
         # Stitch suggested_code back into the workflow YAML. The full YAML is
@@ -360,11 +410,52 @@ class RouterAgent:
 
         return RouterResult(
             response=result["response"],
+            response_segments=[{"type": "text", "content": result["response"]}],
             attachments=attachments,
             history=result["history"].copy(),
             usage=total_usage,
             meta={"agents": ["router", "job_code_agent"], "router_confidence": confidence},
         )
+
+    def _handover_to_planner(
+        self,
+        from_agent: str,
+        subagent_result: Dict,
+        content: str,
+        workflow_yaml: Optional[str],
+        page: Optional[str],
+        history: List[Dict],
+        stream: bool,
+        confidence: int,
+    ) -> RouterResult:
+        """Reroute a handed-over request to the planner.
+
+        A direct-routed subagent signalled it cannot complete the request
+        (wrong route or missing capability). The planner never hands over, so
+        this retries at most once. The shared stream manager means the user
+        never sees the aborted attempt.
+        """
+        reason = subagent_result["handover"]
+        logger.warning(f"{from_agent} handed over: {reason}. Rerouting to planner")
+        self._track_reroute({"handover_from": from_agent, "handover_reason": reason})
+
+        planner_result = self._route_to_planner(content, workflow_yaml, page, history, stream, confidence)
+        planner_result.usage = sum_usage(planner_result.usage, subagent_result.get("usage", {}))
+        return planner_result
+
+    def _track_reroute(self, metadata: Dict) -> None:
+        """Record reroute diagnostics on the Langfuse trace (opt-in per request).
+
+        Deliberately kept out of the response meta: the frontend does nothing
+        with these, they are for Langfuse analysis only. Server logs carry the
+        same information when tracking is off.
+        """
+        if not self._metrics_opt_in:
+            return
+        try:
+            get_langfuse_client().update_current_span(metadata=metadata)
+        except Exception:
+            logger.warning("Failed to record reroute metadata in Langfuse")
 
     def _route_to_planner(
         self,
@@ -392,6 +483,7 @@ class RouterAgent:
             stream=stream,
             user=self._user,
             metrics_opt_in=self._metrics_opt_in,
+            stream_manager=self._stream_manager,
         )
 
         total_usage = sum_usage(self.routing_usage, planner_result.usage)
@@ -401,6 +493,7 @@ class RouterAgent:
 
         return RouterResult(
             response=planner_result.response,
+            response_segments=planner_result.response_segments,
             attachments=planner_result.attachments,
             history=planner_result.history,
             usage=total_usage,

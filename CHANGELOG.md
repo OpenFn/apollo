@@ -1,5 +1,17 @@
 # apollo
 
+## 3.1.0
+
+### Minor Changes
+
+- f1df29c: global chat: add answer streaming to the planner, breaking up
+  responses into chunks which can be rendered earlier
+
+### Patch Changes
+
+- 6c322ae: global_chat: enable subagents to pull missing context, recovering
+  from routing errors
+
 ## 3.0.3
 
 ### Patch Changes

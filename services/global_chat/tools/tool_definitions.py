@@ -73,24 +73,9 @@ Describe the goal in plain language; the job code agent is the expert on adaptor
     "cache_control": {"type": "ephemeral"}
 }
 
-# Tool 4: Inspect job code
-INSPECT_JOB_CODE_TOOL = {
-    "name": "inspect_job_code",
-    "description": """Read the current code body of one or more jobs in the workflow (read-only).
-
-Use this to inspect existing step code before editing — e.g. to find which steps a change applies to before editing only those, or to base one step on another. Pass all the job keys you need in a single call rather than calling once per job.""",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "job_keys": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "The job keys to inspect (e.g. ['fetch-patients', 'load-dhis2'])"
-            }
-        },
-        "required": ["job_keys"]
-    }
-}
+# Tool 4: Inspect job code — shared with job_chat's subagent mode so both
+# agents explore the workflow with the exact same tool
+from yaml_utils import INSPECT_JOB_CODE_TOOL  # noqa: E402
 
 # Export all tool definitions
 TOOL_DEFINITIONS = [
