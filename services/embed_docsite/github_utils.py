@@ -1,5 +1,6 @@
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from pathlib import Path
 
 import requests
 from util import ApolloError, create_logger
@@ -18,6 +19,12 @@ DOCS_TYPE_PREFIXES = {"general_docs": "docs/", "adaptor_docs": "adaptors/"}
 ADAPTOR_FUNCTIONS_URL = f"{GITHUB_RAW}/OpenFn/adaptors/docs/docs/docs.json"
 
 REQUEST_TIMEOUT_SECONDS = 30
+
+HTTP_NOT_MODIFIED = 304
+HTTP_FORBIDDEN = 403
+
+# GitHub reports the remaining quota as a decimal string in X-RateLimit-Remaining.
+RATE_LIMIT_EXHAUSTED = "0"
 
 
 def _github_headers(etag=None):
@@ -43,13 +50,13 @@ def _raise_if_rate_limited(response):
     `IndexError: list index out of range` — which named neither the cause nor
     the fix.
     """
-    if response.status_code != 403 or response.headers.get("X-RateLimit-Remaining") != "0":
+    if response.status_code != HTTP_FORBIDDEN or response.headers.get("X-RateLimit-Remaining") != RATE_LIMIT_EXHAUSTED:
         return
 
     reset = response.headers.get("X-RateLimit-Reset")
     when = ""
     if reset:
-        resets_at = datetime.fromtimestamp(int(reset), tz=timezone.utc).isoformat()
+        resets_at = datetime.fromtimestamp(int(reset), tz=UTC).isoformat()
         when = f" Resets at {resets_at}."
 
     raise ApolloError(
@@ -74,7 +81,7 @@ def get_repo_tree(repo=DOCS_REPO, ref=DOCS_REF, etag=None):
     url = f"{GITHUB_API}/repos/{repo}/git/trees/{ref}?recursive=1"
     response = requests.get(url, headers=_github_headers(etag), timeout=REQUEST_TIMEOUT_SECONDS)
 
-    if response.status_code == 304:
+    if response.status_code == HTTP_NOT_MODIFIED:
         logger.info(f"{repo} tree unchanged upstream")
         return None
 
@@ -122,7 +129,7 @@ def get_adaptor_function_docs(etag=None):
     headers = {"If-None-Match": etag} if etag else {}
     response = requests.get(ADAPTOR_FUNCTIONS_URL, headers=headers, timeout=REQUEST_TIMEOUT_SECONDS)
 
-    if response.status_code == 304:
+    if response.status_code == HTTP_NOT_MODIFIED:
         logger.info("Adaptor function docs unchanged upstream")
         return None
 
@@ -151,4 +158,4 @@ def get_docs(docs_type):
     tree = get_repo_tree()
     paths = markdown_paths(tree["files"], docs_type)
     logger.info(f"Downloading {len(paths)} {docs_type} files")
-    return [{"name": os.path.basename(path), "docs": download_file(path)} for path in paths]
+    return [{"name": Path(path).name, "docs": download_file(path)} for path in paths]

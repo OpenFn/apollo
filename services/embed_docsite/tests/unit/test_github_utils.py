@@ -23,13 +23,20 @@ def make_response(status_code=200, json_body=None, headers=None, text=""):
     return response
 
 
+HTTP_BAD_REQUEST = 400
+HTTP_TOO_MANY_REQUESTS = 429
+HTTP_INTERNAL_ERROR = 500
+
+# setup.md deliberately precedes jobs.md: GitHub returns tree entries in its own
+# order, and listing them unsorted here is what makes the `sorted()` in
+# `markdown_paths` load-bearing rather than incidental.
 TREE_BODY = {
     "sha": "tree-sha-1",
     "truncated": False,
     "tree": [
         {"path": "docs", "type": "tree", "sha": "d0"},
-        {"path": "docs/jobs.md", "type": "blob", "sha": "blob-jobs"},
         {"path": "docs/setup.md", "type": "blob", "sha": "blob-setup"},
+        {"path": "docs/jobs.md", "type": "blob", "sha": "blob-jobs"},
         {"path": "adaptors/http.md", "type": "blob", "sha": "blob-http"},
         {"path": "docs/logo.png", "type": "blob", "sha": "blob-png"},
     ],
@@ -78,6 +85,24 @@ def test_get_repo_tree_returns_none_on_304():
         assert m.get_repo_tree(etag='W/"abc"') is None
 
 
+def test_get_repo_tree_forwards_the_etag_into_the_outbound_headers():
+    """The whole zero-cost-repeat-run claim rests on this wiring, not on
+    `_github_headers` being correct in isolation."""
+    with patch.object(m.requests, "get", return_value=make_response(status_code=304)) as mock_get:
+        m.get_repo_tree(etag='W/"tree-etag"')
+
+    assert mock_get.call_args.kwargs["headers"]["If-None-Match"] == 'W/"tree-etag"'
+
+
+def test_get_repo_tree_captures_the_etag_for_the_next_run():
+    """A tree read that does not return its ETag cannot be revalidated cheaply."""
+    response = make_response(json_body=TREE_BODY, headers={"ETag": 'W/"tree-etag"'})
+    with patch.object(m.requests, "get", return_value=response):
+        tree = m.get_repo_tree()
+
+    assert tree["etag"] == 'W/"tree-etag"'
+
+
 def test_rate_limit_raises_a_rate_limit_error_not_an_indexerror():
     """The old code returned silently here and died later with
     `IndexError: list index out of range`, naming neither the cause nor the fix."""
@@ -85,21 +110,20 @@ def test_rate_limit_raises_a_rate_limit_error_not_an_indexerror():
         status_code=403,
         headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1800000000"},
     )
-    with patch.object(m.requests, "get", return_value=response):
-        with pytest.raises(ApolloError) as exc:
-            m.get_repo_tree()
+    with patch.object(m.requests, "get", return_value=response), pytest.raises(ApolloError) as exc:
+        m.get_repo_tree()
 
-    assert exc.value.code == 429
+    assert exc.value.code == HTTP_TOO_MANY_REQUESTS
     assert "GITHUB_TOKEN" in exc.value.message
 
 
 def test_truncated_tree_is_rejected_loudly():
     """A truncated tree would silently index a partial corpus."""
-    body = dict(TREE_BODY, truncated=True)
-    with patch.object(m.requests, "get", return_value=make_response(json_body=body)):
-        with pytest.raises(ApolloError) as exc:
-            m.get_repo_tree()
-    assert exc.value.code == 500
+    response = make_response(json_body=dict(TREE_BODY, truncated=True))
+    with patch.object(m.requests, "get", return_value=response), pytest.raises(ApolloError) as exc:
+        m.get_repo_tree()
+
+    assert exc.value.code == HTTP_INTERNAL_ERROR
 
 
 def test_raw_url_uses_the_same_ref_as_the_tree():
@@ -110,6 +134,33 @@ def test_raw_url_uses_the_same_ref_as_the_tree():
 def test_markdown_paths_filters_by_prefix_and_extension():
     assert m.markdown_paths(TREE_BODY_FILES, "general_docs") == ["docs/jobs.md", "docs/setup.md"]
     assert m.markdown_paths(TREE_BODY_FILES, "adaptor_docs") == ["adaptors/http.md"]
+
+
+def test_download_file_reads_raw_content_not_the_api():
+    """raw.githubusercontent is not subject to the API rate limit; the API is."""
+    with patch.object(m.requests, "get", return_value=make_response(text="# Jobs")) as mock_get:
+        body = m.download_file("docs/jobs.md")
+
+    assert body == "# Jobs"
+    url = mock_get.call_args[0][0]
+    assert url == "https://raw.githubusercontent.com/OpenFn/docs/main/docs/jobs.md"
+    assert "api.github.com" not in url
+
+
+def test_get_adaptor_function_docs_returns_docs_and_etag():
+    response = make_response(json_body={"adaptors": []}, headers={"ETag": 'W/"fn-etag"'})
+    with patch.object(m.requests, "get", return_value=response) as mock_get:
+        result = m.get_adaptor_function_docs()
+
+    assert result == {"docs": {"adaptors": []}, "etag": 'W/"fn-etag"'}
+    assert mock_get.call_args[0][0] == m.ADAPTOR_FUNCTIONS_URL
+
+
+def test_get_adaptor_function_docs_returns_none_on_304_and_sends_the_etag():
+    with patch.object(m.requests, "get", return_value=make_response(status_code=304)) as mock_get:
+        assert m.get_adaptor_function_docs(etag='W/"fn-etag"') is None
+
+    assert mock_get.call_args.kwargs["headers"]["If-None-Match"] == 'W/"fn-etag"'
 
 
 def test_get_docs_keeps_its_return_contract():
@@ -131,4 +182,5 @@ def test_get_docs_keeps_its_return_contract():
 def test_get_docs_rejects_an_unknown_docs_type():
     with pytest.raises(ApolloError) as exc:
         m.get_docs("nonsense")
-    assert exc.value.code == 400
+
+    assert exc.value.code == HTTP_BAD_REQUEST
