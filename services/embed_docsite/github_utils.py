@@ -30,8 +30,8 @@ def _github_headers(etag=None):
     """Headers for an api.github.com request.
 
     A token lifts the rate limit from 60 to 5000 requests/hour. An
-    `If-None-Match` makes revalidation free: 304 responses are not counted
-    against the limit at all.
+    `If-None-Match` makes revalidation cheap, not free: a 304 still costs the
+    same one request against the limit as a 200 would, but carries no body.
     """
     headers = {"Accept": "application/vnd.github+json"}
     token = os.environ.get("GITHUB_TOKEN")
@@ -73,8 +73,9 @@ def get_repo_tree(repo=DOCS_REPO, ref=DOCS_REF, etag=None):
     (~22 for OpenFn/docs).
 
     :param etag: if supplied and still current, GitHub answers 304 and this
-        returns None — meaning the caller's cache is up to date, at no
-        rate-limit cost.
+        returns None — meaning the caller's cache is up to date. The request
+        still spends one unit of rate limit; what it saves is the response body
+        and every file download the caller would otherwise have made.
     :return: {"tree_sha", "etag", "files": {path: blob_sha}}, or None if unchanged
     """
     url = f"{GITHUB_API}/repos/{repo}/git/trees/{ref}?recursive=1"

@@ -5,9 +5,9 @@ module, is gitignored, is written atomically, and — the property that actually
 matters — is served when the fetch fails. A GitHub rate limit then degrades to
 slightly stale docs instead of failing the run.
 
-Freshness is decided by upstream state, not a clock: one conditional Trees
-request per run, and a per-file blob SHA comparison, so an unchanged corpus
-downloads nothing.
+Freshness is decided by upstream state, not a clock: two conditional Trees
+requests per run — one per markdown docs type — and a per-file blob SHA
+comparison, so an unchanged corpus downloads nothing.
 """
 
 import json
@@ -31,7 +31,10 @@ CACHE_DIR = Path(__file__).parent / "docsite_cache"
 ADAPTOR_FUNCTIONS_FILE = "adaptor_functions.json"
 
 # One key per repo, not per docs_type: general_docs and adaptor_docs both come
-# from OpenFn/docs, so one tree call covers both.
+# from OpenFn/docs, so they share one manifest entry. They do not share the
+# request — each call issues its own conditional Trees request against the same
+# tree, so a run covering both spends two. Deliberate, and deliberately not
+# memoised.
 REPO_KEY = f"{DOCS_REPO}@{DOCS_REF}"
 
 
