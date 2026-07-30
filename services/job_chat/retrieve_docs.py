@@ -164,7 +164,7 @@ def generate_queries(content, client, user_context=""):
             "Failed to generate search queries - invalid response from AI service",
             type="INVALID_LLM_RESPONSE",
             details={"response_preview": text[:200]}
-        )
+        ) from e
 
     if len(answer_parsed) >= 4:
         answer_parsed = answer_parsed[:4]
@@ -255,10 +255,10 @@ def call_llm(model, temperature, system_prompt, user_prompt, client, output_sche
             "Unable to reach the AI service for documentation search",
             type="CONNECTION_ERROR",
             details=details,
-        )
+        ) from e
     except AuthenticationError as e:
         logger.error(f"Authentication error during knowledge retrieval: {e}")
-        raise ApolloError(401, "Authentication failed with AI service", type="AUTH_ERROR")
+        raise ApolloError(401, "Authentication failed with AI service", type="AUTH_ERROR") from e
     except RateLimitError as e:
         logger.error(f"Rate limit error during knowledge retrieval: {e}")
         retry_after = int(e.response.headers.get('retry-after', 60)) if hasattr(e, 'response') else 60
@@ -267,22 +267,22 @@ def call_llm(model, temperature, system_prompt, user_prompt, client, output_sche
             "Rate limit exceeded for documentation search, please try again later",
             type="RATE_LIMIT",
             details={"retry_after": retry_after}
-        )
+        ) from e
     except BadRequestError as e:
         logger.error(f"Bad request error during knowledge retrieval: {e}")
-        raise ApolloError(400, f"Invalid request to AI service: {str(e)}", type="BAD_REQUEST")
+        raise ApolloError(400, f"Invalid request to AI service: {str(e)}", type="BAD_REQUEST") from e
     except PermissionDeniedError as e:
         logger.error(f"Permission denied error during knowledge retrieval: {e}")
-        raise ApolloError(403, "Not authorized to perform this action", type="FORBIDDEN")
+        raise ApolloError(403, "Not authorized to perform this action", type="FORBIDDEN") from e
     except NotFoundError as e:
         logger.error(f"Not found error during knowledge retrieval: {e}")
-        raise ApolloError(404, "Resource not found", type="NOT_FOUND")
+        raise ApolloError(404, "Resource not found", type="NOT_FOUND") from e
     except UnprocessableEntityError as e:
         logger.error(f"Unprocessable entity error during knowledge retrieval: {e}")
-        raise ApolloError(422, str(e), type="INVALID_REQUEST")
+        raise ApolloError(422, str(e), type="INVALID_REQUEST") from e
     except InternalServerError as e:
         logger.error(f"Internal server error from AI service during knowledge retrieval: {e}")
-        raise ApolloError(500, "The AI service encountered an error", type="PROVIDER_ERROR")
+        raise ApolloError(500, "The AI service encountered an error", type="PROVIDER_ERROR") from e
     except Exception as e:
         logger.error(f"Unexpected error during LLM call for knowledge retrieval: {str(e)}")
-        raise ApolloError(500, f"Unexpected error during documentation search: {str(e)}", type="UNKNOWN_ERROR")
+        raise ApolloError(500, f"Unexpected error during documentation search: {str(e)}", type="UNKNOWN_ERROR") from e
