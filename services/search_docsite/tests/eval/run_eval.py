@@ -3,9 +3,10 @@
 Usage: poetry run python -m search_docsite.tests.eval.run_eval
 
 Compares the Postgres-backed DocsiteSearch against LegacyPineconeDocsiteSearch
-over the golden query set. Both run strategy='semantic'. Postgres should match 
-or beat Pinecone's recall@5 and p95 latency before DOCSITE_SEARCH_BACKEND is 
-flipped to 'postgres' by default.
+over the golden query set. Both run strategy='semantic'.
+
+Golden queries live in services/search_docsite/tests/eval/golden_queries.yaml
+— edit that file to add queries or curate expected_doc_titles.
 """
 
 import time
@@ -103,6 +104,19 @@ def run_eval(golden_queries, backend_cls, strategy, top_k=5):
     }
 
 
+def print_per_query_results(postgres_report, pinecone_report):
+    """Print each golden query's expected titles and both backends' hit/miss + retrieved titles."""
+    print("\nPer-query results:")
+    for pg, pc in zip(postgres_report["per_query"], pinecone_report["per_query"], strict=True):
+        expected = ", ".join(pg["expected_titles"]) or "(unlabelled — excluded from recall)"
+        print(f"  {pg['query']}")
+        print(f"    expected: {expected}")
+        for name, report_item in (("postgres", pg), ("pinecone", pc)):
+            status = {True: "HIT ", False: "MISS", None: "--  "}[report_item["hit"]]
+            titles = ", ".join(t for t in report_item["retrieved_titles"] if t is not None)
+            print(f"    {name:8} {status}  {report_item['latency_s']:.3f}s  {titles}")
+
+
 def main():
     with open(GOLDEN_QUERIES_PATH) as f:
         golden_queries = yaml.safe_load(f)["queries"]
@@ -122,6 +136,8 @@ def main():
           f"across {len(agreement['per_query'])} queries")
     for q in agreement["per_query"]:
         print(f"  {q['jaccard']:.2f}  overlap={q['overlap']}/{q['union']}  {q['query']}")
+
+    print_per_query_results(postgres_report, pinecone_report)
 
 
 if __name__ == "__main__":
