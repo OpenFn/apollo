@@ -1,27 +1,31 @@
-# Starter set of representative job_chat/general-docs queries. Queries with an
-# empty expected_doc_titles list are still run and reported (so this fixture
-# is usable immediately), but excluded from the recall@k aggregate until a
-# human curates the expected doc title(s) by inspecting real search results
-# against the live docsite content (neither this script's author nor the
-# implementer of this plan has that access).
+# Representative job_chat/general-docs queries with expected doc titles.
+#
+# recall@k counts a query as a hit when ANY expected title appears in the top k,
+# so each entry lists every doc that would be a reasonable answer, not only the
+# single best one. Titles are docsite filenames without .md, matching
+# docsite_chunks.doc_title.
 queries:
   - query: "how do I configure a webhook trigger"
-    expected_doc_titles: []
+    expected_doc_titles: ["triggers", "webhook-auth"]
   - query: "how do I set up a cron trigger"
-    expected_doc_titles: []
+    expected_doc_titles: ["triggers"]
   - query: "what is a run in OpenFn"
-    expected_doc_titles: []
+    expected_doc_titles: ["terminology", "glossary"]
   - query: "how do I use collections to store state between runs"
-    expected_doc_titles: []
+    expected_doc_titles: ["collections", "state", "cli-collections"]
   - query: "how do I configure a credential for an adaptor"
-    expected_doc_titles: []
+    expected_doc_titles: ["credentials", "manage-credentials"]
   - query: "what is the difference between a job and a workflow"
-    expected_doc_titles: []
+    expected_doc_titles: ["terminology", "glossary", "workflows"]
   - query: "how do I deploy a project using the CLI"
-    expected_doc_titles: []
+    expected_doc_titles: ["cli-sync", "portability"]
   - query: "how do I debug a failed run"
-    expected_doc_titles: []
+    expected_doc_titles:
+      ["troubleshooting", "rerunning-workflow", "inspect-runs"]
+  # Unscorable as run_eval filters to docs_type='general_docs', but the
+  # adaptor listing lives in adaptor_docs.
   - query: "what adaptors are available for HTTP requests"
     expected_doc_titles: []
   - query: "how do I write a data transform function"
-    expected_doc_titles: []
+    expected_doc_titles:
+      ["data-transformation", "job-writing-guide", "operations"]
