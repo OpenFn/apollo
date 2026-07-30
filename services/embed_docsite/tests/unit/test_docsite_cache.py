@@ -19,7 +19,14 @@ TREE = {
     "files": {"docs/jobs.md": "blob-jobs", "adaptors/http.md": "blob-http"},
 }
 
+TWO_GENERAL_DOCS = {
+    "tree_sha": "tree-2g",
+    "etag": 'W/"etag-2g"',
+    "files": {"docs/jobs.md": "blob-jobs", "docs/setup.md": "blob-setup"},
+}
+
 FILES_IN_TREE = 2
+MARKDOWN_FILES_REFRESHED = 3
 HTTP_BAD_REQUEST = 400
 HTTP_SERVICE_UNAVAILABLE = 503
 
@@ -73,6 +80,24 @@ def test_only_the_changed_blob_is_redownloaded():
     assert mock_download.call_args[0][0] == "docs/jobs.md"
 
 
+def test_a_file_missing_from_disk_is_redownloaded(cache_dir):
+    """The manifest can claim a file the disk no longer has.
+
+    Nothing upstream has moved, so the SHA comparison alone would skip the
+    download and leave the corpus permanently short of one file.
+    """
+    warm()
+    (cache_dir / "docs/jobs.md").unlink()
+    with (
+        patch.object(m, "get_repo_tree", return_value=TREE),
+        patch.object(m, "download_file", return_value="content") as mock_download,
+    ):
+        downloaded = m.refresh_markdown_cache()
+
+    assert downloaded == 1
+    assert mock_download.call_args[0][0] == "docs/jobs.md"
+
+
 def test_files_removed_upstream_are_dropped_from_the_cache(cache_dir):
     warm()
     shrunk = {"tree_sha": "tree-3", "etag": 'W/"etag-3"', "files": {"docs/jobs.md": "blob-jobs"}}
@@ -112,6 +137,48 @@ def test_a_failed_refresh_with_no_cache_raises_clearly():
     assert "no cached copy" in exc.value.message
 
 
+def test_some_missing_markdown_files_are_skipped_with_a_warning(cache_dir):
+    """A partially wiped cache should still serve what survives."""
+    warm(tree=TWO_GENERAL_DOCS, body="the text")
+    (cache_dir / "docs/setup.md").unlink()
+
+    with (
+        patch.object(m, "get_repo_tree", return_value=None),
+        patch.object(m.logger, "warning") as mock_warning,
+    ):
+        docs = m.get_docs_cached("general_docs")
+
+    assert docs == [{"name": "jobs.md", "docs": "the text"}]
+    assert mock_warning.call_count == 1
+    assert "1 cached general_docs file(s) missing from disk" in mock_warning.call_args[0][0]
+
+
+def test_all_missing_markdown_files_raise_rather_than_serving_nothing(cache_dir):
+    """An empty list would be indexed as 'the docs are empty', not as a failure."""
+    warm()
+    (cache_dir / "docs/jobs.md").unlink()
+
+    with patch.object(m, "get_repo_tree", return_value=None), pytest.raises(ApolloError) as exc:
+        m.get_docs_cached("general_docs")
+
+    assert exc.value.code == HTTP_SERVICE_UNAVAILABLE
+    assert "no cached copy" in exc.value.message
+
+
+def test_missing_adaptor_functions_file_raises_rather_than_filenotfound(cache_dir):
+    """A 304 keeps the manifest etag current even when the file underneath is gone."""
+    payload = {"docs": {"adaptors": ["http"]}, "etag": 'W/"af-1"'}
+    with patch.object(m, "get_adaptor_function_docs", return_value=payload):
+        m.refresh_adaptor_functions_cache()
+    (cache_dir / m.ADAPTOR_FUNCTIONS_FILE).unlink()
+
+    with patch.object(m, "get_adaptor_function_docs", return_value=None), pytest.raises(ApolloError) as exc:
+        m.get_docs_cached("adaptor_functions")
+
+    assert exc.value.code == HTTP_SERVICE_UNAVAILABLE
+    assert "no cached copy" in exc.value.message
+
+
 def test_is_populated_reflects_the_manifest():
     assert m.is_populated() is False
     warm()
@@ -125,6 +192,18 @@ def test_adaptor_functions_round_trip():
 
     with patch.object(m, "get_adaptor_function_docs", return_value=None):
         assert m.get_docs_cached("adaptor_functions") == {"adaptors": ["http"]}
+
+
+def test_refresh_all_reports_both_refreshes():
+    """The entry point Tasks 3 and 4 both consume."""
+    with (
+        patch.object(m, "refresh_markdown_cache", return_value=MARKDOWN_FILES_REFRESHED),
+        patch.object(m, "refresh_adaptor_functions_cache", return_value=True),
+    ):
+        assert m.refresh_all() == {
+            "markdown_files_downloaded": MARKDOWN_FILES_REFRESHED,
+            "adaptor_functions_updated": True,
+        }
 
 
 def test_manifest_survives_a_corrupt_file(cache_dir):

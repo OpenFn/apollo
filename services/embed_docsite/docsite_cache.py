@@ -147,16 +147,25 @@ def refresh_all():
     }
 
 
+def _no_cache_error(docs_type, reason):
+    """The one way this module reports 'nothing to serve'.
+
+    An ApolloError carries a code that bridge.ts maps to an HTTP status; a bare
+    FileNotFoundError escaping from a read would not.
+    """
+    return ApolloError(
+        503,
+        f"Could not fetch {docs_type} from GitHub and no cached copy exists: {reason}",
+        type="UPSTREAM_ERROR",
+    )
+
+
 def _survive_or_raise(exc, have_cache, docs_type):
     """A refresh failure is survivable only when something is already cached."""
     if have_cache:
         logger.warning(f"Could not refresh {docs_type}, serving cached copy: {exc}")
         return
-    raise ApolloError(
-        503,
-        f"Could not fetch {docs_type} from GitHub and no cached copy exists: {exc}",
-        type="UPSTREAM_ERROR",
-    )
+    raise _no_cache_error(docs_type, exc)
 
 
 def get_docs_cached(docs_type):
@@ -169,6 +178,10 @@ def get_docs_cached(docs_type):
             refresh_adaptor_functions_cache()
         except Exception as exc:
             _survive_or_raise(exc, (CACHE_DIR / ADAPTOR_FUNCTIONS_FILE).exists(), docs_type)
+        # The manifest decided we could degrade; only the disk can confirm it. A
+        # 304 leaves the etag current even if the file underneath was deleted.
+        if not (CACHE_DIR / ADAPTOR_FUNCTIONS_FILE).exists():
+            raise _no_cache_error(docs_type, "the cached file is missing from disk")
         return json.loads(_read_cached_file(ADAPTOR_FUNCTIONS_FILE))
 
     if docs_type not in DOCS_TYPE_PREFIXES:
@@ -180,4 +193,12 @@ def get_docs_cached(docs_type):
         _survive_or_raise(exc, is_populated(), docs_type)
 
     paths = markdown_paths(load_manifest().get(REPO_KEY, {}).get("files", {}), docs_type)
-    return [{"name": Path(path).name, "docs": _read_cached_file(path)} for path in paths]
+    present = [path for path in paths if (CACHE_DIR / path).exists()]
+
+    if len(present) < len(paths):
+        logger.warning(f"{len(paths) - len(present)} cached {docs_type} file(s) missing from disk, skipped")
+    if paths and not present:
+        # Returning [] here would index an empty corpus and call it the docs.
+        raise _no_cache_error(docs_type, "every cached file is missing from disk")
+
+    return [{"name": Path(path).name, "docs": _read_cached_file(path)} for path in present]
