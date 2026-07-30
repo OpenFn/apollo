@@ -1,15 +1,17 @@
 import os
-import json
+
 from dotenv import load_dotenv
-import pandas as pd
-from util import create_logger, ApolloError
-from embed_docsite.docsite_processor import DocsiteProcessor
-from embed_docsite.docsite_indexer import DocsiteIndexer
+from embed_docsite.docsite_cache import refresh_all
+from util import ApolloError, create_logger
 
 logger = create_logger("embed_docsite")
 
 def main(data):
     logger.info("Starting...")
+
+    if data.get("refresh_cache_only"):
+        logger.info("Refreshing the docs cache only")
+        return {"target": "cache", **refresh_all()}
 
     # Get selection of doc types to upload, or default to all
     docs_to_upload = data.get("docs_to_upload", ["adaptor_docs", "general_docs", "adaptor_functions"])
@@ -48,6 +50,10 @@ def main(data):
         msg = f'Missing API keys: {", ".join(missing_keys)}'
         logger.error(msg)
         raise ApolloError(500, f'Missing API keys: {", ".join(missing_keys)}. Add to payload or environment.', type="BAD_REQUEST")
+
+    # Minimise importing and using key from a refresh_cache_only run
+    from embed_docsite.docsite_indexer import DocsiteIndexer  # noqa: PLC0415 - see comment above
+    from embed_docsite.docsite_processor import DocsiteProcessor  # noqa: PLC0415 - see comment above
 
     # Initialize indexer
     docsite_indexer = DocsiteIndexer(**(index_params or {}))

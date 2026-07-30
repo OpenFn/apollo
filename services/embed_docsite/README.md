@@ -35,6 +35,27 @@ The input payload is a JSON object. All parameters are optional:
     "collection_name": "docsite-20250225", // Name of the collection in the vector database (defaults to the current date)
     "index_name": "docsite", // Name of the index in the vector database (an index contains collections; defaults to docsite)
     "docs_to_ignore": ["job-examples.md", "release-notes.md"], // Titles of documents that should not be indexed
+    "refresh_cache_only": false,      // If true, refresh the on-disk docs cache and return. Needs no API keys.
     "max_total_collections" : 3 // The max number of collections to keep in the vector database. This will delete older collections by date.
 }
 ```
+
+## Docs cache
+
+Docs are cached on disk at `services/embed_docsite/docsite_cache/` (gitignored).
+Each run makes one conditional GitHub Trees request; if nothing changed upstream
+the response is a 304, which costs nothing against the rate limit and downloads
+nothing. Only files whose blob SHA moved are re-fetched.
+
+If GitHub is unreachable or rate-limits the request, the cached copy is served
+and a warning is logged. Only a failure with an empty cache is fatal.
+
+Warm the cache without indexing:
+
+```bash
+echo '{"refresh_cache_only": true}' > tmp/warm.json
+bun py embed_docsite tmp/warm.json
+```
+
+Set `GITHUB_TOKEN` to raise the API limit from 60 to 5000 requests/hour. With
+the cache in place you should not need it, but it helps on a cold cache or in CI.
