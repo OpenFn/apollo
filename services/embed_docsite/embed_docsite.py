@@ -51,7 +51,11 @@ def main(data):
         logger.error(msg)
         raise ApolloError(500, f'Missing API keys: {", ".join(missing_keys)}. Add to payload or environment.', type="BAD_REQUEST")
 
-    # Minimise importing and using key from a refresh_cache_only run
+    # Imported here, not at module scope: DocsiteIndexer builds an
+    # OpenAIEmbeddings() default argument at class-definition time (so importing
+    # it demands OPENAI_API_KEY), DocsiteProcessor runs nltk.download() at
+    # import, and both pull in pandas. A refresh_cache_only run must pay none of
+    # that.
     from embed_docsite.docsite_indexer import DocsiteIndexer  # noqa: PLC0415 - see comment above
     from embed_docsite.docsite_processor import DocsiteProcessor  # noqa: PLC0415 - see comment above
 
