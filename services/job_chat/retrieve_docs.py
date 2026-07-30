@@ -1,21 +1,23 @@
-import os
 import json
+import os
+
 import anthropic
+import sentry_sdk
 from anthropic import (
     APIConnectionError,
-    BadRequestError,
     AuthenticationError,
-    PermissionDeniedError,
-    NotFoundError,
-    UnprocessableEntityError,
-    RateLimitError,
+    BadRequestError,
     InternalServerError,
+    NotFoundError,
+    PermissionDeniedError,
+    RateLimitError,
+    UnprocessableEntityError,
 )
-import sentry_sdk
 from langfuse import observe
-from util import ApolloError, create_logger
 from models import resolve_model
 from search_docsite.search_docsite import resolve_backend
+from util import ApolloError, create_logger
+
 from .rag_config_loader import ConfigLoader
 
 logger = create_logger("job_chat.retrieve_docs")

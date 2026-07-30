@@ -3,7 +3,6 @@ import os
 import psycopg2
 import pytest
 from dotenv import load_dotenv
-
 from job_chat.prompt import generate_system_message
 
 load_dotenv()
@@ -147,7 +146,7 @@ def test_generate_queries_returns_valid_structure():
     print("==================TEST==================")
     print("Description: Testing generate_queries returns valid JSON structure")
 
-    from job_chat.retrieve_docs import generate_queries, get_client, format_context
+    from job_chat.retrieve_docs import format_context, generate_queries, get_client
 
     # Step 1: Prepare test inputs
     print("\n1. Preparing test inputs...")
@@ -192,7 +191,7 @@ def test_search_docs_returns_general_docs_only():
     from job_chat.retrieve_docs import search_docs
 
     queries = [{"query": "http adaptor merge() function"}]
-    results = search_docs(queries, top_k=3)
+    results = search_docs(queries, top_k=3, threshold=0.5)
     print(results)
 
     assert isinstance(results, list), "Should return a list"

@@ -16,7 +16,6 @@ repo-root conftest also blocks real anthropic/openai client construction here).
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 import search_docsite.pinecone_legacy_search as m
 from util import ApolloError
 

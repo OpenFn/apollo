@@ -14,12 +14,10 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from embeddings.embeddings import SearchResult
 from job_chat import retrieve_docs as rd
 from job_chat.retrieve_docs import search_docs
 from util import ApolloError
-
 
 # --- generate_queries ----------------------------------------------------------
 

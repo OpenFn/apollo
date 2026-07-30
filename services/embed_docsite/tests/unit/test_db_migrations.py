@@ -1,9 +1,8 @@
 """Unit tests for the Python migration runner.
 
-Mirrors the TypeScript runner in platform/src/db/migrate.ts: lexical ordering,
-already-applied files skipped, advisory lock taken. The connection and cursor
-are MagicMocks — the repo-root conftest blocks real psycopg2.connect in unit
-tests anyway.
+Mirrors the TypeScript runner in platform/src/db/migrate.ts using lexical ordering,
+already-applied files skipped and an advisory lock taken. The connection and cursor
+are MagicMocks.
 """
 
 from unittest.mock import MagicMock, patch
@@ -43,9 +42,8 @@ def test_run_migrations_creates_tracking_table():
 
 def test_migration_files_returns_sql_files_in_lexical_order(tmp_path):
     """The sort lives in _migration_files, so it must be tested against the real
-    filesystem — patching that function out (as the apply tests below do) would
-    bypass the very ordering being asserted. Files are created out of order and
-    a non-.sql file is included to prove it is filtered."""
+    filesystem. Files are created out of order and a non-.sql file is included 
+    to prove it is filtered."""
     (tmp_path / "0002_second.sql").write_text("SELECT 2;", encoding="utf-8")
     (tmp_path / "0010_tenth.sql").write_text("SELECT 10;", encoding="utf-8")
     (tmp_path / "0001_first.sql").write_text("SELECT 1;", encoding="utf-8")

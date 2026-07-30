@@ -1,11 +1,11 @@
 from contextlib import contextmanager
 
-from psycopg2.extras import execute_values
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.document_loaders import DataFrameLoader
 from util import create_logger, ApolloError, is_docsite_collection
 from pgvector import Vector
 from pgvector.psycopg2 import register_vector
+from psycopg2.extras import execute_values
 
 logger = create_logger("DocsiteIndexer")
 
@@ -30,12 +30,7 @@ def autocommit(conn):
 
 
 def register_vector_type(conn):
-    """Register pgvector's psycopg2 adapters on this connection.
-
-    Registers `Vector` and `numpy.ndarray` — *not* `list`. A bare list is sent
-    as `numeric[]`, which Postgres will cast on assignment but has no `<=>`
-    operator for, so writes succeed and searches fail.
-    """
+    """Register pgvector's psycopg2 adapters on this connection."""
     register_vector(conn)
 
 
@@ -60,8 +55,7 @@ class DocsiteIndexer:
 
     @property
     def embeddings(self):
-        """Lazily construct the OpenAI embeddings client, so importing this module
-        needs no credentials."""
+        """Lazily construct the OpenAI embeddings client."""
         if self._embeddings is None:
             self._embeddings = OpenAIEmbeddings()
         return self._embeddings
@@ -116,7 +110,7 @@ class DocsiteIndexer:
         return embeddings
 
     def copy_forward_missing_docs_types(self, conn, batch_id, docs_types_present):
-        """Copy chunks for docs_types NOT in this run from the previous complete batch,
+        """Copy chunks for docs_types not in this run from the previous complete batch,
         so every complete batch is a full snapshot across all docs_types. Returns rows copied."""
         missing_types = [t for t in ALL_DOCS_TYPES if t not in docs_types_present]
         if not missing_types:
@@ -160,7 +154,7 @@ class DocsiteIndexer:
         logger.info(f"Built HNSW index for batch {batch_id}")
 
     def promote_batch(self, conn, batch_id, chunk_count):
-        """Flip a batch to 'complete' — the moment it becomes visible to readers."""
+        """Flip a batch to 'complete' the moment it becomes visible to readers."""
         with conn.cursor() as cur:
             cur.execute(
                 "UPDATE docsite_batches SET status = 'complete', completed_at = now(), chunk_count = %s WHERE id = %s",

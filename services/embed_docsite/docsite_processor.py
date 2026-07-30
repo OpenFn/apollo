@@ -1,6 +1,7 @@
 import json
 import os
 import re
+
 import nltk
 from embed_docsite.github_utils import get_docs
 from util import create_logger
@@ -139,7 +140,7 @@ class DocsiteProcessor:
                 if len(current_chunk) >= min_length:
                     accumulated.append(current_chunk)  # Store the completed chunk
 
-                    # add overlap
+                    # Add overlap
                     if self.docs_type == "adaptor_functions":
                         overlap_sections = " ".join(current_chunk.split("\n")[-overlap:])
                     else:

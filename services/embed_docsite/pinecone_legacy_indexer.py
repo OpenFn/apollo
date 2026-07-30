@@ -1,12 +1,13 @@
 import os
 import time
 from datetime import datetime
+
 import pandas as pd
-from pinecone import Pinecone, ServerlessSpec
-from langchain_pinecone import PineconeVectorStore
-from langchain_openai import OpenAIEmbeddings
 from langchain_community.document_loaders import DataFrameLoader
-from util import create_logger, ApolloError
+from langchain_openai import OpenAIEmbeddings
+from langchain_pinecone import PineconeVectorStore
+from pinecone import Pinecone, ServerlessSpec
+from util import ApolloError, create_logger
 
 logger = create_logger("LegacyPineconeDocsiteIndexer")
 

@@ -1,8 +1,8 @@
 """Unit tests for the Postgres-backed DocsiteSearch (semantic/keyword/hybrid).
 
-get_db_connection and register_vector_type are mocked throughout — no real
+get_db_connection and register_vector_type are mocked throughout, no real
 Postgres connection is made. The OpenAI embeddings client is mocked via the
-lazy `_embeddings` attribute, matching the DocsiteIndexer test pattern.
+`_embeddings` attribute, matching the DocsiteIndexer test pattern.
 """
 
 import json
@@ -11,7 +11,6 @@ from unittest.mock import MagicMock, patch
 
 import psycopg2
 import pytest
-
 import search_docsite.search_docsite as m
 from pgvector import Vector
 from util import ApolloError

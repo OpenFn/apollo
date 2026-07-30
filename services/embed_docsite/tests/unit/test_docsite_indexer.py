@@ -2,19 +2,16 @@
 
 Every DB call goes through an explicit `conn` parameter (never looked up
 internally), so these tests drive a FakeConn that models psycopg2's transaction
-state. A MagicMock cannot, which is how the autocommit defects survived a green
-suite. `register_vector` (which needs a live connection to look up pgvector's
-type oid) and the OpenAI embeddings client are both patched out.
+state.
 """
 
 from unittest.mock import MagicMock, patch
 
+import embed_docsite.docsite_indexer as m
 import psycopg2
 import pytest
-from pgvector import Vector
-
-import embed_docsite.docsite_indexer as m
 from embed_docsite.tests.unit.fake_conn import FakeConn
+from pgvector import Vector
 
 
 def test_register_vector_type_calls_pgvector_register():
@@ -124,9 +121,6 @@ def test_prune_old_batches_deletes_batches_beyond_keep_count():
 
 
 def test_build_index_succeeds_when_a_prior_read_left_a_transaction_open():
-    """C3: with no previous complete batch, copy_forward returns straight after
-    its SELECT without committing. psycopg2 then refuses `autocommit = True`,
-    build_index raises, and the batch strands in 'building' forever."""
     conn = FakeConn(results=[None])
     indexer = make_indexer()
     indexer.copy_forward_missing_docs_types(conn, batch_id=7, docs_types_present=["general_docs"])
@@ -138,9 +132,6 @@ def test_build_index_succeeds_when_a_prior_read_left_a_transaction_open():
 
 
 def test_prune_old_batches_completes_after_its_own_select():
-    """C2: the SELECT for old batch ids opens a transaction, so the DROP INDEX
-    step raised and pruning never ran — every re-index left its predecessor's
-    chunks and HNSW index behind."""
     conn = FakeConn(results=[[(3,), (2,)]])
     indexer = make_indexer()
 
@@ -153,9 +144,6 @@ def test_prune_old_batches_completes_after_its_own_select():
 
 
 def test_fail_batch_recovers_an_aborted_transaction():
-    """By the time fail_batch runs, the error that triggered it has already
-    aborted the transaction, so any statement would raise
-    InFailedSqlTransaction until something rolls back."""
     conn = FakeConn(fail_on="boom")
     indexer = make_indexer()
     with pytest.raises(psycopg2.ProgrammingError):

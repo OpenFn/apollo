@@ -7,7 +7,6 @@ on demand for manual comparison.
 from unittest.mock import patch
 
 import pytest
-
 import search_docsite.search_docsite as m
 from util import ApolloError
 
