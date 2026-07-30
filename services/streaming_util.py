@@ -310,6 +310,24 @@ class StreamManager:
         self._close_open_blocks()
         self._emit_event('changes', changes_data)
 
+    def send_status(self, content: str) -> None:
+        """
+        Send a completed-action status ("Edited workflow structure") as a
+        custom `status` SSE event.
+
+        This is deliberately a different event type from the transient
+        spinners sent via send_thinking: thinking events are live progress
+        that the client replaces and never persists, while `status` events
+        are durable facts about what happened, which the client keeps. The
+        payload matches the `response_segments` entry shape so the client
+        can render live events and reloaded segments with the same code.
+        """
+        if not self.stream_started:
+            self.start_stream()
+
+        self._close_open_blocks()
+        self._emit_event('status', {"type": "status", "content": content})
+
     def end_stream(self, stop_reason: str = "end_turn") -> None:
         """
         End the stream by closing all open blocks and sending final events.
