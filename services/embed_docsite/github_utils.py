@@ -1,102 +1,154 @@
+import os
+from datetime import datetime, timezone
+
 import requests
-from util import create_logger
+from util import ApolloError, create_logger
 
 logger = create_logger("GitHubUtils")
 
-def download_main_docs(github_info):
-    """Downloads and processes the main docs from GitHub API info."""
-    output = []
+GITHUB_API = "https://api.github.com"
+GITHUB_RAW = "https://raw.githubusercontent.com"
 
-    for file_info in github_info:
-        try:
-            response = requests.get(file_info["download_url"])
-            response.raise_for_status()
-            
-            output.append({
-                "name": file_info["name"],
-                "docs": response.text
-            })
+DOCS_REPO = "OpenFn/docs"
+DOCS_REF = "main"
 
-        except requests.RequestException as e:
-            logger.info(f"Failed to fetch content for {file_info['name']}: {e}")
-    logger.info(f"Downloaded and processed {len(output)} files from GitHub")
-    logger.info(f'{output[0]}')
-    return output
+# Which top-level path in OpenFn/docs backs each docs_type.
+DOCS_TYPE_PREFIXES = {"general_docs": "docs/", "adaptor_docs": "adaptors/"}
 
-def get_github_urls(repo, path="", owner="OpenFn", file_type=".md"):
-    """"
-    Get the download URLs for a GitHub repository.
+ADAPTOR_FUNCTIONS_URL = f"{GITHUB_RAW}/OpenFn/adaptors/docs/docs/docs.json"
 
-    :param repo: The repository (e.g. "docs")
-    :param path: The path from root (e.g. "")
-    :param owner: The repository owner (default="OpenFn")
-    :return: List of dictionaries {name, path, download_url}
+REQUEST_TIMEOUT_SECONDS = 30
+
+
+def _github_headers(etag=None):
+    """Headers for an api.github.com request.
+
+    A token lifts the rate limit from 60 to 5000 requests/hour. An
+    `If-None-Match` makes revalidation free: 304 responses are not counted
+    against the limit at all.
     """
-    files = []
-    
-    def fetch_contents(current_path):
-        url = f"https://api.github.com/repos/{owner}/{repo}/contents/{current_path}"
-        response = requests.get(url)
-        contents = response.json()
-        
-        # Handle single file response
-        if not isinstance(contents, list):
-            contents = [contents]
+    headers = {"Accept": "application/vnd.github+json"}
+    token = os.environ.get("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    if etag:
+        headers["If-None-Match"] = etag
+    return headers
 
-        msg = contents[0].get("message") 
-        if msg and msg.startswith("API rate limit exceeded"):
-                logger.error("GitHub API limit exceeded. Check limits here: \
-                             https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28")
-                return
-        
-        for item in contents:
-            if item.get("type") == "file" and item.get("name").endswith(file_type):
-                files.append({
-                    "name": item["name"],
-                    "path": item["path"],
-                    "download_url": item["download_url"]
-                })
-            elif item.get("type") == "dir":
-                fetch_contents(item["path"])
-    
-    fetch_contents(path)
-    logger.info(f'Fetched {len(files)} URLs from GitHub for https://api.github.com/repos/{owner}/{repo}/contents/{path}')
-    
-    return files
 
-def get_adaptor_function_docs(data_url="https://raw.githubusercontent.com/OpenFn/adaptors/docs/docs/docs.json"):
-    """Fetches adaptor data from the preprocessed adaptor docs url."""
-    try:
-        response = requests.get(data_url)
-        response.raise_for_status()
+def _raise_if_rate_limited(response):
+    """Turn GitHub's rate-limit 403 into an error that says 'rate limit'.
 
-        return response.json() 
-    
-    except requests.RequestException as e:
-        logger.error(f"Failed to fetch data: {e}")
-
-def get_github_path_contents(repo, path="", owner="OpenFn", file_type=".md"):
+    This path used to return silently, leaving the caller to fail later with
+    `IndexError: list index out of range` — which named neither the cause nor
+    the fix.
     """
-    Get the contents of files from a GitHub repository.
+    if response.status_code != 403 or response.headers.get("X-RateLimit-Remaining") != "0":
+        return
 
-    :param repo: The repository (e.g. "docs")
-    :param path: The path from root (e.g. "")
-    :param owner: The repository owner (default="OpenFn")
-    :param file_type: File extension to filter by (default=".md")
-    :return: List of dictionaries {name, docs}
+    reset = response.headers.get("X-RateLimit-Reset")
+    when = ""
+    if reset:
+        resets_at = datetime.fromtimestamp(int(reset), tz=timezone.utc).isoformat()
+        when = f" Resets at {resets_at}."
+
+    raise ApolloError(
+        429,
+        f"GitHub API rate limit exceeded.{when} Set GITHUB_TOKEN to raise the limit "
+        "from 60 to 5000 requests/hour",
+        type="RATE_LIMITED",
+    )
+
+
+def get_repo_tree(repo=DOCS_REPO, ref=DOCS_REF, etag=None):
+    """Fetch a repository's entire file tree in one request.
+
+    Replaces a recursive contents-API walk that cost one request per directory
+    (~22 for OpenFn/docs).
+
+    :param etag: if supplied and still current, GitHub answers 304 and this
+        returns None — meaning the caller's cache is up to date, at no
+        rate-limit cost.
+    :return: {"tree_sha", "etag", "files": {path: blob_sha}}, or None if unchanged
     """
-    # Get list of files
-    github_files = get_github_urls(repo, path, owner, file_type)
-    
-    # Download and process each file
-    files_data = download_main_docs(github_files)
-            
-    return files_data
+    url = f"{GITHUB_API}/repos/{repo}/git/trees/{ref}?recursive=1"
+    response = requests.get(url, headers=_github_headers(etag), timeout=REQUEST_TIMEOUT_SECONDS)
+
+    if response.status_code == 304:
+        logger.info(f"{repo} tree unchanged upstream")
+        return None
+
+    _raise_if_rate_limited(response)
+    response.raise_for_status()
+    payload = response.json()
+
+    if payload.get("truncated"):
+        raise ApolloError(
+            500,
+            f"GitHub returned a truncated tree for {repo}; it can no longer be listed in one call",
+            type="UPSTREAM_ERROR",
+        )
+
+    files = {item["path"]: item["sha"] for item in payload.get("tree", []) if item.get("type") == "blob"}
+    logger.info(f"Read {repo}@{ref} tree, {len(files)} files")
+    return {"tree_sha": payload["sha"], "etag": response.headers.get("ETag"), "files": files}
+
+
+def raw_url(path, repo=DOCS_REPO, ref=DOCS_REF):
+    """Build a raw.githubusercontent URL.
+
+    The Trees API supplies no download_url, and raw.githubusercontent is not
+    subject to the API rate limit. `ref` must match the ref the tree was read at,
+    or the bytes won't correspond to the blob SHA recorded against them.
+    """
+    return f"{GITHUB_RAW}/{repo}/{ref}/{path}"
+
+
+def download_file(path, repo=DOCS_REPO, ref=DOCS_REF):
+    """Download one file's text. Not rate-limited."""
+    response = requests.get(raw_url(path, repo, ref), timeout=REQUEST_TIMEOUT_SECONDS)
+    response.raise_for_status()
+    return response.text
+
+
+def get_adaptor_function_docs(etag=None):
+    """Fetch the preprocessed adaptor docs JSON.
+
+    Served from raw.githubusercontent, so no API rate limit applies, but it does
+    honour ETags — a warm cache revalidates without transferring the body.
+
+    :return: {"docs": <parsed json>, "etag": str | None}, or None if unchanged
+    """
+    headers = {"If-None-Match": etag} if etag else {}
+    response = requests.get(ADAPTOR_FUNCTIONS_URL, headers=headers, timeout=REQUEST_TIMEOUT_SECONDS)
+
+    if response.status_code == 304:
+        logger.info("Adaptor function docs unchanged upstream")
+        return None
+
+    response.raise_for_status()
+    return {"docs": response.json(), "etag": response.headers.get("ETag")}
+
+
+def markdown_paths(tree_files, docs_type):
+    """The .md paths in a tree that belong to one docs_type, sorted."""
+    prefix = DOCS_TYPE_PREFIXES[docs_type]
+    return sorted(p for p in tree_files if p.startswith(prefix) and p.endswith(".md"))
+
 
 def get_docs(docs_type):
+    """Download the docs for one docs_type.
+
+    Return contract is fixed by the sole consumer, DocsiteProcessor: a list of
+    {name, docs} for the markdown types, the parsed JSON for adaptor_functions.
+    """
     if docs_type == "adaptor_functions":
-        return get_adaptor_function_docs()
-    if docs_type == "general_docs":
-        return get_github_path_contents(repo="docs", path="docs")
-    if docs_type == "adaptor_docs": 
-        return get_github_path_contents(repo="docs", path="adaptors")
+        return get_adaptor_function_docs()["docs"]
+
+    if docs_type not in DOCS_TYPE_PREFIXES:
+        raise ApolloError(400, f"Unknown docs_type '{docs_type}'", type="BAD_REQUEST")
+
+    tree = get_repo_tree()
+    paths = markdown_paths(tree["files"], docs_type)
+    logger.info(f"Downloading {len(paths)} {docs_type} files")
+    return [{"name": os.path.basename(path), "docs": download_file(path)} for path in paths]
