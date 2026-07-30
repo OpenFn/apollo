@@ -23,7 +23,6 @@ def make_response(status_code=200, json_body=None, headers=None, text=""):
     return response
 
 
-HTTP_BAD_REQUEST = 400
 HTTP_TOO_MANY_REQUESTS = 429
 HTTP_INTERNAL_ERROR = 500
 
@@ -161,26 +160,3 @@ def test_get_adaptor_function_docs_returns_none_on_304_and_sends_the_etag():
         assert m.get_adaptor_function_docs(etag='W/"fn-etag"') is None
 
     assert mock_get.call_args.kwargs["headers"]["If-None-Match"] == 'W/"fn-etag"'
-
-
-def test_get_docs_keeps_its_return_contract():
-    """DocsiteProcessor is the sole consumer and expects {name, docs} with a basename."""
-    def fake_get(url, **_kwargs):
-        if "git/trees" in url:
-            return make_response(json_body=TREE_BODY)
-        return make_response(text=f"body of {url.rsplit('/', 1)[-1]}")
-
-    with patch.object(m.requests, "get", side_effect=fake_get):
-        docs = m.get_docs("general_docs")
-
-    assert docs == [
-        {"name": "jobs.md", "docs": "body of jobs.md"},
-        {"name": "setup.md", "docs": "body of setup.md"},
-    ]
-
-
-def test_get_docs_rejects_an_unknown_docs_type():
-    with pytest.raises(ApolloError) as exc:
-        m.get_docs("nonsense")
-
-    assert exc.value.code == HTTP_BAD_REQUEST

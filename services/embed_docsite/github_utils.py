@@ -1,6 +1,5 @@
 import os
 from datetime import UTC, datetime
-from pathlib import Path
 
 import requests
 from util import ApolloError, create_logger
@@ -141,21 +140,3 @@ def markdown_paths(tree_files, docs_type):
     """The .md paths in a tree that belong to one docs_type, sorted."""
     prefix = DOCS_TYPE_PREFIXES[docs_type]
     return sorted(p for p in tree_files if p.startswith(prefix) and p.endswith(".md"))
-
-
-def get_docs(docs_type):
-    """Download the docs for one docs_type.
-
-    Return contract is fixed by the sole consumer, DocsiteProcessor: a list of
-    {name, docs} for the markdown types, the parsed JSON for adaptor_functions.
-    """
-    if docs_type == "adaptor_functions":
-        return get_adaptor_function_docs()["docs"]
-
-    if docs_type not in DOCS_TYPE_PREFIXES:
-        raise ApolloError(400, f"Unknown docs_type '{docs_type}'", type="BAD_REQUEST")
-
-    tree = get_repo_tree()
-    paths = markdown_paths(tree["files"], docs_type)
-    logger.info(f"Downloading {len(paths)} {docs_type} files")
-    return [{"name": Path(path).name, "docs": download_file(path)} for path in paths]
