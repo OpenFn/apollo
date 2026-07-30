@@ -13,7 +13,6 @@ tier connects normally.
 
 import psycopg2
 import pytest
-
 from embed_docsite.tests.integration.helpers import TEST_URL
 
 

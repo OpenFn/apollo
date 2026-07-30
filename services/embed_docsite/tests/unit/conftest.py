@@ -5,8 +5,7 @@ Importing `embed_docsite.pinecone_legacy_indexer` pulls in
 default arg validates credentials at construction (openai 2.x / langchain-openai 1.x).
 A key must therefore exist at import time.
 
-Dummy placeholders only: unit tests mock every real network call, so no real
-key is ever used. `setdefault` means a real key (from services/.env) wins.
+This test only sets dummy environment variables for unit tests.
 """
 
 import os

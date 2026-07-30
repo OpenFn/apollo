@@ -71,7 +71,7 @@ def main(data: dict) -> dict:
 
 
 def _upload_to_pinecone(data, documents, metadata_dict, docs_to_upload):
-    """Legacy write path. Deliberately opens no Postgres connection."""
+    """Legacy write path to pinecone."""
     pinecone_api_key = data.get("PINECONE_API_KEY") or os.environ.get("PINECONE_API_KEY")
     if not pinecone_api_key:
         msg = "Missing API key: PINECONE_API_KEY"
@@ -103,9 +103,8 @@ def _mark_failed(indexer, conn, batch_id):
 
 
 def _prune_old_batches(indexer, conn):
-    """Best-effort cleanup of OLDER, unrelated batches. Runs after the new
-    batch is already promoted, so a failure here must never retroactively
-    invalidate that batch or fail the whole call."""
+    """Best-effort cleanup of older, unrelated batches. Runs after the new
+    batch is already promoted."""
     try:
         return indexer.prune_old_batches(conn)
     except Exception as exc:
@@ -122,8 +121,6 @@ def _upload_to_postgres(documents, metadata_dict, docs_to_upload, chunk_target_l
 
     conn = get_db_connection()
     try:
-        # Order matters: register_vector looks up pgvector's type oid, so the
-        # extension must exist before we register.
         run_migrations(conn)
         register_vector_type(conn)
 
@@ -140,8 +137,7 @@ def _upload_to_postgres(documents, metadata_dict, docs_to_upload, chunk_target_l
             raise
 
         # The new batch is already promoted and visible to readers. Pruning
-        # only touches older, unrelated batches, so its failure must not be
-        # attributed to the batch we just built.
+        # only touches older, unrelated batches.
         pruned = _prune_old_batches(indexer, conn)
 
         return {

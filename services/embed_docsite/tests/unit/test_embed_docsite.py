@@ -1,5 +1,5 @@
 """Unit tests for embed_docsite's orchestration. DocsiteProcessor/DocsiteIndexer
-and get_db_connection are all mocked — this only tests call order and wiring."""
+and get_db_connection are all mocked."""
 
 from unittest.mock import MagicMock, patch
 
@@ -95,8 +95,8 @@ def test_main_pinecone_target_does_not_require_postgres_url():
 
 
 def test_main_rejects_unknown_target():
-    from util import ApolloError
     import pytest
+    from util import ApolloError
 
     with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
         with pytest.raises(ApolloError) as exc:

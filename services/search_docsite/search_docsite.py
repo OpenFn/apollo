@@ -1,12 +1,13 @@
 import os
+
 import psycopg2
 from dotenv import load_dotenv
+from embeddings.embeddings import SearchResult
 from langchain_openai import OpenAIEmbeddings
 from pgvector import Vector
 from pgvector.psycopg2 import register_vector
-from util import create_logger, ApolloError, get_db_connection
-from embeddings.embeddings import SearchResult
 from search_docsite.pinecone_legacy_search import LegacyPineconeDocsiteSearch
+from util import ApolloError, create_logger, get_db_connection
 
 logger = create_logger("DocsiteSearch")
 
@@ -42,11 +43,6 @@ class DocsiteSearch:
 
     def _connect(self):
         """Open a connection with pgvector registered.
-
-        A database the indexer has never touched fails here rather than at the
-        query: register_vector looks up pgvector's type oid and raises if the
-        extension is absent. 503, not 500 — it resolves by running the indexer,
-        with no redeploy.
         """
         conn = get_db_connection()
         try:
@@ -108,9 +104,6 @@ class DocsiteSearch:
             top_k = self.default_top_k
         max_k = top_k or 50
 
-        # Vector, not list: psycopg2 registers adapters for Vector and ndarray
-        # only, and a bare list arrives as numeric[], for which `<=>` has no
-        # operator.
         query_embedding = Vector(self.embeddings.embed_query(query))
 
         sql = """

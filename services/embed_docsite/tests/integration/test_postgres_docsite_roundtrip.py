@@ -3,9 +3,8 @@
 
 from unittest.mock import patch
 
-import pytest
-
 import embed_docsite.docsite_indexer as indexer_module
+import pytest
 from embed_docsite.embed_docsite import _upload_to_postgres
 from embed_docsite.tests.integration.helpers import StubEmbeddings, query
 from search_docsite.search_docsite import DocsiteSearch

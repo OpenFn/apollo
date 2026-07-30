@@ -6,15 +6,15 @@ Can be called:
 2. As a tool by supervisor via search_documentation_tool()
 """
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict
-from dataclasses import dataclass
 
 # Import utilities from services directory
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from util import create_logger, ApolloError
 from search_docsite.search_docsite import resolve_backend
+from util import ApolloError, create_logger
 
 logger = create_logger(__name__)
 
@@ -46,10 +46,7 @@ def _search_implementation(query: str, num_results: int) -> Dict:
     logger.info(f"Searching documentation for: {query[:100]}...")
 
     # Both backends use semantic search with the same cosine-similarity cutoff, so
-    # results are directly comparable. Hybrid (RRF) is deliberately not used here:
-    # its score has no calibratable scale, so it can be neither thresholded nor
-    # rendered as a relevance figure. It stays available via the search_docsite
-    # service and run_eval for evaluation.
+    # results are directly comparable.
     # Initialize docsite search
     docsite_search = resolve_backend()()
 

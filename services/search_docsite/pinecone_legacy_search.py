@@ -1,9 +1,10 @@
 import os
-from pinecone import Pinecone
-from langchain_pinecone import PineconeVectorStore
-from langchain_openai import OpenAIEmbeddings
-from util import create_logger, ApolloError
+
 from embeddings.embeddings import SearchResult
+from langchain_openai import OpenAIEmbeddings
+from langchain_pinecone import PineconeVectorStore
+from pinecone import Pinecone
+from util import ApolloError, create_logger
 
 logger = create_logger("LegacyPineconeDocsiteSearch")
 
