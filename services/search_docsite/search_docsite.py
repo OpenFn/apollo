@@ -15,9 +15,15 @@ class DocsiteSearch:
     :param collection_name: Vectorstore collection name (namespace) to store documents
     :param index_name: Vectorstore index name (default: docsite)
     :param default_top_k: Default number of results to return (default: 5)
-    :param embeddings: LangChain embedding type (default: OpenAIEmbeddings())
+    :param embeddings: LangChain embedding type (default: OpenAIEmbeddings(), created lazily)
     """
-    def __init__(self, collection_name=None, index_name="docsite", default_top_k=5, embeddings=OpenAIEmbeddings()):
+    def __init__(self, collection_name=None, index_name="docsite", default_top_k=5, embeddings=None):
+        # OpenAIEmbeddings() must not be a default argument: defaults are
+        # evaluated at import time and it raises without OPENAI_API_KEY,
+        # which crashed any importer (e.g. global_chat's tool imports)
+        # even when docsite search was never used.
+        if embeddings is None:
+            embeddings = OpenAIEmbeddings()
         self.index_client = index_name
         self.default_top_k = default_top_k
 
