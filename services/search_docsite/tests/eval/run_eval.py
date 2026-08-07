@@ -21,8 +21,30 @@ load_dotenv()
 
 from search_docsite.pinecone_legacy_search import LegacyPineconeDocsiteSearch
 from search_docsite.search_docsite import DocsiteSearch
+from util import get_db_connection
 
 GOLDEN_QUERIES_PATH = Path(__file__).parent / "golden_queries.yaml"
+
+
+def resolve_batch_id(chunk_target_length):
+    """Newest complete batch indexed at the given chunk size, or None if there is none.
+
+    Batch ids are environment-specific, so the eval looks them up by the indexing
+    configuration recorded on each batch rather than hardcoding them.
+    """
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM docsite_batches WHERE status = 'complete' "
+                "AND chunk_target_length = %s ORDER BY id DESC LIMIT 1",
+                (chunk_target_length,),
+            )
+            row = cur.fetchone()
+    finally:
+        conn.close()
+
+    return row[0] if row else None
 
 
 def compute_recall_at_k(retrieved_titles, expected_titles):

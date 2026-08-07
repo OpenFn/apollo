@@ -154,3 +154,36 @@ def test_run_eval_excludes_unlabelled_queries_from_category_recall():
 
     assert report["recall_by_category"]["keyword"] == {"recall": 1.0, "scored": 1}
     assert report["queries_skipped"] == 1
+
+
+def test_resolve_batch_id_returns_newest_matching_batch():
+    from unittest.mock import patch
+
+    import search_docsite.tests.eval.run_eval as m
+
+    conn = MagicMock()
+    cur = MagicMock()
+    conn.cursor.return_value.__enter__.return_value = cur
+    cur.fetchone.return_value = (11,)
+
+    with patch.object(m, "get_db_connection", return_value=conn):
+        assert m.resolve_batch_id(2500) == 11
+
+    assert cur.execute.call_args[0][1] == (2500,)
+    conn.close.assert_called_once()
+
+
+def test_resolve_batch_id_returns_none_when_no_batch_matches():
+    from unittest.mock import patch
+
+    import search_docsite.tests.eval.run_eval as m
+
+    conn = MagicMock()
+    cur = MagicMock()
+    conn.cursor.return_value.__enter__.return_value = cur
+    cur.fetchone.return_value = None
+
+    with patch.object(m, "get_db_connection", return_value=conn):
+        assert m.resolve_batch_id(1800) is None
+
+    conn.close.assert_called_once()
