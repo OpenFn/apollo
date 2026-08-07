@@ -112,3 +112,45 @@ def test_compute_agreement_means_across_queries():
     agreement = compute_agreement(report_a, report_b)
 
     assert agreement["mean_jaccard"] == pytest.approx(0.5)
+
+
+def test_run_eval_reports_recall_per_category():
+    golden_queries = [
+        {"query": "c1", "category": "conceptual", "expected_doc_titles": ["A"]},
+        {"query": "c2", "category": "conceptual", "expected_doc_titles": ["B"]},
+        {"query": "k1", "category": "keyword", "expected_doc_titles": ["C"]},
+        {"query": "k2", "category": "keyword", "expected_doc_titles": ["MISSING"]},
+    ]
+    backend_cls = make_fake_backend({"c1": ["A"], "c2": ["B"], "k1": ["C"], "k2": ["Z"]})
+
+    report = run_eval(golden_queries, backend_cls, strategy="semantic", top_k=5)
+
+    assert report["recall_by_category"]["conceptual"] == {"recall": 1.0, "scored": 2}
+    assert report["recall_by_category"]["keyword"] == {"recall": 0.5, "scored": 2}
+    assert report["recall_at_k"] == 0.75
+
+
+def test_run_eval_tolerates_queries_without_a_category():
+    golden_queries = [
+        {"query": "q1", "expected_doc_titles": ["A"]},
+        {"query": "q2", "category": "keyword", "expected_doc_titles": ["B"]},
+    ]
+    backend_cls = make_fake_backend({"q1": ["A"], "q2": ["B"]})
+
+    report = run_eval(golden_queries, backend_cls, strategy="semantic", top_k=5)
+
+    assert report["recall_at_k"] == 1.0
+    assert report["recall_by_category"] == {"keyword": {"recall": 1.0, "scored": 1}}
+
+
+def test_run_eval_excludes_unlabelled_queries_from_category_recall():
+    golden_queries = [
+        {"query": "k1", "category": "keyword", "expected_doc_titles": ["A"]},
+        {"query": "k2", "category": "keyword", "expected_doc_titles": []},
+    ]
+    backend_cls = make_fake_backend({"k1": ["A"], "k2": ["B"]})
+
+    report = run_eval(golden_queries, backend_cls, strategy="semantic", top_k=5)
+
+    assert report["recall_by_category"]["keyword"] == {"recall": 1.0, "scored": 1}
+    assert report["queries_skipped"] == 1
