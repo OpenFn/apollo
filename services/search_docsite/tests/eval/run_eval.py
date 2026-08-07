@@ -53,18 +53,20 @@ def compute_agreement(report_a, report_b):
     return {"per_query": per_query, "mean_jaccard": mean_jaccard}
 
 
-def run_eval(golden_queries, backend_cls, strategy, top_k=5):
+def run_eval(golden_queries, make_backend, strategy, top_k=5):
     """Run every golden query against one backend/strategy and return a report dict."""
-    backend = backend_cls()
+    backend = make_backend()
     per_query = []
     latencies = []
     scored = 0
     skipped = 0
     hits = 0
+    by_category = {}
 
     for item in golden_queries:
         query = item["query"]
         expected_titles = item.get("expected_doc_titles", [])
+        category = item.get("category")
 
         start = time.time()
         results = backend.search(query, top_k=top_k, strategy=strategy, docs_type="general_docs")
@@ -77,12 +79,17 @@ def run_eval(golden_queries, backend_cls, strategy, top_k=5):
             hit = compute_recall_at_k(retrieved_titles, expected_titles)
             scored += 1
             hits += int(hit)
+            if category:
+                counts = by_category.setdefault(category, {"scored": 0, "hits": 0})
+                counts["scored"] += 1
+                counts["hits"] += int(hit)
         else:
             hit = None
             skipped += 1
 
         per_query.append({
             "query": query,
+            "category": category,
             "retrieved_titles": retrieved_titles,
             "expected_titles": expected_titles,
             "hit": hit,
@@ -96,6 +103,10 @@ def run_eval(golden_queries, backend_cls, strategy, top_k=5):
 
     return {
         "recall_at_k": (hits / scored) if scored else None,
+        "recall_by_category": {
+            name: {"recall": c["hits"] / c["scored"], "scored": c["scored"]}
+            for name, c in sorted(by_category.items())
+        },
         "queries_scored": scored,
         "queries_skipped": skipped,
         "p50_latency_s": p50,
