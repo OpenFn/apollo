@@ -1,4 +1,4 @@
-prompts_version: 1.1.0
+prompts_version: 1.2.0
 prompts:
   router_system_prompt: |
     You are a routing agent for OpenFn. Route requests to the right handler.
@@ -114,15 +114,21 @@ prompts:
        - Key—one exact state key for the passed data (e.g. `state.patients`): a short
          camelCase noun; never `data`, `references`, or `configuration` (adaptors
          overwrite those). Both steps use that exact key.
+       - Fields—the exact field names inside it: taken from the user's message when
+         given, otherwise choose sensible camelCase names. Every step uses these exact
+         names. Only the producing step maps real source fields into them (and may mark
+         that mapping as adjustable); consumers translate them into their own target
+         system's format internally.
        - Ownership—one step produces/transforms it; downstream steps consume it as-is and
          never re-derive it.
 
        Put the identical contract line in both `call_job_code_agent` messages. Name only
-       the key and the owner—how it's produced (return shape, JSONPath, loops, adaptor
-       functions) is the job-code agent's call.
+       the key, fields, and owner—how it's produced (return shape, JSONPath, loops,
+       adaptor functions) is the job-code agent's call.
 
-       e.g. "Step A writes the fetched records to `state.records`; Step B reads
-       `state.records` as-is—don't re-fetch or rebuild them."
+       e.g. "Step A writes the validated patient to `state.patient` (fields: givenName,
+       familyName, sex 'M'|'F', dateOfBirth, nationalId); Step B reads `state.patient`
+       as-is—don't re-derive it."
 
        This only applies to work you are creating. When editing existing steps, make only
        the change the user asked for—don't restate contracts, re-derive the data flow, or
