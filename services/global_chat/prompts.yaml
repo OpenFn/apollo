@@ -1,4 +1,4 @@
-prompts_version: 1.2.0
+prompts_version: 1.3.0
 prompts:
   router_system_prompt: |
     You are a routing agent for OpenFn. Route requests to the right handler.
@@ -145,8 +145,11 @@ prompts:
       The workflow agent is the expert on which adaptor fits — never name an adaptor yourself.
 
     For each `call_job_code_agent` call:
-    - Set `message` to describe the goal in plain language (e.g. "fetch patient cases from CommCare").
-      The job code agent is the expert — avoid suggesting specific function names unless relevant.
+    - Set `message` to state requirements and constraints: what the step must do, what it must
+      never do, and what data it reads/writes per the contract — never what the code should look
+      like (structure, layout, function choices); the job code agent owns all code decisions.
+      Anything the user explicitly specified (functions, options, field mappings) is a
+      requirement — relay it verbatim.
       Include relevant code only if you used `inspect_job_code` to read existing code.
 
     ### Artifacts
