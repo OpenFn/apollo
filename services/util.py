@@ -1,6 +1,8 @@
+import contextvars
 import logging
 import os
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -61,6 +63,61 @@ filename = None
 loggers: dict[str, logging.Logger] = {}
 apollo_port = 3000
 
+# The job writer, when set, routes this job's logs/events to the Bun worker
+# socket. Absent (standalone entry.py / CLI) they fall back to stdout. It lives
+# in a ContextVar so a per-job copy_context() in the worker isolates it per job.
+_job_writer: contextvars.ContextVar[Callable[[dict], None] | None] = contextvars.ContextVar(
+    "apollo_job_writer", default=None,
+)
+
+
+def set_job_writer(writer: Callable[[dict], None] | None) -> None:
+    """Bind the current context's job writer (worker socket sink)."""
+    _job_writer.set(writer)
+
+
+def get_job_writer() -> Callable[[dict], None] | None:
+    """The current context's job writer, or None when running standalone."""
+    return _job_writer.get()
+
+
+class _JobLogHandler(logging.Handler):
+    """Single root handler: routes each record to the job writer when one is
+    bound (worker context), else to stdout (standalone). Exactly one emission
+    per record — never both."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            writer = get_job_writer()
+            if writer is not None:
+                writer({
+                    "type": "LOG",
+                    "level": record.levelname,
+                    "source": record.name,
+                    "message": record.getMessage(),
+                })
+            else:
+                sys.stdout.write(self.format(record) + "\n")
+                sys.stdout.flush()
+        except Exception:
+            self.handleError(record)
+
+
+_handler_installed = False
+
+
+def _ensure_root_handler() -> None:
+    """Install the single job/stdout handler on the root logger, once."""
+    global _handler_installed  # noqa: PLW0603
+    if _handler_installed:
+        return
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    handler = _JobLogHandler()
+    handler.setFormatter(logging.Formatter(logging.BASIC_FORMAT))
+    root.addHandler(handler)
+    _handler_installed = True
+
 
 def set_log_output(f: str | None) -> None:
     """Set the output file for logging."""
@@ -75,12 +132,12 @@ def set_log_output(f: str | None) -> None:
 def create_logger(name: str) -> logging.Logger:
     """
     Create or retrieve a logger with the given name.
-    Logs to stdout by default.
+    Records route to the job writer (worker socket) when one is bound for the
+    current job, else to stdout.
     """
-    logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+    _ensure_root_handler()
     if name not in loggers:
-        logger = logging.getLogger(name)
-        loggers[name] = logger
+        loggers[name] = logging.getLogger(name)
     return loggers[name]
 
 

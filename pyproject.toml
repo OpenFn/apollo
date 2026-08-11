@@ -51,6 +51,7 @@ testpaths = [
     "services/latest_adaptors/tests",
     "services/search_docsite/tests",
     "services/tools",
+    "services/tests",
 ]
 
 python_files = ["test_*.py"]
@@ -114,3 +115,13 @@ ignore = [
 ]
 line-length = 120
 target-version = "py311"
+
+[tool.ruff.per-file-ignores]
+# Test suites don't need full annotation ceremony or named constants for the
+# literal values they assert against.
+"services/tests/**" = [
+    "ANN001", # missing type annotation for function argument (fixtures/helpers)
+    "ANN201", # missing return type on public test functions
+    "ANN202", # missing return type on private helpers
+    "PLR2004", # magic value used in comparison (expected values in asserts)
+]
