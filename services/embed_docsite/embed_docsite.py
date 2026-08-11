@@ -1,7 +1,7 @@
 import os
 
 from dotenv import load_dotenv
-from embed_docsite.docsite_cache import refresh_all
+from embed_docsite.docsite_cache import refresh_cache
 from util import ApolloError, create_logger
 
 logger = create_logger("embed_docsite")
@@ -9,13 +9,13 @@ logger = create_logger("embed_docsite")
 def main(data):
     logger.info("Starting...")
 
-    if data.get("refresh_cache_only"):
-        logger.info("Refreshing the docs cache only")
-        return {"target": "cache", **refresh_all()}
-
     # Get selection of doc types to upload, or default to all
     docs_to_upload = data.get("docs_to_upload", ["adaptor_docs", "general_docs", "adaptor_functions"])
     docs_to_ignore = data.get("docs_to_ignore", ["job-examples.md", "release-notes.md"])
+
+    if data.get("refresh_cache_only"):
+        logger.info("Refreshing the docs cache only")
+        return {"target": "cache", **refresh_cache(docs_to_upload)}
 
     # Get other fields
     index_params = {}
@@ -58,6 +58,12 @@ def main(data):
     # that.
     from embed_docsite.docsite_indexer import DocsiteIndexer  # noqa: PLC0415 - see comment above
     from embed_docsite.docsite_processor import DocsiteProcessor  # noqa: PLC0415 - see comment above
+
+    # One refresh for the whole run: the markdown refresh covers every markdown
+    # docs_type in a single conditional Trees request. Ahead of the indexer, so a
+    # fatal fetch failure leaves no empty collection behind. Each
+    # DocsiteProcessor below then reads from disk.
+    refresh_cache(docs_to_upload)
 
     # Initialize indexer
     docsite_indexer = DocsiteIndexer(**(index_params or {}))

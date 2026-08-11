@@ -4,7 +4,7 @@ import logging
 import re
 import requests
 import nltk
-from embed_docsite.docsite_cache import get_docs_cached
+from embed_docsite.docsite_cache import read_docs
 from util import create_logger, ApolloError
 
 nltk.download('punkt_tab')
@@ -31,8 +31,8 @@ class DocsiteProcessor:
         :return: List of chunk dictionaries {name, docs_type, doc_chunk}, and a dictionary mapping 
         adaptor_name to original data dictionary
         """
-        # Step 1: Download docs
-        docs = get_docs_cached(docs_type=self.docs_type)
+        # Step 1: Read docs from the cache, refreshed by the caller
+        docs = read_docs(docs_type=self.docs_type)
 
         # Step 2: Process adaptor data
         chunks, metadata_dict = self._chunk_adaptor_docs(docs)

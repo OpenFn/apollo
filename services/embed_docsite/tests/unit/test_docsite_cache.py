@@ -110,12 +110,60 @@ def test_files_removed_upstream_are_dropped_from_the_cache(cache_dir):
     assert not (cache_dir / "adaptors/http.md").exists()
 
 
-def test_get_docs_cached_keeps_the_return_contract():
+def test_read_docs_keeps_the_return_contract():
     warm(body="the text")
-    with patch.object(m, "get_repo_tree", return_value=None):
-        docs = m.get_docs_cached("general_docs")
+    docs = m.read_docs("general_docs")
 
     assert docs == [{"name": "jobs.md", "docs": "the text"}]
+
+
+def test_read_docs_makes_no_network_calls():
+    """The read path is disk-only; refreshing is the caller's job."""
+    warm(body="the text")
+    with (
+        patch.object(m, "get_repo_tree") as mock_tree,
+        patch.object(m, "download_file") as mock_download,
+    ):
+        m.read_docs("general_docs")
+
+    mock_tree.assert_not_called()
+    mock_download.assert_not_called()
+
+
+def test_one_refresh_serves_every_markdown_docs_type():
+    """Both markdown types come out of a single tree read."""
+    with (
+        patch.object(m, "get_repo_tree", return_value=TREE) as mock_tree,
+        patch.object(m, "download_file", return_value="content"),
+    ):
+        m.refresh_cache(["general_docs", "adaptor_docs"])
+
+    assert mock_tree.call_count == 1
+    assert m.read_docs("general_docs") == [{"name": "jobs.md", "docs": "content"}]
+    assert m.read_docs("adaptor_docs") == [{"name": "http.md", "docs": "content"}]
+
+
+def test_refresh_skips_markdown_when_only_adaptor_functions_wanted():
+    """Refreshing what was not asked for would download the whole corpus."""
+    payload = {"docs": {"adaptors": ["http"]}, "etag": 'W/"af-1"'}
+    with (
+        patch.object(m, "get_repo_tree") as mock_tree,
+        patch.object(m, "get_adaptor_function_docs", return_value=payload),
+    ):
+        m.refresh_cache(["adaptor_functions"])
+
+    mock_tree.assert_not_called()
+
+
+def test_refresh_skips_adaptor_functions_when_only_markdown_wanted():
+    with (
+        patch.object(m, "get_repo_tree", return_value=TREE),
+        patch.object(m, "download_file", return_value="content"),
+        patch.object(m, "get_adaptor_function_docs") as mock_functions,
+    ):
+        m.refresh_cache(["general_docs"])
+
+    mock_functions.assert_not_called()
 
 
 def test_a_failed_refresh_serves_the_cached_copy():
@@ -123,18 +171,27 @@ def test_a_failed_refresh_serves_the_cached_copy():
     warm(body="cached text")
     boom = ApolloError(429, "GitHub API rate limit exceeded", type="RATE_LIMITED")
     with patch.object(m, "get_repo_tree", side_effect=boom):
-        docs = m.get_docs_cached("general_docs")
+        m.refresh_cache(["general_docs"])
 
-    assert docs == [{"name": "jobs.md", "docs": "cached text"}]
+    assert m.read_docs("general_docs") == [{"name": "jobs.md", "docs": "cached text"}]
 
 
 def test_a_failed_refresh_with_no_cache_raises_clearly():
     boom = ApolloError(429, "GitHub API rate limit exceeded", type="RATE_LIMITED")
     with patch.object(m, "get_repo_tree", side_effect=boom), pytest.raises(ApolloError) as exc:
-        m.get_docs_cached("general_docs")
+        m.refresh_cache(["general_docs"])
 
     assert exc.value.code == HTTP_SERVICE_UNAVAILABLE
     assert "no cached copy" in exc.value.message
+
+
+def test_reading_an_unpopulated_cache_raises_rather_than_reporting_empty_docs():
+    """Reading before refreshing must not look like 'the docs are empty'."""
+    with pytest.raises(ApolloError) as exc:
+        m.read_docs("general_docs")
+
+    assert exc.value.code == HTTP_SERVICE_UNAVAILABLE
+    assert "refresh_cache must run first" in exc.value.message
 
 
 def test_some_missing_markdown_files_are_skipped_with_a_warning(cache_dir):
@@ -142,11 +199,8 @@ def test_some_missing_markdown_files_are_skipped_with_a_warning(cache_dir):
     warm(tree=TWO_GENERAL_DOCS, body="the text")
     (cache_dir / "docs/setup.md").unlink()
 
-    with (
-        patch.object(m, "get_repo_tree", return_value=None),
-        patch.object(m.logger, "warning") as mock_warning,
-    ):
-        docs = m.get_docs_cached("general_docs")
+    with patch.object(m.logger, "warning") as mock_warning:
+        docs = m.read_docs("general_docs")
 
     assert docs == [{"name": "jobs.md", "docs": "the text"}]
     assert mock_warning.call_count == 1
@@ -158,8 +212,8 @@ def test_all_missing_markdown_files_raise_rather_than_serving_nothing(cache_dir)
     warm()
     (cache_dir / "docs/jobs.md").unlink()
 
-    with patch.object(m, "get_repo_tree", return_value=None), pytest.raises(ApolloError) as exc:
-        m.get_docs_cached("general_docs")
+    with pytest.raises(ApolloError) as exc:
+        m.read_docs("general_docs")
 
     assert exc.value.code == HTTP_SERVICE_UNAVAILABLE
     assert "no cached copy" in exc.value.message
@@ -172,8 +226,8 @@ def test_missing_adaptor_functions_file_raises_rather_than_filenotfound(cache_di
         m.refresh_adaptor_functions_cache()
     (cache_dir / m.ADAPTOR_FUNCTIONS_FILE).unlink()
 
-    with patch.object(m, "get_adaptor_function_docs", return_value=None), pytest.raises(ApolloError) as exc:
-        m.get_docs_cached("adaptor_functions")
+    with pytest.raises(ApolloError) as exc:
+        m.read_docs("adaptor_functions")
 
     assert exc.value.code == HTTP_SERVICE_UNAVAILABLE
     assert "no cached copy" in exc.value.message
@@ -190,17 +244,16 @@ def test_adaptor_functions_round_trip():
     with patch.object(m, "get_adaptor_function_docs", return_value=payload):
         assert m.refresh_adaptor_functions_cache() is True
 
-    with patch.object(m, "get_adaptor_function_docs", return_value=None):
-        assert m.get_docs_cached("adaptor_functions") == {"adaptors": ["http"]}
+    assert m.read_docs("adaptor_functions") == {"adaptors": ["http"]}
 
 
-def test_refresh_all_reports_both_refreshes():
-    """The entry point Tasks 3 and 4 both consume."""
+def test_refresh_cache_reports_both_refreshes():
+    """The entry point embed_docsite's refresh_cache_only mode returns."""
     with (
         patch.object(m, "refresh_markdown_cache", return_value=MARKDOWN_FILES_REFRESHED),
         patch.object(m, "refresh_adaptor_functions_cache", return_value=True),
     ):
-        assert m.refresh_all() == {
+        assert m.refresh_cache(["general_docs", "adaptor_docs", "adaptor_functions"]) == {
             "markdown_files_downloaded": MARKDOWN_FILES_REFRESHED,
             "adaptor_functions_updated": True,
         }
@@ -213,6 +266,7 @@ def test_manifest_survives_a_corrupt_file(cache_dir):
 
 
 def test_unknown_docs_type_rejected():
+    warm()
     with pytest.raises(ApolloError) as exc:
-        m.get_docs_cached("nonsense")
+        m.read_docs("nonsense")
     assert exc.value.code == HTTP_BAD_REQUEST

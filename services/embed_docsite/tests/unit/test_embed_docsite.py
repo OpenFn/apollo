@@ -14,6 +14,7 @@ import embed_docsite.embed_docsite as m
 from util import ApolloError
 
 REFRESH_RESULT = {"markdown_files_downloaded": 3, "adaptor_functions_updated": True}
+ALL_DOCS_TYPES = ["adaptor_docs", "general_docs", "adaptor_functions"]
 HTTP_INTERNAL_ERROR = 500
 
 
@@ -21,13 +22,13 @@ def test_refresh_cache_only_warms_the_cache_without_indexing():
     """Warming must not need an OpenAI key or a write target — that is the whole
     point of a mode separate from a real indexing run."""
     with (
-        patch.object(m, "refresh_all", return_value=REFRESH_RESULT) as mock_refresh,
+        patch.object(m, "refresh_cache", return_value=REFRESH_RESULT) as mock_refresh,
         patch.object(m, "load_dotenv") as mock_load_dotenv,
         patch.dict("os.environ", {}, clear=True),
     ):
         result = m.main({"refresh_cache_only": True})
 
-    mock_refresh.assert_called_once_with()
+    mock_refresh.assert_called_once_with(ALL_DOCS_TYPES)
     mock_load_dotenv.assert_not_called()
     assert result == {
         "target": "cache",
@@ -36,11 +37,23 @@ def test_refresh_cache_only_warms_the_cache_without_indexing():
     }
 
 
+def test_refresh_cache_only_warms_just_the_requested_docs_types():
+    """Warming a subset must not pull the whole corpus."""
+    with (
+        patch.object(m, "refresh_cache", return_value=REFRESH_RESULT) as mock_refresh,
+        patch.object(m, "load_dotenv"),
+        patch.dict("os.environ", {}, clear=True),
+    ):
+        m.main({"refresh_cache_only": True, "docs_to_upload": ["general_docs"]})
+
+    mock_refresh.assert_called_once_with(["general_docs"])
+
+
 def test_a_normal_run_still_requires_api_keys():
     """Guards the reordering: the early return must not have skipped the key
     check for ordinary runs."""
     with (
-        patch.object(m, "refresh_all") as mock_refresh,
+        patch.object(m, "refresh_cache") as mock_refresh,
         patch.object(m, "load_dotenv"),
         patch.dict("os.environ", {}, clear=True),
         pytest.raises(ApolloError) as exc,

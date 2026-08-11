@@ -5,9 +5,13 @@ module, is gitignored, is written atomically, and — the property that actually
 matters — is served when the fetch fails. A GitHub rate limit then degrades to
 slightly stale docs instead of failing the run.
 
-Freshness is decided by upstream state, not a clock: two conditional Trees
-requests per run — one per markdown docs type — and a per-file blob SHA
-comparison, so an unchanged corpus downloads nothing.
+Refreshing and reading are separate concerns: `refresh_cache` brings the whole
+corpus up to date, then `read_docs` serves each docs_type from disk without
+touching the network.
+
+Freshness is decided by upstream state, not a clock: one conditional Trees
+request per run, and a per-file blob SHA comparison, so an unchanged corpus
+downloads nothing.
 """
 
 import json
@@ -30,11 +34,8 @@ logger = create_logger("DocsiteCache")
 CACHE_DIR = Path(__file__).parent / "docsite_cache"
 ADAPTOR_FUNCTIONS_FILE = "adaptor_functions.json"
 
-# One key per repo, not per docs_type: general_docs and adaptor_docs both come
-# from OpenFn/docs, so they share one manifest entry. They do not share the
-# request — each call issues its own conditional Trees request against the same
-# tree, so a run covering both spends two. Deliberate, and deliberately not
-# memoised.
+# One key per repo: general_docs and adaptor_docs both come from OpenFn/docs, so
+# one tree read and one manifest entry cover both.
 REPO_KEY = f"{DOCS_REPO}@{DOCS_REF}"
 
 
@@ -88,9 +89,9 @@ def is_populated():
 def refresh_markdown_cache():
     """Bring the cached OpenFn/docs markdown up to date.
 
-    Costs one conditional Trees request. An unchanged upstream answers 304,
-    which is not counted against the rate limit and downloads nothing. A change
-    downloads only the blobs whose SHA moved.
+    Costs one conditional Trees request, and covers every markdown docs_type in
+    that one call. An unchanged upstream answers 304, which carries no body and
+    downloads nothing. A change downloads only the blobs whose SHA moved.
 
     :return: number of files downloaded
     """
@@ -142,45 +143,69 @@ def refresh_adaptor_functions_cache():
     return True
 
 
-def refresh_all():
-    """Warm both caches. Used by embed_docsite's refresh_cache_only mode."""
-    return {
-        "markdown_files_downloaded": refresh_markdown_cache(),
-        "adaptor_functions_updated": refresh_adaptor_functions_cache(),
-    }
-
-
-def _no_cache_error(docs_type, reason):
+def _no_cache_error(docs_types, reason):
     """The one way this module reports 'nothing to serve'.
 
     An ApolloError carries a code that bridge.ts maps to an HTTP status; a bare
     FileNotFoundError escaping from a read would not.
+
+    :param docs_types: the docs type(s) this concerns, named as the payload does
     """
     return ApolloError(
         503,
-        f"Could not fetch {docs_type} from GitHub and no cached copy exists: {reason}",
+        f"Could not fetch {docs_types} from GitHub and no cached copy exists: {reason}",
         type="UPSTREAM_ERROR",
     )
 
 
-def _survive_or_raise(exc, have_cache, docs_type):
+def _survive_or_raise(exc, have_cache, docs_types):
     """A refresh failure is survivable only when something is already cached."""
     if have_cache:
-        logger.warning(f"Could not refresh {docs_type}, serving cached copy: {exc}")
+        logger.warning(f"Could not refresh {docs_types}, serving cached copy: {exc}")
         return
-    raise _no_cache_error(docs_type, exc)
+    raise _no_cache_error(docs_types, exc)
 
 
-def get_docs_cached(docs_type):
-    """Docs for one docs_type, refreshed when possible and served from cache.
+def refresh_cache(docs_types):
+    """Bring the cache up to date for the requested docs types.
+
+    Call once per run, before reading. The markdown refresh covers every
+    markdown docs_type in a single conditional Trees request, so the number of
+    docs types requested does not change the cost.
+
+    Only the requested types are refreshed: a run wanting just adaptor_functions
+    leaves the markdown corpus alone.
+
+    :return: {"markdown_files_downloaded": int, "adaptor_functions_updated": bool}
+    """
+    downloaded = 0
+    updated = False
+
+    markdown_types = [docs_type for docs_type in docs_types if docs_type in DOCS_TYPE_PREFIXES]
+    if markdown_types:
+        try:
+            downloaded = refresh_markdown_cache()
+        except Exception as exc:
+            _survive_or_raise(exc, is_populated(), ", ".join(markdown_types))
+
+    if "adaptor_functions" in docs_types:
+        try:
+            updated = refresh_adaptor_functions_cache()
+        except Exception as exc:
+            _survive_or_raise(exc, (CACHE_DIR / ADAPTOR_FUNCTIONS_FILE).exists(), "adaptor_functions")
+
+    return {"markdown_files_downloaded": downloaded, "adaptor_functions_updated": updated}
+
+
+def read_docs(docs_type):
+    """Docs for one docs_type, served from disk. Never touches the network.
+
+    Refresh first with refresh_cache; an unpopulated cache raises rather than
+    reporting the docs as empty.
 
     Return contract matches the get_docs that DocsiteProcessor depends on.
     """
     if docs_type == "adaptor_functions":
-        try:
-            refresh_adaptor_functions_cache()
-        except Exception as exc:
-            _survive_or_raise(exc, (CACHE_DIR / ADAPTOR_FUNCTIONS_FILE).exists(), docs_type)
         # The manifest decided we could degrade; only the disk can confirm it. A
         # 304 leaves the etag current even if the file underneath was deleted.
         if not (CACHE_DIR / ADAPTOR_FUNCTIONS_FILE).exists():
@@ -190,10 +215,8 @@ def get_docs_cached(docs_type):
     if docs_type not in DOCS_TYPE_PREFIXES:
         raise ApolloError(400, f"Unknown docs_type '{docs_type}'", type="BAD_REQUEST")
 
-    try:
-        refresh_markdown_cache()
-    except Exception as exc:
-        _survive_or_raise(exc, is_populated(), docs_type)
+    if not is_populated():
+        raise _no_cache_error(docs_type, "the cache is empty; refresh_cache must run first")
 
     paths = markdown_paths(load_manifest().get(REPO_KEY, {}).get("files", {}), docs_type)
     present = [path for path in paths if (CACHE_DIR / path).exists()]
