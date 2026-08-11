@@ -1,23 +1,24 @@
-import os
 import json
+import os
+
 import anthropic
+import sentry_sdk
 from anthropic import (
     APIConnectionError,
-    BadRequestError,
     AuthenticationError,
-    PermissionDeniedError,
-    NotFoundError,
-    UnprocessableEntityError,
-    RateLimitError,
+    BadRequestError,
     InternalServerError,
+    NotFoundError,
+    PermissionDeniedError,
+    RateLimitError,
+    UnprocessableEntityError,
 )
-import sentry_sdk
 from langfuse import observe
-from util import ApolloError, create_logger
 from models import resolve_model
-from search_docsite.search_docsite import DocsiteSearch
+from search_docsite.search_docsite import resolve_backend
+from util import ApolloError, create_logger
+
 from .rag_config_loader import ConfigLoader
-from streaming_util import StreamManager
 
 logger = create_logger("job_chat.retrieve_docs")
 
@@ -82,7 +83,7 @@ def retrieve_knowledge(content, history, code="", adaptor="", api_key=None, stre
                     search_results = list(set(search_results))
                     search_results_sections = list(set(result.metadata["doc_title"] for result in search_results))
                 except Exception as e:
-                    logger.error(f"Pinecone search failed: {e}")
+                    logger.error(f"Docsite search failed: {e}")
                     sentry_sdk.capture_exception(e)
                     # Continue with empty results - chat can still work without docs
                     search_results = []
@@ -163,26 +164,33 @@ def generate_queries(content, client, user_context=""):
             "Failed to generate search queries - invalid response from AI service",
             type="INVALID_LLM_RESPONSE",
             details={"response_preview": text[:200]}
-        )
+        ) from e
 
     if len(answer_parsed) >= 4:
         answer_parsed = answer_parsed[:4]
 
     return (answer_parsed, usage)
 
-def search_docs(search_queries, top_k, threshold):
-    """Search the docsite vector store using search queries."""
-    docsite_search = DocsiteSearch()
+def search_docs(search_queries, top_k, threshold=None):
+    """Search the docsite store. Both backends run semantic search, so the
+    threshold applies identically.
+
+    Set DOCSITE_SEARCH_BACKEND=postgres to use Postgres.
+
+    :param threshold: Cosine-similarity cutoff
+    """
+    searcher = resolve_backend()()
     search_results = []
     for q in search_queries:
-        query_search_result = docsite_search.search(
-            q.get("query"), 
-            top_k=top_k, 
-            threshold=threshold, 
+        query_search_result = searcher.search(
+            q.get("query"),
+            top_k=top_k,
+            threshold=threshold,
+            strategy="semantic",
             docs_type="general_docs"
         )
         search_results.extend(query_search_result)
-    
+
     return search_results
 
 def format_context(adaptor, code, history):
@@ -247,10 +255,10 @@ def call_llm(model, temperature, system_prompt, user_prompt, client, output_sche
             "Unable to reach the AI service for documentation search",
             type="CONNECTION_ERROR",
             details=details,
-        )
+        ) from e
     except AuthenticationError as e:
         logger.error(f"Authentication error during knowledge retrieval: {e}")
-        raise ApolloError(401, "Authentication failed with AI service", type="AUTH_ERROR")
+        raise ApolloError(401, "Authentication failed with AI service", type="AUTH_ERROR") from e
     except RateLimitError as e:
         logger.error(f"Rate limit error during knowledge retrieval: {e}")
         retry_after = int(e.response.headers.get('retry-after', 60)) if hasattr(e, 'response') else 60
@@ -259,22 +267,22 @@ def call_llm(model, temperature, system_prompt, user_prompt, client, output_sche
             "Rate limit exceeded for documentation search, please try again later",
             type="RATE_LIMIT",
             details={"retry_after": retry_after}
-        )
+        ) from e
     except BadRequestError as e:
         logger.error(f"Bad request error during knowledge retrieval: {e}")
-        raise ApolloError(400, f"Invalid request to AI service: {str(e)}", type="BAD_REQUEST")
+        raise ApolloError(400, f"Invalid request to AI service: {str(e)}", type="BAD_REQUEST") from e
     except PermissionDeniedError as e:
         logger.error(f"Permission denied error during knowledge retrieval: {e}")
-        raise ApolloError(403, "Not authorized to perform this action", type="FORBIDDEN")
+        raise ApolloError(403, "Not authorized to perform this action", type="FORBIDDEN") from e
     except NotFoundError as e:
         logger.error(f"Not found error during knowledge retrieval: {e}")
-        raise ApolloError(404, "Resource not found", type="NOT_FOUND")
+        raise ApolloError(404, "Resource not found", type="NOT_FOUND") from e
     except UnprocessableEntityError as e:
         logger.error(f"Unprocessable entity error during knowledge retrieval: {e}")
-        raise ApolloError(422, str(e), type="INVALID_REQUEST")
+        raise ApolloError(422, str(e), type="INVALID_REQUEST") from e
     except InternalServerError as e:
         logger.error(f"Internal server error from AI service during knowledge retrieval: {e}")
-        raise ApolloError(500, "The AI service encountered an error", type="PROVIDER_ERROR")
+        raise ApolloError(500, "The AI service encountered an error", type="PROVIDER_ERROR") from e
     except Exception as e:
         logger.error(f"Unexpected error during LLM call for knowledge retrieval: {str(e)}")
-        raise ApolloError(500, f"Unexpected error during documentation search: {str(e)}", type="UNKNOWN_ERROR")
+        raise ApolloError(500, f"Unexpected error during documentation search: {str(e)}", type="UNKNOWN_ERROR") from e

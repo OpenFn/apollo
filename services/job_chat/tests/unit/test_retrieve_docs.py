@@ -14,10 +14,10 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
-
+from embeddings.embeddings import SearchResult
 from job_chat import retrieve_docs as rd
+from job_chat.retrieve_docs import search_docs
 from util import ApolloError
-
 
 # --- generate_queries ----------------------------------------------------------
 
@@ -76,3 +76,54 @@ def test_call_llm_wraps_unexpected_error_as_apollo_error():
 
     assert exc.value.code == 500
     assert exc.value.type == "UNKNOWN_ERROR"
+
+
+# --- search_docs ----------------------------------------------------------------
+
+
+def _fake_result(title):
+    return SearchResult(f"text for {title}", {"doc_title": title, "docs_type": "general_docs"}, 0.9)
+
+
+def test_search_docs_forwards_query_args_to_resolved_backend(monkeypatch):
+    monkeypatch.delenv("DOCSITE_SEARCH_BACKEND", raising=False)
+
+    with patch.object(rd, "resolve_backend") as mock_resolve:
+        backend = mock_resolve.return_value.return_value
+        backend.search.return_value = [_fake_result("A")]
+        results = search_docs([{"query": "q"}], top_k=5)
+
+    assert [r.metadata["doc_title"] for r in results] == ["A"]
+    backend.search.assert_called_once_with(
+        "q", top_k=5, threshold=None, strategy="semantic", docs_type="general_docs"
+    )
+
+
+def test_search_docs_passes_threshold_through(monkeypatch):
+    """Threshold is a cosine-similarity cutoff that must reach the backend — this
+    regressed once already when the backend flag was introduced, and rag.yaml's
+    threshold silently stopped applying."""
+    monkeypatch.delenv("DOCSITE_SEARCH_BACKEND", raising=False)
+
+    with patch.object(rd, "resolve_backend") as mock_resolve:
+        backend = mock_resolve.return_value.return_value
+        backend.search.return_value = [_fake_result("A")]
+        search_docs([{"query": "q"}], top_k=5, threshold=0.8)
+
+    backend.search.assert_called_once_with(
+        "q", top_k=5, threshold=0.8, strategy="semantic", docs_type="general_docs"
+    )
+
+
+def test_search_docs_accumulates_results_across_queries(monkeypatch):
+    monkeypatch.delenv("DOCSITE_SEARCH_BACKEND", raising=False)
+
+    with patch.object(rd, "resolve_backend") as mock_resolve:
+        backend = mock_resolve.return_value.return_value
+        backend.search.side_effect = [[_fake_result("A")], [_fake_result("B")]]
+        results = search_docs([{"query": "q1"}, {"query": "q2"}], top_k=5)
+
+    assert [r.metadata["doc_title"] for r in results] == ["A", "B"]
+    assert backend.search.call_count == 2
+
+

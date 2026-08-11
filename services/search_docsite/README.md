@@ -26,16 +26,24 @@ bun py search_docsite tmp/payload.json -O
 ## Implementation
 The service uses the DocsiteSearch class to query the database (Pinecone). It embeds semantic search queries using OpenAI. 
 
+To compare backends on the same query, run the service twice with different
+`backend` values and diff the results. This replaces the shadow-mode comparison
+that was considered for the Postgres migration.
+
 ## Payload Reference
 The input payload is a JSON object with the following structure:
 
 ```js
 {
-    "query": "What is Asana", // Input query
-    "collection_name": "Docsite-20250225", // Name of the collection in the vector database
-    "docs_type": "adaptor_docs", // Filter for document type adaptor_docs, adaptor_functions, general_docs (optional)
-    "doc_title": "Asana", // Filter for document title (optional)
-    "top_k": 5 // Adjust the number of search results (optional)
+    "query": "What is Asana",         // Input query (required)
+    "backend": "pinecone",            // 'pinecone' | 'postgres'. Defaults to DOCSITE_SEARCH_BACKEND, itself defaulting to pinecone.
+    "docs_type": "adaptor_docs",      // Filter for adaptor_docs | adaptor_functions | general_docs (optional)
+    "doc_title": "Asana",             // Filter for document title (optional)
+    "top_k": 5,                       // Number of search results (optional)
+    "threshold": 0.8,                 // Cosine cutoff. Only valid with strategy 'semantic'. (optional)
+    "strategy": "semantic",           // Postgres backend only: 'semantic' | 'keyword' | 'hybrid'
+    "batch_id": 12,                   // Postgres backend only: pin a specific batch (optional)
+    "collection_name": "docsite-..."  // Pinecone backend only: pin a namespace (optional)
 }
 ```
 

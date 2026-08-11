@@ -26,6 +26,8 @@ psycopg2-binary = "^2.9.10"
 langfuse = "^4.14.1"
 opentelemetry-instrumentation-anthropic = "^0.62.1"
 opentelemetry-instrumentation-threading = "0.65b0"
+pgvector = "^0.5.0"
+pandas = "^2.2"
 
 [tool.poetry.group.dev]
 optional = false
@@ -50,6 +52,7 @@ testpaths = [
     "services/job_chat/tests",
     "services/latest_adaptors/tests",
     "services/search_docsite/tests",
+    "services/embed_docsite/tests",
     "services/tools",
 ]
 
