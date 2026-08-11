@@ -44,7 +44,7 @@ def make_search(**kwargs):
 
 
 def test_fresh_database_migrates_indexes_and_promotes(clean_db):
-    """C3: the first run on an empty database used to strand in 'building',
+    """The first run on an empty database used to strand in 'building',
     because copy_forward's SELECT left a transaction open."""
     result = index_docs()
 
@@ -55,7 +55,7 @@ def test_fresh_database_migrates_indexes_and_promotes(clean_db):
 
 @pytest.mark.parametrize("strategy", ["semantic", "keyword", "hybrid"])
 def test_search_returns_the_indexed_chunk(clean_db, strategy):
-    """C1: semantic and hybrid used to fail with
+    """Semantic and hybrid used to fail with
     `operator does not exist: vector <=> numeric[]` on every query."""
     index_docs()
     target = DOCS[0]["doc_chunk"]
@@ -66,7 +66,7 @@ def test_search_returns_the_indexed_chunk(clean_db, strategy):
 
 
 def test_reindexing_prunes_the_previous_batch(clean_db):
-    """C2: pruning never ran, so every re-index permanently added a full
+    """Pruning never ran, so every re-index permanently added a full
     docsite copy and another HNSW index."""
     first = index_docs(keep_batches=1)
     second = index_docs(keep_batches=1)
@@ -78,7 +78,7 @@ def test_reindexing_prunes_the_previous_batch(clean_db):
 
 
 def test_reader_without_a_schema_gets_a_clear_503(clean_db):
-    """C4: with migrations moved to the indexer, a reader on an un-indexed
+    """With migrations moved to the indexer, a reader on an un-indexed
     database must explain itself rather than emit a psycopg2 traceback."""
     with pytest.raises(ApolloError) as exc:
         make_search().search("anything")
