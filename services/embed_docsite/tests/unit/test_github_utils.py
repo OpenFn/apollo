@@ -103,8 +103,6 @@ def test_get_repo_tree_captures_the_etag_for_the_next_run():
 
 
 def test_rate_limit_raises_a_rate_limit_error_not_an_indexerror():
-    """The old code returned silently here and died later with
-    `IndexError: list index out of range`, naming neither the cause nor the fix."""
     response = make_response(
         status_code=403,
         headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1800000000"},

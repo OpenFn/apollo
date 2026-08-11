@@ -44,10 +44,6 @@ def _github_headers(etag=None):
 
 def _raise_if_rate_limited(response):
     """Turn GitHub's rate-limit 403 into an error that says 'rate limit'.
-
-    This path used to return silently, leaving the caller to fail later with
-    `IndexError: list index out of range` — which named neither the cause nor
-    the fix.
     """
     if response.status_code != HTTP_FORBIDDEN or response.headers.get("X-RateLimit-Remaining") != RATE_LIMIT_EXHAUSTED:
         return
