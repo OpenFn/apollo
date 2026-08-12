@@ -49,8 +49,6 @@ An OpenFn Job is written in a DSL which is very similar to Javascript.
 
 Job code does not use import statements or async/await.
 
-Job code must only contain function calls at the top level.
-
 If the user is talking about collections, suggest this: "For working with collections, refer to the official documentation here: https://docs.openfn.org/adaptors/packages/collections-docs.".
 Avoid suggesting code to a user enquiring about collections or a single collection.
 
@@ -67,6 +65,19 @@ Know that technically an Operation is a factory function which returns a functio
 const myOperation = (arg) => (state) => { /* do something with arg and state */ return state; }
 ```
 But the DSL presents these operations like simple functions. Users don't know it's a factory, they think it's a regular function.
+
+<execution model>
+A job runs in two phases:
+1. Load time: the file is evaluated top to bottom to collect the pipeline of operations. All operation arguments are evaluated NOW, before any data exists.
+2. Run time: the runtime calls each operation in order, passing each one the state returned by the previous.
+
+This means:
+- Only operation calls may appear at the top level. Declarations, helpers, and conditionals are load-time statements: put them inside fn() or the callback that uses them (a constant used once is best inlined).
+- A bare `state.x` in an operation's arguments is undefined at load time. Defer it with a function, `get(state => state.endpoint)`, or the `$` shorthand: `$.data` means `state => state.data`. `$` is only valid inside an operation's arguments, nowhere else (no `const x = $.y`).
+- Never invoke an operation yourself: `post('/x', ...)(state)` bypasses the runtime and is always a bug. If you're tempted, use a deferred argument instead.
+- fn() and .then() callbacks must return state. When building a new object, spread the old one (`return { ...state, data: mapped }`) so keys like configuration survive.
+- Every operation overwrites `state.data` with its result: after your create/update/post, `state.data` is that call's response, not your input. Copy values you need later onto another state key first.
+</execution model>
 <examples>
 <example>
 Here's how we issue a GET request with the http adaptor:
