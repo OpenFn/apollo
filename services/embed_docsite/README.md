@@ -2,24 +2,36 @@
 
 This service embeds the OpenFn Documentation to a vector database. It downloads, chunks, processes metadata, embeds and uploads the documentation to a vector database (Pinecone). 
 
+## Setup
+
+Every environment maintains its own vector store, so there is no shared index to point at. Run this service to populate your own before using `search_docsite`.
+
+1. Create an account on [Pinecone](https://www.pinecone.io/) and set up a free cluster.
+2. Add `PINECONE_API_KEY` and `OPENAI_API_KEY` to your `.env` file.
+
+The service creates the `docsite` index if it does not already exist.
+
 ## Usage - Embedding OpenFn Documentation
-
-The vector database used here is Pinecone. To obtain the env variables follow these steps:
-
-1. Create an account on [Pinecone] and set up a free cluster.
-2. Obtain the URL and token for the cluster and add them to the `.env` file.
-3. You'll also need an OpenAI API key to generate embeddings.
 
 ### With the CLI, returning to stdout:
 
 ```bash
 openfn apollo embed_docsite tmp/payload.json
 ```
-To run directly from this repo (note that the server must be started):
+
+### Directly from this repo:
 
 ```bash
-bun py embed_docsite tmp/payload.json -O
+bun py embed_docsite
 ```
+
+The payload is optional. With no `--input`, the service indexes all documentation using the defaults below; to customise it, pass a payload file:
+
+```bash
+bun py embed_docsite --input tmp/payload.json
+```
+
+A full run downloads the entire docs site and embeds several thousand chunks, so allow upwards of ten minutes.
 
 ## Implementation
 The service uses the DocsiteProcessor to download the documentation and chunk it into smaller parts. The DocsiteIndexer formats metadata, creates a new collection, embeds the chunked texts (OpenAI) and uploads them into the vector database (Pinecone).
