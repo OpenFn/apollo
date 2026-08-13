@@ -26,6 +26,21 @@ The service uses the DocsiteProcessor to download the documentation and chunk it
 
 The chunked texts can be viewed in `tmp/split_sections`.
 
+## Docs checkout
+
+`general_docs` and `adaptor_docs` are read from a shallow `git clone` of
+[OpenFn/docs](https://github.com/OpenFn/docs), kept at
+`services/embed_docsite/docsite_cache/` (gitignored). The first call in a
+process clones; every call after `fetch`es and `reset --hard`s onto the latest
+`main`, so a run reading both docs types still only touches the network once.
+
+If the refresh fails and a checkout already exists, the existing copy is
+served and a warning is logged — the run only fails if there is no checkout to
+fall back on. `git` must be on `PATH`.
+
+`adaptor_functions` is unaffected: it's a single JSON file from a different
+repo (`OpenFn/adaptors`), fetched over plain HTTP as before.
+
 ## Payload Reference
 The input payload is a JSON object. All parameters are optional:
 
