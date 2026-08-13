@@ -1,11 +1,14 @@
-"""A shallow git checkout of OpenFn/docs, kept on disk.
+"""A shallow, blobless, sparse git checkout of OpenFn/docs, kept on disk.
 
 Uses a single `git clone`/`fetch`.
 
 `sync_docs_repo` clones on the first call in a process and `fetch`+`reset
---hard`s on every call after, memoized. A failed refresh serves the 
-existing checkout rather than failing the run, same as 
+--hard`s on every call after, memoized. A failed refresh serves the
+existing checkout rather than failing the run, same as
 `services/latest_adaptors/latest_adaptors.py`'s cache.
+
+The clone is blobless and sparse-checked-out to only `DOCS_TYPE_PREFIXES`'
+directories, so the missing blobs are fetched lazily for the checkout.
 """
 
 import shutil
@@ -47,10 +50,19 @@ def _has_checkout():
 
 
 def _clone():
-    """Wipe and clone. Also the recovery path for a corrupt or partial checkout."""
+    """Wipe and clone. Also the recovery path for a corrupt or partial checkout.
+
+    Blobless (`--filter=blob:none`) and sparse, checked out to only the
+    directories `DOCS_TYPE_PREFIXES` names: the rest of OpenFn/docs is images
+    and static assets we never index, and this way their blobs are never even
+    transferred. `sparse-checkout set` fetches the blobs it needs to
+    materialize those paths as part of running; nothing later in this module
+    reads outside them, so no further blob fetch happens after this call.
+    """
     if CLONE_DIR.exists():
         shutil.rmtree(CLONE_DIR)
-    _run_git(["clone", "--depth", "1", DOCS_REPO_URL, str(CLONE_DIR)])
+    _run_git(["clone", "--depth", "1", "--filter=blob:none", "--sparse", DOCS_REPO_URL, str(CLONE_DIR)])
+    _run_git(["sparse-checkout", "set", *DOCS_TYPE_PREFIXES.values()], cwd=CLONE_DIR)
     logger.info(f"Cloned {DOCS_REPO_URL} to {CLONE_DIR}")
 
 
