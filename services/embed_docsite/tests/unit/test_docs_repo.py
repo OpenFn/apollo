@@ -1,6 +1,6 @@
 """Unit tests for the git-backed docs checkout.
 
-`_run_git` is replaced with a fake that records argv 
+`_run_git` is replaced with a fake that records argv
 and never spawns `git`.
 """
 import subprocess
@@ -53,8 +53,27 @@ def test_cold_clone_when_no_checkout_exists(monkeypatch):
 
     sha = m.sync_docs_repo()
 
-    assert git.calls[0] == ["clone", "--depth", "1", m.DOCS_REPO_URL, str(m.CLONE_DIR)]
+    assert git.calls[0] == [
+        "clone",
+        "--depth",
+        "1",
+        "--filter=blob:none",
+        "--sparse",
+        m.DOCS_REPO_URL,
+        str(m.CLONE_DIR),
+    ]
+    assert git.calls[1] == ["sparse-checkout", "set", *m.DOCS_TYPE_PREFIXES.values()]
     assert sha == FAKE_SHA
+
+
+def test_sparse_checkout_paths_are_derived_not_hardcoded(monkeypatch):
+    monkeypatch.setattr(m, "DOCS_TYPE_PREFIXES", {"made_up_type": "somewhere"})
+    git = make_git()
+    monkeypatch.setattr(m, "_run_git", git)
+
+    m.sync_docs_repo()
+
+    assert ["sparse-checkout", "set", "somewhere"] in git.calls
 
 
 def test_warm_update_when_checkout_exists(monkeypatch):
@@ -64,7 +83,7 @@ def test_warm_update_when_checkout_exists(monkeypatch):
 
     m.sync_docs_repo()
 
-    assert ["clone", "--depth", "1", m.DOCS_REPO_URL, str(m.CLONE_DIR)] not in git.calls
+    assert not any(call[0] == "clone" for call in git.calls)
     assert ["fetch", "--depth", "1", "origin", m.DOCS_REF] in git.calls
     assert ["reset", "--hard", "FETCH_HEAD"] in git.calls
 
@@ -77,7 +96,7 @@ def test_clone_dir_without_git_is_wiped_then_cloned(monkeypatch):
 
     m.sync_docs_repo()
 
-    assert git.calls[0] == ["clone", "--depth", "1", m.DOCS_REPO_URL, str(m.CLONE_DIR)]
+    assert git.calls[0][0] == "clone"
     assert not (m.CLONE_DIR / "stale.txt").exists()
 
 
