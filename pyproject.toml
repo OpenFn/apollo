@@ -53,6 +53,7 @@ testpaths = [
     "services/latest_adaptors/tests",
     "services/search_docsite/tests",
     "services/testing/tests",
+    "services/embed_docsite/tests",
     "services/tools",
 ]
 
