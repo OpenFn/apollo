@@ -22,6 +22,75 @@ export function apolloError(
   return { code, type, message, ...(details ? { details } : {}) };
 }
 
+/** An ApolloError that can also be thrown, so a catch block gets a real Error
+ *  while the wire shape stays the same. `toJSON` is required: JSON.stringify on
+ *  an Error is `{}` without it. */
+export class ApolloThrowable extends Error implements ApolloError {
+  readonly code: number;
+  readonly type: string;
+  readonly details?: Record<string, any>;
+
+  constructor(
+    code: number,
+    type: string,
+    message: string,
+    details?: Record<string, any>
+  ) {
+    super(message);
+    this.name = "ApolloThrowable";
+    this.code = code;
+    this.type = type;
+    this.details = details;
+  }
+
+  toJSON(): ApolloError {
+    return {
+      code: this.code,
+      type: this.type,
+      message: this.message,
+      ...(this.details ? { details: this.details } : {}),
+    };
+  }
+}
+
+/** The service process exited non-zero. */
+export function subprocessFailed(
+  service: string,
+  exitCode: number
+): ApolloThrowable {
+  return new ApolloThrowable(
+    500,
+    "SUBPROCESS_FAILED",
+    `Service "${service}" exited with code ${exitCode}`,
+    { service, exitCode }
+  );
+}
+
+/** We never got as far as running the service - poetry or python missing, or
+ *  the spawn refused. */
+export function subprocessSpawnFailed(
+  service: string,
+  cause: unknown
+): ApolloThrowable {
+  return new ApolloThrowable(
+    500,
+    "SUBPROCESS_SPAWN_FAILED",
+    `Service "${service}" could not be started`,
+    { service, cause: cause instanceof Error ? cause.message : String(cause) }
+  );
+}
+
+/** The service exited cleanly but wrote nothing. entry.py writes a result on
+ *  every path it completes, so an empty file means the run died. */
+export function emptyResult(service: string): ApolloThrowable {
+  return new ApolloThrowable(
+    502,
+    "EMPTY_RESULT",
+    `Service "${service}" finished without producing a result`,
+    { service }
+  );
+}
+
 export function unauthorized(ctx: any): ApolloError {
   return apolloError(ctx, 401, "UNAUTHORIZED", "Missing or invalid API key");
 }

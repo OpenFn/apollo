@@ -6,7 +6,11 @@ import { run } from "../bridge";
 import describeModules, {
   type ModuleDescription,
 } from "../util/describe-modules";
-import { isApolloError } from "../util/errors";
+import {
+  ApolloThrowable,
+  isApolloError,
+  type ApolloError,
+} from "../util/errors";
 import type { InstanceAuth } from "../auth/instance-auth";
 
 const textEncoder = new TextEncoder();
@@ -29,6 +33,30 @@ export const heartbeatIntervalMs = (): number => {
   return Number.isFinite(configured) && configured > 0
     ? configured
     : HEARTBEAT_INTERVAL_MS;
+};
+
+/** Normalise anything thrown by a service run into the ApolloError envelope, so
+ *  a caller sees the same shape whether the failure was typed or not. */
+const toErrorPayload = (error: unknown): ApolloError => {
+  if (error instanceof ApolloThrowable) {
+    return error.toJSON();
+  }
+  // Rebuilt field by field rather than returned as-is: isApolloError only
+  // checks for a numeric `code`, and anything else hanging off the object
+  // would be serialised to the caller along with it.
+  if (isApolloError(error)) {
+    return {
+      code: error.code,
+      type: error.type,
+      message: error.message,
+      ...(error.details === undefined ? {} : { details: error.details }),
+    };
+  }
+  return {
+    code: 500,
+    type: "INTERNAL_ERROR",
+    message: error instanceof Error ? error.message : String(error),
+  };
 };
 
 const callService = (
@@ -99,7 +127,19 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
       app.post(name, async (ctx) => {
         console.log(`POST /services/${name}: ${ctx.uuid}`);
         const payload = buildPayload(ctx);
-        const result = await callService(m, port, payload as any);
+
+        let result: any;
+        try {
+          result = await callService(m, port, payload as any);
+        } catch (error) {
+          const payload = toErrorPayload(error);
+          return new Response(JSON.stringify(payload), {
+            status: payload.code,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          });
+        }
 
         if (isApolloError(result)) {
           return new Response(JSON.stringify(result), {
@@ -189,10 +229,7 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
                 sendSSE("complete", result);
               }
             } catch (error) {
-              sendSSE("error", {
-                message:
-                  error instanceof Error ? error.message : "Unknown error",
-              });
+              sendSSE("error", toErrorPayload(error));
             } finally {
               stopHeartbeat();
               console.log(
@@ -255,14 +292,23 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
               const base: Record<string, any> = { ...(message.data ?? {}) };
               const payload = applyKey(base, ws.data);
 
-              callService(m, port, payload as any, onLog, onEvent).then(
-                (result) => {
+              // The catch matters as much as the then: a run that rejects
+              // (spawn failure, empty output) would otherwise leave the client
+              // waiting on a frame that never comes. The try around this only
+              // sees synchronous throws.
+              callService(m, port, payload as any, onLog, onEvent)
+                .then((result) => {
                   ws.send({
                     event: "complete",
                     data: result,
                   });
-                }
-              );
+                })
+                .catch((error) => {
+                  ws.send({
+                    event: "error",
+                    data: toErrorPayload(error),
+                  });
+                });
             }
           } catch (e) {
             console.log(e);

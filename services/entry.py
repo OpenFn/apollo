@@ -73,19 +73,28 @@ def call(
         try:
             with open(input_path, "r") as f:
                 data = json.load(f)
-        except FileNotFoundError:
+        except FileNotFoundError as e:
             sentry_sdk.capture_exception(e)
-            return ApolloError(code=500, message=f"Input file not found: {input_path}", type="INTERNAL_ERROR").to_dict()
-        except json.JSONDecodeError:
+            return _finish(
+                ApolloError(code=500, message=f"Input file not found: {input_path}", type="INTERNAL_ERROR").to_dict(),
+                output_path,
+            )
+        except json.JSONDecodeError as e:
             sentry_sdk.capture_exception(e)
-            return ApolloError(code=500, message="Invalid JSON input", type="INTERNAL_ERROR").to_dict()
+            return _finish(
+                ApolloError(code=500, message="Invalid JSON input", type="INTERNAL_ERROR").to_dict(),
+                output_path,
+            )
 
     try:
         m = __import__(module_name, fromlist=["main"])
         result = m.main(data)
     except ModuleNotFoundError as e:
         sentry_sdk.capture_exception(e)
-        return ApolloError(code=500, message=str(e), type="INTERNAL_ERROR").to_dict()
+        return _finish(
+            ApolloError(code=500, message=str(e), type="INTERNAL_ERROR").to_dict(),
+            output_path,
+        )
     except ApolloError as e:
         sentry_sdk.capture_exception(e)
         result = e.to_dict()
@@ -95,6 +104,15 @@ def call(
 
     langfuse.flush()
 
+    return _finish(result, output_path)
+
+
+def _finish(result: dict, output_path: str | None) -> dict:
+    """Write the result where the caller expects it, then hand it back.
+
+    Every path out of run_service goes through here, so an empty output file
+    means the run died rather than that it failed politely.
+    """
     if output_path:
         with open(output_path, "w") as f:
             json.dump(result, f)

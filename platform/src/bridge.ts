@@ -3,6 +3,11 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { rm } from "node:fs/promises";
 import { getInternalToken } from "./auth/internal-token";
+import {
+  emptyResult,
+  subprocessFailed,
+  subprocessSpawnFailed,
+} from "./util/errors";
 import pkg from "../../package.json";
 
 /**
@@ -56,8 +61,11 @@ export const run = async (
       }
     );
 
-    proc.on("error", async (err) => {
-      console.log(err);
+    // Nothing was spawned, so no "close" is coming - without settling here the
+    // request stays open until something upstream gives up
+    proc.on("error", (err) => {
+      console.error("Failed to start python process", err);
+      reject(subprocessSpawnFailed(scriptName, err));
     });
 
     const rl = readline.createInterface({
@@ -101,12 +109,10 @@ export const run = async (
       rl.close();
       rl2.close();
 
-      if (code) {
-        console.error("Python process exited with code", code);
-        reject(code);
-      }
-      const result = Bun.file(outputPath);
-      const text = await result.text();
+      // Read before cleaning up, and clean up on every exit path
+      const text = await Bun.file(outputPath)
+        .text()
+        .catch(() => "");
 
       try {
         await rm(inputPath);
@@ -116,12 +122,19 @@ export const run = async (
         console.error(e);
       }
 
-      if (text) {
-        resolve(JSON.parse(text));
-      } else {
-        console.warn("No data returned from pythonland");
-        resolve(null);
+      if (code) {
+        console.error("Python process exited with code", code);
+        return reject(subprocessFailed(scriptName, code));
       }
+
+      if (text) {
+        return resolve(JSON.parse(text));
+      }
+
+      // entry.py writes a result on every path it completes, including its own
+      // error envelopes, so an empty file means the run died
+      console.warn("No data returned from pythonland");
+      return reject(emptyResult(scriptName));
     });
 
     return;
