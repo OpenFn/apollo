@@ -11,6 +11,14 @@ import type { InstanceAuth } from "../auth/instance-auth";
 
 const textEncoder = new TextEncoder();
 
+// The space after the colon is required: Lightning's SSE decoder matches
+// `": " <> comment` and has no catch-all clause, so ":ping" raises there.
+export const HEARTBEAT_FRAME = ": ping\n\n";
+
+// Inside the shortest silence any hop tolerates - our own socket, Lightning's
+// inter-chunk timeout, and the 60s read timeout typical of proxies.
+export const HEARTBEAT_INTERVAL_MS = 15_000;
+
 const callService = (
   m: ModuleDescription,
   port: number,
@@ -126,6 +134,28 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
               sendSSE(type, payload);
             };
 
+            // Started before the service call so the window while Python boots
+            // is covered too
+            let heartbeat: ReturnType<typeof setInterval> | undefined =
+              setInterval(() => {
+                if (isClosed) {
+                  return;
+                }
+                try {
+                  controller.enqueue(textEncoder.encode(HEARTBEAT_FRAME));
+                } catch (error) {
+                  // consumer went away between ticks
+                  isClosed = true;
+                }
+              }, HEARTBEAT_INTERVAL_MS);
+
+            const stopHeartbeat = () => {
+              if (heartbeat) {
+                clearInterval(heartbeat);
+                heartbeat = undefined;
+              }
+            };
+
             try {
               const result = await callService(
                 m,
@@ -146,13 +176,18 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
                   error instanceof Error ? error.message : "Unknown error",
               });
             } finally {
+              stopHeartbeat();
               console.log(
                 `STREAM COMPLETE ${ctx.uuid} in ${
-                  (new Date() - ctx.start) / 1000
+                  (Date.now() - ctx.start) / 1000
                 }s`
               );
               isClosed = true;
-              controller.close();
+              try {
+                controller.close();
+              } catch (error) {
+                // already closed from the consumer's side
+              }
             }
           },
         });
