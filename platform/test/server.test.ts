@@ -85,6 +85,13 @@ describe("Main server", () => {
     expect(await response.text()).toBe("");
   });
 
+  // Asserts the configuration rather than the behaviour: these tests drive the
+  // app through app.handle(), which never opens a socket, so none of them can
+  // observe a socket timer.
+  it("keeps the socket idle timeout long enough for slow SSE streams", () => {
+    expect(app.config.serve?.idleTimeout).toBe(255);
+  });
+
   // send messages through a web socket
 });
 

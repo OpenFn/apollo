@@ -19,7 +19,14 @@ export default async (
   // pass a pre-configured instance (fake lookup) instead of the live DB-backed one.
   auth: InstanceAuth = new InstanceAuth()
 ) => {
-  const app = new Elysia();
+  // Bun's idle timer applies to in-flight SSE responses, not just idle
+  // keep-alive sockets, and Elysia defaults it to 30s - shorter than our own
+  // services routinely go without emitting. 255 is Bun's maximum.
+  const app = new Elysia({
+    serve: {
+      idleTimeout: 255,
+    },
+  });
 
   app.use(html());
 
