@@ -80,6 +80,20 @@ export function subprocessSpawnFailed(
   );
 }
 
+/** We stopped the service ourselves because the client went away. 499 keeps
+ *  these out of the 5xx that mean something is actually broken. */
+export function subprocessCancelled(
+  service: string,
+  signal: string
+): ApolloThrowable {
+  return new ApolloThrowable(
+    499,
+    "SUBPROCESS_CANCELLED",
+    `Service "${service}" was cancelled because the client disconnected`,
+    { service, signal }
+  );
+}
+
 /** The service exited cleanly but wrote nothing. entry.py writes a result on
  *  every path it completes, so an empty file means the run died. */
 export function emptyResult(service: string): ApolloThrowable {

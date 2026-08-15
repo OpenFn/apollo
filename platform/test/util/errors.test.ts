@@ -4,6 +4,7 @@ import {
   ApolloThrowable,
   emptyResult,
   isApolloError,
+  subprocessCancelled,
   subprocessFailed,
   subprocessSpawnFailed,
 } from "../../src/util/errors";
@@ -57,5 +58,15 @@ describe("subprocess failures", () => {
     const details = subprocessSpawnFailed("echo", new Error("ENOENT")).details;
 
     expect(details?.cause).toBe("ENOENT");
+  });
+
+  it("keeps a deliberate cancellation out of the 5xx range", () => {
+    // We stopped this one ourselves because the caller left. Reporting it as a
+    // server error would bury the failures that mean something is broken.
+    const cancelled = subprocessCancelled("global_chat", "SIGTERM");
+
+    expect(cancelled.code).toBe(499);
+    expect(cancelled.type).toBe("SUBPROCESS_CANCELLED");
+    expect(cancelled.details?.signal).toBe("SIGTERM");
   });
 });

@@ -64,12 +64,14 @@ const callService = (
   port: number,
   payload?: any,
   onLog?: (str: string) => void,
-  onEvent?: (evt: string, payload: any) => void
+  onEvent?: (evt: string, payload: any) => void,
+  signal?: AbortSignal
 ) => {
   if (m.type === "py") {
-    return run(m.name, port, payload as any, onLog, onEvent);
+    return run(m.name, port, payload as any, onLog, onEvent, signal);
   } else {
     // TODO add event handling to ts services
+    // TODO ts services can't be cancelled - the handler signature has no signal
     return m.handler!(port, payload as any, onLog);
   }
 };
@@ -158,19 +160,21 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
         console.log(`STREAM START /services/${name}: ${ctx.uuid}`);
         const payload = buildPayload(ctx);
 
+        const abort = new AbortController();
+
+        // Hoisted so cancel() can reach what start() set up
+        let isClosed = false;
+        let heartbeat: ReturnType<typeof setInterval> | undefined;
+
+        const stopHeartbeat = () => {
+          if (heartbeat) {
+            clearInterval(heartbeat);
+            heartbeat = undefined;
+          }
+        };
+
         const stream = new ReadableStream({
           async start(controller) {
-            let isClosed = false;
-
-            let heartbeat: ReturnType<typeof setInterval> | undefined;
-
-            const stopHeartbeat = () => {
-              if (heartbeat) {
-                clearInterval(heartbeat);
-                heartbeat = undefined;
-              }
-            };
-
             const sendSSE = (event: string, data: any) => {
               if (isClosed) {
                 return;
@@ -182,11 +186,11 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
                 //  console.log(message.trim());
                 controller.enqueue(textEncoder.encode(message));
               } catch (error) {
-                // A throwing enqueue is how a dropped connection reaches us
-                // when the runtime has not called cancel(), so stop ticking
-                // here too rather than waiting out the interval.
+                // Same as the heartbeat's catch: a throwing enqueue is a
+                // dropped connection the runtime has not told us about.
                 isClosed = true;
                 stopHeartbeat();
+                abort.abort();
               }
             };
 
@@ -208,9 +212,12 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
               try {
                 controller.enqueue(textEncoder.encode(HEARTBEAT_FRAME));
               } catch (error) {
-                // consumer went away between ticks
+                // The consumer went away between ticks. cancel() may never
+                // fire for this, so end the run here rather than leaving the
+                // child generating for nobody.
                 isClosed = true;
                 stopHeartbeat();
+                abort.abort();
               }
             }, heartbeatIntervalMs());
 
@@ -220,7 +227,8 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
                 port,
                 payload as any,
                 onLog,
-                onEvent
+                onEvent,
+                abort.signal
               );
 
               if (isApolloError(result)) {
@@ -245,6 +253,24 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
               }
             }
           },
+
+          // Everything from here on is work nobody will read
+          cancel(reason) {
+            isClosed = true;
+            stopHeartbeat();
+            console.warn(
+              `STREAM CANCELLED ${ctx.uuid} after ${
+                (Date.now() - ctx.start) / 1000
+              }s`
+            );
+            abort.abort(reason);
+          },
+        });
+
+        // cancel() depends on the runtime noticing the dropped connection, so
+        // listen on the request's own signal too. abort() is idempotent.
+        ctx.request?.signal?.addEventListener("abort", () => abort.abort(), {
+          once: true,
         });
 
         return new Response(stream, {

@@ -5,6 +5,7 @@ import { rm } from "node:fs/promises";
 import { getInternalToken } from "./auth/internal-token";
 import {
   emptyResult,
+  subprocessCancelled,
   subprocessFailed,
   subprocessSpawnFailed,
 } from "./util/errors";
@@ -22,7 +23,9 @@ export const run = async (
   port: number, // needed for self-calling services in pythonland
   args: any = {},
   onLog?: (str: string) => void,
-  onEvent?: (type: string, payload: any /* string or json tbh */) => void
+  onEvent?: (type: string, payload: any /* string or json tbh */) => void,
+  // Aborted when the client goes away
+  signal?: AbortSignal
 ) => {
   return new Promise<JSON | null>(async (resolve, reject) => {
     const id = crypto.randomUUID();
@@ -68,6 +71,32 @@ export const run = async (
       reject(subprocessSpawnFailed(scriptName, err));
     });
 
+    // `poetry run` execs into python rather than forking it, so this pid is the
+    // interpreter and a plain signal reaches it. Killing it closes the socket to
+    // Anthropic, which stops generation on the streaming calls; a non-streaming
+    // call is already submitted and gets billed whatever we do here.
+    let cancelled = false;
+    let hardKill: ReturnType<typeof setTimeout> | undefined;
+
+    const onAbort = () => {
+      cancelled = true;
+      console.warn(`cancelling ${scriptName}: client went away`);
+      proc.kill("SIGTERM");
+
+      // Python installs no SIGTERM handler, so termination is immediate. This
+      // is only for a child wedged somewhere that never sees it.
+      hardKill = setTimeout(() => proc.kill("SIGKILL"), 5_000);
+      hardKill.unref?.();
+    };
+
+    if (signal) {
+      if (signal.aborted) {
+        onAbort();
+      } else {
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+    }
+
     const rl = readline.createInterface({
       input: proc.stdout,
       crlfDelay: Infinity,
@@ -104,10 +133,15 @@ export const run = async (
       onLog?.(line);
     });
 
-    proc.on("close", async (code) => {
+    proc.on("close", async (code, closeSignal) => {
       // Clean up readline interfaces immediately to prevent race conditions
       rl.close();
       rl2.close();
+
+      if (hardKill) {
+        clearTimeout(hardKill);
+      }
+      signal?.removeEventListener("abort", onAbort);
 
       // Read before cleaning up, and clean up on every exit path
       const text = await Bun.file(outputPath)
@@ -122,13 +156,27 @@ export const run = async (
         console.error(e);
       }
 
+      // We killed it on purpose, so this is not a service failure
+      if (cancelled) {
+        return reject(subprocessCancelled(scriptName, closeSignal ?? "SIGTERM"));
+      }
+
       if (code) {
         console.error("Python process exited with code", code);
         return reject(subprocessFailed(scriptName, code));
       }
 
       if (text) {
-        return resolve(JSON.parse(text));
+        // Parsed inside the try: this handler is async, so a throw here
+        // becomes an unhandled rejection and the run never settles at all.
+        // A half-written file is what a crash mid-dump leaves behind.
+        try {
+          return resolve(JSON.parse(text));
+        } catch (e) {
+          console.error(`Unreadable output from ${scriptName}`);
+          console.error(e);
+          return reject(emptyResult(scriptName));
+        }
       }
 
       // entry.py writes a result on every path it completes, including its own
