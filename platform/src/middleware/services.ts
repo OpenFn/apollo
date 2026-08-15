@@ -19,6 +19,18 @@ export const HEARTBEAT_FRAME = ": ping\n\n";
 // inter-chunk timeout, and the 60s read timeout typical of proxies.
 export const HEARTBEAT_INTERVAL_MS = 15_000;
 
+// Read per request rather than at import, so it can be turned down without a
+// release if a hop turns out to be less patient than we thought. Zero and
+// negatives are rejected rather than passed to setInterval, which would treat
+// them as "every tick".
+export const heartbeatIntervalMs = (): number => {
+  const configured = Number(process.env.APOLLO_HEARTBEAT_INTERVAL_MS);
+
+  return Number.isFinite(configured) && configured > 0
+    ? configured
+    : HEARTBEAT_INTERVAL_MS;
+};
+
 const callService = (
   m: ModuleDescription,
   port: number,
@@ -110,6 +122,15 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
           async start(controller) {
             let isClosed = false;
 
+            let heartbeat: ReturnType<typeof setInterval> | undefined;
+
+            const stopHeartbeat = () => {
+              if (heartbeat) {
+                clearInterval(heartbeat);
+                heartbeat = undefined;
+              }
+            };
+
             const sendSSE = (event: string, data: any) => {
               if (isClosed) {
                 return;
@@ -121,8 +142,11 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
                 //  console.log(message.trim());
                 controller.enqueue(textEncoder.encode(message));
               } catch (error) {
-                // Stream may have been closed
+                // A throwing enqueue is how a dropped connection reaches us
+                // when the runtime has not called cancel(), so stop ticking
+                // here too rather than waiting out the interval.
                 isClosed = true;
+                stopHeartbeat();
               }
             };
 
@@ -136,25 +160,19 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
 
             // Started before the service call so the window while Python boots
             // is covered too
-            let heartbeat: ReturnType<typeof setInterval> | undefined =
-              setInterval(() => {
-                if (isClosed) {
-                  return;
-                }
-                try {
-                  controller.enqueue(textEncoder.encode(HEARTBEAT_FRAME));
-                } catch (error) {
-                  // consumer went away between ticks
-                  isClosed = true;
-                }
-              }, HEARTBEAT_INTERVAL_MS);
-
-            const stopHeartbeat = () => {
-              if (heartbeat) {
-                clearInterval(heartbeat);
-                heartbeat = undefined;
+            heartbeat = setInterval(() => {
+              if (isClosed) {
+                stopHeartbeat();
+                return;
               }
-            };
+              try {
+                controller.enqueue(textEncoder.encode(HEARTBEAT_FRAME));
+              } catch (error) {
+                // consumer went away between ticks
+                isClosed = true;
+                stopHeartbeat();
+              }
+            }, heartbeatIntervalMs());
 
             try {
               const result = await callService(
