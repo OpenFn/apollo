@@ -5,10 +5,10 @@ from typing import Any
 
 import yaml
 
-# The control. Every field the server may fill in on a payload, not just the
-# one it fills in today: a value here belongs to the deployment rather than to
-# the caller. langfuse_public_key is deliberately absent - it is meant to be
-# visible, and masking it would cost a useful identifier for nothing.
+# Every field the server may fill in on a payload, not just the one it fills
+# in today: a value under one of these belongs to the deployment rather than
+# to the caller. langfuse_public_key is deliberately absent - it is meant to
+# be visible, and masking it would cost a useful identifier for nothing.
 _SECRET_KEY_NAMES = {
     "api_key",
     "anthropic_api_key",
@@ -19,25 +19,19 @@ _SECRET_KEY_NAMES = {
     "x_api_key",
 }
 
-# Depth beyond which a payload is not being logged in good faith. Guards
-# against a self-inflicted RecursionError: json.loads accepts around a
-# thousand levels, and this runs over anything a caller sends.
+# json.loads accepts around a thousand levels of nesting and this runs over
+# whatever a caller sends, so a deep payload could otherwise take the process
+# down with a RecursionError.
 _MAX_DEPTH = 50
 
-# A backstop for a key that turns up somewhere the name list cannot see, such
-# as inside a string. Both directions matter, because this masks the workflow
-# YAML, job code and service results it passes over as well as anything
-# genuinely secret: without the lookbehind it eats the tail of ta[sk-],
-# ri[sk-], di[sk-]; matching sk- plus any hyphenated words eats
-# sk-antelope-migration-plan. So it anchors on the prefixes providers actually
-# use, and otherwise wants an unbroken high-entropy run rather than words.
+# A backstop for a key inside a string, where the name list cannot see it.
+# Deliberately narrow: this also passes over workflow YAML, job code and
+# service results, so a loose pattern corrupts a caller's own data. Hence a
+# known provider prefix, or a run too long and unbroken to be a name.
+# test_mask_secrets.py pins both directions.
 _SECRET_VALUE_PATTERN = re.compile(
     r"(?<![A-Za-z0-9])sk-(?:"
-    # A provider prefix, which needs its own trailing hyphen - so this does
-    # not fire on sk-antelope-something, where no hyphen follows the "ant".
     r"(?:ant|proj|svcacct|lf|or)-[\w-]+"
-    # Or an unbroken run of alphanumerics, long enough to be a key rather
-    # than the start of a hyphenated name.
     r"|[A-Za-z0-9]{20,}"
     r")",
 )

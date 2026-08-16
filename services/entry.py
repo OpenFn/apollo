@@ -138,12 +138,12 @@ def call(
 def _finish(result: dict, output_path: str | None) -> dict:
     """Mask, write the result where the caller expects it, then hand it back.
 
-    Every path out of `call` already came through here so that an empty output
-    file means the run died rather than that it failed politely. Masking here
-    too means a value the server put in the payload cannot leave down a branch
-    someone forgot: most services catch broadly and rewrap as
-    `ApolloError(500, str(e))`, so masking per-branch would miss the one nearly
-    all of them take.
+    Every path out of `call` comes through here, which buys two things. The
+    output file is always written, so the bridge can read an empty one as the
+    run having died rather than as a polite failure. And a value the server put
+    on the payload cannot leave down a branch someone forgot: most services
+    catch broadly and rewrap as `ApolloError(500, str(e))`, so masking
+    per-branch would miss the one nearly all of them take.
     """
     result = mask_secrets(result)
 

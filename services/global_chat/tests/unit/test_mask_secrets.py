@@ -53,8 +53,6 @@ def test_masks_a_secret_field_however_it_is_spelled(name: str) -> None:
 
 
 def test_does_not_recurse_without_bound() -> None:
-    # json.loads accepts around a thousand levels, and this runs over whatever
-    # a caller sends, so a deep payload must not take the process down.
     nested = {"leaf": "value"}
     for _ in range(600):
         nested = {"next": nested}
