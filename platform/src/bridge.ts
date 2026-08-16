@@ -7,9 +7,14 @@ import {
   emptyResult,
   subprocessCancelled,
   subprocessFailed,
+  subprocessKilled,
   subprocessSpawnFailed,
 } from "./util/errors";
 import pkg from "../../package.json";
+
+// A line a service logged on purpose, as opposed to whatever else lands on a
+// stream. Only these are forwarded to the caller.
+const LOG_LINE = /^(INFO|DEBUG|ERROR|WARNING):/;
 
 /**
   Run a python script
@@ -27,20 +32,29 @@ export const run = async (
   // Aborted when the client goes away
   signal?: AbortSignal
 ) => {
-  return new Promise<JSON | null>(async (resolve, reject) => {
-    const id = crypto.randomUUID();
+  const id = crypto.randomUUID();
 
-    const tmpfile = path.resolve(`tmp/data/${id}-{}.json`);
+  const tmpfile = path.resolve(`tmp/data/${id}-{}.json`);
 
-    const inputPath = tmpfile.replace("{}", "input");
-    const outputPath = tmpfile.replace("{}", "output");
+  const inputPath = tmpfile.replace("{}", "input");
+  const outputPath = tmpfile.replace("{}", "output");
 
-    // console.log("Initing input file at", inputPath);
+  // Outside the promise, deliberately. The Promise constructor only catches a
+  // synchronous throw from its executor, so an await that rejects in there -
+  // a full disk, a read-only tmp - leaves the promise pending for ever and
+  // the caller's stream open. Out here, run() is async and simply rejects.
+  try {
     await Bun.write(inputPath, JSON.stringify(args));
-
-    // console.log("Initing output file at", outputPath);
     await Bun.write(outputPath, "");
+  } catch (error) {
+    // The input file holds the key, so it does not get left behind on a
+    // half-finished setup.
+    await rm(inputPath).catch(() => {});
+    await rm(outputPath).catch(() => {});
+    throw subprocessSpawnFailed(scriptName, error);
+  }
 
+  return new Promise<JSON | null>((resolve, reject) => {
     const proc = spawn(
       "poetry",
       [
@@ -103,7 +117,7 @@ export const run = async (
     });
     rl.on("line", (line) => {
       // Then divert any logs from a logger object to the websocket
-      if (/^(INFO|DEBUG|ERROR|WARNING)\:/.test(line)) {
+      if (LOG_LINE.test(line)) {
         // Divert the log line locally
         console.log(line);
         // TODO I'd love to break the log line up in to JSON actually
@@ -129,8 +143,14 @@ export const run = async (
     });
     rl2.on("line", (line) => {
       console.error(line);
-      // /Divert all errors to the websocket
-      onLog?.(line);
+
+      // Only forward what a service logged deliberately, the same rule stdout
+      // follows. Everything else on stderr is the interpreter talking: raw
+      // tracebacks carrying server paths, source lines, and whatever a frame
+      // held - which for a service is the payload.
+      if (LOG_LINE.test(line)) {
+        onLog?.(line);
+      }
     });
 
     proc.on("close", async (code, closeSignal) => {
@@ -164,6 +184,14 @@ export const run = async (
       if (code) {
         console.error("Python process exited with code", code);
         return reject(subprocessFailed(scriptName, code));
+      }
+
+      // A child killed by a signal reports a null code, so without this the
+      // OOM killer - the likeliest way a service dies without exiting - would
+      // be reported as an empty result and the signal thrown away.
+      if (closeSignal) {
+        console.error(`Python process killed by ${closeSignal}`);
+        return reject(subprocessKilled(scriptName, closeSignal));
       }
 
       if (text) {

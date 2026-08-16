@@ -74,15 +74,21 @@ def call(
             with open(input_path, "r") as f:
                 data = json.load(f)
         except FileNotFoundError as e:
+            # The path is the server's own, so it is for the log, not the
+            # caller.
             sentry_sdk.capture_exception(e)
             return _finish(
-                ApolloError(code=500, message=f"Input file not found: {input_path}", type="INTERNAL_ERROR").to_dict(),
+                ApolloError(
+                    code=500, message="Input file not found", type="INTERNAL_ERROR"
+                ).to_dict(),
                 output_path,
             )
         except json.JSONDecodeError as e:
             sentry_sdk.capture_exception(e)
             return _finish(
-                ApolloError(code=500, message="Invalid JSON input", type="INTERNAL_ERROR").to_dict(),
+                ApolloError(
+                    code=500, message="Invalid JSON input", type="INTERNAL_ERROR"
+                ).to_dict(),
                 output_path,
             )
 

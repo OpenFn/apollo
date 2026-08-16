@@ -6,11 +6,7 @@ import { run } from "../bridge";
 import describeModules, {
   type ModuleDescription,
 } from "../util/describe-modules";
-import {
-  ApolloThrowable,
-  isApolloError,
-  type ApolloError,
-} from "../util/errors";
+import { isApolloError, toErrorPayload } from "../util/errors";
 import type { InstanceAuth } from "../auth/instance-auth";
 
 const textEncoder = new TextEncoder();
@@ -23,40 +19,22 @@ export const HEARTBEAT_FRAME = ": ping\n\n";
 // inter-chunk timeout, and the 60s read timeout typical of proxies.
 export const HEARTBEAT_INTERVAL_MS = 15_000;
 
+// Anything past this is a mistake rather than a choice, and setInterval turns
+// a delay over 2^31-1 into "every tick" - so the value someone reaches for to
+// mean "effectively never" would flood every open stream instead.
+const HEARTBEAT_MAX_MS = 120_000;
+
 // Read per request rather than at import, so it can be turned down without a
-// release if a hop turns out to be less patient than we thought. Zero and
-// negatives are rejected rather than passed to setInterval, which would treat
-// them as "every tick".
+// release if a hop turns out to be less patient than we thought. Out-of-range
+// values fall back rather than being passed to setInterval.
 export const heartbeatIntervalMs = (): number => {
   const configured = Number(process.env.APOLLO_HEARTBEAT_INTERVAL_MS);
 
-  return Number.isFinite(configured) && configured > 0
+  return Number.isFinite(configured) &&
+    configured > 0 &&
+    configured <= HEARTBEAT_MAX_MS
     ? configured
     : HEARTBEAT_INTERVAL_MS;
-};
-
-/** Normalise anything thrown by a service run into the ApolloError envelope, so
- *  a caller sees the same shape whether the failure was typed or not. */
-const toErrorPayload = (error: unknown): ApolloError => {
-  if (error instanceof ApolloThrowable) {
-    return error.toJSON();
-  }
-  // Rebuilt field by field rather than returned as-is: isApolloError only
-  // checks for a numeric `code`, and anything else hanging off the object
-  // would be serialised to the caller along with it.
-  if (isApolloError(error)) {
-    return {
-      code: error.code,
-      type: error.type,
-      message: error.message,
-      ...(error.details === undefined ? {} : { details: error.details }),
-    };
-  }
-  return {
-    code: 500,
-    type: "INTERNAL_ERROR",
-    message: error instanceof Error ? error.message : String(error),
-  };
 };
 
 const callService = (
@@ -75,6 +53,11 @@ const callService = (
     return m.handler!(port, payload as any, onLog);
   }
 };
+
+// The in-flight run for each open websocket, so closing the socket can stop
+// it. Keyed on the socket itself and deleted as soon as the run settles, so a
+// closed socket holds nothing.
+const wsRuns = new WeakMap<object, AbortController>();
 
 export default async (app: Elysia, port: number, auth: InstanceAuth) => {
   console.log("Loading routes:");
@@ -132,7 +115,17 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
 
         let result: any;
         try {
-          result = await callService(m, port, payload as any);
+          // The signal matters here as much as on the stream: a client that
+          // gives up waiting for a plain POST leaves the model generating
+          // just the same.
+          result = await callService(
+            m,
+            port,
+            payload as any,
+            undefined,
+            undefined,
+            ctx.request?.signal
+          );
         } catch (error) {
           const payload = toErrorPayload(error);
           return new Response(JSON.stringify(payload), {
@@ -295,6 +288,14 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
         open() {
           console.log(`Websocket connected  at /services/${name}`);
         },
+        // A websocket has no request signal, so cancellation needs its own
+        // controller and a close handler to fire it. Without this a WS caller
+        // going away leaves the child generating, which is the cost the whole
+        // change exists to stop.
+        close(ws) {
+          wsRuns.get(ws)?.abort();
+          wsRuns.delete(ws);
+        },
         message(ws, message) {
           try {
             if (message.event === "start") {
@@ -318,23 +319,40 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
               const base: Record<string, any> = { ...(message.data ?? {}) };
               const payload = applyKey(base, ws.data);
 
-              // The catch matters as much as the then: a run that rejects
-              // (spawn failure, empty output) would otherwise leave the client
-              // waiting on a frame that never comes. The try around this only
-              // sees synchronous throws.
-              callService(m, port, payload as any, onLog, onEvent)
-                .then((result) => {
+              const abort = new AbortController();
+              wsRuns.set(ws, abort);
+
+              // Two arguments rather than a chained catch: a chain would also
+              // catch a throw from the success callback and report it to the
+              // client as a service failure.
+              //
+              // The failure handler matters as much as the success one - a run
+              // that rejects (spawn failure, empty output) would otherwise
+              // leave the client waiting on a frame that never comes, since
+              // the try around this only sees synchronous throws.
+              callService(
+                m,
+                port,
+                payload as any,
+                onLog,
+                onEvent,
+                abort.signal
+              ).then(
+                (result) => {
+                  wsRuns.delete(ws);
                   ws.send({
                     event: "complete",
                     data: result,
                   });
-                })
-                .catch((error) => {
+                },
+                (error) => {
+                  wsRuns.delete(ws);
                   ws.send({
                     event: "error",
                     data: toErrorPayload(error),
                   });
-                });
+                }
+              );
             }
           } catch (e) {
             console.log(e);
