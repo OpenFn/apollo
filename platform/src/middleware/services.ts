@@ -7,7 +7,7 @@ import describeModules, {
   type ModuleDescription,
 } from "../util/describe-modules";
 import { isApolloError, toErrorPayload } from "../util/errors";
-import type { InstanceAuth } from "../auth/instance-auth";
+import type { InstanceAuth, KeyResolution } from "../auth/instance-auth";
 
 const textEncoder = new TextEncoder();
 
@@ -54,6 +54,44 @@ const callService = (
   }
 };
 
+/** Write the resolved key onto an outgoing payload.
+ *
+ *  Exported so a test can assert what lands on the payload without a service
+ *  reflecting it back: that was how this was covered before, and masking the
+ *  reflection took the proof with it.
+ *
+ *  The switch is explicit so the inbound-credential-never-forwarded invariant
+ *  is structural rather than positional: a known client's stored key is
+ *  swapped in (useKey), a request with no key of its own drops the field so
+ *  python falls back to the global one (useGlobal), and an internal
+ *  apollo() hop is forwarded exactly as received (passthrough).
+ */
+export const applyResolvedKey = (
+  payload: Record<string, any>,
+  resolution: KeyResolution
+): Record<string, any> => {
+  switch (resolution.kind) {
+    case "useKey":
+      payload.api_key = resolution.key;
+      break;
+    case "useGlobal":
+      delete payload.api_key;
+      break;
+    case "passthrough":
+      break;
+    default: {
+      // A new KeyResolution tag must be a compile error here, not a silent
+      // forward of the inbound credential.
+      const _exhaustive: never = resolution;
+      throw new Error(
+        `unhandled KeyResolution: ${(resolution as { kind: string }).kind}`
+      );
+    }
+  }
+
+  return payload;
+};
+
 // The in-flight run for each open websocket, so closing the socket can stop
 // it. Keyed on ws.raw, not ws: Elysia builds a fresh wrapper per event, so the
 // object the close handler receives is not the one the message handler saw,
@@ -65,35 +103,11 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
   console.log("Loading routes:");
   const modules = await describeModules(path.resolve("./services"));
 
-  // Apply the resolved key to an outgoing payload with an explicit switch so the
-  // inbound-credential-never-forwarded invariant is structural, not positional: a
-  // known client's stored key is swapped in (useKey), a NULL stored key (or a request
-  // with no api_key) drops the field so Python uses the global key (useGlobal), and an
-  // internal apollo() hop forwards the body exactly as received (passthrough). `ctx` is
-  // the upgrade-time context that carries lightningClient/internalCall: on POST the
-  // route ctx, on WS the captured ws.data, never a fresh per-message one.
-  const applyKey = (payload: Record<string, any>, ctx: any) => {
-    const resolution = auth.resolveKey(ctx);
-    switch (resolution.kind) {
-      case "useKey":
-        payload.api_key = resolution.key;
-        break;
-      case "useGlobal":
-        delete payload.api_key;
-        break;
-      case "passthrough":
-        break;
-      default: {
-        // Exhaustiveness guard: a new KeyResolution tag must be a compile error
-        // here, not a silent forward of the inbound credential.
-        const _exhaustive: never = resolution;
-        throw new Error(
-          `unhandled KeyResolution: ${(resolution as { kind: string }).kind}`
-        );
-      }
-    }
-    return payload;
-  };
+  // `ctx` is the upgrade-time context carrying lightningClient/internalCall:
+  // on POST the route ctx, on WS the captured ws.data, never a fresh
+  // per-message one.
+  const applyKey = (payload: Record<string, any>, ctx: any) =>
+    applyResolvedKey(payload, auth.resolveKey(ctx));
 
   const buildPayload = (ctx: any) =>
     applyKey({ ...(ctx.body ?? {}), session_id: ctx.uuid }, ctx);
