@@ -58,19 +58,8 @@ class ApolloError(Exception):
         return error_dict
 
 
-filename = None
 loggers: dict[str, logging.Logger] = {}
 apollo_port = 3000
-
-
-def set_log_output(f: str | None) -> None:
-    """Set the output file for logging."""
-    global filename  # noqa: PLW0603
-
-    if f is not None:
-        print(f"[entry.py] writing logs to {f}")  # noqa: T201
-
-    filename = f
 
 
 class _MaskingFilter(logging.Filter):
