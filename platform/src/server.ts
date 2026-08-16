@@ -14,11 +14,11 @@ import { randomUUID } from "node:crypto";
 import { readdir, rm } from "node:fs/promises";
 import path from "node:path";
 
-// A run's input file carries the provider key the server swapped in, and only
-// the bridge's close handler removes it - so anything that stopped the process
-// mid-run left one behind. Nothing else ever sweeps them, so a pod that
-// restarts often accumulates keys on disk indefinitely. Startup is the one
-// moment we know no run of ours is using them.
+// A run's input file can hold values that belong to the deployment rather
+// than the caller, and only the bridge's close handler removes it - so
+// anything that stopped the process mid-run left one behind, and nothing else
+// ever sweeps them. Startup is the one moment we know no run of ours is
+// reading them.
 const sweepTempPayloads = async () => {
   const dir = path.resolve("tmp/data");
 

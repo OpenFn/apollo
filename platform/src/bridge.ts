@@ -46,15 +46,15 @@ export const run = async (
   try {
     await Bun.write(inputPath, JSON.stringify(args));
 
-    // This file carries the provider key the server swapped in, and the only
-    // thing that removes it is the close handler - so a process that dies
-    // first leaves it behind. Readable by its owner alone, at least.
+    // The payload can hold values that belong to the deployment rather than
+    // the caller, and only the close handler removes this file - so a process
+    // that dies first leaves one behind.
     await chmod(inputPath, 0o600);
 
     await Bun.write(outputPath, "");
   } catch (error) {
-    // The input file holds the key, so it does not get left behind on a
-    // half-finished setup.
+    // Removed rather than left behind by a half-finished setup, for the same
+    // reason it is 0600 above.
     await rm(inputPath).catch(() => {});
     await rm(outputPath).catch(() => {});
     throw subprocessSpawnFailed(scriptName, error);
