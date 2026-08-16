@@ -16,33 +16,58 @@ _SECRET_KEY_NAMES = {
     "pinecone_api_key",
     "langfuse_secret_key",
     "authorization",
-    "x-api-key",
+    "x_api_key",
 }
+
+# Depth beyond which a payload is not being logged in good faith. Guards
+# against a self-inflicted RecursionError: json.loads accepts around a
+# thousand levels, and this runs over anything a caller sends.
+_MAX_DEPTH = 50
 
 # A backstop for a key that turns up somewhere the name list cannot see, such
 # as inside a string. The lookbehind is load-bearing: without it the sk- also
 # matches the tail of ta[sk-], ri[sk-], di[sk-] and friends, which are ordinary
 # words in the workflow YAML and job code this same function masks on the way
-# to Langfuse.
+# to Langfuse. Only alphanumerics need excluding - a key can legitimately
+# follow a hyphen or an underscore.
 _SECRET_VALUE_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9_-])sk-(?:ant-[\w-]+|[A-Za-z0-9_-]{16,})",
+    r"(?<![A-Za-z0-9])sk-(?:ant-[\w-]+|[A-Za-z0-9_-]{16,})",
 )
 
 
-def mask_secrets(data: Any) -> Any:  # noqa: ANN401
+def _normalise_name(key: object) -> str:
+    return str(key).lower().replace("-", "").replace("_", "")
+
+
+# Compared in normalised form, so api-key, apiKey and X-Api-Key are all caught
+# by the one readable entry above.
+_NORMALISED_SECRET_NAMES = {_normalise_name(name) for name in _SECRET_KEY_NAMES}
+
+
+def _is_secret_name(key: object) -> bool:
+    return _normalise_name(key) in _NORMALISED_SECRET_NAMES
+
+
+def mask_secrets(data: Any, _depth: int = 0) -> Any:  # noqa: ANN401
     """Langfuse mask callback: redact API keys from all traced data.
 
     Applied by the SDK to every span's input, output and metadata before
     export, so keys passed as function arguments to @observe-decorated
-    functions never reach Langfuse.
+    functions never reach Langfuse. Also used anywhere a service's own output
+    could carry a value the server put in the payload.
     """
+    if _depth > _MAX_DEPTH:
+        return "[TRUNCATED]"
+
     if isinstance(data, dict):
         return {
-            k: "[REDACTED]" if str(k).lower() in _SECRET_KEY_NAMES and v else mask_secrets(v)
+            k: "[REDACTED]"
+            if _is_secret_name(k) and v
+            else mask_secrets(v, _depth + 1)
             for k, v in data.items()
         }
     if isinstance(data, (list, tuple)):
-        return [mask_secrets(v) for v in data]
+        return [mask_secrets(v, _depth + 1) for v in data]
     if isinstance(data, str):
         return _SECRET_VALUE_PATTERN.sub("[REDACTED]", data)
     return data

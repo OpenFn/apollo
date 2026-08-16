@@ -1,17 +1,18 @@
-import sys
-import os
-import json
-import uuid
 import argparse
-from dotenv import load_dotenv
+import json
+import os
+import uuid
+
 import sentry_sdk
-from util import set_apollo_port, ApolloError
+from dotenv import load_dotenv
+from util import ApolloError, set_apollo_port
 
 load_dotenv()
 
 # Langfuse: init after load_dotenv so env vars are available, before any Anthropic client is created
 from opentelemetry.instrumentation.anthropic import AnthropicInstrumentor
 from opentelemetry.instrumentation.threading import ThreadingInstrumentor
+
 AnthropicInstrumentor().instrument()
 ThreadingInstrumentor().instrument()
 
@@ -42,17 +43,33 @@ trace_rates = {
     'unknown': 0.0,
     }
 
+def _scrub_event(event: dict, _hint: dict) -> dict:
+    """Mask keys in what Sentry is about to send.
+
+    Sentry scrubs frame locals by name, but not the exception message or a
+    set_context payload - and services raise ApolloError(500, str(e)) with the
+    request in scope. One hook here rather than each service remembering to
+    strip its own context before calling set_context.
+    """
+    for section in ("exception", "contexts", "extra", "logentry"):
+        if section in event:
+            event[section] = mask_secrets(event[section])
+
+    return event
+
+
 sentry_sdk.init(
     dsn=os.getenv('SENTRY_DSN'),
     environment=env,
     sample_rate=1.0,
     traces_sample_rate=trace_rates.get(env, 0.0),
     enable_tracing=True,
-    auto_enabling_integrations=False
+    auto_enabling_integrations=False,
+    before_send=_scrub_event,
 )
 
 def call(
-    service: str, *, input_path: str | None = None, output_path: str | None = None, apollo_port: int | None = None
+    service: str, *, input_path: str | None = None, output_path: str | None = None, apollo_port: int | None = None,
 ) -> dict:
     """
     Dynamically imports a module and invokes its main function with input data.
@@ -71,7 +88,7 @@ def call(
     data = {}
     if input_path:
         try:
-            with open(input_path, "r") as f:
+            with open(input_path) as f:
                 data = json.load(f)
         except FileNotFoundError as e:
             # The path is the server's own, so it is for the log, not the
@@ -95,23 +112,18 @@ def call(
     try:
         m = __import__(module_name, fromlist=["main"])
         result = m.main(data)
-    # An exception message goes back to the caller verbatim, and the payload is
-    # in scope wherever one is raised, so mask before it leaves.
     except ModuleNotFoundError as e:
         sentry_sdk.capture_exception(e)
-        return _finish(
-            ApolloError(
-                code=500, message=mask_secrets(str(e)), type="INTERNAL_ERROR"
-            ).to_dict(),
-            output_path,
-        )
+        result = ApolloError(
+            code=500, message=str(e), type="INTERNAL_ERROR",
+        ).to_dict()
     except ApolloError as e:
         sentry_sdk.capture_exception(e)
         result = e.to_dict()
     except Exception as e:
         sentry_sdk.capture_exception(e)
         result = ApolloError(
-            code=500, message=mask_secrets(str(e)), type="INTERNAL_ERROR"
+            code=500, message=str(e), type="INTERNAL_ERROR",
         ).to_dict()
 
     langfuse.flush()
@@ -120,11 +132,17 @@ def call(
 
 
 def _finish(result: dict, output_path: str | None) -> dict:
-    """Write the result where the caller expects it, then hand it back.
+    """Mask, write the result where the caller expects it, then hand it back.
 
-    Every path out of run_service goes through here, so an empty output file
-    means the run died rather than that it failed politely.
+    Every path out of `call` already came through here so that an empty output
+    file means the run died rather than that it failed politely. Masking here
+    too means a value the server put in the payload cannot leave down a branch
+    someone forgot: most services catch broadly and rewrap as
+    `ApolloError(500, str(e))`, so masking per-branch would miss the one nearly
+    all of them take.
     """
+    result = mask_secrets(result)
+
     if output_path:
         with open(output_path, "w") as f:
             json.dump(result, f)

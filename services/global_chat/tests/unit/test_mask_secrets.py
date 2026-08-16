@@ -6,7 +6,6 @@ workflow YAML, job code and prose it also passes over.
 """
 
 import pytest
-
 from langfuse_util import mask_secrets
 
 KEY_SHAPED = [
@@ -15,6 +14,10 @@ KEY_SHAPED = [
     "sk-proj-0123456789abcdef",
     "use sk-ant-abc123 to authenticate",
     "(sk-ant-abc123)",
+    # A key can legitimately follow a hyphen or underscore, so only an
+    # alphanumeric before the sk- means it is the tail of a word.
+    "-sk-ant-zzzzzzzzzzzzzzzzzz",
+    "_sk-ant-zzzzzzzzzzzzzzzzzz",
 ]
 
 # Every one of these ends in a token the pattern used to bite through: task-,
@@ -27,7 +30,27 @@ ORDINARY_TEXT = [
     "kiosk-registration-workflow-id",
     "https://docs.openfn.org/build/task-automation-guide",
     "const task = 'task-runner-config-value';",
+    "obelisk-carving-notes",
+    "whisk-attachment-guide",
 ]
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["api_key", "api-key", "apiKey", "X-Api-Key", "Authorization"],
+)
+def test_masks_a_secret_field_however_it_is_spelled(name: str) -> None:
+    assert mask_secrets({name: "anything"})[name] == "[REDACTED]"
+
+
+def test_does_not_recurse_without_bound() -> None:
+    # json.loads accepts around a thousand levels, and this runs over whatever
+    # a caller sends, so a deep payload must not take the process down.
+    nested = {"leaf": "value"}
+    for _ in range(600):
+        nested = {"next": nested}
+
+    assert isinstance(mask_secrets(nested), dict)
 
 
 @pytest.mark.parametrize("text", KEY_SHAPED)
