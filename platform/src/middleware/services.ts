@@ -55,8 +55,10 @@ const callService = (
 };
 
 // The in-flight run for each open websocket, so closing the socket can stop
-// it. Keyed on the socket itself and deleted as soon as the run settles, so a
-// closed socket holds nothing.
+// it. Keyed on ws.raw, not ws: Elysia builds a fresh wrapper per event, so the
+// object the close handler receives is not the one the message handler saw,
+// and the underlying socket is the only thing common to both. Deleted as soon
+// as the run settles, so a closed socket holds nothing.
 const wsRuns = new WeakMap<object, AbortController>();
 
 export default async (app: Elysia, port: number, auth: InstanceAuth) => {
@@ -293,8 +295,8 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
         // going away leaves the child generating, which is the cost the whole
         // change exists to stop.
         close(ws) {
-          wsRuns.get(ws)?.abort();
-          wsRuns.delete(ws);
+          wsRuns.get(ws.raw)?.abort();
+          wsRuns.delete(ws.raw);
         },
         message(ws, message) {
           try {
@@ -320,7 +322,7 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
               const payload = applyKey(base, ws.data);
 
               const abort = new AbortController();
-              wsRuns.set(ws, abort);
+              wsRuns.set(ws.raw, abort);
 
               // Two arguments rather than a chained catch: a chain would also
               // catch a throw from the success callback and report it to the
@@ -339,14 +341,14 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
                 abort.signal
               ).then(
                 (result) => {
-                  wsRuns.delete(ws);
+                  wsRuns.delete(ws.raw);
                   ws.send({
                     event: "complete",
                     data: result,
                   });
                 },
                 (error) => {
-                  wsRuns.delete(ws);
+                  wsRuns.delete(ws.raw);
                   ws.send({
                     event: "error",
                     data: toErrorPayload(error),
