@@ -2,6 +2,8 @@
 "apollo": patch
 ---
 
-echo: mask sensitive values rather than reflecting the whole payload back to
-the caller and into the logs. The shared mask now covers every field the
-server may fill in, and recognises both provider key formats by shape
+Mask sensitive values on their way out of a service, rather than relying on
+each one to remember: service loggers mask what they emit, echo masks what it
+returns, and the error envelope masks the exception text. The shared mask now
+covers every field the server may fill in, and no longer matches ordinary
+hyphenated words

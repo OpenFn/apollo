@@ -6,6 +6,7 @@ from typing import Any
 
 import psycopg2
 import requests
+from langfuse_util import mask_secrets
 
 APOLLO_VERSION = os.getenv("APOLLO_VERSION", "unknown")
 
@@ -72,6 +73,26 @@ def set_log_output(f: str | None) -> None:
     filename = f
 
 
+class _MaskingFilter(logging.Filter):
+    """Masks key-shaped values on their way out of a service logger.
+
+    This output does not stay on the server: the bridge matches the log prefix
+    on stdout and forwards the line to the caller as an SSE event. A service
+    that logs its own payload would therefore hand the caller the key the
+    server put there. Doing it here means no service has to remember.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Resolve %-args first, so the mask sees the text that will be emitted
+        # rather than a format string.
+        if record.args:
+            record.msg = record.getMessage()
+            record.args = ()
+
+        record.msg = mask_secrets(record.msg)
+        return True
+
+
 def create_logger(name: str) -> logging.Logger:
     """
     Create or retrieve a logger with the given name.
@@ -80,6 +101,7 @@ def create_logger(name: str) -> logging.Logger:
     logging.basicConfig(level=logging.INFO, stream=sys.stdout)
     if name not in loggers:
         logger = logging.getLogger(name)
+        logger.addFilter(_MaskingFilter())
         loggers[name] = logger
     return loggers[name]
 

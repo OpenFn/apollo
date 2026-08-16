@@ -5,24 +5,28 @@ from typing import Any
 
 import yaml
 
-# Every field the server may fill in on a payload, not just the one it fills
-# in today: a value here belongs to the deployment rather than to the caller.
+# The control. Every field the server may fill in on a payload, not just the
+# one it fills in today: a value here belongs to the deployment rather than to
+# the caller. langfuse_public_key is deliberately absent - it is meant to be
+# visible, and masking it would cost a useful identifier for nothing.
 _SECRET_KEY_NAMES = {
     "api_key",
     "anthropic_api_key",
     "openai_api_key",
     "pinecone_api_key",
     "langfuse_secret_key",
-    "langfuse_public_key",
     "authorization",
     "x-api-key",
 }
 
-# Catches a key by its shape, so one under a field name we did not list is
-# still masked. Anthropic's prefix is distinctive enough on its own; the
-# second branch covers the other sk- forms, with a length floor so it stays
-# off ordinary prose.
-_SECRET_VALUE_PATTERN = re.compile(r"sk-(?:ant-[\w\-]+|[A-Za-z0-9_\-]{16,})")
+# A backstop for a key that turns up somewhere the name list cannot see, such
+# as inside a string. The lookbehind is load-bearing: without it the sk- also
+# matches the tail of ta[sk-], ri[sk-], di[sk-] and friends, which are ordinary
+# words in the workflow YAML and job code this same function masks on the way
+# to Langfuse.
+_SECRET_VALUE_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_-])sk-(?:ant-[\w-]+|[A-Za-z0-9_-]{16,})",
+)
 
 
 def mask_secrets(data: Any) -> Any:  # noqa: ANN401

@@ -95,10 +95,14 @@ def call(
     try:
         m = __import__(module_name, fromlist=["main"])
         result = m.main(data)
+    # An exception message goes back to the caller verbatim, and the payload is
+    # in scope wherever one is raised, so mask before it leaves.
     except ModuleNotFoundError as e:
         sentry_sdk.capture_exception(e)
         return _finish(
-            ApolloError(code=500, message=str(e), type="INTERNAL_ERROR").to_dict(),
+            ApolloError(
+                code=500, message=mask_secrets(str(e)), type="INTERNAL_ERROR"
+            ).to_dict(),
             output_path,
         )
     except ApolloError as e:
@@ -106,7 +110,9 @@ def call(
         result = e.to_dict()
     except Exception as e:
         sentry_sdk.capture_exception(e)
-        result = ApolloError(code=500, message=str(e), type="INTERNAL_ERROR").to_dict()
+        result = ApolloError(
+            code=500, message=mask_secrets(str(e)), type="INTERNAL_ERROR"
+        ).to_dict()
 
     langfuse.flush()
 
