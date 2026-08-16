@@ -5,8 +5,24 @@ from typing import Any
 
 import yaml
 
-_SECRET_KEY_NAMES = {"api_key", "anthropic_api_key", "authorization"}
-_SECRET_VALUE_PATTERN = re.compile(r"sk-ant-[\w\-]+")
+# Every field the server may fill in on a payload, not just the one it fills
+# in today: a value here belongs to the deployment rather than to the caller.
+_SECRET_KEY_NAMES = {
+    "api_key",
+    "anthropic_api_key",
+    "openai_api_key",
+    "pinecone_api_key",
+    "langfuse_secret_key",
+    "langfuse_public_key",
+    "authorization",
+    "x-api-key",
+}
+
+# Catches a key by its shape, so one under a field name we did not list is
+# still masked. Anthropic's prefix is distinctive enough on its own; the
+# second branch covers the other sk- forms, with a length floor so it stays
+# off ordinary prose.
+_SECRET_VALUE_PATTERN = re.compile(r"sk-(?:ant-[\w\-]+|[A-Za-z0-9_\-]{16,})")
 
 
 def mask_secrets(data: Any) -> Any:  # noqa: ANN401
