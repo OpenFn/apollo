@@ -1,7 +1,7 @@
 import readline from "node:readline";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { rm } from "node:fs/promises";
+import { chmod, rm } from "node:fs/promises";
 import { getInternalToken } from "./auth/internal-token";
 import {
   emptyResult,
@@ -45,6 +45,12 @@ export const run = async (
   // the caller's stream open. Out here, run() is async and simply rejects.
   try {
     await Bun.write(inputPath, JSON.stringify(args));
+
+    // This file carries the provider key the server swapped in, and the only
+    // thing that removes it is the close handler - so a process that dies
+    // first leaves it behind. Readable by its owner alone, at least.
+    await chmod(inputPath, 0o600);
+
     await Bun.write(outputPath, "");
   } catch (error) {
     // The input file holds the key, so it does not get left behind on a

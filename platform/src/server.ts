@@ -11,6 +11,34 @@ import { captureException } from "./util/sentry";
 import { clientsDbUrl, closeDb } from "./db";
 import { runMigrations } from "./db/migrate";
 import { randomUUID } from "node:crypto";
+import { readdir, rm } from "node:fs/promises";
+import path from "node:path";
+
+// A run's input file carries the provider key the server swapped in, and only
+// the bridge's close handler removes it - so anything that stopped the process
+// mid-run left one behind. Nothing else ever sweeps them, so a pod that
+// restarts often accumulates keys on disk indefinitely. Startup is the one
+// moment we know no run of ours is using them.
+const sweepTempPayloads = async () => {
+  const dir = path.resolve("tmp/data");
+
+  try {
+    const stale = await readdir(dir);
+
+    await Promise.all(
+      stale.map((name) => rm(path.join(dir, name), { force: true }))
+    );
+
+    if (stale.length) {
+      console.log(`Removed ${stale.length} temp payload(s) left by a previous run`);
+    }
+  } catch (error) {
+    // No directory yet on a first boot, which is not worth reporting.
+    if ((error as { code?: string }).code !== "ENOENT") {
+      console.error("Could not sweep tmp/data", error);
+    }
+  }
+};
 import pkg from "../../package.json";
 
 export default async (
@@ -69,6 +97,7 @@ export default async (
   // warns about a per-process token meeting a shared port is live, not
   // hypothetical. It stays quiet once APOLLO_INTERNAL_TOKEN is set.
   logInternalTokenProvenance(true);
+  await sweepTempPayloads();
   await auth.init();
 
   // No stop path exists otherwise; close the DB pool so a graceful pod termination
