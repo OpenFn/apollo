@@ -5,7 +5,7 @@ import uuid
 
 import sentry_sdk
 from dotenv import load_dotenv
-from util import ApolloError, set_apollo_port
+from util import ApolloError, install_log_masking, set_apollo_port
 
 load_dotenv()
 
@@ -46,16 +46,12 @@ trace_rates = {
 def _scrub_event(event: dict, _hint: dict) -> dict:
     """Mask keys in what Sentry is about to send.
 
-    Sentry scrubs frame locals by name, but not the exception message or a
-    set_context payload - and services raise ApolloError(500, str(e)) with the
-    request in scope. One hook here rather than each service remembering to
-    strip its own context before calling set_context.
+    Sentry scrubs frame locals by name, but not the exception message, a
+    set_context payload, or a breadcrumb - and services raise
+    ApolloError(500, str(e)) with the request in scope. The whole event rather
+    than a list of sections, so a section nobody thought of is covered too.
     """
-    for section in ("exception", "contexts", "extra", "logentry"):
-        if section in event:
-            event[section] = mask_secrets(event[section])
-
-    return event
+    return mask_secrets(event)
 
 
 sentry_sdk.init(
@@ -66,6 +62,8 @@ sentry_sdk.init(
     enable_tracing=True,
     auto_enabling_integrations=False,
     before_send=_scrub_event,
+    # before_send covers error events only, and tracing is on.
+    before_send_transaction=_scrub_event,
 )
 
 def call(
@@ -111,6 +109,12 @@ def call(
 
     try:
         m = __import__(module_name, fromlist=["main"])
+
+        # Again here, after every import has had its chance to install a
+        # handler of its own. Some libraries add one that writes to stderr,
+        # which the bridge forwards to the caller line for line.
+        install_log_masking()
+
         result = m.main(data)
     except ModuleNotFoundError as e:
         sentry_sdk.capture_exception(e)

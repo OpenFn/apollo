@@ -114,20 +114,45 @@ class _MaskingFilter(logging.Filter):
 _masking_filter = _MaskingFilter()
 
 
+def install_log_masking() -> None:
+    """Put the mask on every handler that exists right now.
+
+    Called at import and again from create_logger, because handlers appear at
+    two different times: some libraries install their own before any service
+    module is imported (langfuse attaches one to the httpx logger, and it
+    writes to stderr, which the bridge forwards to the caller line for line),
+    and the root handler only exists once basicConfig has run.
+
+    A filter on a handler covers every record reaching that stream whatever
+    logger produced it - which a filter on a logger does not.
+    """
+    root = logging.getLogger()
+    known = [root, *(
+        logger
+        for logger in root.manager.loggerDict.values()
+        if isinstance(logger, logging.Logger)
+    )]
+
+    for logger in known:
+        for handler in logger.handlers:
+            if _masking_filter not in handler.filters:
+                handler.addFilter(_masking_filter)
+
+
 def create_logger(name: str) -> logging.Logger:
     """
     Create or retrieve a logger with the given name.
     Logs to stdout by default.
     """
     logging.basicConfig(level=logging.INFO, stream=sys.stdout)
-
-    for handler in logging.getLogger().handlers:
-        if _masking_filter not in handler.filters:
-            handler.addFilter(_masking_filter)
+    install_log_masking()
 
     if name not in loggers:
         loggers[name] = logging.getLogger(name)
     return loggers[name]
+
+
+install_log_masking()
 
 
 def set_apollo_port(p: int) -> None:

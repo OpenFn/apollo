@@ -18,6 +18,9 @@ KEY_SHAPED = [
     # alphanumeric before the sk- means it is the tail of a word.
     "-sk-ant-zzzzzzzzzzzzzzzzzz",
     "_sk-ant-zzzzzzzzzzzzzzzzzz",
+    "sk-svcacct-abcdefgh",
+    "sk-abcdefghijklmnopqrstuvwx",
+    "Bearer sk-ant-abc12345",
 ]
 
 # Every one of these ends in a token the pattern used to bite through: task-,
@@ -32,6 +35,12 @@ ORDINARY_TEXT = [
     "const task = 'task-runner-config-value';",
     "obelisk-carving-notes",
     "whisk-attachment-guide",
+    # The other direction: a name that starts with sk- and carries on in
+    # words. Only a provider prefix or an unbroken high-entropy run counts.
+    "sk-antelope-migration-plan",
+    "step-sk-mapping-export-v2",
+    "load-sk-patient-records-job",
+    "--sk-ignore-case-sensitivity",
 ]
 
 

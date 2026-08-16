@@ -25,13 +25,21 @@ _SECRET_KEY_NAMES = {
 _MAX_DEPTH = 50
 
 # A backstop for a key that turns up somewhere the name list cannot see, such
-# as inside a string. The lookbehind is load-bearing: without it the sk- also
-# matches the tail of ta[sk-], ri[sk-], di[sk-] and friends, which are ordinary
-# words in the workflow YAML and job code this same function masks on the way
-# to Langfuse. Only alphanumerics need excluding - a key can legitimately
-# follow a hyphen or an underscore.
+# as inside a string. Both directions matter, because this masks the workflow
+# YAML, job code and service results it passes over as well as anything
+# genuinely secret: without the lookbehind it eats the tail of ta[sk-],
+# ri[sk-], di[sk-]; matching sk- plus any hyphenated words eats
+# sk-antelope-migration-plan. So it anchors on the prefixes providers actually
+# use, and otherwise wants an unbroken high-entropy run rather than words.
 _SECRET_VALUE_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9])sk-(?:ant-[\w-]+|[A-Za-z0-9_-]{16,})",
+    r"(?<![A-Za-z0-9])sk-(?:"
+    # A provider prefix, which needs its own trailing hyphen - so this does
+    # not fire on sk-antelope-something, where no hyphen follows the "ant".
+    r"(?:ant|proj|svcacct|lf|or)-[\w-]+"
+    # Or an unbroken run of alphanumerics, long enough to be a key rather
+    # than the start of a hyphenated name.
+    r"|[A-Za-z0-9]{20,}"
+    r")",
 )
 
 
