@@ -1056,3 +1056,12 @@ describe("Instance auth key encryption", () => {
     }
   });
 });
+
+describe("Websocket timeouts", () => {
+  // serve.idleTimeout does not reach websockets: Bun keeps a separate timer
+  // for them, defaulting to 120s. Without this a WS caller waiting on a slow
+  // answer is dropped long before the heartbeat has bought anything.
+  it("gives websockets the same patience as SSE streams", () => {
+    expect(app.config.websocket?.idleTimeout).toBe(255);
+  });
+});

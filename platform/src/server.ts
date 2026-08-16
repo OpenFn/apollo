@@ -26,6 +26,13 @@ export default async (
     serve: {
       idleTimeout: 255,
     },
+    // Websockets have their own idle timer, which serve.idleTimeout does not
+    // reach - it defaults to 120s, so a WS caller waiting on a slow answer
+    // would be dropped well before the SSE route's heartbeat had earned it
+    // anything.
+    websocket: {
+      idleTimeout: 255,
+    },
   });
 
   app.use(html());
@@ -58,9 +65,10 @@ export default async (
     }
   }
 
-  // app.listen below sets no reusePort, so the multi-process internal-token warn
-  // is dormant; pass the flag here if clustering is ever enabled.
-  logInternalTokenProvenance(false);
+  // Elysia's Bun adapter sets reusePort unconditionally, so the guard that
+  // warns about a per-process token meeting a shared port is live, not
+  // hypothetical. It stays quiet once APOLLO_INTERNAL_TOKEN is set.
+  logInternalTokenProvenance(true);
   await auth.init();
 
   // No stop path exists otherwise; close the DB pool so a graceful pod termination
