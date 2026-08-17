@@ -178,7 +178,8 @@ SSE to clients.
   against the `apollo-mappings` Pinecone index (collections `loinc-mappings-v2`,
   `snomed-mappings`). `embed_loinc_dataset` / `embed_snomed_dataset` populate it.
 - `status/` - Health check: validates Anthropic, OpenAI and Pinecone keys.
-- `echo/` - Test service that returns its input; useful for verifying the server
+- `echo/` - Test service that returns its input (with server-set values such as
+  `api_key` masked); useful for verifying the server
   pipeline.
 
 Note: there are **three distinct Pinecone indexes** — `docsite` (OpenFn docs),
