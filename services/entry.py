@@ -1,17 +1,18 @@
-import sys
-import os
-import json
-import uuid
 import argparse
-from dotenv import load_dotenv
+import json
+import os
+import uuid
+
 import sentry_sdk
-from util import set_apollo_port, ApolloError
+from dotenv import load_dotenv
+from util import ApolloError, install_log_masking, set_apollo_port
 
 load_dotenv()
 
 # Langfuse: init after load_dotenv so env vars are available, before any Anthropic client is created
 from opentelemetry.instrumentation.anthropic import AnthropicInstrumentor
 from opentelemetry.instrumentation.threading import ThreadingInstrumentor
+
 AnthropicInstrumentor().instrument()
 ThreadingInstrumentor().instrument()
 
@@ -42,17 +43,31 @@ trace_rates = {
     'unknown': 0.0,
     }
 
+def _scrub_event(event: dict, _hint: dict) -> dict:
+    """Mask keys in what Sentry is about to send.
+
+    Sentry scrubs frame locals by name, but not the exception message, a
+    set_context payload, or a breadcrumb - and services raise
+    ApolloError(500, str(e)) with the request in scope. The whole event rather
+    than a list of sections, so a section nobody thought of is covered too.
+    """
+    return mask_secrets(event)
+
+
 sentry_sdk.init(
     dsn=os.getenv('SENTRY_DSN'),
     environment=env,
     sample_rate=1.0,
     traces_sample_rate=trace_rates.get(env, 0.0),
     enable_tracing=True,
-    auto_enabling_integrations=False
+    auto_enabling_integrations=False,
+    before_send=_scrub_event,
+    # before_send covers error events only, and tracing is on.
+    before_send_transaction=_scrub_event,
 )
 
 def call(
-    service: str, *, input_path: str | None = None, output_path: str | None = None, apollo_port: int | None = None
+    service: str, *, input_path: str | None = None, output_path: str | None = None, apollo_port: int | None = None,
 ) -> dict:
     """
     Dynamically imports a module and invokes its main function with input data.
@@ -71,7 +86,7 @@ def call(
     data = {}
     if input_path:
         try:
-            with open(input_path, "r") as f:
+            with open(input_path) as f:
                 data = json.load(f)
         except FileNotFoundError as e:
             # The path is the server's own, so it is for the log, not the
@@ -94,19 +109,26 @@ def call(
 
     try:
         m = __import__(module_name, fromlist=["main"])
+
+        # Again here, after every import has had its chance to install a
+        # handler of its own. Some libraries add one that writes to stderr,
+        # which the bridge forwards to the caller line for line.
+        install_log_masking()
+
         result = m.main(data)
     except ModuleNotFoundError as e:
         sentry_sdk.capture_exception(e)
-        return _finish(
-            ApolloError(code=500, message=str(e), type="INTERNAL_ERROR").to_dict(),
-            output_path,
-        )
+        result = ApolloError(
+            code=500, message=str(e), type="INTERNAL_ERROR",
+        ).to_dict()
     except ApolloError as e:
         sentry_sdk.capture_exception(e)
         result = e.to_dict()
     except Exception as e:
         sentry_sdk.capture_exception(e)
-        result = ApolloError(code=500, message=str(e), type="INTERNAL_ERROR").to_dict()
+        result = ApolloError(
+            code=500, message=str(e), type="INTERNAL_ERROR",
+        ).to_dict()
 
     langfuse.flush()
 
@@ -114,11 +136,17 @@ def call(
 
 
 def _finish(result: dict, output_path: str | None) -> dict:
-    """Write the result where the caller expects it, then hand it back.
+    """Mask, write the result where the caller expects it, then hand it back.
 
-    Every path out of run_service goes through here, so an empty output file
-    means the run died rather than that it failed politely.
+    Every path out of `call` comes through here, which buys two things. The
+    output file is always written, so the bridge can read an empty one as the
+    run having died rather than as a polite failure. And a value the server put
+    on the payload cannot leave down a branch someone forgot: most services
+    catch broadly and rewrap as `ApolloError(500, str(e))`, so masking
+    per-branch would miss the one nearly all of them take.
     """
+    result = mask_secrets(result)
+
     if output_path:
         with open(output_path, "w") as f:
             json.dump(result, f)

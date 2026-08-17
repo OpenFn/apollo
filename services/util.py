@@ -6,6 +6,7 @@ from typing import Any
 
 import psycopg2
 import requests
+from langfuse_util import mask_secrets
 
 APOLLO_VERSION = os.getenv("APOLLO_VERSION", "unknown")
 
@@ -57,19 +58,77 @@ class ApolloError(Exception):
         return error_dict
 
 
-filename = None
 loggers: dict[str, logging.Logger] = {}
 apollo_port = 3000
 
 
-def set_log_output(f: str | None) -> None:
-    """Set the output file for logging."""
-    global filename  # noqa: PLW0603
+class _MaskingFilter(logging.Filter):
+    """Masks key-shaped values on their way out to the log stream.
 
-    if f is not None:
-        print(f"[entry.py] writing logs to {f}")  # noqa: T201
+    This output does not stay on the server: the bridge matches the log prefix
+    on stdout and forwards the line to the caller as an SSE event. A service
+    that logs its own payload would therefore hand the caller the key the
+    server put there.
 
-    filename = f
+    Attached to the stdout handler rather than to each logger, because a
+    filter on a logger only runs for records emitted through it - a plain
+    `logging.getLogger(__name__)`, or a third-party logger like httpx, writes
+    to the same handler and would sail past.
+
+    Note the two levels are not equally strong. A dict is masked by field name
+    and by value shape; anything already rendered to text, including a payload
+    interpolated into an f-string, has only the shape to go on.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        # A container is worth masking structurally, so field names apply.
+        if isinstance(record.msg, (dict, list, tuple)) and not record.args:
+            record.msg = mask_secrets(record.msg)
+            return True
+
+        # Otherwise mask the text that will actually be emitted. Rendering
+        # normally happens inside the handler, where a bad format string is
+        # caught and reported; here it would escape into the caller's own
+        # logging call, so a cosmetic typo must not fail their request.
+        try:
+            rendered = record.getMessage()
+        except Exception:
+            return True
+
+        record.msg = mask_secrets(rendered)
+        record.args = ()
+        return True
+
+
+_masking_filter = _MaskingFilter()
+
+
+def install_log_masking() -> None:
+    """Put the mask on every handler that exists right now.
+
+    Called at import and again from create_logger, because handlers appear at
+    two different times: some libraries install their own before any service
+    module is imported (langfuse attaches one to the httpx logger, and it
+    writes to stderr, which the bridge forwards to the caller line for line),
+    and the root handler only exists once basicConfig has run.
+
+    A filter on a handler covers every record reaching that stream whatever
+    logger produced it - which a filter on a logger does not.
+
+    loggerDict is copied rather than walked live: a thread creating a logger
+    resizes it mid-walk, which raises RuntimeError.
+    """
+    root = logging.getLogger()
+    known = [root, *(
+        logger
+        for logger in list(root.manager.loggerDict.values())
+        if isinstance(logger, logging.Logger)
+    )]
+
+    for logger in known:
+        for handler in logger.handlers:
+            if _masking_filter not in handler.filters:
+                handler.addFilter(_masking_filter)
 
 
 def create_logger(name: str) -> logging.Logger:
@@ -78,10 +137,14 @@ def create_logger(name: str) -> logging.Logger:
     Logs to stdout by default.
     """
     logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+    install_log_masking()
+
     if name not in loggers:
-        logger = logging.getLogger(name)
-        loggers[name] = logger
+        loggers[name] = logging.getLogger(name)
     return loggers[name]
+
+
+install_log_masking()
 
 
 def set_apollo_port(p: int) -> None:
