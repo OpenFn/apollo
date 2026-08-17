@@ -37,6 +37,12 @@ export const heartbeatIntervalMs = (): number => {
     : HEARTBEAT_INTERVAL_MS;
 };
 
+// Killing these mid-run corrupts shared state that other services read:
+// embed_docsite fills a fresh timestamped namespace that search_docsite treats
+// as live the moment it is newest, and load_adaptor_docs commits its delete
+// before its insert. They run to completion even when the caller has gone.
+const NON_CANCELLABLE = new Set(["embed_docsite", "load_adaptor_docs"]);
+
 const callService = (
   m: ModuleDescription,
   port: number,
@@ -45,6 +51,10 @@ const callService = (
   onEvent?: (evt: string, payload: any) => void,
   signal?: AbortSignal
 ) => {
+  if (NON_CANCELLABLE.has(m.name)) {
+    signal = undefined;
+  }
+
   if (m.type === "py") {
     return run(m.name, port, payload as any, onLog, onEvent, signal);
   } else {
@@ -55,8 +65,11 @@ const callService = (
 };
 
 // The in-flight run for each open websocket, so closing the socket can stop
-// it. Keyed on the socket itself and deleted as soon as the run settles, so a
-// closed socket holds nothing.
+// it. Keyed on ws.data, NOT on ws: Elysia builds a fresh ElysiaWS wrapper for
+// every callback, so the object message() sees is never the object close()
+// sees and a map keyed on it can never hit. ws.data is the upgrade context,
+// created once per connection and carried on every wrapper. Deleted as soon
+// as the run settles, so a closed socket holds nothing.
 const wsRuns = new WeakMap<object, AbortController>();
 
 export default async (app: Elysia, port: number, auth: InstanceAuth) => {
@@ -293,8 +306,8 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
         // going away leaves the child generating, which is the cost the whole
         // change exists to stop.
         close(ws) {
-          wsRuns.get(ws)?.abort();
-          wsRuns.delete(ws);
+          wsRuns.get(ws.data)?.abort();
+          wsRuns.delete(ws.data);
         },
         message(ws, message) {
           try {
@@ -319,8 +332,13 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
               const base: Record<string, any> = { ...(message.data ?? {}) };
               const payload = applyKey(base, ws.data);
 
+              // A second start frame on the same socket would otherwise
+              // orphan the first run: its controller leaves the map, so the
+              // close handler could never reach it again.
+              wsRuns.get(ws.data)?.abort();
+
               const abort = new AbortController();
-              wsRuns.set(ws, abort);
+              wsRuns.set(ws.data, abort);
 
               // Two arguments rather than a chained catch: a chain would also
               // catch a throw from the success callback and report it to the
@@ -339,14 +357,20 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
                 abort.signal
               ).then(
                 (result) => {
-                  wsRuns.delete(ws);
+                  // Only if it is still ours: a later start frame may have
+                  // replaced this run's controller with its own.
+                  if (wsRuns.get(ws.data) === abort) {
+                    wsRuns.delete(ws.data);
+                  }
                   ws.send({
                     event: "complete",
                     data: result,
                   });
                 },
                 (error) => {
-                  wsRuns.delete(ws);
+                  if (wsRuns.get(ws.data) === abort) {
+                    wsRuns.delete(ws.data);
+                  }
                   ws.send({
                     event: "error",
                     data: toErrorPayload(error),
