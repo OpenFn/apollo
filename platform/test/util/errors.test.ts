@@ -4,7 +4,9 @@ import {
   ApolloThrowable,
   emptyResult,
   isApolloError,
+  malformedResult,
   subprocessFailed,
+  subprocessKilled,
   subprocessSpawnFailed,
 } from "../../src/util/errors";
 
@@ -57,5 +59,21 @@ describe("subprocess failures", () => {
     const details = subprocessSpawnFailed("echo", new Error("ENOENT")).details;
 
     expect(details?.cause).toBe("ENOENT");
+  });
+
+  // OOM or a deploy's SIGTERM: the process reports a null exit code, so the
+  // signal is the only honest diagnosis.
+  it("names the signal when the process was killed", () => {
+    const error = subprocessKilled("embed_docsite", "SIGKILL");
+
+    expect(error.type).toBe("SUBPROCESS_KILLED");
+    expect(error.details?.signal).toBe("SIGKILL");
+  });
+
+  it("reports unparseable output as a bad gateway", () => {
+    const error = malformedResult("echo");
+
+    expect(error.type).toBe("MALFORMED_RESULT");
+    expect(error.code).toBe(502);
   });
 });

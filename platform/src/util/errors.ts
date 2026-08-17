@@ -80,6 +80,33 @@ export function subprocessSpawnFailed(
   );
 }
 
+/** The service process was killed by a signal - OOM, or SIGTERM during a
+ *  deploy. A killed process reports a null exit code, so without this case it
+ *  would be misread as having finished. */
+export function subprocessKilled(
+  service: string,
+  signal: string
+): ApolloThrowable {
+  return new ApolloThrowable(
+    500,
+    "SUBPROCESS_KILLED",
+    `Service "${service}" was killed by signal ${signal}`,
+    { service, signal }
+  );
+}
+
+/** The service exited cleanly but its output isn't valid JSON. Without this
+ *  case the parse error escapes the close handler and the request never
+ *  settles. */
+export function malformedResult(service: string): ApolloThrowable {
+  return new ApolloThrowable(
+    502,
+    "MALFORMED_RESULT",
+    `Service "${service}" produced a result that could not be parsed`,
+    { service }
+  );
+}
+
 /** The service exited cleanly but wrote nothing. entry.py writes a result on
  *  every path it completes, so an empty file means the run died. */
 export function emptyResult(service: string): ApolloThrowable {

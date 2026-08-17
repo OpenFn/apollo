@@ -5,7 +5,9 @@ import { rm } from "node:fs/promises";
 import { getInternalToken } from "./auth/internal-token";
 import {
   emptyResult,
+  malformedResult,
   subprocessFailed,
+  subprocessKilled,
   subprocessSpawnFailed,
 } from "./util/errors";
 import pkg from "../../package.json";
@@ -104,7 +106,7 @@ export const run = async (
       onLog?.(line);
     });
 
-    proc.on("close", async (code) => {
+    proc.on("close", async (code, signal) => {
       // Clean up readline interfaces immediately to prevent race conditions
       rl.close();
       rl2.close();
@@ -122,13 +124,28 @@ export const run = async (
         console.error(e);
       }
 
+      // Checked before the exit code and the output: a killed process reports
+      // a null code and usually a truncated file, so either later check would
+      // misdiagnose it
+      if (signal) {
+        console.error("Python process killed by signal", signal);
+        return reject(subprocessKilled(scriptName, signal));
+      }
+
       if (code) {
         console.error("Python process exited with code", code);
         return reject(subprocessFailed(scriptName, code));
       }
 
       if (text) {
-        return resolve(JSON.parse(text));
+        // A parse error must be caught here: thrown, it escapes the close
+        // handler and the promise never settles
+        try {
+          return resolve(JSON.parse(text));
+        } catch (e) {
+          console.error("Unparseable output from pythonland", e);
+          return reject(malformedResult(scriptName));
+        }
       }
 
       // entry.py writes a result on every path it completes, including its own
