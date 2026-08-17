@@ -109,6 +109,18 @@ export function subprocessKilled(
   );
 }
 
+/** The service exited cleanly but its output isn't valid JSON. Without this
+ *  case the parse error escapes the close handler and the request never
+ *  settles. */
+export function malformedResult(service: string): ApolloThrowable {
+  return new ApolloThrowable(
+    502,
+    "MALFORMED_RESULT",
+    `Service "${service}" produced a result that could not be parsed`,
+    { service }
+  );
+}
+
 /** The service exited cleanly but wrote nothing. entry.py writes a result on
  *  every path it completes, so an empty file means the run died. */
 export function emptyResult(service: string): ApolloThrowable {

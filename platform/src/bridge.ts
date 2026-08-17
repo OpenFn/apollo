@@ -5,6 +5,7 @@ import { chmod, rm } from "node:fs/promises";
 import { getInternalToken } from "./auth/internal-token";
 import {
   emptyResult,
+  malformedResult,
   subprocessCancelled,
   subprocessFailed,
   subprocessKilled,
@@ -209,7 +210,7 @@ export const run = async (
         } catch (e) {
           console.error(`Unreadable output from ${scriptName}`);
           console.error(e);
-          return reject(emptyResult(scriptName));
+          return reject(malformedResult(scriptName));
         }
       }
 
