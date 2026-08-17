@@ -80,9 +80,23 @@ export function subprocessSpawnFailed(
   );
 }
 
-/** The service process was killed by a signal - OOM, or SIGTERM during a
- *  deploy. A killed process reports a null exit code, so without this case it
- *  would be misread as having finished. */
+/** We stopped the service ourselves because the client went away. 499 keeps
+ *  these out of the 5xx that mean something is actually broken. */
+export function subprocessCancelled(
+  service: string,
+  signal: string
+): ApolloThrowable {
+  return new ApolloThrowable(
+    499,
+    "SUBPROCESS_CANCELLED",
+    `Service "${service}" was cancelled because the client disconnected`,
+    { service, signal }
+  );
+}
+
+/** Something outside Apollo killed the service - most often the OOM killer.
+ *  Distinct from a cancellation, which is us, and from a non-zero exit, which
+ *  is the service deciding to stop. */
 export function subprocessKilled(
   service: string,
   signal: string
@@ -90,7 +104,7 @@ export function subprocessKilled(
   return new ApolloThrowable(
     500,
     "SUBPROCESS_KILLED",
-    `Service "${service}" was killed by signal ${signal}`,
+    `Service "${service}" was killed by ${signal}`,
     { service, signal }
   );
 }
@@ -138,4 +152,28 @@ export function clientMisconfigured(ctx: any): ApolloError {
     "CLIENT_MISCONFIGURED",
     "Client has no API key configured"
   );
+}
+
+/** Normalise anything thrown by a service run into the ApolloError envelope, so
+ *  a caller sees the same shape whether the failure was typed or not. */
+export function toErrorPayload(error: unknown): ApolloError {
+  if (error instanceof ApolloThrowable) {
+    return error.toJSON();
+  }
+  // Rebuilt field by field rather than returned as-is: isApolloError only
+  // checks for a numeric `code`, and anything else hanging off the object
+  // would be serialised to the caller along with it.
+  if (isApolloError(error)) {
+    return {
+      code: error.code,
+      type: error.type,
+      message: error.message,
+      ...(error.details === undefined ? {} : { details: error.details }),
+    };
+  }
+  return {
+    code: 500,
+    type: "INTERNAL_ERROR",
+    message: error instanceof Error ? error.message : String(error),
+  };
 }
