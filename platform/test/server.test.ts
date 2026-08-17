@@ -85,6 +85,13 @@ describe("Main server", () => {
     expect(await response.text()).toBe("");
   });
 
+  // Asserts the configuration rather than the behaviour: these tests drive the
+  // app through app.handle(), which never opens a socket, so none of them can
+  // observe a socket timer.
+  it("keeps the socket idle timeout long enough for slow SSE streams", () => {
+    expect(app.config.serve?.idleTimeout).toBe(255);
+  });
+
   // send messages through a web socket
 });
 
@@ -247,13 +254,20 @@ describe("Instance authentication", () => {
   });
 
   // Row 1
+  //
+  // echo used to hand its payload back verbatim, which is what let these rows
+  // read the swapped key off the response. It masks now, so what is left to
+  // observe here is that the request was accepted and the field was set. That
+  // the *correct* key is selected is covered directly against
+  // InstanceAuth.authenticate further down, where lightningClient.anthropicKey
+  // is asserted without a round trip through a service.
   it("accepts a known credential and swaps in the client's stored key", async () => {
     const res = await app.handle(postKey("services/echo", { x: 1 }, ALPHA));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.x).toBe(1);
-    expect(body.api_key).toBe("sk-ant-stored-alpha");
-    expect(body.api_key).not.toBe(ALPHA);
+    expect(body.api_key).toBe("[REDACTED]");
+    expect(JSON.stringify(body)).not.toContain(ALPHA);
   });
 
   // Row 2 — a recognised client whose stored key is NULL is a server-side
@@ -334,7 +348,7 @@ describe("Instance authentication", () => {
       postKey("services/echo", { x: 1 }, "sk-ant-unknown")
     );
     expect(swap.status).toBe(200);
-    expect((await swap.json()).api_key).toBe("sk-ant-stored-alpha");
+    expect((await swap.json()).api_key).toBe("[REDACTED]");
     expect(unknown.status).toBe(401);
   });
 
@@ -476,7 +490,9 @@ describe("Instance authentication", () => {
     const res = await app.handle(req);
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.api_key).toBe("sk-ant-internal-hop");
+    // Masked on the way out like anything else. What this row pins is that an
+    // internal call is accepted and its body forwarded rather than rejected.
+    expect(body.api_key).toBe("[REDACTED]");
   });
 
   // WS upgrade auth decision via app.handle(): a bare upgrade carries no api_key, so
@@ -537,8 +553,8 @@ describe("Instance authentication", () => {
   // that ws.data carries the lightningClient set during beforeHandle.
   it("swaps a known client's stored key on a WS upgrade via ?api_key=", async () => {
     const body = await wsRoundTrip(`?api_key=${encodeURIComponent(ALPHA)}`);
-    expect(body.api_key).toBe("sk-ant-stored-alpha");
-    expect(body.api_key).not.toBe(ALPHA);
+    expect(body.api_key).toBe("[REDACTED]");
+    expect(JSON.stringify(body)).not.toContain(ALPHA);
     expect(body.ws).toBe(1);
   });
 
@@ -582,7 +598,7 @@ describe("Instance authentication", () => {
         );
       });
     });
-    expect(body.api_key).toBe("sk-ant-internal-fwd");
+    expect(body.api_key).toBe("[REDACTED]");
   });
 });
 
@@ -1047,5 +1063,14 @@ describe("Instance auth key encryption", () => {
       capture.mockRestore();
       error.mockRestore();
     }
+  });
+});
+
+describe("Websocket timeouts", () => {
+  // serve.idleTimeout does not reach websockets: Bun keeps a separate timer
+  // for them, defaulting to 120s. Without this a WS caller waiting on a slow
+  // answer is dropped long before the heartbeat has bought anything.
+  it("gives websockets the same patience as SSE streams", () => {
+    expect(app.config.websocket?.idleTimeout).toBe(255);
   });
 });
