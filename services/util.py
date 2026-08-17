@@ -114,11 +114,14 @@ def install_log_masking() -> None:
 
     A filter on a handler covers every record reaching that stream whatever
     logger produced it - which a filter on a logger does not.
+
+    loggerDict is copied rather than walked live: a thread creating a logger
+    resizes it mid-walk, which raises RuntimeError.
     """
     root = logging.getLogger()
     known = [root, *(
         logger
-        for logger in root.manager.loggerDict.values()
+        for logger in list(root.manager.loggerDict.values())
         if isinstance(logger, logging.Logger)
     )]
 
