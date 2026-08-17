@@ -11,6 +11,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from langfuse_util import mask_secrets
 from models import CLAUDE_SONNET
 
 # Shared status message pools for user-facing progress indicators.
@@ -132,8 +133,16 @@ class StreamManager:
         """
         # Use EVENT: prefix format that bridge.ts expects
         # Bridge will convert this to proper SSE format
+        #
+        # Masked because this is a third way out to the caller, alongside the
+        # result and the log stream: it is neither, so neither of their masks
+        # sees it. Nothing puts a key in an event today, which is the point of
+        # doing it while that is still true.
         if self.stream:
-            print(f"EVENT:{event_type}:{json.dumps(data)}", flush=True)  # noqa: T201
+            print(  # noqa: T201
+                f"EVENT:{event_type}:{json.dumps(mask_secrets(data))}",
+                flush=True,
+            )
 
     def start_stream(self) -> None:
         """

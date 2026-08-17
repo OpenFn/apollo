@@ -3,6 +3,7 @@ import time
 from typing import Dict, List, Any
 from psycopg2.extras import execute_values
 import sentry_sdk
+from langfuse_util import mask_secrets
 from util import create_logger, ApolloError, apollo, AdaptorSpecifier, get_db_connection
 
 logger = create_logger("load_adaptor_docs")
@@ -349,9 +350,7 @@ def main(data: dict) -> dict:
     """
     logger.info("Starting load_adaptor_docs service...")
 
-    sentry_sdk.set_context("request_data", {
-        k: v for k, v in data.items() if k not in ["api_key"]
-    })
+    sentry_sdk.set_context("request_data", mask_secrets(data))
 
     # Validate required fields
     if "adaptor" not in data:

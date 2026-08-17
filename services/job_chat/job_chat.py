@@ -18,7 +18,7 @@ from anthropic import (
 )
 import sentry_sdk
 from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
-from langfuse_util import should_track, build_tags, build_generation_diff
+from langfuse_util import should_track, build_tags, build_generation_diff, mask_secrets
 from util import ApolloError, create_logger, AdaptorSpecifier, add_page_prefix, APOLLO_VERSION
 from yaml_utils import INSPECT_JOB_CODE_TOOL, inspect_job_code
 from .prompt import build_prompt, build_error_correction_prompt
@@ -742,9 +742,15 @@ def main(data_dict: dict) -> dict:
     Main entry point with improved error handling and input validation.
     """
     try:
-        sentry_sdk.set_context("request_data", {
-            k: v for k, v in data_dict.items() if k not in ("api_key", "_stream_manager")
-            })
+        # The stream manager is an object rather than data, so it is dropped.
+        # Everything else goes through the shared mask instead of a per-service
+        # name list, which catches nested values and key-shaped strings too.
+        sentry_sdk.set_context(
+            "request_data",
+            mask_secrets(
+                {k: v for k, v in data_dict.items() if k != "_stream_manager"},
+            ),
+        )
 
         data = Payload.from_dict(data_dict)
 
