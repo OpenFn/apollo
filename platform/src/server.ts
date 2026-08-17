@@ -11,6 +11,34 @@ import { captureException } from "./util/sentry";
 import { clientsDbUrl, closeDb } from "./db";
 import { runMigrations } from "./db/migrate";
 import { randomUUID } from "node:crypto";
+import { readdir, rm } from "node:fs/promises";
+import path from "node:path";
+
+// A run's input file can hold values that belong to the deployment rather
+// than the caller, and only the bridge's close handler removes it - so
+// anything that stopped the process mid-run left one behind, and nothing else
+// ever sweeps them. Startup is the one moment we know no run of ours is
+// reading them.
+const sweepTempPayloads = async () => {
+  const dir = path.resolve("tmp/data");
+
+  try {
+    const stale = await readdir(dir);
+
+    await Promise.all(
+      stale.map((name) => rm(path.join(dir, name), { force: true }))
+    );
+
+    if (stale.length) {
+      console.log(`Removed ${stale.length} temp payload(s) left by a previous run`);
+    }
+  } catch (error) {
+    // No directory yet on a first boot, which is not worth reporting.
+    if ((error as { code?: string }).code !== "ENOENT") {
+      console.error("Could not sweep tmp/data", error);
+    }
+  }
+};
 import pkg from "../../package.json";
 
 export default async (
@@ -24,6 +52,13 @@ export default async (
   // services routinely go without emitting. 255 is Bun's maximum.
   const app = new Elysia({
     serve: {
+      idleTimeout: 255,
+    },
+    // Websockets have their own idle timer, which serve.idleTimeout does not
+    // reach - it defaults to 120s, so a WS caller waiting on a slow answer
+    // would be dropped well before the SSE route's heartbeat had earned it
+    // anything.
+    websocket: {
       idleTimeout: 255,
     },
   });
@@ -58,9 +93,11 @@ export default async (
     }
   }
 
-  // app.listen below sets no reusePort, so the multi-process internal-token warn
-  // is dormant; pass the flag here if clustering is ever enabled.
-  logInternalTokenProvenance(false);
+  // Elysia's Bun adapter sets reusePort unconditionally, so the guard that
+  // warns about a per-process token meeting a shared port is live, not
+  // hypothetical. It stays quiet once APOLLO_INTERNAL_TOKEN is set.
+  logInternalTokenProvenance(true);
+  await sweepTempPayloads();
   await auth.init();
 
   // No stop path exists otherwise; close the DB pool so a graceful pod termination

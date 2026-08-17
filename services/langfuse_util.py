@@ -5,24 +5,71 @@ from typing import Any
 
 import yaml
 
-_SECRET_KEY_NAMES = {"api_key", "anthropic_api_key", "authorization"}
-_SECRET_VALUE_PATTERN = re.compile(r"sk-ant-[\w\-]+")
+# Every field the server may fill in on a payload, not just the one it fills
+# in today: a value under one of these belongs to the deployment rather than
+# to the caller. langfuse_public_key is deliberately absent - it is meant to
+# be visible, and masking it would cost a useful identifier for nothing.
+_SECRET_KEY_NAMES = {
+    "api_key",
+    "anthropic_api_key",
+    "openai_api_key",
+    "pinecone_api_key",
+    "langfuse_secret_key",
+    "authorization",
+    "x_api_key",
+}
+
+# json.loads accepts around a thousand levels of nesting and this runs over
+# whatever a caller sends, so a deep payload could otherwise take the process
+# down with a RecursionError.
+_MAX_DEPTH = 50
+
+# A backstop for a key inside a string, where the name list cannot see it.
+# Deliberately narrow: this also passes over workflow YAML, job code and
+# service results, so a loose pattern corrupts a caller's own data. Hence a
+# known provider prefix, or a run too long and unbroken to be a name.
+# test_mask_secrets.py pins both directions.
+_SECRET_VALUE_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9])sk-(?:"
+    r"(?:ant|proj|svcacct|lf|or)-[\w-]+"
+    r"|[A-Za-z0-9]{20,}"
+    r")",
+)
 
 
-def mask_secrets(data: Any) -> Any:  # noqa: ANN401
+def _normalise_name(key: object) -> str:
+    return str(key).lower().replace("-", "").replace("_", "")
+
+
+# Compared in normalised form, so api-key, apiKey and X-Api-Key are all caught
+# by the one readable entry above.
+_NORMALISED_SECRET_NAMES = {_normalise_name(name) for name in _SECRET_KEY_NAMES}
+
+
+def _is_secret_name(key: object) -> bool:
+    return _normalise_name(key) in _NORMALISED_SECRET_NAMES
+
+
+def mask_secrets(data: Any, _depth: int = 0) -> Any:  # noqa: ANN401
     """Langfuse mask callback: redact API keys from all traced data.
 
     Applied by the SDK to every span's input, output and metadata before
     export, so keys passed as function arguments to @observe-decorated
-    functions never reach Langfuse.
+    functions never reach Langfuse. Also used anywhere a service's own output
+    could carry a value the server put in the payload.
     """
+    if _depth > _MAX_DEPTH:
+        return "[TRUNCATED]"
+
     if isinstance(data, dict):
         return {
-            k: "[REDACTED]" if str(k).lower() in _SECRET_KEY_NAMES and v else mask_secrets(v)
+            k: "[REDACTED]"
+            if _is_secret_name(k) and v
+            else mask_secrets(v, _depth + 1)
             for k, v in data.items()
         }
     if isinstance(data, (list, tuple)):
-        return [mask_secrets(v) for v in data]
+        return [mask_secrets(v, _depth + 1) for v in data]
     if isinstance(data, str):
         return _SECRET_VALUE_PATTERN.sub("[REDACTED]", data)
     return data
