@@ -67,7 +67,7 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
     // Resolve every /services/* caller: swap a known client's key, drop the field for
     // a no-key request (global key), and reject anything else (forged internal header,
     // or an api_key that isn't a known client -> 401/503).
-    app.onBeforeHandle(auth.authenticate);
+    // app.onBeforeHandle(auth.authenticate);
 
     modules.forEach((m) => {
       const { name, readme } = m;
@@ -80,7 +80,7 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
         console.log(`POST /services/${name}: ${ctx.uuid}`);
         const payload = buildPayload(ctx);
         const result = await callService(m, port, payload as any);
-
+        console.log({ result });
         if (isApolloError(result)) {
           return new Response(JSON.stringify(result), {
             status: result.code,

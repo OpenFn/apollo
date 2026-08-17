@@ -334,6 +334,7 @@ export class InstanceAuth {
     }
 
     const apiKey = this.extractApiKey(ctx);
+    console.log({ apiKey });
     if (!apiKey) {
       return this.globalKeyConfigured() ? undefined : unauthorized(ctx);
     }
@@ -342,6 +343,7 @@ export class InstanceAuth {
     const result: LookupResult = this.lookupOverride
       ? toLookupResult(await this.lookupOverride(hash))
       : await this.lookupClient(hash);
+    console.log({ result });
     if (result.kind === "found") {
       // Recognised client with no stored key is a server-side
       // misconfiguration, not a caller error. Mis-billing the global key

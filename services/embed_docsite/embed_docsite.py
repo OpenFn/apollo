@@ -9,6 +9,7 @@ from embed_docsite.docsite_indexer import DocsiteIndexer
 logger = create_logger("embed_docsite")
 
 def main(data):
+    print('*********************')
     logger.info("Starting...")
 
     # Get selection of doc types to upload, or default to all
