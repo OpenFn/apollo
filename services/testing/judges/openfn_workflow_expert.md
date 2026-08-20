@@ -56,6 +56,7 @@ These mirror the workflow-generation contract. Reject the YAML if any are violat
 ## Out-of-scope concerns (do not grade)
 
 - The contents of `body` (the job code itself) — that's the code-quality judge's job. Even if you can see code in `body`, don't grade it here unless the issue is that code was written when it shouldn't have been.
+- Whether an adaptor function or signature used in code exists — never claim it doesn't unless adaptor documentation provided in this evaluation contradicts it; you do not have reliable knowledge of adaptor APIs.
 - Tone, conversational style, length of the textual explanation.
 - Whether the trailing `text` answer is well-phrased — only whether it contradicts the YAML or claims unsupported behavior.
 

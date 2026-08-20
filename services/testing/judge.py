@@ -32,11 +32,10 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+import yaml
 from anthropic import Anthropic
-
 from models import CLAUDE_SONNET
 from testing.judges import load_judge
-
 
 DEFAULT_MODEL = CLAUDE_SONNET
 DEFAULT_JUDGE = "general"
@@ -97,11 +96,69 @@ def _build_system_prompt(judge_name: str) -> str:
     return "\n".join(parts)
 
 
+_ADAPTOR_DOCS_CAP = 40_000
+_COMMON_ADAPTOR = "@openfn/language-common@latest"
+
+
+def build_adaptor_docs(workflow_yaml: Optional[str]) -> Optional[str]:
+    """Signature listing for the adaptors used in a candidate workflow YAML.
+
+    Grounds judge claims about which adaptor functions exist, instead of the
+    judge guessing from memory. Always includes @openfn/language-common, whose
+    helpers every adaptor re-exports — without it the judge would false-flag
+    `fn`/`each`/etc. on adaptor-specific jobs. Fails open: on any error (no
+    YAML, no DB, no docs) returns None and the judges fall back to their
+    no-docs humility rules.
+    """
+    if not workflow_yaml:
+        return None
+    try:
+        doc = yaml.safe_load(workflow_yaml)
+        jobs = (doc or {}).get("jobs") or {}
+        adaptors = {
+            job["adaptor"]
+            for job in jobs.values()
+            if isinstance(job, dict) and job.get("adaptor")
+        }
+        if not adaptors:
+            return None
+        adaptors.add(_COMMON_ADAPTOR)
+
+        from search_adaptor_docs.search_adaptor_docs import fetch_signatures
+        from util import AdaptorSpecifier, get_db_connection
+
+        sections = []
+        conn = get_db_connection()
+        try:
+            for adaptor in sorted(adaptors):
+                try:
+                    signatures = fetch_signatures(
+                        AdaptorSpecifier(adaptor), conn, auto_load=True
+                    )
+                except Exception:
+                    continue
+                if signatures:
+                    lines = "\n".join(signatures.values())
+                    sections.append(f"<adaptor {adaptor}>\n{lines}\n</adaptor>")
+        finally:
+            conn.close()
+
+        if not sections:
+            return None
+        block = "\n".join(sections)
+        if len(block) > _ADAPTOR_DOCS_CAP:
+            block = block[:_ADAPTOR_DOCS_CAP] + "\n(...truncated)"
+        return block
+    except Exception:
+        return None
+
+
 def _build_user_prompt(
     criteria: list[str],
     candidate: dict,
     test_notes: Optional[str],
     request: Optional[dict],
+    adaptor_docs: Optional[str] = None,
 ) -> str:
     parts = []
     if test_notes:
@@ -114,6 +171,22 @@ def _build_user_prompt(
         parts += [
             "ORIGINAL REQUEST sent to the service (use as ground truth for what existed before and what was asked):",
             json.dumps(request, indent=2, default=str),
+            "",
+        ]
+    if adaptor_docs:
+        parts += [
+            "ADAPTOR DOCUMENTATION (documented functions for the adaptors used in the "
+            "candidate workflow; @openfn/language-common helpers are re-exported by "
+            "every adaptor):",
+            adaptor_docs,
+            "",
+            "Use this to ground claims about whether a function exists and what its "
+            "signature is. The listing can still be incomplete (version drift, "
+            "undocumented helpers), so if a function is absent but you are not "
+            "confident it is invented, or your doubt is about runtime behaviour the "
+            "signatures don't show, do not flag it. An adaptor used in the workflow "
+            "but missing from this listing had no docs available in this run — treat "
+            "its functions as unverifiable, never as nonexistent.",
             "",
         ]
     parts += ["CRITERIA TO EVALUATE:"]
@@ -260,6 +333,7 @@ def evaluate(
     candidate: dict,
     test_notes: Optional[str] = None,
     request: Optional[dict] = None,
+    adaptor_docs: Optional[str] = None,
     judge: str = DEFAULT_JUDGE,
     model: str = DEFAULT_MODEL,
     client: Optional[Anthropic] = None,
@@ -275,6 +349,8 @@ def evaluate(
             provided, the judge can ground "before vs after" reasoning in the
             actual inputs (workflow_yaml, current turn, history) instead of
             guessing.
+        adaptor_docs: Optional adaptor function signatures (from
+            build_adaptor_docs) grounding claims about which functions exist.
         judge: Name of the judge (file at services/testing/judges/<name>.md).
             Defaults to "general".
         model: Model to use. Defaults to CLAUDE_SONNET from services/models.py.
@@ -294,11 +370,11 @@ def evaluate(
         client = Anthropic(api_key=api_key)
 
     system_prompt = _build_system_prompt(judge)
-    user_prompt = _build_user_prompt(criteria, candidate, test_notes, request)
+    user_prompt = _build_user_prompt(criteria, candidate, test_notes, request, adaptor_docs)
 
     response = client.messages.create(
         model=model,
-        max_tokens=4096,
+        max_tokens=16384,
         system=system_prompt,
         messages=[
             {"role": "user", "content": user_prompt},

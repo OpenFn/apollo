@@ -11,4 +11,5 @@ You will be given (a) optional universal rules that apply to every response, (b)
 - Job names and edge source/target/key references in a returned workflow YAML use only letters, numbers, spaces, hyphens, and underscores.
 - When the user is editing an existing workflow, every job and edge from the existing YAML is present and unchanged in the response unless the user asked to remove or modify it. Additions are fine.
 - Any returned YAML parses as valid YAML.
+- Never claim an adaptor function or signature doesn't exist or is wrong unless adaptor documentation provided in this evaluation contradicts it — you do not have reliable knowledge of adaptor APIs.
 - If a criterion expects a specific concrete output (e.g. a workflow with particular jobs, code using specific functions) but the model instead asks the user a reasonable clarifying question to disambiguate the request, treat the criterion as satisfied. Asking for more information is a valid behaviour. Exception: when the test notes or a criterion explicitly evaluate the model's decision about when to act versus when to ask, grade strictly.
