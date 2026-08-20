@@ -7,6 +7,10 @@ have come from, so the output doubles as a worklist.
     poetry run pytest services/job_chat/tests/integration/adaptor_knowledge -s -k interfaces
 
 Every case costs one job_chat call against the live Anthropic API.
+
+job_chat loads the adaptor's docs itself on first use, so there is no fixture
+to set up. If those docs can't be generated on this machine the prompt has no
+adaptor block and the cases fail — that is a broken environment, not a score.
 """
 
 import re
@@ -49,8 +53,7 @@ def _build_payload(case: Case) -> dict:
 
 
 @pytest.mark.parametrize("case", ALL_CASES, ids=lambda c: c.id)
-def test_adaptor_knowledge(case: Case, require_adaptor_docs):
-    require_adaptor_docs(case.adaptor)
+def test_adaptor_knowledge(case: Case) -> None:
     response = ApolloClient().call("job_chat", _build_payload(case))
     hay = _haystack(response, case.target)
 

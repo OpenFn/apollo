@@ -10,25 +10,21 @@ measures nothing.
 
 ## Baseline
 
-Measured on 2026-08-20, `job_chat` unchanged, docs seeded as described below:
+**Not yet established.** The numbers this suite produced during development came
+from a machine where the docs pipeline couldn't run, on hand-built fixture rows,
+so they don't describe the real service and have been removed rather than left
+here to be trusted.
 
-| Group | Pass |
-|---|---|
-| `signatures` (controls) | 3/3 |
-| `functions` | 4/6 |
-| `interfaces` | 4/7 |
-| `namespaces` | **1/6** |
-| `other` | 2/3 |
-| `version` | 2/2 run (3 skipped, old versions unavailable locally) |
-| **Total** | **16/27** |
+Set the baseline by running the suite once, unchanged, on a machine where
+`adaptor_apis` works, and record the scoreboard it prints. Do that before any
+retrieval change, not after.
 
-Treat this as approximate. The model is stochastic and cases near the boundary
-flip between runs — `iface.salesforce-bulk-failonerror` passed one run and
-failed the next. Re-baseline before and after any change rather than comparing
-against these numbers directly.
+Two things to know when you do:
 
-`namespaces` at 1/6 is the standout, and the cause is concrete: see the last
-section.
+- The model is stochastic and cases near the boundary flip between identical
+  runs. A one- or two-point move is noise. Run it more than once.
+- `namespaces` was by far the weakest group in every development run, and the
+  cause is concrete rather than statistical: see the last section.
 
 ## Running them
 
@@ -83,8 +79,8 @@ rather than by *what you're testing* is what keeps both harnesses simple.
 |---|---|
 | `cases.py` | The 30 cases as data. Edit this to add or tune probes. |
 | `test_adaptor_knowledge.py` | Parametrized runner, regex assertions, scoreboard. |
-| `conftest.py` | Skips a case when its adaptor version has no docs. |
-| `seed_docs.py` | Dev workaround for machines where jsdoc can't run. |
+| `conftest.py` | Prints the scoreboard at the end of the run. |
+| `scoreboard.py` | The tally the runner writes and conftest prints. |
 
 ## The groups
 
@@ -97,8 +93,8 @@ rather than by *what you're testing* is what keeps both harnesses simple.
 | `other` | 3 | `configuration-schema` and the README |
 | `version` | 5 | Behaviour that differs between two pinned versions |
 
-The `signatures` group is the baseline. If those fail, something is wrong with
-the fixture rather than with retrieval.
+The `signatures` group is the baseline. If those fail, job_chat isn't getting
+an adaptor block at all and no other number in the run means anything.
 
 Four `version` cases are deliberate inverses of a case in another group — the
 same question, a different pin, and the opposite correct answer:
@@ -107,7 +103,7 @@ same question, a different pin, and the opposite correct answer:
 |---|---|
 | `fn.http-post-data-positional` (7.3.2, `post(path, data)`) | `ver.http6-post-body-option` (6.5.4, `{body: ...}`) |
 | `ns.dhis2-util-findattributevalue` (8.2.1, `util.` prefix) | `ver.dhis2-6-findattributevalue-toplevel` (6.3.4, no prefix) |
-| `ns.salesforce-bulk2-insert` (9.1.1, `bulk2.insert`) | `ver.salesforce4-bulk-toplevel` (4.8.6, `bulk()`) |
+| `ns.salesforce-bulk2-insert` (9.1.5, `bulk2.insert`) | `ver.salesforce4-bulk-toplevel` (4.8.6, `bulk()`) |
 
 A method that just dumps the latest docs will pass one side of each pair and
 fail the other. That's the pair's job.
@@ -124,39 +120,23 @@ key ("you might reach for `text:`, but...") would otherwise trip a `forbid`.
 
 ## Adaptor docs have to be present
 
-A case is only meaningful if job_chat receives a real adaptor block. When the
-docs are missing the prompt quietly degrades to "The user is using an OpenFn
-Adaptor to write the job.", so `conftest.py` skips those cases rather than
-letting them fail for the wrong reason.
+A case only measures anything if job_chat receives a real adaptor block. When
+the docs are missing the prompt quietly degrades to "The user is using an
+OpenFn Adaptor to write the job." and every case fails for a reason that has
+nothing to do with retrieval.
 
-Where `adaptor_apis` works, job_chat auto-loads on first use and there is
-nothing to do. Where it doesn't — notably macOS under bun, where jsdoc dies on
-`Module.wrapper` (see `JSDOC_BUN_ERROR.md`) — seed the table first:
+There is no fixture to set up: job_chat auto-loads an adaptor's docs on first
+use (`download_adaptor_docs` defaults to true), through the same pipeline
+production uses. Run the suite somewhere that pipeline works.
+
+It does not work on macOS under bun, where jsdoc dies on `Module.wrapper` (see
+`JSDOC_BUN_ERROR.md`). A full-red run there is a broken toolchain, not a score.
+Check before believing a number:
 
 ```bash
-poetry run python services/job_chat/tests/integration/adaptor_knowledge/seed_docs.py
+psql "$POSTGRES_URL" -c "SELECT adaptor_name, version, count(*) FROM adaptor_function_docs GROUP BY 1,2 ORDER BY 1,2"
 ```
 
-That pulls the pre-built doclet feed the docsite indexer already uses and
-pushes it through the real ingest functions, so the rows match what the live
-pipeline would write. It only covers each adaptor's **latest** version, so the
-old pins in the `version` group still skip unless that version is already in
-your database.
-
-## What the failures are telling you
-
-Two upstream causes account for most of them, both verified in the code:
-
-1. `job_chat/prompt.py` injects only the `signature` column. The
-   `function_data` JSONB alongside it already holds descriptions, parameter
-   docs and examples — nothing reads them.
-2. `load_adaptor_docs.filter_function_docs` keeps only `function` /
-   `external-function` / `external` doclets, so `@typedef` blocks — the only
-   definition of option-object property names — are never stored.
-
-There is also a third, narrower one worth fixing on its own: the namespace
-prefix is stored in `function_name` (`bulk1.insert`) but not in `signature`
-(`insert(sObject, records, options)`), and only the signature is injected. The
-salesforce block therefore lists `insert(...)` three times with no way to tell
-the variants apart, and shows `get`/`post`/`request` as if they were top-level
-when they are `http.*`.
+Don't hand-populate that table to get a green-ish run. Rows written from
+anything other than the real pipeline make the score unreadable — you no longer
+know whether a change moved retrieval or just moved the fixture.
