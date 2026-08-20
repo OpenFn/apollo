@@ -76,7 +76,7 @@ retrieval method has to have, and the doc surface it has to reach:
 | `version` | 5 | You retrieve for the *pinned* version, not the latest | per-version docs |
 
 **`signatures` is a smoke test, not a score.** If those three fail, job_chat
-isn't getting an adaptor block at all — fix the prerequisites above and rerun.
+probably isn't getting an adaptor block at all — fix the prerequisites above and rerun.
 No other number in that run means anything.
 
 **The `version` group catches the obvious shortcut.** Four of its five cases are
@@ -140,7 +140,5 @@ If a probe needs real judgement rather than a string match, it belongs in
 - The regexes approximate correctness. They have been checked against a right
   and a wrong answer each, but a novel phrasing can still fool one — audit
   passes as well as failures before trusting a big jump.
-- No baseline is recorded here. The numbers measured during development came
-  from hand-built fixture rows and did not describe the real service, so they
-  were removed rather than left to be trusted. Establish yours on a machine that
+- No baseline is recorded here yet. Establish yours on a machine that
   passes the preflight, and record it in your PR.
