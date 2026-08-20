@@ -3,6 +3,7 @@ import os
 import json
 import uuid
 import argparse
+from pathlib import Path
 from dotenv import load_dotenv
 import sentry_sdk
 from util import set_apollo_port, ApolloError
@@ -96,6 +97,7 @@ def call(
     langfuse.flush()
 
     if output_path:
+        Path(os.path.dirname(output_path)).mkdir(parents=True, exist_ok=True)
         with open(output_path, "w") as f:
             json.dump(result, f)
 
