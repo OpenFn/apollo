@@ -85,8 +85,11 @@ SIGNATURES = [
         adaptor="@openfn/language-http@7.3.2",
         prompt="I need to send a HEAD request. Which function supports an arbitrary HTTP method?",
         target="text",
-        expect=[r"\brequest\b"],
-        forbid=[r"\bhead\("],
+        # NOT bare `request` — the word is in the question and in any prose about
+        # HTTP, so it matched answers that never named the function. Require it
+        # in a form that identifies it as the function being recommended.
+        expect=[r"request\s*\(", r"`request`"],
+        forbid=[r"\bhead\(", r"method\s*:\s*['\"]HEAD"],
         doc_ref="Functions > request (in the injected signature list)",
         why="Control: request(method, path, options) is in the signature list.",
     ),
@@ -126,11 +129,15 @@ FUNCTIONS = [
         group="functions",
         adaptor="@openfn/language-salesforce@9.1.5",
         prompt="Create three Contact records from state.contacts in a single call.",
-        expect=[r"create\("],
-        forbid=[r"each\s*\("],
+        # Assert the documented fact directly: the collection goes in as the
+        # second argument. Looping with each() fails this because the second
+        # argument becomes the per-item cursor instead — no need to forbid
+        # each() by name, which would have been a style judgement rather than
+        # anything the docs state.
+        expect=[r"create\(\s*['\"]Contact['\"]\s*,\s*(\$\.|state\.)contacts"],
         doc_ref="Functions > create — create(sObjectName, records); records is an Array",
         why="The signature says `records` but not that it accepts an array, so the "
-            "model reaches for each() to loop instead of one bulk-ish call.",
+            "model loops instead of passing the collection straight in.",
     ),
     Case(
         id="fn.gmail-getcontents-query-key",
@@ -335,8 +342,11 @@ OTHER = [
         adaptor="@openfn/language-dhis2@8.2.1",
         prompt="Where does the DHIS2 API version come from if I don't pass one per request?",
         target="text",
-        expect=[r"apiVersion"],
-        forbid=[r"hard.?cod", r"in your job code"],
+        # The discriminating fact is WHERE the value comes from, so assert that.
+        # The old forbids (`hard.?cod`, `in your job code`) matched the correct
+        # answer — "it's a credential field, don't hardcode it in your job code"
+        # tripped both — and so scored a right answer as wrong.
+        expect=[r"credential", r"configuration"],
         doc_ref="configuration-schema > properties.apiVersion (credential field)",
         why="apiVersion is a credential field, not a job-code concern. The model "
             "has never seen the credential schema.",
