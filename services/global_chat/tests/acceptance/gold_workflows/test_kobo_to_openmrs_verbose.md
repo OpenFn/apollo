@@ -153,7 +153,7 @@ edges:
 - Create and update are mutually exclusive paths: create only runs when no match was found, update only when one was. On the create path the national ID is set as a preferred identifier alongside the demographics.
 - The update path modifies demographics only and does not reassign or resend identifiers.
 - Logging is PII-free everywhere, including the error handler: the submission id may be logged, but never names, dates of birth or national IDs.
-- The openmrs adaptor is used for OpenMRS steps and common for validation/logging, with real functions and plausible arguments; identifier type and location UUIDs are placeholders or state/config references, and credentials are never hardcoded.
+- The openmrs adaptor is used for OpenMRS steps and common for validation/logging, with operations called with plausible arguments; identifier type and location UUIDs are placeholders or state/config references, and credentials are never hardcoded.
 
 # turn
 

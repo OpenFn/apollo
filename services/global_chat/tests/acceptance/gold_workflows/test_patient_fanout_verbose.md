@@ -214,7 +214,7 @@ edges:
 - On the update path, only demographics are modified and identifiers are not resent.
 - After the OpenMRS write succeeds on either path, a DHIS2 tracked entity instance is created (name attributes, org unit, tracked entity type) and then a FHIR Patient resource is POSTed, with the sex code mapped to the FHIR gender value set (M to male, F to female).
 - A DHIS2 or FHIR failure routes to downstream-error handling that logs a PII-free message; the workflow does not silently succeed past a failed write.
-- The named adaptors are used for their systems (common, openmrs, dhis2, fhir) with real functions; instance-specific UUIDs appear as placeholders or state/config references, credentials are never hardcoded, and no names, dates of birth or national IDs appear in any log.
+- The named adaptors are used for their systems (common, openmrs, dhis2, fhir); instance-specific UUIDs appear as placeholders or state/config references, credentials are never hardcoded, and no names, dates of birth or national IDs appear in any log.
 
 # turn
 

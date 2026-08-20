@@ -88,7 +88,7 @@ edges:
 - A step fetches the user list from `https://jsonplaceholder.typicode.com/users` with an HTTP get.
 - A transform maps each user to exactly the three requested fields: `userId` (the user's id), `title` (the user's name) and `body` (a string combining the user's email and company name).
 - Each transformed record is POSTed to `https://jsonplaceholder.typicode.com/posts`.
-- Job code uses real http adaptor functions with plausible arguments, not invented helpers, and each step returns state.
+- Job code uses http adaptor operations with plausible arguments rather than hand-rolled raw JavaScript, and each step returns state.
 - Data-flow coherence: the posting step consumes the transform's output under the same state key it was written to, without re-fetching users or rebuilding the transformed objects.
 - The solution stays simple as instructed: no branching, deduplication or auth logic beyond what was asked.
 

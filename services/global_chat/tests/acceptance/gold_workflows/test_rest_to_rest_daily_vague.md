@@ -85,7 +85,7 @@ edges:
 - A step fetches the user list from `https://jsonplaceholder.typicode.com/users` with an HTTP get.
 - Each user is reduced to some smaller object. Any sensible choice of fields is fine; do not require specific field names since the user only said "simplify".
 - Each transformed record is POSTed to `https://jsonplaceholder.typicode.com/posts`.
-- Job code uses real http adaptor functions with plausible arguments, not invented helpers, and each step returns state.
+- Job code uses http adaptor operations with plausible arguments rather than hand-rolled raw JavaScript, and each step returns state.
 - The posting step consumes what the transform produced under a consistent state key, rather than re-fetching or rebuilding the data.
 - No invented requirements: no authentication, deduplication or branching the user did not ask for.
 

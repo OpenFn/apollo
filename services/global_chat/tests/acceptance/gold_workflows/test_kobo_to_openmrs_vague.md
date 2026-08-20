@@ -131,7 +131,7 @@ edges:
 - The trigger is a webhook so the workflow runs per Kobo submission, not a cron poll.
 - Before any write, a step looks the patient up in OpenMRS by some identifying field to check whether they already exist.
 - A patient is created only when the lookup found no match; when a match exists the workflow updates or skips instead. Exactly one of these outcomes applies per submission, whether via mutually exclusive branch edges or conditional logic inside a job.
-- The OpenMRS steps use the openmrs adaptor with real functions and plausible arguments, not invented ones, and each step returns state.
+- The OpenMRS steps use openmrs adaptor operations with plausible arguments rather than hand-rolled raw JavaScript, and each step returns state.
 - Credentials are left to the adaptor configuration, never hardcoded in job code.
 - Do not require validation steps, error handlers or PII-safe logging; the user did not ask for them in this phrasing (they are fine to include).
 

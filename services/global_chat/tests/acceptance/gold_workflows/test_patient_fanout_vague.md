@@ -146,7 +146,7 @@ edges:
 - The right adaptor is used for each system: openmrs for the OpenMRS save, dhis2 for DHIS2, and fhir for the FHIR server.
 - Before creating in OpenMRS, a step looks the patient up to check for an existing record; create only happens when no match is found, with update or skip otherwise, and exactly one of those outcomes applies per submission.
 - The DHIS2 and FHIR sends run after the OpenMRS save succeeds, matching "then also send them".
-- Job code uses real adaptor functions with plausible arguments, not invented ones, and each step returns state.
+- Job code uses adaptor operations with plausible arguments rather than hand-rolled raw JavaScript, and each step returns state.
 - Credentials are left to the adaptor configuration, never hardcoded in job code.
 - Do not require validation steps, generated identifiers, PII-safe logging or downstream error handlers; the user did not ask for them in this phrasing (they are fine to include).
 
