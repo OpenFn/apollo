@@ -5,7 +5,7 @@ and never spawns `git`.
 """
 import subprocess
 
-import embed_docsite.docs_repo as m
+import embed_docsite.github_utils as m
 import pytest
 from util import ApolloError
 
