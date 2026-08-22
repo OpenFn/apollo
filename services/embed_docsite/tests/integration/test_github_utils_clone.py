@@ -1,10 +1,10 @@
 """Real-network tests for the git-backed docs checkout."""
 import re
 
-import embed_docsite.docs_repo as m
+import embed_docsite.github_utils as m
 import pytest
 
-GENERAL_DOC_COUNT = 93
+GENERAL_DOC_COUNT = 94
 ADAPTOR_DOC_COUNT = 98
 GIT_SHA_LENGTH = 40
 
