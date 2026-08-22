@@ -154,6 +154,28 @@ def test_read_markdown_docs_unknown_type_raises():
     assert exc_info.value.code == HTTP_BAD_REQUEST
 
 
+def test_read_markdown_docs_raises_when_the_checkout_has_no_markdown():
+    (m.CLONE_DIR / "docs").mkdir(parents=True)
+
+    with pytest.raises(ApolloError) as exc_info:
+        m.read_markdown_docs("general_docs")
+
+    assert exc_info.value.code == HTTP_MISCONFIGURED
+    assert "broken" in exc_info.value.message.lower()
+
+
+def test_read_markdown_docs_skips_unreadable_files(caplog):
+    general_dir = m.CLONE_DIR / "docs"
+    general_dir.mkdir(parents=True)
+    (general_dir / "good.md").write_text("readable")
+    (general_dir / "bad.md").write_bytes(b"\xff\xfe not valid utf-8")
+
+    docs = m.read_markdown_docs("general_docs")
+
+    assert [d["name"] for d in docs] == ["good.md"]
+    assert "bad.md" in caplog.text
+
+
 def test_sync_docs_repo_memoizes_within_a_process(monkeypatch):
     git = make_git()
     monkeypatch.setattr(m, "_run_git", git)
