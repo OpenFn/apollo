@@ -1,18 +1,13 @@
 """A shallow, blobless, sparse git checkout of OpenFn/docs, kept on disk.
 
-Uses a single `git clone`/`fetch`.
-
 `sync_docs_repo` clones on the first call in a process and `fetch`+`reset
---hard`s on every call after, memoized. A failed refresh serves the
-existing checkout rather than failing the run, same as
-`services/latest_adaptors/latest_adaptors.py`'s cache.
-
-The clone is blobless and sparse-checked-out to only `DOCS_TYPE_PREFIXES`'
-directories, so the missing blobs are fetched lazily for the checkout.
+--hard`s after. A failed refresh serves the existing checkout rather than
+failing the run, same as `services/latest_adaptors/latest_adaptors.py`.
 """
 
 import shutil
 import subprocess
+from functools import cache
 from pathlib import Path
 
 from util import ApolloError, create_logger
@@ -28,13 +23,7 @@ DOCS_TYPE_PREFIXES = {"general_docs": "docs", "adaptor_docs": "adaptors"}
 
 GIT_TIMEOUT_SECONDS = 300
 
-# Memoized per process: a full run reads two docs_types, and they should
-# cost one sync, not two.
-_synced_sha = None
-
-
-def _run_git(args, cwd=None):
-    """Subprocess seam."""
+def run_git(args, cwd=None):
     return subprocess.run(
         ["git", *args],
         cwd=cwd,
@@ -45,52 +34,43 @@ def _run_git(args, cwd=None):
     )
 
 
-def _has_checkout():
-    return (CLONE_DIR / ".git").exists()
+def wipe_and_clone():
+    """Wipe CLONE_DIR and clone into it. Also the recovery path for a corrupt checkout.
 
-
-def _clone():
-    """Wipe and clone. Also the recovery path for a corrupt or partial checkout.
-
-    Blobless (`--filter=blob:none`) and sparse, checked out to only the
-    directories `DOCS_TYPE_PREFIXES` names: the rest of OpenFn/docs is images
-    and static assets we never index, and this way their blobs are never even
-    transferred. `sparse-checkout set` fetches the blobs it needs to
-    materialize those paths as part of running; nothing later in this module
-    reads outside them, so no further blob fetch happens after this call.
+    Blobless and sparse: the rest of OpenFn/docs is images and static assets we
+    never index, so their blobs are never transferred.
     """
     if CLONE_DIR.exists():
         shutil.rmtree(CLONE_DIR)
-    _run_git(["clone", "--depth", "1", "--filter=blob:none", "--sparse", DOCS_REPO_URL, str(CLONE_DIR)])
-    _run_git(["sparse-checkout", "set", *DOCS_TYPE_PREFIXES.values()], cwd=CLONE_DIR)
+    run_git(["clone", "--depth", "1", "--filter=blob:none", "--sparse", DOCS_REPO_URL, str(CLONE_DIR)])
+    run_git(["sparse-checkout", "set", *DOCS_TYPE_PREFIXES.values()], cwd=CLONE_DIR)
     logger.info(f"Cloned {DOCS_REPO_URL} to {CLONE_DIR}")
 
 
-def _update():
-    _run_git(["fetch", "--depth", "1", "origin", DOCS_REF], cwd=CLONE_DIR)
-    _run_git(["reset", "--hard", "FETCH_HEAD"], cwd=CLONE_DIR)
+def update():
+    run_git(["fetch", "--depth", "1", "origin", DOCS_REF], cwd=CLONE_DIR)
+    run_git(["reset", "--hard", "FETCH_HEAD"], cwd=CLONE_DIR)
     logger.info("Docs checkout updated")
 
 
-def _head_sha():
-    result = _run_git(["rev-parse", "HEAD"], cwd=CLONE_DIR)
+def head_sha():
+    result = run_git(["rev-parse", "HEAD"], cwd=CLONE_DIR)
     return result.stdout.strip()
 
 
+@cache
 def sync_docs_repo():
     """Bring the checkout up to date. Call once per run, before reading.
 
+    Memoized per process: one run reads both markdown docs_types and they
+    should cost one sync, not two.
+
     :return: the checkout's HEAD sha
     """
-    global _synced_sha  # noqa: PLW0603 - per-process memo, same pattern as util.py's apollo_port
-
-    if _synced_sha is not None:
-        return _synced_sha
-
-    have_checkout = _has_checkout()
+    have_checkout = (CLONE_DIR / ".git").exists()
 
     try:
-        _update() if have_checkout else _clone()
+        update() if have_checkout else wipe_and_clone()
     except FileNotFoundError as exc:
         raise ApolloError(
             500,
@@ -100,16 +80,14 @@ def sync_docs_repo():
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         if have_checkout:
             logger.warning(f"Could not refresh the docs checkout, serving existing copy: {exc}")
-            _synced_sha = _head_sha()
-            return _synced_sha
+            return head_sha()
         raise ApolloError(
             503,
             f"Could not clone the docs repo and no cached checkout exists: {exc}",
             type="UPSTREAM_ERROR",
         ) from exc
 
-    _synced_sha = _head_sha()
-    return _synced_sha
+    return head_sha()
 
 
 def read_markdown_docs(docs_type):

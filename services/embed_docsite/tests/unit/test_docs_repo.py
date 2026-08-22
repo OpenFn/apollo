@@ -1,6 +1,6 @@
 """Unit tests for the git-backed docs checkout.
 
-`_run_git` is replaced with a fake that records argv
+`run_git` is replaced with a fake that records argv
 and never spawns `git`.
 """
 import subprocess
@@ -22,7 +22,7 @@ class FakeCompletedProcess:
 
 
 def make_git(rev_sha=FAKE_SHA, fail_on=None):
-    """A fake `_run_git`. `fail_on(args) -> bool` marks which calls raise."""
+    """A fake `run_git`. `fail_on(args) -> bool` marks which calls raise."""
     calls = []
 
     def fake(args, cwd=None):  # noqa: ARG001 - cwd recorded implicitly via calls, not asserted
@@ -40,7 +40,7 @@ def make_git(rev_sha=FAKE_SHA, fail_on=None):
 @pytest.fixture(autouse=True)
 def _isolate(tmp_path, monkeypatch):
     monkeypatch.setattr(m, "CLONE_DIR", tmp_path / "docsite_cache")
-    monkeypatch.setattr(m, "_synced_sha", None)
+    m.sync_docs_repo.cache_clear()
 
 
 def mark_checkout_present():
@@ -49,7 +49,7 @@ def mark_checkout_present():
 
 def test_cold_clone_when_no_checkout_exists(monkeypatch):
     git = make_git()
-    monkeypatch.setattr(m, "_run_git", git)
+    monkeypatch.setattr(m, "run_git", git)
 
     sha = m.sync_docs_repo()
 
@@ -69,7 +69,7 @@ def test_cold_clone_when_no_checkout_exists(monkeypatch):
 def test_sparse_checkout_paths_are_derived_not_hardcoded(monkeypatch):
     monkeypatch.setattr(m, "DOCS_TYPE_PREFIXES", {"made_up_type": "somewhere"})
     git = make_git()
-    monkeypatch.setattr(m, "_run_git", git)
+    monkeypatch.setattr(m, "run_git", git)
 
     m.sync_docs_repo()
 
@@ -79,7 +79,7 @@ def test_sparse_checkout_paths_are_derived_not_hardcoded(monkeypatch):
 def test_warm_update_when_checkout_exists(monkeypatch):
     mark_checkout_present()
     git = make_git()
-    monkeypatch.setattr(m, "_run_git", git)
+    monkeypatch.setattr(m, "run_git", git)
 
     m.sync_docs_repo()
 
@@ -92,7 +92,7 @@ def test_clone_dir_without_git_is_wiped_then_cloned(monkeypatch):
     m.CLONE_DIR.mkdir(parents=True)
     (m.CLONE_DIR / "stale.txt").write_text("leftover")
     git = make_git()
-    monkeypatch.setattr(m, "_run_git", git)
+    monkeypatch.setattr(m, "run_git", git)
 
     m.sync_docs_repo()
 
@@ -103,7 +103,7 @@ def test_clone_dir_without_git_is_wiped_then_cloned(monkeypatch):
 def test_update_failure_serves_stale_checkout(monkeypatch, caplog):
     mark_checkout_present()
     git = make_git(fail_on=lambda args: args[0] == "fetch")
-    monkeypatch.setattr(m, "_run_git", git)
+    monkeypatch.setattr(m, "run_git", git)
 
     sha = m.sync_docs_repo()
 
@@ -113,7 +113,7 @@ def test_update_failure_serves_stale_checkout(monkeypatch, caplog):
 
 def test_clone_failure_with_no_checkout_raises(monkeypatch):
     git = make_git(fail_on=lambda args: args[0] == "clone")
-    monkeypatch.setattr(m, "_run_git", git)
+    monkeypatch.setattr(m, "run_git", git)
 
     with pytest.raises(ApolloError) as exc_info:
         m.sync_docs_repo()
@@ -125,7 +125,7 @@ def test_git_not_on_path_raises_apollo_error(monkeypatch):
     def fake(args, cwd=None):  # noqa: ARG001
         raise FileNotFoundError("git")
 
-    monkeypatch.setattr(m, "_run_git", fake)
+    monkeypatch.setattr(m, "run_git", fake)
 
     with pytest.raises(ApolloError) as exc_info:
         m.sync_docs_repo()
@@ -178,7 +178,7 @@ def test_read_markdown_docs_skips_unreadable_files(caplog):
 
 def test_sync_docs_repo_memoizes_within_a_process(monkeypatch):
     git = make_git()
-    monkeypatch.setattr(m, "_run_git", git)
+    monkeypatch.setattr(m, "run_git", git)
 
     m.sync_docs_repo()
     calls_after_first = len(git.calls)

@@ -10,8 +10,8 @@ GIT_SHA_LENGTH = 40
 
 
 @pytest.fixture(autouse=True)
-def _reset_memo(monkeypatch):
-    monkeypatch.setattr(m, "_synced_sha", None)
+def _reset_memo():
+    m.sync_docs_repo.cache_clear()
 
 
 def test_cold_clone_yields_the_full_markdown_corpus():
@@ -24,14 +24,14 @@ def test_cold_clone_yields_the_full_markdown_corpus():
     assert len(adaptors) == ADAPTOR_DOC_COUNT
 
 
-def test_second_sync_is_a_noop_and_corpus_is_unchanged(monkeypatch):
+def test_second_sync_is_a_noop_and_corpus_is_unchanged():
     m.sync_docs_repo()
     before = m.read_markdown_docs("general_docs")
 
     # Bypass the per-process memo to force a real second sync, as a fresh
     # process would perform. An already-current checkout should fetch
     # nothing and leave the corpus untouched.
-    monkeypatch.setattr(m, "_synced_sha", None)
+    m.sync_docs_repo.cache_clear()
     m.sync_docs_repo()
     after = m.read_markdown_docs("general_docs")
 
