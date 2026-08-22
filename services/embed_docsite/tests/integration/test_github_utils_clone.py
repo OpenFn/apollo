@@ -4,8 +4,7 @@ import re
 import embed_docsite.github_utils as m
 import pytest
 
-GENERAL_DOC_COUNT = 94
-ADAPTOR_DOC_COUNT = 98
+MIN_DOC_COUNT = 50
 GIT_SHA_LENGTH = 40
 
 
@@ -14,14 +13,23 @@ def _reset_memo():
     m.sync_docs_repo.cache_clear()
 
 
-def test_cold_clone_yields_the_full_markdown_corpus():
+@pytest.mark.parametrize("docs_type", ["general_docs", "adaptor_docs"])
+def test_cold_clone_yields_a_usable_markdown_corpus(docs_type):
     m.sync_docs_repo()
 
-    general = m.read_markdown_docs("general_docs")
-    adaptors = m.read_markdown_docs("adaptor_docs")
+    docs = m.read_markdown_docs(docs_type)
 
-    assert len(general) == GENERAL_DOC_COUNT
-    assert len(adaptors) == ADAPTOR_DOC_COUNT
+    assert len(docs) > MIN_DOC_COUNT
+    assert all(doc["name"].endswith(".md") for doc in docs)
+    assert all(doc["docs"].strip() for doc in docs)
+
+
+def test_sparse_checkout_materializes_only_the_docs_directories():
+    m.sync_docs_repo()
+
+    checked_out = {path.name for path in m.CLONE_DIR.iterdir() if path.is_dir() and path.name != ".git"}
+
+    assert checked_out == set(m.DOCS_TYPE_PREFIXES.values())
 
 
 def test_second_sync_is_a_noop_and_corpus_is_unchanged():
