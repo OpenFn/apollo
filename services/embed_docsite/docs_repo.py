@@ -124,4 +124,17 @@ def read_markdown_docs(docs_type):
 
     prefix_dir = CLONE_DIR / DOCS_TYPE_PREFIXES[docs_type]
     paths = sorted(prefix_dir.rglob("*.md"))
-    return [{"name": path.name, "docs": path.read_text(encoding="utf-8")} for path in paths]
+    if not paths:
+        raise ApolloError(
+            500,
+            f"No markdown files under {prefix_dir}; the docs checkout may be broken",
+            type="INTERNAL_ERROR",
+        )
+
+    docs = []
+    for path in paths:
+        try:
+            docs.append({"name": path.name, "docs": path.read_text(encoding="utf-8")})
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.warning(f"Skipping {path}: {exc}")
+    return docs
