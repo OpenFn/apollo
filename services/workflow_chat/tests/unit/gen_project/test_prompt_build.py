@@ -66,18 +66,31 @@ def test_build_prompt_subagent_strips_inspector_instruction():
 def test_build_prompt_attaches_input_to_the_current_turn_only():
     log = "[R/T] Job exited with error code 1"
 
-    _, prompt = build_prompt(
+    system_msg, prompt = build_prompt(
         content="add a retry step",
         existing_yaml="name: test-workflow",
         history=[{"role": "user", "content": "hello"}],
         attachments=[{"type": "log", "content": log}],
     )
 
-    # The attachment is rendered verbatim onto this turn, and nowhere else —
-    # history is returned from the raw content so it can't accumulate
-    assert log in prompt[-1]["content"]
-    assert "add a retry step" in prompt[-1]["content"]
+    # Rendered verbatim at the end of the system message, where this service's
+    # other context already lives — and nowhere in the messages, so it cannot
+    # accumulate in the history built from the raw content
+    assert log in system_msg
+    assert log not in prompt[-1]["content"]
+    assert prompt[-1]["content"] == "add a retry step"
     assert prompt[0]["content"] == "hello"
+
+
+def test_build_prompt_without_attachments_is_unchanged():
+    """Production callers send no attachments; their prompt must not move."""
+    with_none, _ = build_prompt(content="add a step", existing_yaml="name: wf", history=[])
+    with_empty, _ = build_prompt(
+        content="add a step", existing_yaml="name: wf", history=[], attachments=[],
+    )
+
+    assert with_none == with_empty
+    assert "attachment" not in with_none
 
 
 def test_build_prompt_readonly_mode():

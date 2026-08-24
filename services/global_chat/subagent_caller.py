@@ -12,7 +12,7 @@ from typing import Dict, List, Optional
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from langfuse import observe
-from util import create_logger, ApolloError
+from util import create_logger, ApolloError, attachments_to_context
 from yaml_utils import find_job_in_yaml
 
 logger = create_logger(__name__)
@@ -118,6 +118,10 @@ def call_job_agent(
             # Tells job_chat's subagent prompt which step is focused/editable
             job_context["job_key"] = matched_job_key
 
+    # Attachments reuse job_chat's own context fields, which already render as
+    # <run_logs>/<input>/<output> and never reach the returned history.
+    job_context.update(attachments_to_context(attachments))
+
     job_payload = {
         "content": user_message,
         "context": job_context,
@@ -132,7 +136,6 @@ def call_job_agent(
         # the <workflow_structure> block and the inspect_job_code tool.
         "subagent": True,
         "workflow_yaml": workflow_yaml,
-        "attachments": attachments or [],
     }
 
     try:

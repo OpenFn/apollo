@@ -3,6 +3,10 @@
 Attachments must reach a subagent as the exact bytes the user sent (never the
 planner's paraphrase), and must never end up in the history that is returned to
 the client and replayed on later turns.
+
+job_chat already had typed context fields for this content, so attachments are
+mapped onto those rather than given a second channel. workflow_chat and the
+planner have no such fields, so they get a rendered block.
 """
 
 from unittest.mock import patch
@@ -14,93 +18,125 @@ from global_chat.subagent_caller import (
     call_workflow_agent,
     format_subagent_result_for_llm,
 )
-from util import ATTACHMENT_TOTAL_CHAR_LIMIT, ApolloError, append_attachments
+from util import (
+    ATTACHMENT_TOTAL_CHAR_LIMIT,
+    ApolloError,
+    attachments_to_context,
+    format_attachments,
+)
 
 from .test_planner import WORKFLOW_YAML, make_planner
 from .test_router import make_router
 
 LOG = "[JOB] ✗ Request failed with status 401 Unauthorized\n[R/T] Job exited with error code 1"
+INPUT = '{"patients": []}'
 
 ATTACHMENTS = [
     {"type": "log", "content": LOG},
-    {"type": "input_dataclip", "content": '{"patients": []}'},
+    {"type": "input_dataclip", "content": INPUT},
 ]
 
 
-# --- the renderer ---------------------------------------------------------
+# --- mapping onto job_chat's existing context fields -----------------------
 
 
-def test_attachments_are_reproduced_verbatim() -> None:
-    result = append_attachments("why did this fail?", ATTACHMENTS)
+def test_types_map_onto_the_fields_job_chat_already_renders() -> None:
+    context = attachments_to_context([
+        {"type": "log", "content": LOG},
+        {"type": "input_dataclip", "content": INPUT},
+        {"type": "output_dataclip", "content": "out"},
+    ])
 
-    assert "why did this fail?" in result
-    assert LOG in result
-    assert '<attachment type="log">' in result
-    assert '<attachment type="input_dataclip">' in result
+    assert context == {"log": LOG, "input": INPUT, "output": "out"}
 
 
-def test_no_attachments_leaves_content_untouched() -> None:
-    assert append_attachments("hello", None) == "hello"
-    assert append_attachments("hello", []) == "hello"
-    # An entry with no usable content adds no empty block
-    assert append_attachments("hello", [{"type": "log", "content": "  "}]) == "hello"
+def test_two_attachments_sharing_a_field_are_joined_not_overwritten() -> None:
+    """input_dataclip and run_input both describe input; neither may be lost."""
+    context = attachments_to_context([
+        {"type": "input_dataclip", "content": "step input"},
+        {"type": "run_input", "content": "run input"},
+    ])
+
+    assert "step input" in context["input"]
+    assert "run input" in context["input"]
+
+
+def test_unknown_type_is_reported_not_silently_dropped() -> None:
+    with patch("util.create_logger") as mock_logger:
+        context = attachments_to_context([{"type": "screenshot", "content": "..."}])
+
+    assert context == {}
+    mock_logger.return_value.warning.assert_called_once()
+
+
+def test_no_attachments_maps_to_nothing() -> None:
+    assert attachments_to_context(None) == {}
+    assert attachments_to_context([]) == {}
+    assert attachments_to_context([{"type": "log", "content": "  "}]) == {}
+
+
+# --- rendering for agents with no context fields --------------------------
+
+
+def test_rendered_block_reproduces_content_verbatim() -> None:
+    block = format_attachments(ATTACHMENTS)
+
+    assert LOG in block
+    assert '<attachment type="log">' in block
+    assert '<attachment type="input_dataclip">' in block
+
+
+def test_nothing_to_render_returns_empty_string() -> None:
+    assert format_attachments(None) == ""
+    assert format_attachments([]) == ""
+    assert format_attachments([{"type": "log", "content": "  "}]) == ""
+
+
+# --- the size guard -------------------------------------------------------
 
 
 def test_a_large_attachment_that_fits_is_passed_whole() -> None:
     body = "HEAD" + ("x" * (ATTACHMENT_TOTAL_CHAR_LIMIT - 100)) + "TAIL"
 
-    result = append_attachments("debug this", [{"type": "log", "content": body}])
-
     # Nothing is trimmed to make room — a log the user attached is read in full
-    assert body in result
+    assert body in format_attachments([{"type": "log", "content": body}])
+    assert attachments_to_context([{"type": "log", "content": body}])["log"] == body
 
 
 def test_oversized_attachments_are_rejected_not_edited() -> None:
     body = "x" * (ATTACHMENT_TOTAL_CHAR_LIMIT + 1)
 
     with pytest.raises(ApolloError) as excinfo:
-        append_attachments("debug this", [{"type": "log", "content": body}])
+        format_attachments([{"type": "log", "content": body}])
 
     error = excinfo.value
     assert error.code == 400
     assert error.type == "ATTACHMENT_TOO_LARGE"
-    # The message must name the offender so the client can say something useful
+    # The message must name the offender, and must not carry its content
     assert "log" in error.message
     assert error.details["largest_attachment"]["characters"] == len(body)
-    # ...and must not carry the attachment's content anywhere
     assert body not in error.message
 
 
 def test_the_limit_applies_to_the_total_not_each_attachment() -> None:
-    """The prompt carries them together, so the sum is the constraint.
-
-    A per-attachment cap would wave through five attachments that individually
-    fit and collectively cannot.
-    """
+    """The prompt carries them together, so the sum is the constraint."""
     half = "x" * (ATTACHMENT_TOTAL_CHAR_LIMIT // 2 + 1)
 
     with pytest.raises(ApolloError):
-        append_attachments("debug this", [
+        attachments_to_context([
             {"type": "log", "content": half},
             {"type": "output_dataclip", "content": half},
         ])
 
 
-def test_unknown_attachment_type_still_reaches_the_model() -> None:
-    result = append_attachments("look", [{"content": "some data"}])
-
-    assert '<attachment type="unknown">' in result
-    assert "some data" in result
-
-
-# --- router: structural, not flattened into content -----------------------
+# --- router: structural, not flattened into the message -------------------
 
 
 def job_chat_result() -> dict:
     return {"response": "done", "suggested_code": None, "history": [], "usage": {}}
 
 
-def test_job_route_passes_attachments_structurally() -> None:
+def test_job_route_passes_attachments_as_context() -> None:
     router = make_router()
     router._input_attachments = ATTACHMENTS
 
@@ -110,7 +146,8 @@ def test_job_route_passes_attachments_structurally() -> None:
         )
 
     payload = mock_main.call_args[0][0]
-    assert payload["attachments"] == ATTACHMENTS
+    assert payload["context"]["log"] == LOG
+    assert payload["context"]["input"] == INPUT
     # The user's message is passed as written — the log is not spliced into it
     assert payload["content"] == "why did this fail?"
 
@@ -131,26 +168,18 @@ def test_workflow_route_passes_attachments_structurally() -> None:
 # --- planner --------------------------------------------------------------
 
 
-def test_planner_shows_attachments_on_the_current_turn() -> None:
-    planner = make_planner()
-    planner._attachments = ATTACHMENTS
-
-    user_content = planner._build_user_content("why did the last two steps fail?", None)
-
-    assert "why did the last two steps fail?" in user_content
-    assert LOG in user_content
-
-
-def test_planner_history_omits_attachments() -> None:
-    """The turn sent to the model carries the log; the turn stored does not."""
+def test_planner_shows_attachments_on_the_current_turn_only() -> None:
     planner = make_planner()
     planner._attachments = ATTACHMENTS
 
     content = "why did the last two steps fail?"
-    history = [{"role": "user", "content": content}, {"role": "assistant", "content": "..."}]
+    user_content = planner._build_user_content(content, None)
 
-    assert LOG not in "".join(turn["content"] for turn in history)
-    assert LOG in planner._build_user_content(content, None)
+    assert content in user_content
+    assert LOG in user_content
+    # run() records the raw content in the returned history, so the log cannot
+    # be replayed as the current run on a later turn
+    assert LOG not in content
 
 
 def test_planner_relays_attachments_to_both_subagents() -> None:
@@ -194,7 +223,7 @@ def test_job_agent_payload_matches_the_router_route() -> None:
     assert payload["subagent"] is True
     assert payload["workflow_yaml"] == WORKFLOW_YAML
     assert payload["context"]["job_key"] == "fetch-patients"
-    assert payload["attachments"] == ATTACHMENTS
+    assert payload["context"]["log"] == LOG
     # The dead nested copy is gone — Payload.from_dict never read it
     assert "workflow_yaml" not in payload["context"]
 

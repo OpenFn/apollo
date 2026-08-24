@@ -86,10 +86,8 @@ prompts:
     code redacted. The full YAML is automatically passed to subagents — you don't need to relay it.
 
     The same is true of anything the user attached to this message (`<attachments>`: run logs,
-    dataclips). Every subagent you call receives those attachments in full, exactly as the user
-    sent them. Never paraphrase, summarise, or quote them into a subagent message — say what you
-    want done and let the subagent read the attachment itself. Attachments belong to the message
-    they arrived with: earlier turns' attachments are gone, so never treat one as the current run.
+    dataclips) — every subagent you call receives those attachments in full, exactly as the user
+    sent them.
 
     NEVER ask the user to share what is already available:
 

@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from langfuse import observe, get_client as get_langfuse_client
-from util import create_logger, ApolloError, sum_usage
+from util import create_logger, ApolloError, sum_usage, attachments_to_context
 from streaming_util import StreamManager
 from global_chat.config_loader import ConfigLoader
 from models import resolve_model
@@ -250,9 +250,8 @@ class RouterAgent:
             "meta": {"user": self._user} if self._user else None,
             "metrics_opt_in": self._metrics_opt_in,
             "subagent": True,
-            # Passed structurally, like the YAML: the subagent renders the
-            # original bytes into the turn it sends the model, and keeps them
-            # out of the history it returns.
+            # workflow_chat has no typed context fields of its own, so it takes
+            # attachments as a payload field and renders them itself.
             "attachments": self._input_attachments,
             "_stream_manager": self._stream_manager,
         }
@@ -361,6 +360,10 @@ class RouterAgent:
         elif page_view == "overview":
             job_context["viewing"] = "canvas"
 
+        # Attachments reuse job_chat's own context fields, which already render
+        # as <run_logs>/<input>/<output> and never reach the returned history.
+        job_context.update(attachments_to_context(self._input_attachments))
+
         clean_history = [{"role": t["role"], "content": t["content"]} for t in history]
 
         payload = {
@@ -374,7 +377,6 @@ class RouterAgent:
             "metrics_opt_in": self._metrics_opt_in,
             "subagent": True,
             "workflow_yaml": workflow_yaml,
-            "attachments": self._input_attachments,
             "_stream_manager": self._stream_manager,
         }
 

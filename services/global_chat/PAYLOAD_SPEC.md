@@ -263,28 +263,34 @@ The step name should match a job key in the workflow YAML (exact match or normal
 ### Attachment handling
 
 Input attachments travel **structurally**, the same way the workflow YAML does —
-as a payload field, never as text spliced into the user's message. Every agent
-reachable from `global_chat` (`workflow_chat`, `job_chat`, and the planner)
-accepts the same top-level `attachments` field and renders it into the message
-it sends the model.
+as a payload field, never as text spliced into the user's message.
+
+Each agent receives them the way it already receives context of that kind:
+
+- **`job_chat`** has typed `context.log` / `context.input` / `context.output`
+  fields, which render as `<run_logs>` / `<input>` / `<output>`. Attachments are
+  mapped onto those, so there is one way this content reaches the service
+  whether the caller is Lightning or `global_chat`. Two attachments that share a
+  field (`input_dataclip` and `run_input` both describe input) are joined rather
+  than overwritten. A type with no field is logged and not passed on.
+- **`workflow_chat`** and the **planner** have no typed fields, so they take an
+  `attachments` payload field and render it verbatim where their other context
+  goes.
 
 Three consequences worth knowing about:
 
 1. **Subagents get the original bytes.** When the planner delegates, it does not
    summarise the attachments into its `call_job_code_agent` /
    `call_workflow_agent` message — they are relayed automatically and in full.
-   The planner's prompt tells it not to paraphrase them.
-2. **Attachments are never written to `history`.** Each service builds its
+2. **Attachments are never written to `history`.** Every service builds its
    returned history from the raw `content`, so a run log attached on turn one is
    not replayed on turn five, where the model would have no way to tell it was
    stale. **The client must re-send an attachment on every turn it should apply
    to** — Apollo will not remember it.
-3. **Attachments are never trimmed — oversized ones are refused.** What the user
-   attached is what the model reads. If a turn's attachments total more than
-   **250,000 characters**, the request is rejected up front with
-   `400 ATTACHMENT_TOO_LARGE` before any model is called. The error names the
-   largest attachment and its size, and carries a machine-readable `details`
-   block:
+3. **Attachments are never trimmed; oversized ones are refused.** If a turn's
+   attachments total more than **250,000 characters**, the request is rejected
+   with `400 ATTACHMENT_TOO_LARGE` before any model is called. The error names
+   the largest attachment and carries a machine-readable `details` block:
 
    ```json
    {
@@ -300,18 +306,14 @@ Three consequences worth knowing about:
    ```
 
    The limit is a **total across all attachments**, because the prompt carries
-   them together. It is derived, not chosen by feel: see the note on
-   `ATTACHMENT_TOTAL_CHAR_LIMIT` in `services/util.py` for the arithmetic, and
-   re-derive it if the model, context window, or `max_tokens` changes.
+   them together, and is derived from what a subagent prompt can actually hold —
+   see the note on `ATTACHMENT_TOTAL_CHAR_LIMIT` in `services/util.py`.
 
-   Silent truncation is deliberately not an option here. Attachments are content
-   the user chose to send, so answering from a quietly shortened log would mean
-   reasoning from evidence they believe we read in full. (Context Apollo injects
-   on spec, such as adaptor docs, is a different case and *is* truncated.)
-
-   Clients that know an attachment's size before sending — Lightning does —
-   should prefer to warn or offer a shorter selection rather than let this
-   fire.
+   Silently shortening user-supplied content would mean answering from evidence
+   they believe we read in full. (Context Apollo injects on spec, such as adaptor
+   docs, is a different case and *is* truncated.) Clients that know an
+   attachment's size before sending — Lightning does — should prefer to warn or
+   offer a shorter selection rather than let this fire.
 
 ### Job code stitching (planner path)
 

@@ -1,5 +1,5 @@
 import os
-from util import append_attachments
+from util import format_attachments
 from .config_loader import ConfigLoader
 from .available_adaptors import get_adaptors_string
 
@@ -95,7 +95,17 @@ def build_prompt(content, existing_yaml=None, errors=None, history=None, read_on
         )
         system_message += "\n" + config_loader.get_prompt("subagent_handover_instructions")
 
+    # Attachments go last in the system message, where this service's other
+    # context (the existing YAML) already lives, and only when there are any —
+    # with none, the prompt is byte-identical to before. History is built from
+    # the raw content, so they never carry into a later turn.
+    attachments_block = format_attachments(attachments)
+    if attachments_block:
+        system_message += (
+            "\n\nThe user attached the following to their latest message:\n" + attachments_block
+        )
+
     prompt = list(history)  # Create a copy
-    prompt.append({"role": "user", "content": append_attachments(user_content, attachments)})
+    prompt.append({"role": "user", "content": user_content})
 
     return (system_message, prompt)

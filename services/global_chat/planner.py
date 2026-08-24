@@ -16,7 +16,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from langfuse import observe
-from util import create_logger, ApolloError, sum_usage, append_attachments
+from util import create_logger, ApolloError, sum_usage, format_attachments
 from streaming_util import (
     StreamManager,
     STATUS_REVIEWING_WORKFLOW,
@@ -285,7 +285,11 @@ class PlannerAgent:
         the returned history, so an attached log never becomes a permanent part
         of the conversation.
         """
-        user_content = append_attachments(content, self._attachments)
+        user_content = content
+
+        attachments = format_attachments(self._attachments)
+        if attachments:
+            user_content += f"\n\n{attachments}"
 
         if page:
             step_name = get_step_name_from_page(page)

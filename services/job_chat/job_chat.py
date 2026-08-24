@@ -160,10 +160,6 @@ class Payload:
     download_adaptor_docs: Optional[bool] = True
     refresh_rag: Optional[bool] = False
     metrics_opt_in: Optional[bool] = None
-    # This turn's input attachments (logs, dataclips) as {type, content} dicts.
-    # Rendered into the message sent to the model and deliberately left out of
-    # the returned history — see append_attachments.
-    attachments: Optional[List[Dict]] = None
     # Subagent mode: set only when called from global_chat, never by direct
     # production callers. workflow_yaml additionally enables the
     # inspect_job_code tool.
@@ -188,7 +184,6 @@ class Payload:
             download_adaptor_docs=data.get("download_adaptor_docs", True),
             refresh_rag=data.get("refresh_rag", False),
             metrics_opt_in=data.get("metrics_opt_in"),
-            attachments=data.get("attachments"),
             workflow_yaml=data.get("workflow_yaml"),
             subagent=data.get("subagent", False),
         )
@@ -245,7 +240,6 @@ class AnthropicClient:
         download_adaptor_docs: Optional[bool] = True,
         refresh_rag: Optional[bool] = False,
         current_page: Optional[dict] = None,
-        attachments: Optional[List[Dict]] = None,
         workflow_yaml: Optional[str] = None,
         subagent: Optional[bool] = False,
         stream_manager: Optional[StreamManager] = None,
@@ -280,7 +274,6 @@ class AnthropicClient:
                         stream_manager=stream_manager,
                         download_adaptor_docs=download_adaptor_docs,
                         refresh_rag=refresh_rag,
-                        attachments=attachments,
                         workflow_yaml=workflow_yaml,
                         subagent=subagent
                     )
@@ -488,9 +481,7 @@ class AnthropicClient:
                         len(tool_code_edits), (diff or {}).get("patches_applied"), _blocks,
                     )
 
-            # Add prefix to content when building history. History is built from
-            # the RAW content, never the enriched message sent to the model: the
-            # attachments and the tool reminder belong to this turn only.
+            # Add prefix to content when building history
             prefixed_content = add_page_prefix(content, current_page)
 
             updated_history = history + [
@@ -818,7 +809,6 @@ def main(data_dict: dict) -> dict:
                 download_adaptor_docs=data.download_adaptor_docs,
                 refresh_rag=should_refresh_rag,
                 current_page=current_page,
-                attachments=data.attachments,
                 workflow_yaml=data.workflow_yaml,
                 subagent=data.subagent,
                 # In-process callers (global_chat) may inject a shared stream

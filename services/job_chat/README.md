@@ -90,7 +90,6 @@ The input payload is a JSON object with the following structure
       "search_results": []
     }
   },
-  "attachments": [{ "type": "log", "content": "execution log text" }],
   "suggest_code": true,
   "stream": false,
   "download_adaptor_docs": true,
@@ -102,15 +101,11 @@ The input payload is a JSON object with the following structure
 
 All context is optional, as is history.
 
-- `attachments` (optional): Files the user attached to this message, as
-  `{type, content}` objects (`"log"`, `"input_dataclip"`, `"output_dataclip"`,
-  …). Rendered into the message sent to the model verbatim and in full, and
-  deliberately left out of the returned `history`, so an attachment never
-  carries into later turns — send them again on any turn they still apply to.
-  Nothing is ever trimmed to fit: attachments totalling over 250,000 characters
-  are rejected with `400 ATTACHMENT_TOO_LARGE`. `global_chat` populates this
-  when it delegates; the typed `context.log` / `context.input` /
-  `context.output` fields above are the equivalent for direct callers.
+`context.log` / `context.input` / `context.output` are how run logs and
+dataclips reach this service. `global_chat` maps the attachments on its own
+payload onto these same fields, so there is one way in regardless of caller, and
+none of it enters the returned `history`.
+
 - `meta.session_id` (optional): Session ID for grouping multi-turn conversations in Langfuse
 - `meta.user` (optional): User identity object with `id` (string) and `persona` (string, e.g. `"core-contributor"` or `"user"`) — attributed to Langfuse traces when tracking is enabled
 - `metrics_opt_in` (optional): Set to `true` to enable Langfuse tracing for this session. The frontend is responsible for setting this flag; the backend tracks if and only if this is `true`.

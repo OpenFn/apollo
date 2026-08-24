@@ -364,50 +364,75 @@ def check_attachment_size(attachments: list[dict] | None) -> None:
     )
 
 
-def append_attachments(content: str, attachments: list[dict] | None) -> str:
-    """Append the user's input attachments to a message, verbatim.
+# Payload attachment type -> the job_chat context field that already renders it.
+# job_chat has had typed <run_logs>/<input>/<output> blocks all along; attachments
+# arriving from global_chat reuse them rather than adding a second channel.
+# A new attachment type needs a line here, which is the cost of the reuse.
+_ATTACHMENT_CONTEXT_FIELDS = {
+    "log": "log",
+    "input_dataclip": "input",
+    "run_input": "input",
+    "output_dataclip": "output",
+    "run_output": "output",
+}
 
-    Attachments belong to the turn they arrived on, so callers append this to
-    the message they send the model and NEVER to the history they return: a run
-    log carried forward would be re-read as the current run on every later turn.
-    Re-attaching per turn is the client's job.
 
-    Each entry is a `{"type", "content"}` dict as documented in
-    global_chat/PAYLOAD_SPEC.md. The type is passed through as a label rather
-    than mapped to a fixed set, so a new attachment type reaches the model
-    without a code change.
+def attachments_to_context(attachments: list[dict] | None) -> dict:
+    """Map input attachments onto job_chat's existing context fields.
 
-    Raises ApolloError (ATTACHMENT_TOO_LARGE) if the turn's attachments exceed
-    what the prompt can carry — see check_attachment_size. Nothing is ever
-    trimmed to fit: what the user attached is what the model reads.
+    Returns the fields to merge into a job_chat `context`. Nothing lands in the
+    conversation history this way, because job_chat builds history from the raw
+    `content` — so an attachment can't be re-read as the current run on a later
+    turn.
+
+    Two attachments can want the same field (input_dataclip and run_input both
+    describe input), so they are joined rather than allowed to overwrite.
     """
     if not attachments:
-        return content
+        return {}
 
     check_attachment_size(attachments)
 
-    blocks = []
+    context: dict[str, str] = {}
     for attachment in attachments:
         body = str(attachment.get("content") or "")
         if not body.strip():
             continue
-        att_type = attachment.get("type") or "unknown"
-        blocks.append(
-            f'<attachment type="{att_type}">\n'
-            f"{body}\n"
-            "</attachment>",
-        )
 
+        att_type = str(attachment.get("type") or "")
+        field = _ATTACHMENT_CONTEXT_FIELDS.get(att_type)
+        if not field:
+            create_logger(__name__).warning(
+                "attachment type %r has no job_chat context field — not passed on", att_type,
+            )
+            continue
+
+        context[field] = f"{context[field]}\n\n{body}" if field in context else body
+
+    return context
+
+
+def format_attachments(attachments: list[dict] | None) -> str:
+    """Render attachments for an agent with no typed context fields of its own.
+
+    Used by the planner and workflow_chat. Returns "" when there is nothing to
+    show, so callers can append it unconditionally. Callers add their own
+    one-line introduction and put it where their other context goes; nothing
+    here goes into history.
+    """
+    if not attachments:
+        return ""
+
+    check_attachment_size(attachments)
+
+    blocks = [
+        f'<attachment type="{attachment.get("type") or "unknown"}">\n'
+        f"{attachment.get('content') or ''!s}\n"
+        "</attachment>"
+        for attachment in attachments
+        if str(attachment.get("content") or "").strip()
+    ]
     if not blocks:
-        return content
+        return ""
 
-    body = "\n".join(blocks)
-    return (
-        f"{content}\n\n"
-        "<attachments>\n"
-        "The user attached these to THIS message. They are the exact bytes the user "
-        "sent — read them as the current evidence and quote from them rather than "
-        "guessing. Attachments from earlier turns are not re-sent.\n"
-        f"{body}\n"
-        "</attachments>"
-    )
+    return "<attachments>\n" + "\n".join(blocks) + "\n</attachments>"

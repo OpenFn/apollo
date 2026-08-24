@@ -97,17 +97,29 @@ class ScriptedAnthropic:
         return response([text_block('{"destination": "planner", "confidence": 5, "job_key": null}')], "end_turn")
 
     def job_chat_prompt_text(self):
-        """Everything job_chat put in front of the model, as one string."""
+        """Everything job_chat put in front of the model, as one string.
+
+        System and messages both, since typed context (a run log lands in
+        <run_logs>) goes in the system message while the question goes in the
+        user turn.
+        """
         for call in self.calls:
             if "edit_job" in {t["name"] for t in call.get("tools") or []}:
-                return "\n".join(str(m["content"]) for m in call["messages"])
+                return _prompt_text(call)
         raise AssertionError("job_chat was never called")
 
     def all_prompt_text(self):
         """Everything every agent put in front of a model, as one string."""
-        return "\n".join(
-            str(m["content"]) for call in self.calls for m in call.get("messages") or []
-        )
+        return "\n".join(_prompt_text(call) for call in self.calls)
+
+
+def _prompt_text(call):
+    """Flatten one API call's system + messages into a searchable string."""
+    system = call.get("system") or ""
+    if isinstance(system, list):
+        system = "\n".join(str(block.get("text", block)) for block in system)
+    messages = "\n".join(str(m["content"]) for m in call.get("messages") or [])
+    return f"{system}\n{messages}"
 
 
 @pytest.fixture
@@ -137,6 +149,8 @@ def test_attached_log_reaches_the_subagents_api_call_verbatim(scripted):
     sent = scripted.job_chat_prompt_text()
     assert CANARY in sent, "the planner delegated without passing the attachment through"
     assert LOG in sent, "the log arrived altered, not as the bytes the user attached"
+    # ...in the block job_chat already had for logs, not a second one
+    assert "<run_logs>" in sent
 
 
 def test_attachment_is_not_persisted_to_history(scripted):
