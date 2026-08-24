@@ -12,7 +12,7 @@ from typing import Dict, List, Optional
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from langfuse import observe
-from util import create_logger, ApolloError, attachments_to_context
+from util import create_logger, ApolloError, attachments_to_context, select_attachments
 from yaml_utils import find_job_in_yaml
 
 logger = create_logger(__name__)
@@ -33,7 +33,8 @@ def call_workflow_agent(
     Args:
         tool_input: Tool input from supervisor containing message
         workflow_yaml: Full workflow YAML string
-        attachments: This turn's input attachments, relayed verbatim
+        attachments: This turn's attachments; the planner names which of them
+            this call needs, and only those are forwarded
 
     Returns:
         Dictionary with workflow agent response (raw, not formatted)
@@ -43,6 +44,8 @@ def call_workflow_agent(
         raise ApolloError(400, "message is required")
 
     logger.info(f"Calling workflow_agent: {user_message[:120]}")
+
+    selected = select_attachments(attachments, tool_input.get("attachments"))
 
     workflow_payload = {
         "content": user_message,
@@ -56,7 +59,7 @@ def call_workflow_agent(
         # the Inspector" scope instruction, and a handover field for requests
         # that belong to the job code agent.
         "subagent": True,
-        "attachments": attachments or [],
+        "attachments": selected,
     }
 
     try:
@@ -93,7 +96,8 @@ def call_job_agent(
     Args:
         tool_input: Tool input from supervisor containing message and optional adaptor
         workflow_yaml: Full workflow YAML string for additional context
-        attachments: This turn's input attachments, relayed verbatim
+        attachments: This turn's attachments; the planner names which of them
+            this call needs, and only those are forwarded
 
     Returns:
         Dictionary with job agent response (raw, not formatted)
@@ -119,8 +123,9 @@ def call_job_agent(
             job_context["job_key"] = matched_job_key
 
     # Attachments reuse job_chat's own context fields, which already render as
-    # <run_logs>/<input>/<output> and never reach the returned history.
-    job_context.update(attachments_to_context(attachments))
+    # <run_logs>/<input>/<output> and never reach the returned history. Only the
+    # ones the planner named for this call are forwarded.
+    job_context.update(attachments_to_context(select_attachments(attachments, tool_input.get("attachments"))))
 
     job_payload = {
         "content": user_message,

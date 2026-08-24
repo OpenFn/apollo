@@ -279,9 +279,12 @@ Each agent receives them the way it already receives context of that kind:
 
 Three consequences worth knowing about:
 
-1. **Subagents get the original bytes.** When the planner delegates, it does not
-   summarise the attachments into its `call_job_code_agent` /
-   `call_workflow_agent` message — they are relayed automatically and in full.
+1. **Subagents get the original bytes.** The router forwards everything to
+   whichever subagent it picks. The planner instead names, per call, which
+   attachments that subagent needs to read for itself — so a step being told
+   "change `state.patients` to `state.cases`" is not billed for the log the
+   planner already read. Named or not, what travels is the original content,
+   never a summary of it.
 2. **Attachments are never written to `history`.** Every service builds its
    returned history from the raw `content`, so a run log attached on turn one is
    not replayed on turn five, where the model would have no way to tell it was

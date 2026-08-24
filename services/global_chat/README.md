@@ -53,8 +53,8 @@ Request to build a new multi-step workflow from scratch:
   `{role, content}`
 - `attachments` (optional): List of input context objects with `type` (e.g.
   `"log"`, `"input_dataclip"`, `"run_output"`) and `content`. Passed unmodified
-  to whichever subagents handle the request, and **not** stored in the returned
-  history — re-send them on each turn they apply to. Never trimmed: over 250,000
+  to the subagents that need them, and **not** stored in the returned history —
+  re-send them on each turn they apply to. Never trimmed: over 250,000
   characters in total, the request is rejected with `400 ATTACHMENT_TOO_LARGE`
   before any model call. See `PAYLOAD_SPEC.md` → Attachment handling
 - `options` (optional): Runtime options object (e.g. `{stream: false}`)

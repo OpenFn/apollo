@@ -412,6 +412,19 @@ def attachments_to_context(attachments: list[dict] | None) -> dict:
     return context
 
 
+def select_attachments(attachments: list[dict] | None, types: list[str] | None) -> list[dict]:
+    """Keep the attachments whose type the caller named.
+
+    A subagent sees only what it is handed, so nothing travels unless it is
+    named — there is no implicit default either way.
+    """
+    if not attachments or not types:
+        return []
+
+    wanted = set(types)
+    return [a for a in attachments if str(a.get("type") or "") in wanted]
+
+
 def format_attachments(attachments: list[dict] | None) -> str:
     """Render attachments for an agent with no typed context fields of its own.
 

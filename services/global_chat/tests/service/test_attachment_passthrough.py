@@ -65,6 +65,9 @@ class ScriptedAnthropic:
     the script does not silently rot if an agent adds a round.
     """
 
+    #: What the scripted planner names on its call_job_code_agent call.
+    forwards = ["log"]
+
     def __init__(self, *_args, **_kwargs):
         self.calls = []
         self.messages = SimpleNamespace(create=self._create)
@@ -84,6 +87,7 @@ class ScriptedAnthropic:
                     [tool_use_block("call_job_code_agent", {
                         "message": "the mapping step blew up on the run - see the attached log",
                         "job_key": "map-to-dhis2",
+                        "attachments": self.forwards,
                     })],
                     "tool_use",
                 )
@@ -151,6 +155,19 @@ def test_attached_log_reaches_the_subagents_api_call_verbatim(scripted):
     assert LOG in sent, "the log arrived altered, not as the bytes the user attached"
     # ...in the block job_chat already had for logs, not a second one
     assert "<run_logs>" in sent
+
+
+def test_a_call_that_names_nothing_forwards_nothing(scripted):
+    """The planner read the log itself and is only relaying an instruction.
+
+    The subagent sees what it is handed and nothing else, so this is how the
+    planner avoids paying for a log the subagent has no use for.
+    """
+    scripted.forwards = []
+
+    call_global_chat(scripted, [{"type": "log", "content": LOG}])
+
+    assert CANARY not in scripted.job_chat_prompt_text()
 
 
 def test_attachment_is_not_persisted_to_history(scripted):

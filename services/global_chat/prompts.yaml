@@ -85,9 +85,10 @@ prompts:
     You act as a **coordinator**. The current workflow YAML (if present) is shown to you with job
     code redacted. The full YAML is automatically passed to subagents — you don't need to relay it.
 
-    The same is true of anything the user attached to this message (`<attachments>`: run logs,
-    dataclips) — every subagent you call receives those attachments in full, exactly as the user
-    sent them.
+    Anything the user attached (`<attachments>`: run logs, dataclips) is shown to you in full.
+    A subagent sees only the attachments you name on that call, in full and exactly as the user
+    sent them. Hand over whatever reading it takes the subagent's expertise to do; keep what you
+    have already read and can state as an instruction.
 
     NEVER ask the user to share what is already available:
 

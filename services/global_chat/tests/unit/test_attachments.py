@@ -23,6 +23,7 @@ from util import (
     ApolloError,
     attachments_to_context,
     format_attachments,
+    select_attachments,
 )
 
 from .test_planner import WORKFLOW_YAML, make_planner
@@ -182,7 +183,8 @@ def test_planner_shows_attachments_on_the_current_turn_only() -> None:
     assert LOG not in content
 
 
-def test_planner_relays_attachments_to_both_subagents() -> None:
+def test_planner_offers_every_attachment_to_the_caller() -> None:
+    """The planner hands the whole set down; the caller keeps what was named."""
     planner = make_planner()
     planner._attachments = ATTACHMENTS
 
@@ -205,13 +207,24 @@ def test_planner_relays_attachments_to_both_subagents() -> None:
     assert wf_mock.call_args.kwargs["attachments"] == ATTACHMENTS
 
 
+def test_selection_keeps_only_what_was_named() -> None:
+    assert select_attachments(ATTACHMENTS, ["log"]) == [ATTACHMENTS[0]]
+    assert select_attachments(ATTACHMENTS, ["log", "input_dataclip"]) == ATTACHMENTS
+
+
+def test_naming_nothing_forwards_nothing() -> None:
+    """A subagent sees only what it is handed — there is no implicit default."""
+    assert select_attachments(ATTACHMENTS, []) == []
+    assert select_attachments(ATTACHMENTS, None) == []
+
+
 # --- subagent_caller payloads ---------------------------------------------
 
 
 def test_job_agent_payload_matches_the_router_route() -> None:
     with patch("job_chat.job_chat.main", return_value=job_chat_result()) as mock_main:
         call_job_agent(
-            {"message": "fix the mapping", "job_key": "fetch-patients"},
+            {"message": "fix the mapping", "job_key": "fetch-patients", "attachments": ["log"]},
             workflow_yaml=WORKFLOW_YAML,
             attachments=ATTACHMENTS,
         )
@@ -224,6 +237,8 @@ def test_job_agent_payload_matches_the_router_route() -> None:
     assert payload["workflow_yaml"] == WORKFLOW_YAML
     assert payload["context"]["job_key"] == "fetch-patients"
     assert payload["context"]["log"] == LOG
+    # ...and only the log, because that is what this call asked for
+    assert "input" not in payload["context"]
     # The dead nested copy is gone — Payload.from_dict never read it
     assert "workflow_yaml" not in payload["context"]
 
@@ -232,11 +247,28 @@ def test_workflow_agent_payload_runs_in_subagent_mode() -> None:
     workflow_result = {"response": "done", "response_yaml": None, "history": [], "usage": {}}
 
     with patch("workflow_chat.workflow_chat.main", return_value=workflow_result) as mock_main:
-        call_workflow_agent({"message": "add a step"}, workflow_yaml=WORKFLOW_YAML, attachments=ATTACHMENTS)
+        call_workflow_agent(
+            {"message": "add a step", "attachments": ["log"]},
+            workflow_yaml=WORKFLOW_YAML,
+            attachments=ATTACHMENTS,
+        )
 
     payload = mock_main.call_args[0][0]
     assert payload["subagent"] is True
-    assert payload["attachments"] == ATTACHMENTS
+    assert payload["attachments"] == [ATTACHMENTS[0]]
+
+
+def test_a_subagent_call_that_names_nothing_gets_nothing() -> None:
+    """The planner read the log and is only relaying an instruction."""
+    with patch("job_chat.job_chat.main", return_value=job_chat_result()) as mock_main:
+        call_job_agent(
+            {"message": "change state.patients to state.cases", "job_key": "fetch-patients",
+             "attachments": []},
+            workflow_yaml=WORKFLOW_YAML,
+            attachments=ATTACHMENTS,
+        )
+
+    assert "log" not in mock_main.call_args[0][0]["context"]
 
 
 def test_handover_becomes_an_instruction_for_the_planner() -> None:

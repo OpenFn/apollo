@@ -95,8 +95,8 @@ class PlannerAgent:
             history: Conversation history
             stream: Whether to stream text via SSE events
             attachments: Input attachments for this turn (logs, dataclips).
-                Shown to the planner and relayed verbatim to every subagent,
-                the same way the YAML is.
+                Shown to the planner in full; each subagent call forwards only
+                the ones the planner names for it.
             stream_manager: Optional shared stream manager from the router, so
                 a handed-over request continues on the same stream
 

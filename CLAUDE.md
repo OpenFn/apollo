@@ -127,15 +127,13 @@ Every mounted service gets three endpoints automatically:
 - `sum_usage(*usages)` - Aggregate Anthropic token/cache usage across calls
 - `add_page_prefix(content, page)` - Tag a message with `[pg:type/name/adaptor]`
   for client-side navigation
-- `attachments_to_context(attachments)` - Map a turn's input attachments (logs,
-  dataclips) onto the `log`/`input`/`output` context fields job_chat already
-  renders, so there is no second channel for the same content
-- `format_attachments(attachments)` / `check_attachment_size(...)` - Render
-  attachments verbatim for agents with no typed context fields (workflow_chat,
-  the planner). Neither path touches the history a service returns, so
-  attachments can't accumulate across turns, and neither trims — a turn
-  totalling over `ATTACHMENT_TOTAL_CHAR_LIMIT` is rejected with
-  `400 ATTACHMENT_TOO_LARGE`
+- `attachments_to_context(attachments)` - Map input attachments onto job_chat's
+  existing `log`/`input`/`output` context fields
+- `format_attachments(...)` / `select_attachments(...)` - Render attachments for
+  agents with no context fields (workflow_chat, planner); filter to the types a
+  planner tool call named
+- `check_attachment_size(attachments)` - Reject a turn over
+  `ATTACHMENT_TOTAL_CHAR_LIMIT`; attachments are never trimmed to fit
 
 ### Models (`services/models.py`)
 
