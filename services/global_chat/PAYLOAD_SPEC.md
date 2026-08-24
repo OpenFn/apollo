@@ -73,6 +73,8 @@ This document defines the input and output payload structure for the Global Agen
   - `run_input` — input payload for the whole run
   - `run_output` — final output of a run
 
+  The `type` is passed to the model as a label, so an unrecognised type is delivered rather than dropped. See [Attachment handling](#attachment-handling) for how they travel and why they are not persisted.
+
 - **`options`** (object, optional): Runtime options.
   - **`stream`** (boolean): Enable streaming response (default: false).
 
@@ -253,10 +255,34 @@ The step name should match a job key in the workflow YAML (exact match or normal
 
 ## Design Principles
 
-1. **Attachments carry artifacts**: Output `attachments` contain structured artifacts (currently `workflow_yaml`). The frontend reads the array to find and diff workflow YAML changes. Input `attachments` carry contextual data (logs, dataclips, etc.) that enrich the agent's understanding of the request.
+1. **Attachments carry artifacts**: Output `attachments` contain structured artifacts (currently `workflow_yaml`). The frontend reads the array to find and diff workflow YAML changes. Input `attachments` carry contextual data (logs, dataclips, etc.) that enrich the agent's understanding of the request; they reach every agent unmodified and belong to the turn they arrived on (see [Attachment handling](#attachment-handling)).
 2. **Page-driven routing**: The `page` URL tells the router what the user is focused on, avoiding ambiguous name matching.
 3. **Transparent execution**: `meta.agents` shows the full execution path.
 4. **Usage tracking**: Token usage is aggregated across all agents invoked in a single request.
+
+### Attachment handling
+
+Input attachments travel **structurally**, the same way the workflow YAML does —
+as a payload field, never as text spliced into the user's message. Every agent
+reachable from `global_chat` (`workflow_chat`, `job_chat`, and the planner)
+accepts the same top-level `attachments` field and renders it into the message
+it sends the model.
+
+Three consequences worth knowing about:
+
+1. **Subagents get the original bytes.** When the planner delegates, it does not
+   summarise the attachments into its `call_job_code_agent` /
+   `call_workflow_agent` message — they are relayed automatically and in full.
+   The planner's prompt tells it not to paraphrase them.
+2. **Attachments are never written to `history`.** Each service builds its
+   returned history from the raw `content`, so a run log attached on turn one is
+   not replayed on turn five, where the model would have no way to tell it was
+   stale. **The client must re-send an attachment on every turn it should apply
+   to** — Apollo will not remember it.
+3. **Large attachments are truncated in the middle.** Anything over 40,000
+   characters keeps its head and its tail (a log's setup and its stack trace)
+   with an explicit `[... N characters omitted ...]` note in the gap, which the
+   model can report to the user. The cap is per attachment.
 
 ### Job code stitching (planner path)
 

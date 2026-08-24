@@ -108,6 +108,10 @@ class Payload:
     stream: Optional[bool] = False
     read_only: Optional[bool] = False
     metrics_opt_in: Optional[bool] = None
+    # This turn's input attachments (logs, dataclips) as {type, content} dicts.
+    # Rendered into the message sent to the model and deliberately left out of
+    # the returned history — see append_attachments.
+    attachments: Optional[List[Dict]] = None
     # Subagent mode: set only when called from global_chat, never by direct
     # production callers. Enables the handover response field.
     subagent: Optional[bool] = False
@@ -129,6 +133,7 @@ class Payload:
             stream=data.get("stream", False),
             read_only=data.get("read_only", False),
             metrics_opt_in=data.get("metrics_opt_in"),
+            attachments=data.get("attachments"),
             subagent=data.get("subagent", False),
         )
 
@@ -188,6 +193,7 @@ class AnthropicClient:
         stream: Optional[bool] = False,
         current_page: Optional[dict] = None,
         read_only: Optional[bool] = False,
+        attachments: Optional[List[Dict]] = None,
         subagent: Optional[bool] = False,
         stream_manager: Optional[StreamManager] = None,
     ) -> ChatResponse:
@@ -220,6 +226,7 @@ class AnthropicClient:
                     errors=errors,
                     history=history,
                     read_only=read_only,
+                    attachments=attachments,
                     subagent=subagent
                 )
 
@@ -338,7 +345,9 @@ class AnthropicClient:
                             raise ApolloError(502, "Response truncated", type="OUTPUT_TRUNCATED")
                         raise ApolloError(502, "Model returned no usable text", type="EMPTY_OUTPUT")
 
-                    # Add prefix to content when building history
+                    # Add prefix to content when building history. History is
+                    # built from the RAW content, never the enriched message
+                    # sent to the model: attachments belong to this turn only.
                     prefixed_content = add_page_prefix(content, current_page)
 
                     updated_history = history + [
@@ -753,6 +762,7 @@ def main(data_dict: dict) -> dict:
                 stream=data.stream,
                 current_page=current_page,
                 read_only=data.read_only,
+                attachments=data.attachments,
                 subagent=data.subagent,
                 # In-process callers (global_chat) may inject a shared stream
                 # manager so a handed-over request continues the same stream

@@ -3,7 +3,7 @@
 import json
 import sentry_sdk
 from langfuse import observe
-from util import create_logger, ApolloError, AdaptorSpecifier, get_db_connection
+from util import create_logger, ApolloError, AdaptorSpecifier, get_db_connection, append_attachments
 from yaml_utils import redact_job_bodies, normalize_name
 from .retrieve_docs import retrieve_knowledge
 from search_adaptor_docs.search_adaptor_docs import fetch_signatures
@@ -58,9 +58,16 @@ The system will provide you with various pieces of context about the user's job 
   during execution. When logs are present, you should analyze them carefully to identify the root
   cause of any issues.
 
-When the user asks you to check logs or debug an error, the <run_logs> tag will contain the
-relevant execution information. Pay close attention to error messages, stack traces, and the
-sequence of log statements to understand what went wrong.
+- <attachments>: Files the user attached to their LATEST message — run logs, input or output
+  dataclips — reproduced verbatim. Treat them the same way as the tags above, by their type.
+  Very large ones have their middle dropped, marked by an omission note.
+
+When the user asks you to check logs or debug an error, the <run_logs> tag or an <attachments>
+entry will contain the relevant execution information. Pay close attention to error messages,
+stack traces, and the sequence of log statements to understand what went wrong.
+
+Attachments belong to the message they arrived with and are not carried into later turns, so
+never describe an earlier turn's log as the current state of the job.
 
 Earlier turns may have pertained to different context (workflow structure or other job steps) that is no longer
 attached. Any previously generated code has been redacted from history. Some turns may have a [pg:...]
@@ -456,7 +463,7 @@ def format_search_results(search_results):
 
 @observe(name="job_chat_build_prompt")
 def build_prompt(content, history, context, rag=None, api_key=None, stream_manager=None, download_adaptor_docs=True, refresh_rag=False,
-                 workflow_yaml=None, subagent=False):
+                 attachments=None, workflow_yaml=None, subagent=False):
     retrieved_knowledge = {
         "search_results": [],
         "search_results_sections": [],
@@ -506,9 +513,13 @@ def build_prompt(content, history, context, rag=None, api_key=None, stream_manag
             " If it needs changes beyond this step's code, call `edit_workflow` first;"
             " to merely read another step (to answer, or to edit this one), use `inspect_job_code`."
         )
+    # Attachments ride on this turn's message for the same reason as the
+    # reminder, and stay out of history for the same reason. They sit before the
+    # reminder so it remains the last thing the model reads. RAG deliberately
+    # queries the raw content — a run log is not a search query.
     prompt.append({
         "role": "user",
-        "content": f"{content}\n\n{reminder}",
+        "content": f"{append_attachments(content, attachments)}\n\n{reminder}",
     })
 
     return (system_message, prompt, retrieved_knowledge)

@@ -309,3 +309,67 @@ def add_page_prefix(content: str, page: dict | None) -> str:
 
     prefix = f"[pg:{'/'.join(prefix_parts)}]"
     return f"{prefix} {content}"
+
+
+# Per-attachment ceiling before the middle is dropped. Matches the adaptor-doc
+# cap in job_chat: large enough for a real run log, small enough that several
+# attachments can't crowd out the prompt.
+ATTACHMENT_CHAR_LIMIT = 40000
+
+
+def _truncate_middle(text: str, limit: int) -> str:
+    """Trim `text` to `limit` chars from the middle, noting what was dropped.
+
+    Head and tail are both kept because either end can carry the answer: a run
+    log opens with the adaptor and credential it loaded and closes with the
+    stack trace that killed it.
+    """
+    if len(text) <= limit:
+        return text
+
+    half = limit // 2
+    omitted = len(text) - 2 * half
+    return f"{text[:half]}\n\n[... {omitted} characters omitted ...]\n\n{text[-half:]}"
+
+
+def append_attachments(content: str, attachments: list[dict] | None) -> str:
+    """Append the user's input attachments to a message, verbatim.
+
+    Attachments belong to the turn they arrived on, so callers append this to
+    the message they send the model and NEVER to the history they return: a run
+    log carried forward would be re-read as the current run on every later turn.
+    Re-attaching per turn is the client's job.
+
+    Each entry is a `{"type", "content"}` dict as documented in
+    global_chat/PAYLOAD_SPEC.md. The type is passed through as a label rather
+    than mapped to a fixed set, so a new attachment type reaches the model
+    without a code change.
+    """
+    if not attachments:
+        return content
+
+    blocks = []
+    for attachment in attachments:
+        body = str(attachment.get("content") or "")
+        if not body.strip():
+            continue
+        att_type = attachment.get("type") or "unknown"
+        blocks.append(
+            f'<attachment type="{att_type}">\n'
+            f"{_truncate_middle(body, ATTACHMENT_CHAR_LIMIT)}\n"
+            "</attachment>",
+        )
+
+    if not blocks:
+        return content
+
+    body = "\n".join(blocks)
+    return (
+        f"{content}\n\n"
+        "<attachments>\n"
+        "The user attached these to THIS message. They are the exact bytes the user "
+        "sent — read them as the current evidence and quote from them rather than "
+        "guessing. Attachments from earlier turns are not re-sent.\n"
+        f"{body}\n"
+        "</attachments>"
+    )

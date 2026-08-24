@@ -58,9 +58,11 @@ Writing.
 
 ## Streaming
 
-Right now the service will return the complete response when loaded.
-
-Later, we may expose a streaming interface for better UX.
+Set `stream: true` in the payload and call the `/stream` (SSE) or WebSocket
+endpoint to receive the reply as it generates. The service emits
+Anthropic-shaped events plus progress statuses; see
+`services/streaming_util.py`. Without the flag it returns the complete response
+in one JSON body.
 
 ## Payload Reference
 
@@ -88,6 +90,7 @@ The input payload is a JSON object with the following structure
       "search_results": []
     }
   },
+  "attachments": [{ "type": "log", "content": "execution log text" }],
   "suggest_code": true,
   "stream": false,
   "download_adaptor_docs": true,
@@ -99,6 +102,14 @@ The input payload is a JSON object with the following structure
 
 All context is optional, as is history.
 
+- `attachments` (optional): Files the user attached to this message, as
+  `{type, content}` objects (`"log"`, `"input_dataclip"`, `"output_dataclip"`,
+  …). Rendered verbatim into the message sent to the model — with the middle of
+  anything over 40,000 characters dropped and marked — and deliberately left out
+  of the returned `history`, so an attachment never carries into later turns.
+  Send them again on any turn they still apply to. `global_chat` populates this
+  when it delegates; the typed `context.log` / `context.input` /
+  `context.output` fields above are the equivalent for direct callers.
 - `meta.session_id` (optional): Session ID for grouping multi-turn conversations in Langfuse
 - `meta.user` (optional): User identity object with `id` (string) and `persona` (string, e.g. `"core-contributor"` or `"user"`) — attributed to Langfuse traces when tracking is enabled
 - `metrics_opt_in` (optional): Set to `true` to enable Langfuse tracing for this session. The frontend is responsible for setting this flag; the backend tracks if and only if this is `true`.

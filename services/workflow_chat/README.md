@@ -39,6 +39,12 @@ Simple input:
 - `errors` (optional): Error message to fix
 - `history` (optional, default: `[]`): Array of previous conversation turns
 - `context` (optional): Context including `page_name` for navigation tracking
+- `attachments` (optional): Files the user attached to this message, as
+  `{type, content}` objects (`"log"`, `"input_dataclip"`, …). Rendered
+  verbatim into the message sent to the model — with the middle of anything
+  over 40,000 characters dropped and marked — and deliberately left out of the
+  returned `history`, so an attachment never carries into later turns.
+  Populated by `global_chat` when it delegates
 - `stream` (optional, default: `false`): Enable streaming response
 - `read_only` (optional, default: `false`): Enable read-only mode (IDs removed, no code preservation)
 - `api_key` (optional): Anthropic API key (falls back to environment variable)

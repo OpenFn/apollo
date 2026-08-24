@@ -1,0 +1,156 @@
+"""The attached log reaches the subagent's API call as the exact bytes sent in.
+
+This is the regression guard for
+https://github.com/OpenFn/apollo/issues/643 — the planner used to relay only
+its own `message` field, so a subagent saw the planner's paraphrase of a log or
+nothing at all.
+
+Every LLM call is scripted, so the whole router -> planner -> job_chat chain runs
+without a token spent. The attachment carries an improbable canary
+(OKAPI_CANARY_...): a paraphrase cannot reproduce it by luck, so `canary in
+messages` is a real assertion about the bytes rather than a judgement call about
+the wording.
+"""
+
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import pytest
+
+from global_chat.global_chat import main as global_chat_main
+
+# Improbable on purpose: nothing but a verbatim copy of the attachment can
+# put this string in front of the model.
+CANARY = "OKAPI_CANARY_7f3a91"
+
+LOG = (
+    "[R/T] Starting job map-to-dhis2\n"
+    f"[JOB] ✗ TypeError: Cannot read properties of undefined (reading '{CANARY}')\n"
+    "[R/T] Run finished with errors"
+)
+
+WORKFLOW_YAML = """\
+name: wf
+jobs:
+  map-to-dhis2:
+    name: Map to DHIS2
+    body: |
+      fn(state => state);
+"""
+
+
+def text_block(text):
+    return SimpleNamespace(type="text", text=text)
+
+
+def tool_use_block(name, tool_input, block_id="tu_1"):
+    return SimpleNamespace(type="tool_use", id=block_id, name=name, input=tool_input)
+
+
+def response(content, stop_reason):
+    usage = SimpleNamespace(
+        input_tokens=1,
+        output_tokens=1,
+        cache_creation_input_tokens=0,
+        cache_read_input_tokens=0,
+    )
+    usage.model_dump = lambda: {"input_tokens": 1, "output_tokens": 1}
+    return SimpleNamespace(content=content, stop_reason=stop_reason, usage=usage)
+
+
+class ScriptedAnthropic:
+    """Stands in for every agent's Anthropic client, dispatching on the request.
+
+    The three callers are told apart by what they ask for, not by call order, so
+    the script does not silently rot if an agent adds a round.
+    """
+
+    def __init__(self, *_args, **_kwargs):
+        self.calls = []
+        self.messages = SimpleNamespace(create=self._create)
+        self.beta = SimpleNamespace(messages=SimpleNamespace(create=self._create))
+
+    def _create(self, **kwargs):
+        self.calls.append(kwargs)
+        tool_names = {t["name"] for t in kwargs.get("tools") or []}
+
+        if "call_job_code_agent" in tool_names:
+            # The planner: delegate once, then answer.
+            planner_rounds = sum(
+                1 for c in self.calls if "call_job_code_agent" in {t["name"] for t in c.get("tools") or []}
+            )
+            if planner_rounds == 1:
+                return response(
+                    [tool_use_block("call_job_code_agent", {
+                        "message": "the mapping step blew up on the run - see the attached log",
+                        "job_key": "map-to-dhis2",
+                    })],
+                    "tool_use",
+                )
+            return response([text_block("The mapping step read a key nothing produced.")], "end_turn")
+
+        if "edit_job" in tool_names:
+            # job_chat, called as a subagent by the planner
+            return response([text_block("That key is never set upstream.")], "end_turn")
+
+        # The router's structured routing decision
+        return response([text_block('{"destination": "planner", "confidence": 5, "job_key": null}')], "end_turn")
+
+    def job_chat_prompt_text(self):
+        """Everything job_chat put in front of the model, as one string."""
+        for call in self.calls:
+            if "edit_job" in {t["name"] for t in call.get("tools") or []}:
+                return "\n".join(str(m["content"]) for m in call["messages"])
+        raise AssertionError("job_chat was never called")
+
+    def all_prompt_text(self):
+        """Everything every agent put in front of a model, as one string."""
+        return "\n".join(
+            str(m["content"]) for call in self.calls for m in call.get("messages") or []
+        )
+
+
+@pytest.fixture
+def scripted():
+    client = ScriptedAnthropic()
+    with patch("global_chat.router.Anthropic", return_value=client), \
+         patch("global_chat.planner.Anthropic", return_value=client), \
+         patch("job_chat.job_chat.Anthropic", return_value=client), \
+         patch("job_chat.prompt.retrieve_knowledge", return_value={"search_results": []}):
+        yield client
+
+
+def call_global_chat(scripted, attachments, history=None):
+    return global_chat_main({
+        "content": "why did the last two steps fail?",
+        "workflow_yaml": WORKFLOW_YAML,
+        "page": "workflows/wf/map-to-dhis2",
+        "history": history or [],
+        "attachments": attachments,
+        "api_key": "test-key",
+    })
+
+
+def test_attached_log_reaches_the_subagents_api_call_verbatim(scripted):
+    call_global_chat(scripted, [{"type": "log", "content": LOG}])
+
+    sent = scripted.job_chat_prompt_text()
+    assert CANARY in sent, "the planner delegated without passing the attachment through"
+    assert LOG in sent, "the log arrived altered, not as the bytes the user attached"
+
+
+def test_attachment_is_not_persisted_to_history(scripted):
+    result = call_global_chat(scripted, [{"type": "log", "content": LOG}])
+
+    # Nothing the client stores and replays next turn carries the log, so a
+    # later turn cannot re-read this run as the current one
+    assert all(CANARY not in turn["content"] for turn in result["history"])
+
+
+def test_a_later_turn_does_not_resend_an_earlier_attachment(scripted):
+    first = call_global_chat(scripted, [{"type": "log", "content": LOG}])
+
+    scripted.calls.clear()
+    call_global_chat(scripted, attachments=[], history=first["history"])
+
+    assert CANARY not in scripted.all_prompt_text()

@@ -63,6 +63,23 @@ def test_build_prompt_subagent_strips_inspector_instruction():
     assert "Job Code Requests" in system_msg
 
 
+def test_build_prompt_attaches_input_to_the_current_turn_only():
+    log = "[R/T] Job exited with error code 1"
+
+    _, prompt = build_prompt(
+        content="add a retry step",
+        existing_yaml="name: test-workflow",
+        history=[{"role": "user", "content": "hello"}],
+        attachments=[{"type": "log", "content": log}],
+    )
+
+    # The attachment is rendered verbatim onto this turn, and nowhere else —
+    # history is returned from the raw content so it can't accumulate
+    assert log in prompt[-1]["content"]
+    assert "add a retry step" in prompt[-1]["content"]
+    assert prompt[0]["content"] == "hello"
+
+
 def test_build_prompt_readonly_mode():
     system_msg, prompt = build_prompt(
         content="What does this workflow do?",

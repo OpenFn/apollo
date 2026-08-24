@@ -1,4 +1,5 @@
 import os
+from util import append_attachments
 from .config_loader import ConfigLoader
 from .available_adaptors import get_adaptors_string
 
@@ -30,7 +31,8 @@ def build_system_message(mode_config, existing_yaml=None):
     return system_message
 
 
-def build_prompt(content, existing_yaml=None, errors=None, history=None, read_only=False, subagent=False):
+def build_prompt(content, existing_yaml=None, errors=None, history=None, read_only=False, attachments=None,
+                 subagent=False):
     """
     Build a prompt for the LLM based on mode and context.
 
@@ -40,6 +42,8 @@ def build_prompt(content, existing_yaml=None, errors=None, history=None, read_on
         errors: Error messages if in error mode (optional)
         history: Conversation history (optional)
         read_only: Whether in read-only mode
+        attachments: This turn's input attachments (logs, dataclips), rendered
+            into the current message only — never into the returned history
         subagent: Whether called from global_chat (adds handover instructions)
 
     Returns:
@@ -92,6 +96,6 @@ def build_prompt(content, existing_yaml=None, errors=None, history=None, read_on
         system_message += "\n" + config_loader.get_prompt("subagent_handover_instructions")
 
     prompt = list(history)  # Create a copy
-    prompt.append({"role": "user", "content": user_content})
+    prompt.append({"role": "user", "content": append_attachments(user_content, attachments)})
 
     return (system_message, prompt)
