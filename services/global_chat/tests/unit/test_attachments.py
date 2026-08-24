@@ -7,12 +7,14 @@ the client and replayed on later turns.
 
 from unittest.mock import patch
 
+import pytest
+
 from global_chat.subagent_caller import (
     call_job_agent,
     call_workflow_agent,
     format_subagent_result_for_llm,
 )
-from util import ATTACHMENT_CHAR_LIMIT, append_attachments
+from util import ATTACHMENT_TOTAL_CHAR_LIMIT, ApolloError, append_attachments
 
 from .test_planner import WORKFLOW_YAML, make_planner
 from .test_router import make_router
@@ -44,17 +46,44 @@ def test_no_attachments_leaves_content_untouched() -> None:
     assert append_attachments("hello", [{"type": "log", "content": "  "}]) == "hello"
 
 
-def test_oversized_attachment_keeps_both_ends_and_notes_the_gap() -> None:
-    body = "HEAD" + ("x" * (ATTACHMENT_CHAR_LIMIT * 2)) + "TAIL"
+def test_a_large_attachment_that_fits_is_passed_whole() -> None:
+    body = "HEAD" + ("x" * (ATTACHMENT_TOTAL_CHAR_LIMIT - 100)) + "TAIL"
 
     result = append_attachments("debug this", [{"type": "log", "content": body}])
 
-    # Both ends survive: a run log opens with what it loaded and closes with
-    # the stack trace that killed it
-    assert "HEAD" in result
-    assert "TAIL" in result
-    assert "characters omitted" in result
-    assert len(result) < len(body)
+    # Nothing is trimmed to make room — a log the user attached is read in full
+    assert body in result
+
+
+def test_oversized_attachments_are_rejected_not_edited() -> None:
+    body = "x" * (ATTACHMENT_TOTAL_CHAR_LIMIT + 1)
+
+    with pytest.raises(ApolloError) as excinfo:
+        append_attachments("debug this", [{"type": "log", "content": body}])
+
+    error = excinfo.value
+    assert error.code == 400
+    assert error.type == "ATTACHMENT_TOO_LARGE"
+    # The message must name the offender so the client can say something useful
+    assert "log" in error.message
+    assert error.details["largest_attachment"]["characters"] == len(body)
+    # ...and must not carry the attachment's content anywhere
+    assert body not in error.message
+
+
+def test_the_limit_applies_to_the_total_not_each_attachment() -> None:
+    """The prompt carries them together, so the sum is the constraint.
+
+    A per-attachment cap would wave through five attachments that individually
+    fit and collectively cannot.
+    """
+    half = "x" * (ATTACHMENT_TOTAL_CHAR_LIMIT // 2 + 1)
+
+    with pytest.raises(ApolloError):
+        append_attachments("debug this", [
+            {"type": "log", "content": half},
+            {"type": "output_dataclip", "content": half},
+        ])
 
 
 def test_unknown_attachment_type_still_reaches_the_model() -> None:

@@ -59,8 +59,8 @@ The system will provide you with various pieces of context about the user's job 
   cause of any issues.
 
 - <attachments>: Files the user attached to their LATEST message — run logs, input or output
-  dataclips — reproduced verbatim. Treat them the same way as the tags above, by their type.
-  Very large ones have their middle dropped, marked by an omission note.
+  dataclips — reproduced in full and unedited. Treat them the same way as the tags above, by
+  their type. Nothing has been trimmed, so what you see is all the user sent.
 
 When the user asks you to check logs or debug an error, the <run_logs> tag or an <attachments>
 entry will contain the relevant execution information. Pay close attention to error messages,

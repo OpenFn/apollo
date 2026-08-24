@@ -147,6 +147,24 @@ def test_attachment_is_not_persisted_to_history(scripted):
     assert all(CANARY not in turn["content"] for turn in result["history"])
 
 
+def test_oversized_attachment_fails_before_any_model_is_called(scripted):
+    """Rejected at the door, not three agents deep.
+
+    An attachment too big for the prompt cannot be answered by any route, so
+    there is nothing to gain from paying for the routing call first — and
+    nothing is silently trimmed to make it fit.
+    """
+    from util import ATTACHMENT_TOTAL_CHAR_LIMIT, ApolloError
+
+    huge = "x" * (ATTACHMENT_TOTAL_CHAR_LIMIT + 1)
+
+    with pytest.raises(ApolloError) as excinfo:
+        call_global_chat(scripted, [{"type": "log", "content": huge}])
+
+    assert excinfo.value.type == "ATTACHMENT_TOO_LARGE"
+    assert scripted.calls == [], "a model was called before the size was checked"
+
+
 def test_a_later_turn_does_not_resend_an_earlier_attachment(scripted):
     first = call_global_chat(scripted, [{"type": "log", "content": LOG}])
 

@@ -279,10 +279,39 @@ Three consequences worth knowing about:
    not replayed on turn five, where the model would have no way to tell it was
    stale. **The client must re-send an attachment on every turn it should apply
    to** — Apollo will not remember it.
-3. **Large attachments are truncated in the middle.** Anything over 40,000
-   characters keeps its head and its tail (a log's setup and its stack trace)
-   with an explicit `[... N characters omitted ...]` note in the gap, which the
-   model can report to the user. The cap is per attachment.
+3. **Attachments are never trimmed — oversized ones are refused.** What the user
+   attached is what the model reads. If a turn's attachments total more than
+   **250,000 characters**, the request is rejected up front with
+   `400 ATTACHMENT_TOO_LARGE` before any model is called. The error names the
+   largest attachment and its size, and carries a machine-readable `details`
+   block:
+
+   ```json
+   {
+     "code": 400,
+     "type": "ATTACHMENT_TOO_LARGE",
+     "message": "Attachments are too large to analyse: 612,430 characters against a 250,000 limit. The biggest is the 'log' attachment at 610,002 characters. Attach a shorter section — for a run log, the part around the failure is usually enough.",
+     "details": {
+       "total_characters": 612430,
+       "limit_characters": 250000,
+       "largest_attachment": { "type": "log", "characters": 610002 }
+     }
+   }
+   ```
+
+   The limit is a **total across all attachments**, because the prompt carries
+   them together. It is derived, not chosen by feel: see the note on
+   `ATTACHMENT_TOTAL_CHAR_LIMIT` in `services/util.py` for the arithmetic, and
+   re-derive it if the model, context window, or `max_tokens` changes.
+
+   Silent truncation is deliberately not an option here. Attachments are content
+   the user chose to send, so answering from a quietly shortened log would mean
+   reasoning from evidence they believe we read in full. (Context Apollo injects
+   on spec, such as adaptor docs, is a different case and *is* truncated.)
+
+   Clients that know an attachment's size before sending — Lightning does —
+   should prefer to warn or offer a shorter selection rather than let this
+   fire.
 
 ### Job code stitching (planner path)
 

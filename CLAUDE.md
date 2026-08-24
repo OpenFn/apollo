@@ -127,10 +127,12 @@ Every mounted service gets three endpoints automatically:
 - `sum_usage(*usages)` - Aggregate Anthropic token/cache usage across calls
 - `add_page_prefix(content, page)` - Tag a message with `[pg:type/name/adaptor]`
   for client-side navigation
-- `append_attachments(content, attachments)` - Render this turn's input
-  attachments (logs, dataclips) verbatim onto a message, truncating the middle
-  of oversized ones. Used by the chat services on the message they send the
-  model; never on the history they return, so attachments can't accumulate
+- `append_attachments(content, attachments)` / `check_attachment_size(...)` -
+  Render this turn's input attachments (logs, dataclips) verbatim onto a
+  message. Used by the chat services on the message they send the model; never
+  on the history they return, so attachments can't accumulate. Attachments are
+  never trimmed — a turn totalling over `ATTACHMENT_TOTAL_CHAR_LIMIT` is
+  rejected with `400 ATTACHMENT_TOO_LARGE`
 
 ### Models (`services/models.py`)
 

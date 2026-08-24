@@ -311,25 +311,57 @@ def add_page_prefix(content: str, page: dict | None) -> str:
     return f"{prefix} {content}"
 
 
-# Per-attachment ceiling before the middle is dropped. Matches the adaptor-doc
-# cap in job_chat: large enough for a real run log, small enough that several
-# attachments can't crowd out the prompt.
-ATTACHMENT_CHAR_LIMIT = 40000
+# Total characters allowed across ALL of one turn's attachments — the prompt
+# carries them together, so the sum is what matters, not any single one.
+#
+# Derived rather than guessed. A job_chat subagent prompt leaves ~155k tokens
+# once you subtract the 200k window's max_tokens reserve (24.5k), the measured
+# static prompt (~2.7k), adaptor docs at their own cap (~9.3k) and a generous
+# allowance for RAG results, workflow structure, code and history (~8k). Run
+# logs measure ~2.1 chars/token — far denser than prose, because of timestamps,
+# hex ids and stack traces — so 250k chars is ~118k tokens in the worst case,
+# leaving room for a long conversation underneath it.
+#
+# Re-derive this if the model, the window, or max_tokens changes; do not tune it
+# by feel. `messages.count_tokens` is free, so measure instead of estimating.
+ATTACHMENT_TOTAL_CHAR_LIMIT = 250_000
 
 
-def _truncate_middle(text: str, limit: int) -> str:
-    """Trim `text` to `limit` chars from the middle, noting what was dropped.
+def check_attachment_size(attachments: list[dict] | None) -> None:
+    """Reject a turn whose attachments cannot fit, before any model is called.
 
-    Head and tail are both kept because either end can carry the answer: a run
-    log opens with the adaptor and credential it loaded and closes with the
-    stack trace that killed it.
+    Deliberately loud rather than lossy. Attachments are content the user chose
+    to send — usually the most relevant thing in the request — so silently
+    dropping part of a log to make it fit would answer from evidence the user
+    thinks we read in full. (Contrast adaptor docs, which we inject on spec and
+    may fairly truncate.) The caller gets a typed error naming the offender so
+    the client can say something useful and offer a shorter selection.
     """
-    if len(text) <= limit:
-        return text
+    if not attachments:
+        return
 
-    half = limit // 2
-    omitted = len(text) - 2 * half
-    return f"{text[:half]}\n\n[... {omitted} characters omitted ...]\n\n{text[-half:]}"
+    sizes = [
+        (str(attachment.get("type") or "unknown"), len(str(attachment.get("content") or "")))
+        for attachment in attachments
+    ]
+    total = sum(size for _, size in sizes)
+    if total <= ATTACHMENT_TOTAL_CHAR_LIMIT:
+        return
+
+    largest_type, largest_size = max(sizes, key=lambda entry: entry[1])
+    raise ApolloError(
+        400,
+        f"Attachments are too large to analyse: {total:,} characters against a "
+        f"{ATTACHMENT_TOTAL_CHAR_LIMIT:,} limit. The biggest is the '{largest_type}' "
+        f"attachment at {largest_size:,} characters. Attach a shorter section — for a "
+        "run log, the part around the failure is usually enough.",
+        type="ATTACHMENT_TOO_LARGE",
+        details={
+            "total_characters": total,
+            "limit_characters": ATTACHMENT_TOTAL_CHAR_LIMIT,
+            "largest_attachment": {"type": largest_type, "characters": largest_size},
+        },
+    )
 
 
 def append_attachments(content: str, attachments: list[dict] | None) -> str:
@@ -344,9 +376,15 @@ def append_attachments(content: str, attachments: list[dict] | None) -> str:
     global_chat/PAYLOAD_SPEC.md. The type is passed through as a label rather
     than mapped to a fixed set, so a new attachment type reaches the model
     without a code change.
+
+    Raises ApolloError (ATTACHMENT_TOO_LARGE) if the turn's attachments exceed
+    what the prompt can carry — see check_attachment_size. Nothing is ever
+    trimmed to fit: what the user attached is what the model reads.
     """
     if not attachments:
         return content
+
+    check_attachment_size(attachments)
 
     blocks = []
     for attachment in attachments:
@@ -356,7 +394,7 @@ def append_attachments(content: str, attachments: list[dict] | None) -> str:
         att_type = attachment.get("type") or "unknown"
         blocks.append(
             f'<attachment type="{att_type}">\n'
-            f"{_truncate_middle(body, ATTACHMENT_CHAR_LIMIT)}\n"
+            f"{body}\n"
             "</attachment>",
         )
 

@@ -104,10 +104,11 @@ All context is optional, as is history.
 
 - `attachments` (optional): Files the user attached to this message, as
   `{type, content}` objects (`"log"`, `"input_dataclip"`, `"output_dataclip"`,
-  …). Rendered verbatim into the message sent to the model — with the middle of
-  anything over 40,000 characters dropped and marked — and deliberately left out
-  of the returned `history`, so an attachment never carries into later turns.
-  Send them again on any turn they still apply to. `global_chat` populates this
+  …). Rendered into the message sent to the model verbatim and in full, and
+  deliberately left out of the returned `history`, so an attachment never
+  carries into later turns — send them again on any turn they still apply to.
+  Nothing is ever trimmed to fit: attachments totalling over 250,000 characters
+  are rejected with `400 ATTACHMENT_TOO_LARGE`. `global_chat` populates this
   when it delegates; the typed `context.log` / `context.input` /
   `context.output` fields above are the equivalent for direct callers.
 - `meta.session_id` (optional): Session ID for grouping multi-turn conversations in Langfuse
