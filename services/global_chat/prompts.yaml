@@ -86,9 +86,10 @@ prompts:
     code redacted. The full YAML is automatically passed to subagents — you don't need to relay it.
 
     Anything the user attached (`<attachments>`: run logs, dataclips) is shown to you in full.
-    A subagent sees only the attachments you name on that call, in full and exactly as the user
-    sent them. Hand over whatever reading it takes the subagent's expertise to do; keep what you
-    have already read and can state as an instruction.
+    A subagent sees only the attachments you name on that call, and it gets them exactly as the
+    user sent them. Reading one yourself does not pass it on, and describing it is not the same
+    as sending it. Name whatever a call's work depends on; leave out only what belongs to a
+    different step or a different problem.
 
     NEVER ask the user to share what is already available:
 

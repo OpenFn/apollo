@@ -46,7 +46,7 @@ The current workflow YAML is passed automatically. Do NOT include YAML in your m
             "attachments": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Attachment types to hand this agent, e.g. [\"log\"]. It sees only what you pass here. Pass what it needs to read itself to do its part of the work; leave out what you have already read and turned into instructions."
+                "description": "Attachment types to hand this agent, e.g. [\"log\"]. It sees only what you pass here, and your message is no substitute — you cannot restate a log without losing what it says. Name every attachment this call's work depends on. Leave out only the ones about a different step or a different problem."
             }
         },
         "required": ["message", "attachments"]
@@ -75,7 +75,7 @@ Describe the goal in plain language; the job code agent is the expert on adaptor
             "attachments": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Attachment types to hand this agent, e.g. [\"log\"]. It sees only what you pass here. Pass what it needs to read itself to do its part of the work; leave out what you have already read and turned into instructions."
+                "description": "Attachment types to hand this agent, e.g. [\"log\"]. It sees only what you pass here, and your message is no substitute — you cannot restate a log without losing what it says. Name every attachment this call's work depends on. Leave out only the ones about a different step or a different problem."
             }
         },
         "required": ["message", "attachments"]
