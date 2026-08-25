@@ -42,7 +42,7 @@ class Payload:
 
         # Fail here rather than three agents deep: an oversized attachment can't
         # be answered by any route, so there is no point paying for the routing
-        # call first. append_attachments re-checks for direct callers.
+        # call first.
         check_attachment_size(data.get("attachments"))
 
         return cls(

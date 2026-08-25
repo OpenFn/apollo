@@ -54,27 +54,6 @@ def _scrub_event(event: dict, _hint: dict) -> dict:
     return mask_secrets(event)
 
 
-# At or above this the failure is ours; below it the caller sent something we
-# correctly refused.
-HTTP_SERVER_ERROR = 500
-
-
-def _capture_apollo_error(e: ApolloError) -> None:
-    """Send a typed error to Sentry so a class of failure can be counted.
-
-    The type is a tag rather than only a field on the response, so a search can
-    count one kind of failure without matching on message wording. A 4xx is the
-    caller's problem rather than a defect, so it goes in at warning level: still
-    searchable, but not something to be paged about.
-    """
-    sentry_sdk.capture_exception(
-        e,
-        level="warning" if e.code < HTTP_SERVER_ERROR else "error",
-        tags={"apollo_error_type": e.type},
-        contexts={"apollo_error": {"code": e.code, **(e.details or {})}},
-    )
-
-
 sentry_sdk.init(
     dsn=os.getenv('SENTRY_DSN'),
     environment=env,
@@ -86,6 +65,32 @@ sentry_sdk.init(
     # before_send covers error events only, and tracing is on.
     before_send_transaction=_scrub_event,
 )
+
+# At or above this the failure is ours; below it the caller sent something we
+# correctly refused.
+HTTP_SERVER_ERROR = 500
+
+# 4xx that are our problem despite the code: the provider rejected or throttled
+# Apollo's own key, so no change by the caller would help.
+PROVIDER_FAILURE_TYPES = frozenset({"AUTH_ERROR", "RATE_LIMIT"})
+
+
+def _capture_apollo_error(e: ApolloError) -> None:
+    """Send a typed error to Sentry so a class of failure can be counted.
+
+    The type is a tag rather than only a field on the response, so a search can
+    count one kind of failure without matching on message wording. An error the
+    caller caused goes in at warning level: still searchable, but not something
+    to be paged about. Anything we could have to fix stays at error.
+    """
+    caller_error = e.code < HTTP_SERVER_ERROR and e.type not in PROVIDER_FAILURE_TYPES
+    sentry_sdk.capture_exception(
+        e,
+        level="warning" if caller_error else "error",
+        tags={"apollo_error_type": e.type},
+        contexts={"apollo_error": {"code": e.code, **(e.details or {})}},
+    )
+
 
 def call(
     service: str, *, input_path: str | None = None, output_path: str | None = None, apollo_port: int | None = None,

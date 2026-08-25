@@ -239,6 +239,11 @@ def test_selection_keeps_only_what_was_named() -> None:
     assert select_attachments(ATTACHMENTS, ["log", "input_dataclip"]) == ATTACHMENTS
 
 
+def test_a_type_named_as_a_bare_string_still_matches() -> None:
+    """Models occasionally return "log" where the schema says ["log"]."""
+    assert select_attachments([{"type": "log", "content": "x"}], "log")
+
+
 def test_naming_nothing_forwards_nothing() -> None:
     """A subagent sees only what it is handed — there is no implicit default."""
     assert select_attachments(ATTACHMENTS, []) == []

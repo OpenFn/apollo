@@ -439,7 +439,9 @@ def select_attachments(attachments: list[dict] | None, types: list[str] | None) 
     if not attachments or not types:
         return []
 
-    wanted = set(types)
+    # A model that returns "log" for an array field would otherwise match
+    # nothing, which is the silent drop this whole path exists to avoid.
+    wanted = {types} if isinstance(types, str) else set(types)
     return [a for a in attachments if str(a.get("type") or "") in wanted]
 
 
@@ -456,12 +458,11 @@ def format_attachments(attachments: list[dict] | None) -> str:
 
     check_attachment_size(attachments)
 
+    rendered = ((a.get("type") or "unknown", attachment_text(a.get("content"))) for a in attachments)
     blocks = [
-        f'<attachment type="{attachment.get("type") or "unknown"}">\n'
-        f"{attachment_text(attachment.get('content'))}\n"
-        "</attachment>"
-        for attachment in attachments
-        if attachment_text(attachment.get("content")).strip()
+        f'<attachment type="{att_type}">\n{body}\n</attachment>'
+        for att_type, body in rendered
+        if body.strip()
     ]
     if not blocks:
         return ""

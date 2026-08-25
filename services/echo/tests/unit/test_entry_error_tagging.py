@@ -70,6 +70,15 @@ def test_a_server_error_still_alerts(captured: list[dict]) -> None:
     assert captured[0]["level"] == "error"
 
 
+def test_a_provider_failure_wearing_a_4xx_still_alerts(captured: list[dict]) -> None:
+    """A 401 from Anthropic means our own key failed, which no caller can fix."""
+    _capture_apollo_error(ApolloError(401, "Authentication failed", type="AUTH_ERROR"))
+    _capture_apollo_error(ApolloError(429, "Rate limit exceeded", type="RATE_LIMIT"))
+
+    assert [event["level"] for event in captured] == ["error", "error"]
+
+
+
 def test_an_error_without_details_still_carries_its_code(captured: list[dict]) -> None:
     _capture_apollo_error(ApolloError(503, "client store unreachable", type="CLIENT_STORE_DOWN"))
 

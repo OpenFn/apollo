@@ -110,7 +110,7 @@ class Payload:
     metrics_opt_in: Optional[bool] = None
     # This turn's input attachments (logs, dataclips) as {type, content} dicts.
     # Rendered into the message sent to the model and deliberately left out of
-    # the returned history — see append_attachments.
+    # the returned history, which is built from the raw content.
     attachments: Optional[List[Dict]] = None
     # Subagent mode: set only when called from global_chat, never by direct
     # production callers. Enables the handover response field.
