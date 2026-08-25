@@ -62,6 +62,22 @@ def test_two_attachments_sharing_a_field_are_joined_not_overwritten() -> None:
     assert "run input" in context["input"]
 
 
+def test_an_unmapped_type_reaches_sentry_not_just_the_log() -> None:
+    """Content the user sent and we did not pass on: someone should find out."""
+    with patch("util.sentry_sdk.capture_message") as capture:
+        attachments_to_context([{"type": "screenshot", "content": "..."}])
+
+    assert capture.call_args.kwargs["level"] == "warning"
+    assert capture.call_args.kwargs["tags"]["unmapped_attachment_type"] == "screenshot"
+
+
+def test_a_mapped_type_reports_nothing() -> None:
+    with patch("util.sentry_sdk.capture_message") as capture:
+        attachments_to_context([{"type": "log", "content": "..."}])
+
+    capture.assert_not_called()
+
+
 def test_unknown_type_is_reported_not_silently_dropped() -> None:
     with patch("util.create_logger") as mock_logger:
         context = attachments_to_context([{"type": "screenshot", "content": "..."}])

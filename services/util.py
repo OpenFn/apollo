@@ -7,6 +7,7 @@ from typing import Any
 
 import psycopg2
 import requests
+import sentry_sdk
 from langfuse_util import mask_secrets
 
 APOLLO_VERSION = os.getenv("APOLLO_VERSION", "unknown")
@@ -395,6 +396,23 @@ _ATTACHMENT_CONTEXT_FIELDS = {
 }
 
 
+def _report_unmapped_attachment(att_type: str) -> None:
+    """A type with no field is content the user sent and we did not pass on.
+
+    Worth seeing rather than only logging: it means the client is sending a type
+    this mapping does not know, which no one finds out about otherwise. Warning
+    level, so it is countable without paging.
+    """
+    create_logger(__name__).warning(
+        "attachment type %r has no job_chat context field — not passed on", att_type,
+    )
+    sentry_sdk.capture_message(
+        f"Attachment type {att_type!r} has no job_chat context field",
+        level="warning",
+        tags={"unmapped_attachment_type": att_type},
+    )
+
+
 def attachments_to_context(attachments: list[dict] | None) -> dict:
     """Map input attachments onto job_chat's existing context fields.
 
@@ -420,9 +438,7 @@ def attachments_to_context(attachments: list[dict] | None) -> dict:
         att_type = str(attachment.get("type") or "")
         field = _ATTACHMENT_CONTEXT_FIELDS.get(att_type)
         if not field:
-            create_logger(__name__).warning(
-                "attachment type %r has no job_chat context field — not passed on", att_type,
-            )
+            _report_unmapped_attachment(att_type)
             continue
 
         context[field] = f"{context[field]}\n\n{body}" if field in context else body
