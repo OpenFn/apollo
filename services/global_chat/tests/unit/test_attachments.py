@@ -12,7 +12,6 @@ planner have no such fields, so they get a rendered block.
 from unittest.mock import patch
 
 import pytest
-
 from global_chat.subagent_caller import (
     call_job_agent,
     call_workflow_agent,
@@ -21,6 +20,7 @@ from global_chat.subagent_caller import (
 from util import (
     ATTACHMENT_TOTAL_CHAR_LIMIT,
     ApolloError,
+    attachment_text,
     attachments_to_context,
     format_attachments,
     select_attachments,
@@ -74,6 +74,33 @@ def test_no_attachments_maps_to_nothing() -> None:
     assert attachments_to_context(None) == {}
     assert attachments_to_context([]) == {}
     assert attachments_to_context([{"type": "log", "content": "  "}]) == {}
+
+
+# --- typed content --------------------------------------------------------
+#
+# Content may arrive as a list of log lines or a dataclip object rather than a
+# string. str() would render Python repr, which flattens a log onto one line.
+
+
+def test_a_log_sent_as_lines_keeps_its_lines() -> None:
+    assert attachment_text(["[R/T] started", "[JOB] failed"]) == "[R/T] started\n[JOB] failed"
+
+
+def test_a_dataclip_sent_as_an_object_renders_as_json() -> None:
+    rendered = attachment_text({"active": True, "ref": None})
+
+    assert '"active": true' in rendered
+    assert '"ref": null' in rendered
+
+
+def test_a_string_is_left_exactly_as_it_arrived() -> None:
+    assert attachment_text("[R/T] started\n[JOB] failed") == "[R/T] started\n[JOB] failed"
+
+
+def test_typed_content_reaches_job_chat_readable() -> None:
+    context = attachments_to_context([{"type": "log", "content": ["line one", "line two"]}])
+
+    assert context["log"] == "line one\nline two"
 
 
 # --- rendering for agents with no context fields --------------------------

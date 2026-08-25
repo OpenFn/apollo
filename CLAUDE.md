@@ -134,6 +134,8 @@ Every mounted service gets three endpoints automatically:
   planner tool call named
 - `check_attachment_size(attachments)` - Reject a turn over
   `ATTACHMENT_TOTAL_CHAR_LIMIT`; attachments are never trimmed to fit
+- `attachment_text(content)` - Render attachment content by shape (a log's lines
+  joined, a dataclip object as JSON) rather than as Python repr
 
 ### Models (`services/models.py`)
 

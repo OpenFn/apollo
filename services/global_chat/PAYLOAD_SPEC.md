@@ -35,7 +35,7 @@ This document defines the input and output payload structure for the Global Agen
   "attachments": [                        // Input attachments (optional)
     {
       "type": "string",                   //   e.g. "log", "input_dataclip", "output_dataclip", "run_input", "run_output"
-      "content": "string"                 //   The attachment content
+      "content": "string|array|object"    //   Text, a log's lines, or a dataclip object
     }
   ],
 
@@ -72,6 +72,11 @@ This document defines the input and output payload structure for the Global Agen
   - `output_dataclip` — output data from a step
   - `run_input` — input payload for the whole run
   - `run_output` — final output of a run
+
+  `content` may be a string, an array of lines (a log), or an object (a
+  dataclip). Apollo renders each by shape — lines joined by newlines, objects as
+  indented JSON — so a log stays readable rather than collapsing onto one line.
+  The character limit below counts the rendered text.
 
   The `type` is passed to the model as a label, so an unrecognised type is delivered rather than dropped. See [Attachment handling](#attachment-handling) for how they travel and why they are not persisted.
 
@@ -314,9 +319,10 @@ Three consequences worth knowing about:
 
    Silently shortening user-supplied content would mean answering from evidence
    they believe we read in full. (Context Apollo injects on spec, such as adaptor
-   docs, is a different case and *is* truncated.) Clients that know an
-   attachment's size before sending — Lightning does — should prefer to warn or
-   offer a shorter selection rather than let this fire.
+   docs, is a different case and *is* truncated.) This error is the user-facing
+   path rather than a last resort: the client is expected to send, catch it, and
+   rephrase it for the user, so `details` carries what a message needs without
+   parsing the prose.
 
 ### Job code stitching (planner path)
 

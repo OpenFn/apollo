@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import sys
@@ -327,6 +328,23 @@ def add_page_prefix(content: str, page: dict | None) -> str:
 ATTACHMENT_TOTAL_CHAR_LIMIT = 250_000
 
 
+def attachment_text(content: Any) -> str:  # noqa: ANN401
+    """Render an attachment's content as the text an agent will read.
+
+    Content may arrive typed rather than as a string — a list of lines for a
+    log, an object for a dataclip. A plain str() would show Python repr, which
+    puts a whole log on one line and a dataclip in single quotes with True and
+    None. Rendering by shape keeps both readable.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, dict):
+        return json.dumps(content, indent=2, default=str)
+    if isinstance(content, (list, tuple)):
+        return "\n".join(attachment_text(item) for item in content)
+    return "" if content is None else str(content)
+
+
 def check_attachment_size(attachments: list[dict] | None) -> None:
     """Reject a turn whose attachments cannot fit, before any model is called.
 
@@ -341,7 +359,7 @@ def check_attachment_size(attachments: list[dict] | None) -> None:
         return
 
     sizes = [
-        (str(attachment.get("type") or "unknown"), len(str(attachment.get("content") or "")))
+        (str(attachment.get("type") or "unknown"), len(attachment_text(attachment.get("content"))))
         for attachment in attachments
     ]
     total = sum(size for _, size in sizes)
@@ -395,7 +413,7 @@ def attachments_to_context(attachments: list[dict] | None) -> dict:
 
     context: dict[str, str] = {}
     for attachment in attachments:
-        body = str(attachment.get("content") or "")
+        body = attachment_text(attachment.get("content"))
         if not body.strip():
             continue
 
@@ -440,10 +458,10 @@ def format_attachments(attachments: list[dict] | None) -> str:
 
     blocks = [
         f'<attachment type="{attachment.get("type") or "unknown"}">\n'
-        f"{attachment.get('content') or ''!s}\n"
+        f"{attachment_text(attachment.get('content'))}\n"
         "</attachment>"
         for attachment in attachments
-        if str(attachment.get("content") or "").strip()
+        if attachment_text(attachment.get("content")).strip()
     ]
     if not blocks:
         return ""
