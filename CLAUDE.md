@@ -149,6 +149,12 @@ Langfuse tracing is initialised in `entry.py` and applied per-service with
 `metrics_opt_in` flag on the payload. Keys: `LANGFUSE_SECRET_KEY`,
 `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL`.
 
+Sentry captures every `ApolloError` via `_capture_apollo_error` in `entry.py`,
+tagged `apollo_error_type` (the error's `type`) with its `code` and `details`
+under an `apollo_error` context. A 4xx goes in at `warning` level and a 5xx at
+`error`, so a client error stays countable in search without alerting. Search
+one class of failure with `apollo_error_type:ATTACHMENT_TOO_LARGE`.
+
 ### Streaming (`services/streaming_util.py`)
 
 `StreamManager` emits Anthropic-formatted SSE events (message_start,
