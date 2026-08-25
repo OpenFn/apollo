@@ -309,3 +309,18 @@ def add_page_prefix(content: str, page: dict | None) -> str:
 
     prefix = f"[pg:{'/'.join(prefix_parts)}]"
     return f"{prefix} {content}"
+
+
+def is_docsite_collection(name: str) -> bool:
+    """
+    True for docsite collection (namespace) names created by embed_docsite:
+    'docsite-' followed by a date (YYYYMMDD) or date+time (YYYYMMDDHHMM).
+
+    Both formats exist in real indexes, and both the searcher and the cleanup
+    must accept both — filtering on one format made freshly embedded
+    collections invisible to search. Lexicographic order on the full name
+    sorts these chronologically (the first 8 digits are the date; a
+    date+time name sorts after a date-only name for the same day).
+    """
+    suffix = name.removeprefix("docsite-")
+    return name != suffix and suffix.isdigit() and len(suffix) in (8, 12)

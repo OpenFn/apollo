@@ -2,25 +2,27 @@
 
 This service searches the OpenFn Documentation vector database using a query and returns search matches. 
 
-The documenation is vectorized through the `embed_docsite` service.
+The documentation is vectorized through the `embed_docsite` service.
+
+## Setup
+
+Searching requires a populated `docsite` index. Every environment maintains its own, so there is no shared index to point at: run `embed_docsite` to create and fill yours before searching.
+
+1. Create an account on [Pinecone](https://www.pinecone.io/) and set up a free cluster.
+2. Add `PINECONE_API_KEY` and `OPENAI_API_KEY` to your `.env` file.
 
 ## Usage - Searching OpenFn Documentation
-
-The vector database used here is Pinecone. To obtain the env variables follow these steps:
-
-1. Create an account on [Pinecone] and set up a free cluster.
-2. Obtain the URL and token for the cluster and add them to the `.env` file.
-3. You'll also need an OpenAI API key to generate embeddings for input queries.
 
 ### With the CLI, returning to stdout:
 
 ```bash
 openfn apollo search_docsite tmp/payload.json
 ```
-To run directly from this repo (note that the server must be started):
+
+### Directly from this repo:
 
 ```bash
-bun py search_docsite tmp/payload.json -O
+bun py search_docsite --input tmp/payload.json
 ```
 
 ## Implementation
