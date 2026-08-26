@@ -40,7 +40,8 @@ This document defines the input and output payload structure for the Global Agen
   ],
 
   "options": {                            // Runtime options (optional)
-    "stream": false
+    "stream": false,
+    "web_search": false
   },
 
   "api_key": "string (REQUIRED in production, optional in development)"
@@ -75,6 +76,7 @@ This document defines the input and output payload structure for the Global Agen
 
 - **`options`** (object, optional): Runtime options.
   - **`stream`** (boolean): Enable streaming response (default: false).
+  - **`web_search`** (boolean): Let the planner search and fetch pages on the live web for this request (default: `false`). Takes effect **only on planner-routed requests** — the direct `workflow_agent` / `job_code_agent` routes ignore it, and `meta.web_search_requested` records when it was set on a request that never reached the planner. Reachable domains are limited to a server-side allowlist. Requires the caller's own Anthropic key to have web search enabled in their Anthropic Console; searches bill to that key, and clients on a zero-data-retention contract cannot use it. If the key does not have it enabled, the turn still answers — without web results — and sets `meta.web_search_downgraded`.
 
 - **`api_key`** (string, **required in production**, optional in development): API key for the Anthropic API. In production environments this field is required and requests without it will be rejected. In development, the server falls back to the `ANTHROPIC_API_KEY` environment variable if this field is omitted.
 

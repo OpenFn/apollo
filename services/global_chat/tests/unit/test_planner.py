@@ -3,6 +3,7 @@
 from unittest.mock import patch
 
 from global_chat.planner import PlannerAgent
+from global_chat.tools.tool_definitions import TOOL_DEFINITIONS
 
 WORKFLOW_YAML = """\
 name: wf
@@ -206,3 +207,60 @@ def test_user_content_falls_back_to_page_for_non_step_pages() -> None:
 
     assert "workflows/my-wf/settings" in user_content
     assert "currently viewing the step" not in user_content
+
+
+class StubConfigLoader:
+    """Minimal ConfigLoader stand-in."""
+
+    def __init__(self, config: dict) -> None:
+        self.config = config
+
+
+WEB_CONFIG = {
+    "planner": {
+        "model": "claude-opus",
+        "web_search": {
+            "max_uses": 5,
+            "max_content_tokens": 10000,
+            "allowed_domains": ["docs.dhis2.org"],
+        },
+    },
+}
+
+
+def build_planner(config: dict, *, web_search: bool) -> PlannerAgent:
+    """Construct a real PlannerAgent with the Anthropic client stubbed out.
+    """
+    with patch("global_chat.planner.Anthropic"):
+        return PlannerAgent(StubConfigLoader(config), api_key="test-key", web_search=web_search)
+
+
+def test_web_tools_are_off_unless_the_request_asks_for_them() -> None:
+    planner = build_planner(WEB_CONFIG, web_search=False)
+
+    assert planner.web_tools == []
+    assert planner.web_search_enabled is False
+    assert planner.tools == TOOL_DEFINITIONS
+
+
+def test_web_tools_are_appended_after_the_existing_tools() -> None:
+    planner = build_planner(WEB_CONFIG, web_search=True)
+
+    assert planner.tools[: len(TOOL_DEFINITIONS)] == TOOL_DEFINITIONS
+    assert [t["name"] for t in planner.tools[len(TOOL_DEFINITIONS):]] == ["web_search", "web_fetch"]
+    assert planner.web_search_enabled is True
+
+
+def test_the_module_level_tool_list_is_never_mutated() -> None:
+    before = list(TOOL_DEFINITIONS)
+
+    build_planner(WEB_CONFIG, web_search=True)
+
+    assert before == TOOL_DEFINITIONS
+
+
+def test_an_empty_allowlist_keeps_the_tools_off_even_when_requested() -> None:
+    planner = build_planner({"planner": {"web_search": {"allowed_domains": []}}}, web_search=True)
+
+    assert planner.web_tools == []
+    assert planner.web_search_enabled is False

@@ -56,6 +56,10 @@ class Payload:
         """Extract stream flag from options."""
         return (self.options or {}).get("stream", False)
 
+    def get_web_search(self) -> bool:
+        """Extract web_search flag from options."""
+        return (self.options or {}).get("web_search", False)
+
 
 @observe(name="global_chat", capture_input=False)
 def main(data_dict: dict) -> dict:
@@ -103,6 +107,7 @@ def main(data_dict: dict) -> dict:
                 attachments=data.attachments or [],
                 user=user_info,
                 metrics_opt_in=data.metrics_opt_in,
+                web_search=data.get_web_search(),
             )
 
             if tracking:

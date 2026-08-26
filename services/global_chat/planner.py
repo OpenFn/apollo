@@ -25,7 +25,7 @@ from streaming_util import (
 )
 from global_chat.config_loader import ConfigLoader
 from models import resolve_model
-from global_chat.tools.tool_definitions import TOOL_DEFINITIONS
+from global_chat.tools.tool_definitions import TOOL_DEFINITIONS, build_web_tools
 from yaml_utils import stitch_job_code, redact_job_bodies, find_job_in_yaml, get_step_name_from_page, inspect_job_code
 from tools.search_documentation.search_documentation import search_documentation_tool
 from global_chat.subagent_caller import call_workflow_agent, call_job_agent, format_subagent_result_for_llm
@@ -50,7 +50,12 @@ class PlannerAgent:
     Planner agent that coordinates subagents and tools for complex multi-step tasks.
     """
 
-    def __init__(self, config_loader: ConfigLoader, api_key: Optional[str] = None):
+    def __init__(
+        self,
+        config_loader: ConfigLoader,
+        api_key: Optional[str] = None,
+        web_search: bool = False,
+    ):
         self.config_loader = config_loader
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
 
@@ -58,7 +63,14 @@ class PlannerAgent:
             raise ApolloError(500, "ANTHROPIC_API_KEY not found")
 
         self.client = Anthropic(api_key=self.api_key)
-        self.tools = TOOL_DEFINITIONS
+
+        self.web_tools = build_web_tools(config_loader.config) if web_search else []
+        self.web_search_enabled = bool(self.web_tools)
+        self.web_search_downgraded = False
+        self.tools = TOOL_DEFINITIONS + self.web_tools
+
+        if web_search and not self.web_tools:
+            logger.info("web_search requested but no allowed_domains configured, web tools are disabled")
 
         planner_config = config_loader.config.get("planner", {})
         self.model = resolve_model(planner_config.get("model", "claude-opus"))

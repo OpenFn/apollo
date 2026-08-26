@@ -2,6 +2,7 @@
 
 from unittest.mock import patch
 
+from global_chat.planner import PlannerResult
 from global_chat.router import RouterAgent, RouterDecision, RouterResult
 from yaml_utils import workflow_has_job_code
 
@@ -29,6 +30,7 @@ def make_router() -> RouterAgent:
     """Build a RouterAgent without config or an Anthropic client."""
     router = RouterAgent.__new__(RouterAgent)
     router.api_key = "test-key"
+    router.config_loader = None
     router.routing_usage = {}
     router._input_attachments = []
     router._user = None
@@ -164,6 +166,39 @@ def test_low_confidence_direct_route_goes_to_planner() -> None:
     planner_mock.assert_called_once()
     job_mock.assert_not_called()
     assert result.response == "planner answer"
+
+
+def make_planner_agent_result() -> PlannerResult:
+    return PlannerResult(
+        response="planner answer",
+        response_segments=[{"type": "text", "content": "planner answer"}],
+        attachments=[],
+        history=[],
+        usage={"input_tokens": 10},
+        meta={"agents": ["router", "planner"]},
+    )
+
+
+def test_route_and_execute_defaults_web_search_off() -> None:
+    router = make_router()
+    decision = RouterDecision(destination="planner", confidence=5)
+
+    with patch.object(RouterAgent, "_make_routing_decision", return_value=decision), \
+         patch.object(RouterAgent, "_route_to_planner", return_value=make_planner_result()):
+        router.route_and_execute("build me a workflow", None, None, [], False)
+
+    assert router._web_search is False
+
+
+def test_planner_route_forwards_the_web_search_flag() -> None:
+    router = make_router()
+    router._web_search = True
+
+    with patch("global_chat.planner.PlannerAgent") as planner_cls:
+        planner_cls.return_value.run.return_value = make_planner_agent_result()
+        router._route_to_planner("look up the DHIS2 tracker API", None, None, [], False, 5)
+
+    assert planner_cls.call_args.kwargs["web_search"] is True
 
 
 def test_confident_direct_route_is_not_gated() -> None:
