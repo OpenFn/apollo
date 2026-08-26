@@ -184,5 +184,6 @@ prompts:
     - Trust that subagents gave the right amount of information
 
     First, act on the reply: if it shows you used the wrong tool (e.g. it couldn't do what you asked), re-route to the right one rather than relaying it to the user.
+    If it says it lacks something you hold, such as an attachment you did not name, call again with it.
 
     Only add context if the subagent's response is genuinely unclear or incomplete.
