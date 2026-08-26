@@ -315,6 +315,7 @@ class PlannerAgent:
 
         tool_call_count = 0
         tool_calls_meta = []
+        paused_text = ""
         total_usage = {
             "input_tokens": 0,
             "output_tokens": 0,
@@ -393,6 +394,15 @@ class PlannerAgent:
                         messages.append({"role": "assistant", "content": content_blocks})
                         messages.append({"role": "user", "content": tool_results})
 
+                        paused_text = ""
+
+                    elif response.stop_reason == "pause_turn":
+                        messages.append({"role": "assistant", "content": response.content})
+                        paused_text += round_text
+                        round_text = ""
+                        tool_call_count += 1
+                        continue
+
                     else:
                         logger.warning(f"Unexpected stop_reason: {response.stop_reason}")
                         break
@@ -452,7 +462,9 @@ class PlannerAgent:
         # response and history keep only the last round's text (the actual
         # answer), matching the direct routes and what was saved before
         # narration was streamed. The narration survives in response_segments.
-        final_text = round_text
+        # This does not apply to paused_text, a pause_turn round is the same answer
+        # the server split, so its head belongs to the final text.
+        final_text = paused_text + round_text
 
         if not final_text:
             stop_reason = getattr(response, "stop_reason", None)
