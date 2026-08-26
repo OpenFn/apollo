@@ -421,15 +421,16 @@ def attachments_to_context(attachments: list[dict] | None) -> dict:
     `content` — so an attachment can't be re-read as the current run on a later
     turn.
 
-    Two attachments can want the same field (input_dataclip and run_input both
-    describe input), so they are joined rather than allowed to overwrite.
+    Two attachments can want the same field: input_dataclip is a step's input
+    and run_input is the whole run's, and both describe input. They are kept
+    and labelled rather than one overwriting the other.
     """
     if not attachments:
         return {}
 
     check_attachment_size(attachments)
 
-    context: dict[str, str] = {}
+    grouped: dict[str, list[tuple[str, str]]] = {}
     for attachment in attachments:
         body = attachment_text(attachment.get("content"))
         if not body.strip():
@@ -441,7 +442,16 @@ def attachments_to_context(attachments: list[dict] | None) -> dict:
             _report_unmapped_attachment(att_type)
             continue
 
-        context[field] = f"{context[field]}\n\n{body}" if field in context else body
+        grouped.setdefault(field, []).append((att_type, body))
+
+    context: dict[str, str] = {}
+    for field, items in grouped.items():
+        # Labelled only where a field has two sources, since unlabelled there
+        # would tell the model a run's input is the step's.
+        if len(items) == 1:
+            context[field] = items[0][1]
+        else:
+            context[field] = "\n\n".join(f"[{att_type}]\n{body}" for att_type, body in items)
 
     return context
 

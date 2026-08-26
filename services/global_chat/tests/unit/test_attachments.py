@@ -51,15 +51,19 @@ def test_types_map_onto_the_fields_job_chat_already_renders() -> None:
     assert context == {"log": LOG, "input": INPUT, "output": "out"}
 
 
-def test_two_attachments_sharing_a_field_are_joined_not_overwritten() -> None:
-    """input_dataclip and run_input both describe input; neither may be lost."""
+def test_a_field_with_one_source_is_not_labelled() -> None:
+    """The common case stays exactly what the model saw before."""
+    assert attachments_to_context([{"type": "input_dataclip", "content": "STEP"}]) == {"input": "STEP"}
+
+
+def test_two_sources_in_one_field_are_labelled() -> None:
+    """Unlabelled would say a run's input is the step's."""
     context = attachments_to_context([
-        {"type": "input_dataclip", "content": "step input"},
-        {"type": "run_input", "content": "run input"},
+        {"type": "input_dataclip", "content": "STEP"},
+        {"type": "run_input", "content": "RUN"},
     ])
 
-    assert "step input" in context["input"]
-    assert "run input" in context["input"]
+    assert context["input"] == "[input_dataclip]\nSTEP\n\n[run_input]\nRUN"
 
 
 def test_an_unmapped_type_reaches_sentry_not_just_the_log() -> None:
