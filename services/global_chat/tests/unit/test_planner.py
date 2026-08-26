@@ -2,7 +2,7 @@
 
 from unittest.mock import patch
 
-from global_chat.planner import PlannerAgent
+from global_chat.planner import PlannerAgent, PlannerResult
 from global_chat.tools.tool_definitions import TOOL_DEFINITIONS
 
 WORKFLOW_YAML = """\
@@ -40,6 +40,8 @@ def empty_usage() -> dict:
 
 
 class FakeToolUse:
+    type = "tool_use"
+
     def __init__(self, name: str, tool_input: dict, block_id: str = "tu_1"):
         self.name = name
         self.input = tool_input
@@ -55,6 +57,47 @@ class StubStreamManager:
 
     def send_status(self, *_args: object, **_kwargs: object) -> None:
         pass
+
+
+class FakeTextBlock:
+    type = "text"
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class FakeUsage:
+    input_tokens = 0
+    output_tokens = 0
+    cache_creation_input_tokens = 0
+    cache_read_input_tokens = 0
+
+
+class FakeResponse:
+    def __init__(self, stop_reason: str, content: list) -> None:
+        self.stop_reason = stop_reason
+        self.content = content
+        self.usage = FakeUsage()
+
+
+def make_run_planner(max_tool_calls: int = 10) -> PlannerAgent:
+    """A planner wired for run(), with no config, client, or tools."""
+    planner = make_planner()
+    planner.model = "claude-test"
+    planner.max_tokens = 1024
+    planner.max_tool_calls = max_tool_calls
+    planner.tools = []
+    planner.web_tools = []
+    planner.web_search_enabled = False
+    planner.web_search_downgraded = False
+    return planner
+
+
+def run_with(planner: PlannerAgent, responses: list, content: str = "q") -> PlannerResult:
+    """Drive planner.run() over a scripted list of API responses."""
+    with patch.object(PlannerAgent, "_build_system_prompt", return_value=[]), \
+         patch.object(PlannerAgent, "_call_api", side_effect=list(responses)):
+        return planner.run(content, None, None, [], stream=False)
 
 
 def test_inspect_job_code_accepts_multiple_keys() -> None:
@@ -229,8 +272,7 @@ WEB_CONFIG = {
 
 
 def build_planner(config: dict, *, web_search: bool) -> PlannerAgent:
-    """Construct a real PlannerAgent with the Anthropic client stubbed out.
-    """
+    """Construct a real PlannerAgent with the Anthropic client stubbed out."""
     with patch("global_chat.planner.Anthropic"):
         return PlannerAgent(StubConfigLoader(config), api_key="test-key", web_search=web_search)
 
