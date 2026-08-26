@@ -84,3 +84,30 @@ TOOL_DEFINITIONS = [
     CALL_JOB_CODE_AGENT_TOOL,
     INSPECT_JOB_CODE_TOOL
 ]
+
+
+def build_web_tools(config: dict) -> list[dict]:
+    """Build Anthropic's server-side web search and fetch tool definitions.
+    """
+    web_config = (config.get("planner") or {}).get("web_search") or {}
+    allowed_domains = list(web_config.get("allowed_domains") or [])
+    if not allowed_domains:
+        return []
+
+    max_uses = web_config.get("max_uses", 5)
+
+    return [
+        {
+            "type": "web_search_20260209",
+            "name": "web_search",
+            "max_uses": max_uses,
+            "allowed_domains": allowed_domains,
+        },
+        {
+            "type": "web_fetch_20260209",
+            "name": "web_fetch",
+            "max_uses": max_uses,
+            "max_content_tokens": web_config.get("max_content_tokens", 10000),
+            "allowed_domains": list(allowed_domains),
+        },
+    ]
