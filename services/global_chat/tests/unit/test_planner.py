@@ -46,14 +46,24 @@ class FakeToolUse:
 
 
 class StubStreamManager:
+    def __init__(self) -> None:
+        self.statuses: list[dict] = []
+
     def send_thinking(self, *_args: object, **_kwargs: object) -> None:
         pass
 
     def send_changes(self, *_args: object, **_kwargs: object) -> None:
         pass
 
-    def send_status(self, *_args: object, **_kwargs: object) -> None:
-        pass
+    def send_status(
+        self,
+        content: str,
+        steps: list | None = None,
+        summary: str | None = None,
+    ) -> None:
+        self.statuses.append(
+            {"content": content, "steps": steps, "summary": summary},
+        )
 
 
 def test_inspect_job_code_accepts_multiple_keys() -> None:
@@ -206,3 +216,60 @@ def test_user_content_falls_back_to_page_for_non_step_pages() -> None:
 
     assert "workflows/my-wf/settings" in user_content
     assert "currently viewing the step" not in user_content
+
+
+def test_step_name_is_taken_from_the_workflow_verbatim() -> None:
+    """The user named the step; title-casing it renames it in the prose."""
+    planner = make_planner()
+
+    assert planner._display_name_for_job("fetch-patients") == "Fetch Patients"
+    assert planner._display_name_for_job("load-dhis2") == "Load to DHIS2"
+
+
+def test_step_key_is_title_cased_only_as_a_fallback() -> None:
+    """With no name in the YAML there is nothing to preserve, so format the key."""
+    planner = make_planner()
+    planner.current_yaml = None
+
+    assert planner._display_name_for_job("fetch-patients") == "Fetch Patients"
+
+
+def test_settled_status_reports_its_steps_as_data() -> None:
+    planner = make_planner()
+    stream = StubStreamManager()
+
+    planner._send_settled(
+        stream,
+        'Wrote code for "Fetch Patients"',
+        steps=[{"key": "fetch-patients", "name": "Fetch Patients"}],
+        summary="Wrote code for 1 step",
+    )
+
+    # On the wire, so the client can attach detail without reading the prose
+    assert stream.statuses == [
+        {
+            "content": 'Wrote code for "Fetch Patients"',
+            "steps": [{"key": "fetch-patients", "name": "Fetch Patients"}],
+            "summary": "Wrote code for 1 step",
+        },
+    ]
+    # And in the transcript, so a reload has what the live stream had
+    assert planner._segments == [
+        {
+            "type": "status",
+            "content": 'Wrote code for "Fetch Patients"',
+            "steps": [{"key": "fetch-patients", "name": "Fetch Patients"}],
+            "summary": "Wrote code for 1 step",
+        },
+    ]
+
+
+def test_settled_status_without_steps_records_only_the_sentence() -> None:
+    planner = make_planner()
+    stream = StubStreamManager()
+
+    planner._send_settled(stream, "Edited workflow structure")
+
+    assert planner._segments == [
+        {"type": "status", "content": "Edited workflow structure"},
+    ]
