@@ -243,6 +243,50 @@ def test_tool_blocks_run_workflow_before_job_against_updated_yaml() -> None:
     assert "newCode();" in planner.current_yaml
 
 
+def test_pause_turn_keeps_the_text_from_before_the_pause() -> None:
+    planner = make_run_planner()
+    responses = [
+        FakeResponse("pause_turn", [FakeTextBlock("Half an answer. ")]),
+        FakeResponse("end_turn", [FakeTextBlock("The rest.")]),
+    ]
+
+    result = run_with(planner, responses)
+
+    assert result.response == "Half an answer. The rest."
+    assert result.history[-1]["content"] == "Half an answer. The rest."
+    assert [s["content"] for s in result.response_segments] == ["Half an answer. ", "The rest."]
+
+
+def test_paused_text_survives_the_max_tool_calls_exit_without_duplicating() -> None:
+    """Exiting the loop while still paused should keep the head exactly once."""
+    planner = make_run_planner(max_tool_calls=2)
+    responses = [
+        FakeResponse("pause_turn", [FakeTextBlock("A")]),
+        FakeResponse("pause_turn", [FakeTextBlock("B")]),
+    ]
+
+    result = run_with(planner, responses)
+
+    assert result.response == "AB"
+    # Pause rounds spend the same budget as real tool calls, so the loop stops.
+    assert result.meta["planner_iterations"] == planner.max_tool_calls
+
+
+def test_a_real_tool_round_resets_the_paused_text_buffer() -> None:
+    """Narration from before a tool call is not part of the final answer."""
+    planner = make_run_planner()
+    responses = [
+        FakeResponse("pause_turn", [FakeTextBlock("Stale narration. ")]),
+        FakeResponse("tool_use", [FakeToolUse("search_documentation", {"query": "dhis2"})]),
+        FakeResponse("end_turn", [FakeTextBlock("The real answer.")]),
+    ]
+
+    with patch("global_chat.planner.search_documentation_tool", return_value="docs"):
+        result = run_with(planner, responses)
+
+    assert result.response == "The real answer."
+
+
 def test_a_mixed_round_keeps_server_tool_blocks_in_history() -> None:
     """A round with both a web search and a local tool should not drop the search blocks."""
     planner = make_run_planner()
