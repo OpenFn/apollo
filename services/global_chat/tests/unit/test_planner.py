@@ -4,10 +4,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 import global_chat.planner as planner_module
+import httpx
+import pytest
 import yaml
+from anthropic import BadRequestError
 from global_chat.planner import PlannerAgent, PlannerResult
 from global_chat.tools.tool_definitions import TOOL_DEFINITIONS, build_web_tools
 from streaming_util import STATUS_SEARCHING_WEB
+from util import ApolloError
 
 WORKFLOW_YAML = """\
 name: wf
@@ -635,3 +639,96 @@ def test_meta_omits_the_web_fields_when_web_search_is_off() -> None:
 
     assert "web_searches" not in result.meta
     assert "web_search_downgraded" not in result.meta
+
+
+def make_bad_request(message: str = "web search is not enabled for this account") -> BadRequestError:
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    return BadRequestError(message, response=httpx.Response(400, request=request), body=None)
+
+
+def test_a_bad_request_with_web_tools_retries_without_them() -> None:
+    planner = make_run_planner()
+    planner.web_tools = build_web_tools(WEB_CONFIG)
+    planner.tools = TOOL_DEFINITIONS + planner.web_tools
+    planner.web_search_enabled = True
+    planner.config_loader = StubPromptLoader(planner_system_prompt="BASE PROMPT")
+    tools_per_call = []
+
+    def fail_then_answer(_system: object, _messages: object, _stream: object, _manager: object) -> FakeResponse:
+        tools_per_call.append([t.get("name") for t in planner.tools])
+        if len(tools_per_call) == 1:
+            raise make_bad_request()
+        return FakeResponse("end_turn", [FakeTextBlock("Answered without the web.")])
+
+    with patch.object(PlannerAgent, "_call_api", side_effect=fail_then_answer):
+        result = planner.run("q", None, None, [], stream=False)
+
+    # Two calls, first with the web tools, the retry without.
+    assert [("web_search" in names) for names in tools_per_call] == [True, False]
+    assert result.response == "Answered without the web."
+    assert result.meta["web_search_downgraded"] is True
+    assert result.response_segments[0] == {
+        "type": "status",
+        "content": "Web search is unavailable for this account — answering without it",
+    }
+
+
+def test_the_downgrade_rebuilds_the_system_prompt_without_the_web_block() -> None:
+    """Otherwise the prompt still advertises two tools that are no longer sent."""
+    planner = make_run_planner()
+    planner.web_tools = build_web_tools(WEB_CONFIG)
+    planner.tools = TOOL_DEFINITIONS + planner.web_tools
+    planner.web_search_enabled = True
+    planner.config_loader = StubPromptLoader(
+        planner_system_prompt="BASE PROMPT",
+        planner_web_tools_prompt="WEB ADDENDUM {domains}",
+    )
+    systems = []
+
+    def fail_then_answer(system: list, _messages: object, _stream: object, _manager: object) -> FakeResponse:
+        systems.append([block["text"] for block in system])
+        if len(systems) == 1:
+            raise make_bad_request()
+        return FakeResponse("end_turn", [FakeTextBlock("Answered without the web.")])
+
+    with patch.object(PlannerAgent, "_call_api", side_effect=fail_then_answer):
+        planner.run("q", None, None, [], stream=False)
+
+    # The first call carries the addendum, and the retry should not.
+    assert systems == [["BASE PROMPT", "WEB ADDENDUM docs.dhis2.org"], ["BASE PROMPT"]]
+
+
+def test_a_bad_request_without_web_tools_is_not_retried() -> None:
+    planner = make_run_planner()
+    calls = []
+
+    def always_fail(*_args: object) -> FakeResponse:
+        calls.append(1)
+        raise make_bad_request("prompt is too long")
+
+    with patch.object(PlannerAgent, "_build_system_prompt", return_value=[]), \
+         patch.object(PlannerAgent, "_call_api", side_effect=always_fail), \
+         pytest.raises(ApolloError):
+        planner.run("q", None, None, [], stream=False)
+
+    assert calls == [1]
+
+
+def test_a_second_bad_request_surfaces_the_original_error() -> None:
+    planner = make_run_planner()
+    planner.web_tools = build_web_tools(WEB_CONFIG)
+    planner.tools = TOOL_DEFINITIONS + planner.web_tools
+    planner.web_search_enabled = True
+    planner.config_loader = StubPromptLoader(planner_system_prompt="BASE PROMPT")
+    errors = [make_bad_request("web search is not enabled"), make_bad_request("something else")]
+
+    def always_fail(*_args: object) -> FakeResponse:
+        raise errors.pop(0)
+
+    with patch.object(PlannerAgent, "_call_api", side_effect=always_fail), \
+         pytest.raises(ApolloError) as excinfo:
+        planner.run("q", None, None, [], stream=False)
+
+    assert errors == []
+    assert "web search is not enabled" in excinfo.value.message
+    assert "something else" not in excinfo.value.message

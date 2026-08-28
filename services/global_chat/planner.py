@@ -8,7 +8,7 @@ from typing import List, Dict, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 import httpx
-from anthropic import Anthropic
+from anthropic import Anthropic, BadRequestError
 import sentry_sdk
 
 import sys
@@ -152,7 +152,26 @@ class PlannerAgent:
         try:
             while tool_call_count < self.max_tool_calls:
                 try:
-                    response = self._call_api(system_prompt, messages, stream, stream_manager)
+                    try:
+                        response = self._call_api(system_prompt, messages, stream, stream_manager)
+                    except BadRequestError as web_error:
+                        # Likeliest cause is a caller whose Anthropic key does
+                        # not have web search enabled.
+                        if not self.web_tools:
+                            raise
+                        logger.warning(f"BadRequestError with the web tools active, retrying without them: {web_error}")
+                        self.web_tools = []
+                        self.tools = TOOL_DEFINITIONS
+                        self.web_search_downgraded = True
+                        system_prompt = self._build_system_prompt()
+                        self._send_settled(
+                            stream_manager,
+                            "Web search is unavailable for this account — answering without it",
+                        )
+                        try:
+                            response = self._call_api(system_prompt, messages, stream, stream_manager)
+                        except BadRequestError:
+                            raise web_error from None
 
                     for field in [
                         "input_tokens",
