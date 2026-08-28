@@ -22,6 +22,7 @@ from streaming_util import (
     STATUS_REVIEWING_WORKFLOW,
     STATUS_NEW_WORKFLOW,
     STATUS_PLANNING,
+    STATUS_SEARCHING_WEB,
 )
 from global_chat.config_loader import ConfigLoader
 from models import resolve_model
@@ -315,6 +316,7 @@ class PlannerAgent:
         task-specific status messages sent before each tool execution.
         """
         if stream:
+            settled_this_round = False
             with self.client.messages.stream(
                 model=self.model,
                 max_tokens=self.max_tokens,
@@ -327,6 +329,13 @@ class PlannerAgent:
                 for event in stream_obj:
                     if event.type == "content_block_delta" and event.delta.type == "text_delta":
                         stream_manager.send_text(event.delta.text)
+                    elif event.type == "content_block_start":
+                        block_type = event.content_block.type
+                        if block_type == "server_tool_use":
+                            self._send_spinner(stream_manager, STATUS_SEARCHING_WEB)
+                        elif block_type in ("web_search_tool_result", "web_fetch_tool_result") and not settled_this_round:
+                            self._send_settled(stream_manager, "Searched the web")
+                            settled_this_round = True
                 return stream_obj.get_final_message()
         else:
             response = self.client.beta.messages.create(

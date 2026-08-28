@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from global_chat.planner import PlannerAgent, PlannerResult
 from global_chat.tools.tool_definitions import TOOL_DEFINITIONS
+from streaming_util import STATUS_SEARCHING_WEB
 
 WORKFLOW_YAML = """\
 name: wf
@@ -49,14 +50,22 @@ class FakeToolUse:
 
 
 class StubStreamManager:
-    def send_thinking(self, *_args: object, **_kwargs: object) -> None:
-        pass
+    def __init__(self) -> None:
+        self.thinking: list = []
+        self.statuses: list[str] = []
+        self.text: list[str] = []
+
+    def send_thinking(self, status: object = None, *_args: object, **_kwargs: object) -> None:
+        self.thinking.append(status)
 
     def send_changes(self, *_args: object, **_kwargs: object) -> None:
         pass
 
-    def send_status(self, *_args: object, **_kwargs: object) -> None:
-        pass
+    def send_status(self, content: str = "", *_args: object, **_kwargs: object) -> None:
+        self.statuses.append(content)
+
+    def send_text(self, chunk: str) -> None:
+        self.text.append(chunk)
 
 
 class FakeTextBlock:
@@ -383,3 +392,96 @@ def test_an_empty_allowlist_keeps_the_tools_off_even_when_requested() -> None:
 
     assert planner.web_tools == []
     assert planner.web_search_enabled is False
+
+
+class FakeEvent:
+    def __init__(self, event_type: str, **fields: object) -> None:
+        self.type = event_type
+        for key, value in fields.items():
+            setattr(self, key, value)
+
+
+class FakeBlockRef:
+    def __init__(self, block_type: str) -> None:
+        self.type = block_type
+
+
+class FakeStream:
+    def __init__(self, events: list, final: FakeResponse) -> None:
+        self._events = events
+        self._final = final
+
+    def __enter__(self) -> "FakeStream":
+        return self
+
+    def __exit__(self, *_exc: object) -> bool:
+        return False
+
+    def __iter__(self):
+        return iter(self._events)
+
+    def get_final_message(self) -> FakeResponse:
+        return self._final
+
+
+class FakeMessages:
+    def __init__(self, stream: FakeStream) -> None:
+        self._stream = stream
+
+    def stream(self, **_kwargs: object) -> FakeStream:
+        return self._stream
+
+
+class FakeClient:
+    def __init__(self, stream: FakeStream) -> None:
+        self.messages = FakeMessages(stream)
+
+
+def block_start(block_type: str) -> FakeEvent:
+    return FakeEvent("content_block_start", content_block=FakeBlockRef(block_type))
+
+
+def text_delta(text: str) -> FakeEvent:
+    return FakeEvent("content_block_delta", delta=FakeEvent("text_delta", text=text))
+
+
+def test_server_tool_activity_spins_then_settles_once_per_round() -> None:
+    """Two server-tool uses in one round should result in one line."""
+    planner = make_run_planner()
+    final = FakeResponse("end_turn", [FakeTextBlock("Answer.")])
+    events = [
+        block_start("server_tool_use"),
+        block_start("web_search_tool_result"),
+        block_start("server_tool_use"),
+        block_start("web_fetch_tool_result"),
+        text_delta("Answer."),
+    ]
+    planner.client = FakeClient(FakeStream(events, final))
+    manager = StubStreamManager()
+
+    planner._call_api([], [], True, manager)
+
+    assert manager.thinking == [STATUS_SEARCHING_WEB, STATUS_SEARCHING_WEB]
+    assert manager.statuses == ["Searched the web"]
+    assert planner._segments == [{"type": "status", "content": "Searched the web"}]
+
+
+def test_the_spinner_uses_the_shared_web_status_pool() -> None:
+    planner = make_run_planner()
+    planner.client = FakeClient(FakeStream([block_start("server_tool_use")], FakeResponse("end_turn", [])))
+    manager = StubStreamManager()
+
+    planner._call_api([], [], True, manager)
+
+    assert manager.thinking == [STATUS_SEARCHING_WEB]
+
+
+def test_text_deltas_still_stream_alongside_the_new_branches() -> None:
+    planner = make_run_planner()
+    final = FakeResponse("end_turn", [FakeTextBlock("Hi there")])
+    planner.client = FakeClient(FakeStream([text_delta("Hi "), text_delta("there")], final))
+    manager = StubStreamManager()
+
+    planner._call_api([], [], True, manager)
+
+    assert manager.text == ["Hi ", "there"]
