@@ -149,6 +149,9 @@ class RouterAgent:
         else:
             result = self._route_to_planner(content, workflow_yaml, page, history, stream, decision.confidence)
 
+        if web_search:
+            result.meta["web_search_requested"] = True
+
         return result
 
     @observe(name="routing_decision")
