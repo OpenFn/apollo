@@ -3,6 +3,7 @@ Planner Agent - Coordinates tools and subagents for complex multi-step tasks.
 """
 
 import os
+from urllib.parse import urlparse
 from typing import List, Dict, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -140,6 +141,7 @@ class PlannerAgent:
         tool_call_count = 0
         tool_calls_meta = []
         paused_text = ""
+        web_usage = {"web_searches": 0, "web_fetches": 0, "web_domains": []}
         total_usage = {
             "input_tokens": 0,
             "output_tokens": 0,
@@ -159,6 +161,13 @@ class PlannerAgent:
                         "cache_read_input_tokens",
                     ]:
                         total_usage[field] += getattr(response.usage, field, 0)
+
+                    round_web = self._count_server_tool_uses(response)
+                    web_usage["web_searches"] += round_web["web_searches"]
+                    web_usage["web_fetches"] += round_web["web_fetches"]
+                    for host in round_web["web_domains"]:
+                        if host not in web_usage["web_domains"]:
+                            web_usage["web_domains"].append(host)
 
                     logger.info(f"Claude API call {tool_call_count + 1}: stop_reason={response.stop_reason}")
 
@@ -265,19 +274,25 @@ class PlannerAgent:
         return_history.append({"role": "user", "content": content})
         return_history.append({"role": "assistant", "content": final_text})
 
+        meta = {
+            "agents": agents_used,
+            "planner_iterations": tool_call_count,
+            "tool_calls": tool_calls_meta,
+            "subagent_calls": self.subagent_results,
+            "total_tool_calls": tool_call_count,
+        }
+
+        if self.web_search_enabled:
+            meta.update(web_usage)
+            meta["web_search_downgraded"] = self.web_search_downgraded
+
         return PlannerResult(
             response=final_text,
             response_segments=response_segments,
             attachments=attachments,
             history=return_history,
             usage=total_usage,
-            meta={
-                "agents": agents_used,
-                "planner_iterations": tool_call_count,
-                "tool_calls": tool_calls_meta,
-                "subagent_calls": self.subagent_results,
-                "total_tool_calls": tool_call_count,
-            },
+            meta=meta,
         )
 
     def _build_user_content(self, content: str, page: Optional[str]) -> str:
@@ -777,6 +792,26 @@ class PlannerAgent:
     def _extract_text(self, response):
         """Extract text from response content, concatenated as it was streamed."""
         return "".join(block.text for block in response.content if block.type == "text")
+
+    @staticmethod
+    def _count_server_tool_uses(response) -> dict:
+        """Count web search/fetch uses in one response and note fetched hosts."""
+        searches = 0
+        fetches = 0
+        hosts: list[str] = []
+
+        for block in response.content:
+            if getattr(block, "type", None) != "server_tool_use":
+                continue
+            if block.name == "web_search":
+                searches += 1
+            elif block.name == "web_fetch":
+                fetches += 1
+                host = urlparse((block.input or {}).get("url", "")).hostname
+                if host and host not in hosts:
+                    hosts.append(host)
+
+        return {"web_searches": searches, "web_fetches": fetches, "web_domains": hosts}
 
     def _build_system_prompt(self) -> list:
         """Build system prompt for planner with cache control."""

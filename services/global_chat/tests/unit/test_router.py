@@ -221,3 +221,34 @@ def test_confident_direct_route_is_not_gated() -> None:
     job_mock.assert_called_once()
     planner_mock.assert_not_called()
     assert result.response == "job answer"
+
+
+def test_meta_marks_a_request_that_asked_for_web_search() -> None:
+    """Visible even when the request never reached the planner."""
+    router = make_router()
+    decision = RouterDecision(destination="job_code_agent", confidence=5, job_key="fetch-patients")
+    job_result = RouterResult(
+        response="job answer",
+        response_segments=[],
+        attachments=[],
+        history=[],
+        usage={},
+        meta={"agents": ["router", "job_code_agent"]},
+    )
+
+    with patch.object(RouterAgent, "_make_routing_decision", return_value=decision), \
+         patch.object(RouterAgent, "_route_to_job_chat", return_value=job_result):
+        result = router.route_and_execute("edit this", WORKFLOW_YAML, None, [], False, web_search=True)
+
+    assert result.meta["web_search_requested"] is True
+
+
+def test_meta_omits_web_search_requested_by_default() -> None:
+    router = make_router()
+    decision = RouterDecision(destination="planner", confidence=5)
+
+    with patch.object(RouterAgent, "_make_routing_decision", return_value=decision), \
+         patch.object(RouterAgent, "_route_to_planner", return_value=make_planner_result()):
+        result = router.route_and_execute("build me a workflow", None, None, [], False)
+
+    assert "web_search_requested" not in result.meta

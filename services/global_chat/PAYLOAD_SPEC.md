@@ -126,7 +126,16 @@ This document defines the input and output payload structure for the Global Agen
       { "tool": "call_workflow_agent", "input": { "message": "..." } }
     ],
     "subagent_calls": [],                // Raw sub-agent result dicts (for debugging)
-    "total_tool_calls": 2
+    "total_tool_calls": 2,
+
+    // Only when options.web_search was set:
+    "web_search_requested": true,
+
+    // Only when the planner has web tools on:
+    "web_searches": 2,
+    "web_fetches": 1,
+    "web_domains": ["docs.dhis2.org"],
+    "web_search_downgraded": false
   }
 }
 ```
@@ -163,6 +172,10 @@ Each tool beat streams as: `thinking` spinner → `changes` (if the workflow was
   - **`tool_calls`** (array): List of `{tool, input}` objects for each tool the planner invoked (planner path only).
   - **`subagent_calls`** (array): Raw sub-agent result dicts including `_call_metadata` (planner path only, useful for debugging).
   - **`total_tool_calls`** (number): Total number of tool calls made by the planner (planner path only).
+  - **`web_search_requested`** (boolean): Present and `true` only when the request set `options.web_search`.
+  - **`web_searches`** / **`web_fetches`** (number): Server-side web search and web fetch calls the planner made this turn.
+  - **`web_domains`** (array): Hostnames the planner fetched from this turn, deduplicated.
+  - **`web_search_downgraded`** (boolean): `true` when the web tools were dropped mid-turn because the caller's Anthropic key rejected them, and the turn was answered without web results.
 
 ---
 

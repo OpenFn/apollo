@@ -485,3 +485,94 @@ def test_text_deltas_still_stream_alongside_the_new_branches() -> None:
     planner._call_api([], [], True, manager)
 
     assert manager.text == ["Hi ", "there"]
+
+
+class FakeSearchResult:
+    """A successful web_search_tool_result: content is a list."""
+
+    type = "web_search_tool_result"
+
+    def __init__(self) -> None:
+        self.content = [{"type": "web_search_result", "url": "https://docs.dhis2.org/a"}]
+
+
+class FakeSearchError:
+    """A failed web_search_tool_result: content is a bare object."""
+
+    type = "web_search_tool_result"
+
+    def __init__(self) -> None:
+        self.content = {"type": "web_search_tool_result_error", "error_code": "max_uses_exceeded"}
+
+
+def test_meta_counts_searches_and_fetch_hostnames() -> None:
+    planner = make_run_planner()
+    planner.web_search_enabled = True
+    responses = [
+        FakeResponse("end_turn", [
+            FakeServerToolUse("web_search", {"query": "dhis2 tracker"}, block_id="s1"),
+            FakeSearchResult(),
+            FakeServerToolUse("web_fetch", {"url": "https://docs.dhis2.org/en/tracker.html?q=secret"}, block_id="f1"),
+            FakeServerToolUse("web_fetch", {"url": "https://docs.dhis2.org/en/events.html"}, block_id="f2"),
+            FakeTextBlock("Here is the shape."),
+        ]),
+    ]
+
+    result = run_with(planner, responses)
+
+    assert (result.meta["web_searches"], result.meta["web_fetches"]) == (1, 2)
+    # Hostnames only, deduplicated, and the ?q=secret query string is dropped.
+    assert result.meta["web_domains"] == ["docs.dhis2.org"]
+    assert result.meta["web_search_downgraded"] is False
+
+
+def test_meta_counting_survives_the_error_result_shape() -> None:
+    """A failed search returns content as an object. Counting
+    reads server_tool_use blocks and must not touch either shape."""
+    planner = make_run_planner()
+    planner.web_search_enabled = True
+    responses = [
+        FakeResponse("end_turn", [
+            FakeServerToolUse("web_search", {"query": "dhis2"}, block_id="s1"),
+            FakeSearchError(),
+            FakeTextBlock("Could not find it."),
+        ]),
+    ]
+
+    result = run_with(planner, responses)
+
+    assert result.meta["web_searches"] == 1
+    assert result.meta["web_fetches"] == 0
+    assert result.meta["web_domains"] == []
+
+
+def test_meta_sums_web_usage_across_rounds() -> None:
+    """A paused search continues into a second round; counts must accumulate."""
+    planner = make_run_planner()
+    planner.web_search_enabled = True
+    responses = [
+        FakeResponse("pause_turn", [
+            FakeServerToolUse("web_search", {"query": "dhis2"}, block_id="s1"),
+            FakeServerToolUse("web_fetch", {"url": "https://docs.dhis2.org/a.html"}, block_id="f1"),
+        ]),
+        FakeResponse("end_turn", [
+            FakeServerToolUse("web_fetch", {"url": "https://docs.dhis2.org/b.html"}, block_id="f2"),
+            FakeServerToolUse("web_fetch", {"url": "https://docs.openfn.org/c.html"}, block_id="f3"),
+            FakeTextBlock("Done."),
+        ]),
+    ]
+
+    result = run_with(planner, responses)
+
+    assert (result.meta["web_searches"], result.meta["web_fetches"]) == (1, 3)
+    assert result.meta["web_domains"] == ["docs.dhis2.org", "docs.openfn.org"]
+
+
+def test_meta_omits_the_web_fields_when_web_search_is_off() -> None:
+    planner = make_run_planner()
+    responses = [FakeResponse("end_turn", [FakeTextBlock("Plain answer.")])]
+
+    result = run_with(planner, responses)
+
+    assert "web_searches" not in result.meta
+    assert "web_search_downgraded" not in result.meta
