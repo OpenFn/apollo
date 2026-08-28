@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 import httpx
 import anthropic
-from anthropic import Anthropic
+from anthropic import Anthropic, BadRequestError
 import sentry_sdk
 
 import sys
@@ -333,13 +333,38 @@ class PlannerAgent:
             while not final_round:
                 final_round = tool_call_count >= self.max_tool_calls
                 try:
-                    response = self._call_api(
-                        system_prompt,
-                        messages,
-                        stream,
-                        stream_manager,
-                        tool_choice={"type": "none"} if final_round else None,
-                    )
+                    try:
+                        response = self._call_api(
+                            system_prompt,
+                            messages,
+                            stream,
+                            stream_manager,
+                            tool_choice={"type": "none"} if final_round else None,
+                        )
+                    except BadRequestError as web_error:
+                        # Likeliest cause is a caller whose Anthropic key does
+                        # not have web search enabled.
+                        if not self.web_tools:
+                            raise
+                        logger.warning(f"BadRequestError with the web tools active, retrying without them: {web_error}")
+                        self.web_tools = []
+                        self.tools = TOOL_DEFINITIONS
+                        self.web_search_downgraded = True
+                        system_prompt = self._build_system_prompt()
+                        self._send_settled(
+                            stream_manager,
+                            "Web search is unavailable for this account — answering without it",
+                        )
+                        try:
+                            response = self._call_api(
+                                system_prompt,
+                                messages,
+                                stream,
+                                stream_manager,
+                                tool_choice={"type": "none"} if final_round else None,
+                            )
+                        except BadRequestError:
+                            raise web_error from None
 
                     for field in [
                         "input_tokens",
