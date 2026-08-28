@@ -817,4 +817,11 @@ class PlannerAgent:
         """Build system prompt for planner with cache control."""
         prompt_text = self.config_loader.get_prompt("planner_system_prompt")
 
-        return [{"type": "text", "text": prompt_text, "cache_control": {"type": "ephemeral"}}]
+        blocks = [{"type": "text", "text": prompt_text, "cache_control": {"type": "ephemeral"}}]
+
+        web_prompt = self.config_loader.get_prompt("planner_web_tools_prompt")
+        if self.web_tools and web_prompt:
+            domains = ", ".join(self.web_tools[0].get("allowed_domains") or [])
+            blocks.append({"type": "text", "text": web_prompt.replace("{domains}", domains)})
+
+        return blocks

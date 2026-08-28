@@ -1,9 +1,12 @@
 """Unit tests for PlannerAgent tool execution and user-content building."""
 
+from pathlib import Path
 from unittest.mock import patch
 
+import global_chat.planner as planner_module
+import yaml
 from global_chat.planner import PlannerAgent, PlannerResult
-from global_chat.tools.tool_definitions import TOOL_DEFINITIONS
+from global_chat.tools.tool_definitions import TOOL_DEFINITIONS, build_web_tools
 from streaming_util import STATUS_SEARCHING_WEB
 
 WORKFLOW_YAML = """\
@@ -345,6 +348,16 @@ class StubConfigLoader:
         self.config = config
 
 
+class StubPromptLoader:
+    """ConfigLoader stand-in for _build_system_prompt, which only calls get_prompt."""
+
+    def __init__(self, **prompts: str) -> None:
+        self._prompts = prompts
+
+    def get_prompt(self, key: str) -> str:
+        return self._prompts.get(key, "")
+
+
 WEB_CONFIG = {
     "planner": {
         "model": "claude-opus",
@@ -392,6 +405,52 @@ def test_an_empty_allowlist_keeps_the_tools_off_even_when_requested() -> None:
 
     assert planner.web_tools == []
     assert planner.web_search_enabled is False
+
+
+def test_system_prompt_is_a_single_cached_block_without_web_tools() -> None:
+    planner = make_run_planner()
+    planner.config_loader = StubPromptLoader(planner_system_prompt="BASE PROMPT")
+
+    blocks = planner._build_system_prompt()
+
+    assert len(blocks) == 1
+    assert blocks[0]["cache_control"] == {"type": "ephemeral"}
+
+
+def test_system_prompt_appends_an_uncached_web_block_with_the_allowlist() -> None:
+    planner = make_run_planner()
+    planner.config_loader = StubPromptLoader(
+        planner_system_prompt="BASE PROMPT",
+        planner_web_tools_prompt="WEB ADDENDUM {domains}",
+    )
+    planner.web_tools = build_web_tools(WEB_CONFIG)
+
+    blocks = planner._build_system_prompt()
+
+    # Two blocks, and only the first is cached: the addendum must stay after
+    # the breakpoint, outside the cache key.
+    assert [("cache_control" in block) for block in blocks] == [True, False]
+    assert blocks[0]["text"] == "BASE PROMPT"
+    assert blocks[0]["cache_control"] == {"type": "ephemeral"}
+    assert blocks[1]["text"] == "WEB ADDENDUM docs.dhis2.org"
+
+
+def test_the_web_tools_prompt_key_exists_in_prompts_yaml() -> None:
+    path = Path(planner_module.__file__).parent / "prompts.yaml"
+    prompts = yaml.safe_load(path.read_text(encoding="utf-8"))["prompts"]
+
+    assert "{domains}" in prompts["planner_web_tools_prompt"]
+
+
+def test_no_web_block_is_appended_when_the_prompt_is_missing() -> None:
+    """An empty text block would be rejected by the API, so drop it."""
+    planner = make_run_planner()
+    planner.config_loader = StubPromptLoader(planner_system_prompt="BASE PROMPT")
+    planner.web_tools = build_web_tools(WEB_CONFIG)
+
+    blocks = planner._build_system_prompt()
+
+    assert len(blocks) == 1
 
 
 class FakeEvent:
