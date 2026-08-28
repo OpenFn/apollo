@@ -73,6 +73,15 @@ class FakeUsage:
     cache_read_input_tokens = 0
 
 
+class FakeServerToolUse:
+    type = "server_tool_use"
+
+    def __init__(self, name: str, tool_input: dict, block_id: str = "srvtu_1") -> None:
+        self.name = name
+        self.input = tool_input
+        self.id = block_id
+
+
 class FakeResponse:
     def __init__(self, stop_reason: str, content: list) -> None:
         self.stop_reason = stop_reason
@@ -232,6 +241,30 @@ def test_tool_blocks_run_workflow_before_job_against_updated_yaml() -> None:
     by_id = {r["tool_use_id"]: r["content"] for r in results}
     assert "stitched into the workflow" in by_id["tu_job"]
     assert "newCode();" in planner.current_yaml
+
+
+def test_a_mixed_round_keeps_server_tool_blocks_in_history() -> None:
+    """A round with both a web search and a local tool should not drop the search blocks."""
+    planner = make_run_planner()
+    search_block = FakeServerToolUse("web_search", {"query": "dhis2 tracker api"})
+    responses = [
+        FakeResponse("tool_use", [search_block, FakeToolUse("search_documentation", {"query": "x"})]),
+        FakeResponse("end_turn", [FakeTextBlock("Done.")]),
+    ]
+    seen = []
+
+    def record_and_reply(_system: object, messages: list, _stream: object, _manager: object) -> FakeResponse:
+        seen.append(list(messages))
+        return responses.pop(0)
+
+    with patch.object(PlannerAgent, "_build_system_prompt", return_value=[]), \
+         patch.object(PlannerAgent, "_call_api", side_effect=record_and_reply), \
+         patch("global_chat.planner.search_documentation_tool", return_value="docs"):
+        planner.run("q", None, None, [], stream=False)
+
+    assistant_turn = seen[1][-2]
+    assert assistant_turn["role"] == "assistant"
+    assert search_block in assistant_turn["content"]
 
 
 def test_user_content_names_the_step_being_viewed() -> None:

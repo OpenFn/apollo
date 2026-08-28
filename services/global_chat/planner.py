@@ -185,22 +185,8 @@ class PlannerAgent:
                             tool_use_blocks, stream_manager, total_usage, tool_calls_meta
                         )
 
-                        content_blocks = []
-                        for block in response.content:
-                            if block.type == "thinking":
-                                content_blocks.append({
-                                    "type": "thinking",
-                                    "thinking": block.thinking,
-                                    "signature": block.signature,
-                                })
-                            elif block.type == "text":
-                                content_blocks.append({"type": "text", "text": block.text})
-                            elif block.type == "tool_use":
-                                content_blocks.append(
-                                    {"type": "tool_use", "id": block.id, "name": block.name, "input": block.input}
-                                )
-
-                        messages.append({"role": "assistant", "content": content_blocks})
+                        # Append the response's own blocks rather than a whitelist of known types
+                        messages.append({"role": "assistant", "content": response.content})
                         messages.append({"role": "user", "content": tool_results})
 
                         tool_call_count += len(tool_use_blocks)
