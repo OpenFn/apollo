@@ -2,8 +2,8 @@
 
 from global_chat.tools.tool_definitions import build_web_tools
 
-MAX_USES = 5
-MAX_CONTENT_TOKENS = 10000
+MAX_USES = 3
+MAX_CONTENT_TOKENS = 7500
 ALLOWED_DOMAINS = ["docs.dhis2.org", "docs.openfn.org"]
 
 WEB_CONFIG = {
