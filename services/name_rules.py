@@ -75,6 +75,10 @@ _LETTER_MARK_DIGIT = ("L", "M", "N")
 #: ``validate_length`` counts graphemes, and Lightning's client matches it).
 MAX_NAME_LENGTH = 100
 
+# How many times sanitize_name may re-trim and re-normalise before giving up.
+# Two passes settle every case found so far; the rest is margin.
+_SANITIZE_PASSES = 4
+
 #: Longest edge key. An edge label is ``source->target``, so two names at the
 #: limit would otherwise make a key over twice the length of anything else in
 #: the document.
@@ -686,10 +690,10 @@ def sanitize_name(name: str, unicode_mode: bool | None = None) -> str:
     Under the permissive rule nothing is folded and nothing is dropped except
     the rejected set -- the name is kept exactly as typed.
 
-    In both modes: the result is NFC-normalised, forbidden whitespace becomes a
-    plain space, the result is trimmed with exactly the set Elixir's
-    `String.trim/1` strips, and it is capped at MAX_NAME_LENGTH graphemes
-    without ever cutting a grapheme in half.
+    In both modes: forbidden whitespace becomes a plain space, the result is
+    trimmed with exactly the set Elixir's `String.trim/1` strips, then
+    NFC-normalised, then capped at MAX_NAME_LENGTH graphemes without ever
+    cutting a grapheme in half. The result is a fixed point.
     """
     if not name or not isinstance(name, str):
         return name
@@ -720,8 +724,20 @@ def sanitize_name(name: str, unicode_mode: bool | None = None) -> str:
         if unicode_mode or char in _ASCII_ALLOWED:
             kept.append(char)
 
-    text = normalize_nfc("".join(kept)).strip(_TRIM_CHARS)
-    return truncate_graphemes(text, MAX_NAME_LENGTH).strip(_TRIM_CHARS)
+    # Trim before normalising, not after. Trimming can uncover a combining mark
+    # that only composes once the character in front of it is gone, and
+    # truncating can uncover the same boundary again, so repeat until it
+    # settles. is_valid_name asks whether a name equals this function's output,
+    # so that output has to be a fixed point or a sanitised name reads as
+    # invalid.
+    text = "".join(kept)
+    for _ in range(_SANITIZE_PASSES):
+        settled = text
+        text = normalize_nfc(text.strip(_TRIM_CHARS))
+        text = truncate_graphemes(text, MAX_NAME_LENGTH).strip(_TRIM_CHARS)
+        if text == settled:
+            break
+    return text
 
 
 def is_valid_name(name: str, unicode_mode: bool | None = None) -> bool:

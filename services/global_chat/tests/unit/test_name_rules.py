@@ -774,7 +774,27 @@ def test_sanitized_names_are_fixed_points_of_normalisation(
     so the divergence cannot corrupt anything this service produced."""
     monkeypatch.setenv(UNICODE_FLAG_ENV, mode)
 
-    for text in ("Vérifier l'état", "\u0995\u09c7\u09be", NFC_DIVERGENCE, "患者確認"):
+    for text in (
+        "Vérifier l'état",
+        "\u0995\u09c7\u09be",
+        NFC_DIVERGENCE,
+        "患者確認",
+        # Leading and trailing whitespace matter here rather than being noise:
+        # trimming is what can uncover a mark that had nothing to compose onto.
+        " \u09cb",
+        "\t\u09cb ",
+        "  \u0995\u094b",
+        " Vérifier l'état ",
+    ):
         cleaned = sanitize_name(text)
         assert sanitize_name(cleaned) == cleaned
         assert normalize_nfc(cleaned) == cleaned
+
+
+@pytest.mark.usefixtures("unicode_mode")
+def test_trimming_does_not_leave_a_mark_uncomposed() -> None:
+    """A space in front of a two-part vowel blocks it from composing, so
+    trimming the space after normalising left the decomposed pair behind and
+    the sanitiser returned a name it would then call invalid."""
+    assert sanitize_name(" \u09cb") == "\u09cb"
+    assert is_valid_name(sanitize_name(" \u09cb"))
