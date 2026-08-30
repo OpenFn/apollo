@@ -3,20 +3,20 @@ Global Agent - Main entry point.
 
 This is the supervisor agent that coordinates subagents and tools.
 """
-import os
-from typing import Dict, Any, List, Optional
-from dataclasses import dataclass
-
 # Import utilities from parent services directory
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 sys.path.append(str(Path(__file__).parent.parent))
 
-from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
-from util import ApolloError, create_logger, APOLLO_VERSION
-from langfuse_util import should_track, build_tags, build_generation_diff
 from global_chat.config_loader import ConfigLoader
 from global_chat.router import RouterAgent
+from langfuse import get_client as get_langfuse_client
+from langfuse import observe, propagate_attributes
+from langfuse_util import build_generation_diff, build_tags, should_track
+from util import APOLLO_VERSION, ApolloError, create_logger
 
 logger = create_logger(__name__)
 
@@ -128,13 +128,22 @@ def main(data_dict: dict) -> dict:
                 "usage": result.usage,
                 "meta": {
                 **result.meta,
-                "apollo_version": APOLLO_VERSION
-                }
+                "apollo_version": APOLLO_VERSION,
+                },
             }
 
     except ApolloError as e:
-        logger.error(f"ApolloError in global_chat: {e}")
+        # Type and status only. An ApolloError raised further in wraps an
+        # arbitrary inner exception -- `subagent_caller` builds its message from
+        # `str(e)`, and a PyYAML error's `str()` quotes the offending line of
+        # the document, which is client-supplied `workflow_yaml`. The bridge
+        # forwards this log line to the caller as an SSE event, and the masking
+        # filter is no defence: it redacts by credential field name and `sk-`
+        # shape, and rewrites `record.msg` never `exc_text`.
+        logger.error(f"ApolloError in global_chat (code={e.code})")
         raise e
     except Exception as e:
-        logger.exception("Unexpected error in global_chat")
-        raise ApolloError(500, str(e))
+        logger.error(f"Unexpected error in global_chat ({type(e).__name__})")
+        # The message goes back to the caller as the error payload, so it gets
+        # the same treatment as the log line three lines up.
+        raise ApolloError(500, f"Unexpected error in global_chat ({type(e).__name__})")

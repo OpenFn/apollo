@@ -218,9 +218,9 @@ edges:
 
 def test_special_characters():
     print("==================TEST==================")
-    print("Description: Ask for a workflow that uses platforms with special characters in their names. "
-          "Verify that diacritics and punctuation removed/normalised correctly (e.g. é->e) in job names "
-          "in the generated YAML.")
+    print("Description: Ask for a workflow that uses platforms with accents and punctuation in their "
+          "names. Verify the job names in the generated YAML obey whichever step-name rule is active "
+          "(see name_rules): folded to ASCII by default, kept as typed with APOLLO_UNICODE_STEP_NAMES on.")
     existing_yaml = """"""
     history = [
         {"role": "user", "content": "Create a workflow that retrieves data from mwater, google sheets, netsuite, ferntech.io and processed it and sends it to frappé"},

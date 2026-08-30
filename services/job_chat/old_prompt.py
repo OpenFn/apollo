@@ -1,8 +1,8 @@
-import time
 import sentry_sdk
-from util import create_logger, ApolloError, AdaptorSpecifier, get_db_connection
-from .retrieve_docs import retrieve_knowledge
 from search_adaptor_docs.search_adaptor_docs import fetch_signatures
+from util import AdaptorSpecifier, ApolloError, create_logger, get_db_connection
+
+from .retrieve_docs import retrieve_knowledge
 
 logger = create_logger("job_chat.prompt")
 
@@ -195,23 +195,23 @@ def generate_system_message(context_dict, search_results, download_adaptor_docs=
                         sentry_sdk.set_context("adaptor_context", {
                             "adaptor_name": adaptor.name,
                             "version": adaptor.version,
-                            "parsed_from": context.adaptor
+                            "parsed_from": context.adaptor,
                         })
                 except Exception as parse_error:
-                    msg = f"Failed to parse adaptor string '{context.adaptor}': {parse_error}"
+                    msg = f"Failed to parse adaptor string ({type(parse_error).__name__})"
                     logger.warning(msg)
                     sentry_sdk.capture_message(msg, level="warning")
                     sentry_sdk.set_context("adaptor_context", {
                         "parsed_from": context.adaptor,
-                        "error": str(parse_error)
+                        "error": type(parse_error).__name__,
                     })
             finally:
                 conn.close()
         except ApolloError as e:
-            logger.warning(f"Database not available: {e.message}")
+            logger.warning(f"Database not available ({type(e).__name__})")
             adaptor_string += "The user is using an OpenFn Adaptor to write the job."
         except Exception as e:
-            logger.warning(f"Could not fetch adaptor docs for {context.adaptor}: {e}")
+            logger.warning(f"Could not fetch adaptor docs ({type(e).__name__})")
             adaptor_string += "The user is using an OpenFn Adaptor to write the job."
 
         if len(adaptor_string) >= 40000:
@@ -255,8 +255,8 @@ def build_old_prompt(content, history, context, rag=None, api_key=None, download
         "prompts_version": "",
         "usage": {
             "needs_docs": {},
-            "generate_queries": {}
-        }
+            "generate_queries": {},
+        },
     }
 
     # Run RAG if: (a) no RAG data provided, OR (b) refresh_rag flag is True
@@ -269,10 +269,10 @@ def build_old_prompt(content, history, context, rag=None, api_key=None, download
               history=history,
               code=context.get("expression", ""),
               adaptor=context.get("adaptor", ""),
-              api_key=api_key
+              api_key=api_key,
           )
       except Exception as e:
-          logger.error(f"Error retrieving knowledge: {str(e)}")
+          logger.error(f"Error retrieving knowledge ({type(e).__name__})")
 
     system_message = generate_system_message(
         context_dict=context,

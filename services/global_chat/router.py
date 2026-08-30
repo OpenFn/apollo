@@ -4,25 +4,27 @@ Router Agent - Lightweight routing for global agent requests.
 Routes requests to workflow_chat, job_chat, or planner based on user intent.
 """
 
-import os
 import json
-import yaml
-from typing import List, Dict, Optional
-from dataclasses import dataclass
-from anthropic import Anthropic
+import os
 
 # Import utilities from parent services directory
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Dict, List, Optional
+
+import yaml
+from anthropic import Anthropic
 
 sys.path.append(str(Path(__file__).parent.parent))
 
-from langfuse import observe, get_client as get_langfuse_client
-from util import create_logger, ApolloError, sum_usage
-from streaming_util import StreamManager
 from global_chat.config_loader import ConfigLoader
+from langfuse import get_client as get_langfuse_client
+from langfuse import observe
 from models import resolve_model
-from yaml_utils import get_step_name_from_page, get_page_view, find_job_in_yaml, stitch_job_code, workflow_has_job_code
+from streaming_util import StreamManager
+from util import ApolloError, create_logger, sum_usage
+from yaml_utils import find_job_in_yaml, get_page_view, get_step_name_from_page, stitch_job_code, workflow_has_job_code
 
 logger = create_logger(__name__)
 
@@ -120,10 +122,12 @@ class RouterAgent:
         try:
             decision = self._make_routing_decision(content, workflow_yaml, page, history)
             logger.info(
-                f"Router decision: {decision.destination} (confidence: {decision.confidence}, job_key: {decision.job_key})"
+                f"Router decision: {decision.destination} (confidence: {decision.confidence}, job_key: {decision.job_key})",
             )
         except Exception as e:
-            logger.warning(f"Routing decision failed: {e}. Defaulting to planner for safety.")
+            logger.warning(
+                f"Routing decision failed ({type(e).__name__}). Defaulting to planner for safety.",
+            )
             decision = RouterDecision(destination="planner", confidence=1)
 
         # Direct routes are a fast path for clear-cut requests; when the router
@@ -131,7 +135,7 @@ class RouterAgent:
         # the confidence comes back in the same routing call.
         if decision.destination in ("workflow_agent", "job_code_agent") and decision.confidence < 3:
             logger.warning(
-                f"Low router confidence ({decision.confidence}) for {decision.destination} — routing to planner instead"
+                f"Low router confidence ({decision.confidence}) for {decision.destination} — routing to planner instead",
             )
             self._track_reroute({"low_confidence_reroute": decision.destination})
             decision = RouterDecision(destination="planner", confidence=decision.confidence)
@@ -140,7 +144,7 @@ class RouterAgent:
             result = self._route_to_workflow_chat(content, workflow_yaml, page, history, stream, decision.confidence)
         elif decision.destination == "job_code_agent":
             result = self._route_to_job_chat(
-                content, workflow_yaml, page, history, stream, decision.confidence, decision.job_key
+                content, workflow_yaml, page, history, stream, decision.confidence, decision.job_key,
             )
         else:
             result = self._route_to_planner(content, workflow_yaml, page, history, stream, decision.confidence)
@@ -149,7 +153,7 @@ class RouterAgent:
 
     @observe(name="routing_decision")
     def _make_routing_decision(
-        self, content: str, workflow_yaml: Optional[str], page: Optional[str], history: List[Dict]
+        self, content: str, workflow_yaml: Optional[str], page: Optional[str], history: List[Dict],
     ) -> RouterDecision:
         """Make routing decision using Claude Haiku."""
         routing_message = self._build_routing_message(content, workflow_yaml, page, history)
@@ -163,12 +167,12 @@ class RouterAgent:
                 "job_key": {
                     "anyOf": [
                         {"type": "string"},
-                        {"type": "null"}
-                    ]
-                }
+                        {"type": "null"},
+                    ],
+                },
             },
             "required": ["destination", "confidence", "job_key"],
-            "additionalProperties": False
+            "additionalProperties": False,
         }
 
         response = self.client.messages.create(
@@ -177,9 +181,9 @@ class RouterAgent:
             temperature=self.temperature,
             system=[{"type": "text", "text": system_prompt}],
             messages=[
-                {"role": "user", "content": routing_message}
+                {"role": "user", "content": routing_message},
             ],
-            output_config={"format": {"type": "json_schema", "schema": routing_schema}}
+            output_config={"format": {"type": "json_schema", "schema": routing_schema}},
         )
 
         self.routing_usage = {
@@ -199,11 +203,18 @@ class RouterAgent:
                 job_key=decision_data.get("job_key"),
             )
         except (json.JSONDecodeError, KeyError) as e:
-            logger.error(f"Failed to parse routing decision: {e}. Response: {response_text}")
+            # Neither the exception nor the response body. `response_text` is
+            # the model's reply to a prompt built from the user's workflow, so
+            # it can quote job code back, and this line reaches the caller as
+            # an SSE event.
+            logger.error(
+                f"Failed to parse routing decision ({type(e).__name__}); "
+                f"{len(response_text)} characters received",
+            )
             raise
 
     def _build_routing_message(
-        self, content: str, workflow_yaml: Optional[str], page: Optional[str], history: List[Dict]
+        self, content: str, workflow_yaml: Optional[str], page: Optional[str], history: List[Dict],
     ) -> str:
         """Build message for routing decision."""
         parts = []
@@ -244,7 +255,7 @@ class RouterAgent:
         return "\n".join(parts)
 
     def _route_to_workflow_chat(
-        self, content: str, workflow_yaml: Optional[str], page: Optional[str], history: List[Dict], stream: bool, confidence: int
+        self, content: str, workflow_yaml: Optional[str], page: Optional[str], history: List[Dict], stream: bool, confidence: int,
     ) -> RouterResult:
         """Route directly to workflow_chat."""
         from workflow_chat.workflow_chat import main as workflow_chat_main
@@ -270,7 +281,7 @@ class RouterAgent:
 
         if result.get("handover"):
             return self._handover_to_planner(
-                "workflow_agent", result, content, workflow_yaml, page, history, stream, confidence
+                "workflow_agent", result, content, workflow_yaml, page, history, stream, confidence,
             )
 
         total_usage = sum_usage(self.routing_usage, result["usage"])
@@ -340,10 +351,13 @@ class RouterAgent:
                         reason = f"workflow_yaml has no top-level 'jobs' key (top-level keys: {list(parsed.keys())})"
                     else:
                         reason = f"job not found among keys {list(parsed['jobs'].keys())}"
-                except Exception as e:
-                    reason = f"workflow_yaml failed to parse: {e}"
+                except Exception as error:
+                    # Type only: a PyYAML mark quotes the offending document,
+                    # and `reason` is interpolated into a log line that the
+                    # bridge forwards to the caller as an SSE event.
+                    reason = f"workflow_yaml failed to parse ({type(error).__name__})"
             logger.warning(
-                f"No job matched for router_job_key='{router_job_key}' or page='{page}': {reason}"
+                f"No job matched for router_job_key='{router_job_key}' or page='{page}': {reason}",
             )
 
         if job_data:
@@ -391,7 +405,7 @@ class RouterAgent:
 
         if result.get("handover"):
             return self._handover_to_planner(
-                "job_code_agent", result, content, workflow_yaml, page, history, stream, confidence
+                "job_code_agent", result, content, workflow_yaml, page, history, stream, confidence,
             )
 
         total_usage = sum_usage(self.routing_usage, result["usage"])
@@ -405,7 +419,7 @@ class RouterAgent:
                 attachments.append({"type": "workflow_yaml", "content": updated_yaml})
             else:
                 logger.warning(
-                    f"suggested_code generated but no job matched for page '{page}' - code dropped from response"
+                    f"suggested_code generated but no job matched for page '{page}' - code dropped from response",
                 )
 
         return RouterResult(

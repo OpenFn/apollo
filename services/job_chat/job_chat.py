@@ -1,36 +1,39 @@
-import os
 import json
+import os
 import re
-import yaml
-from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
+
 import httpx
+import sentry_sdk
+import yaml
 from anthropic import (
     Anthropic,
     APIConnectionError,
-    BadRequestError,
     AuthenticationError,
-    PermissionDeniedError,
-    NotFoundError,
-    UnprocessableEntityError,
-    RateLimitError,
+    BadRequestError,
     InternalServerError,
+    NotFoundError,
+    PermissionDeniedError,
+    RateLimitError,
+    UnprocessableEntityError,
 )
-import sentry_sdk
-from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
-from langfuse_util import should_track, build_tags, build_generation_diff, mask_secrets
-from util import ApolloError, create_logger, AdaptorSpecifier, add_page_prefix, APOLLO_VERSION
-from yaml_utils import INSPECT_JOB_CODE_TOOL, inspect_job_code
-from .prompt import build_prompt, build_error_correction_prompt
-from .old_prompt import build_old_prompt
+from langfuse import get_client as get_langfuse_client
+from langfuse import observe, propagate_attributes
+from langfuse_util import build_generation_diff, build_tags, drop_code, mask_secrets, should_track
+from models import resolve_model
 from streaming_util import (
-    StreamManager,
-    STATUS_REVIEWING_CODE,
     STATUS_NEW_CODE,
+    STATUS_REVIEWING_CODE,
     STATUS_WORKING,
     STATUS_WRITING_CODE,
+    StreamManager,
 )
-from models import resolve_model
+from util import APOLLO_VERSION, AdaptorSpecifier, ApolloError, add_page_prefix, create_logger
+from yaml_utils import INSPECT_JOB_CODE_TOOL, inspect_job_code
+
+from .old_prompt import build_old_prompt
+from .prompt import build_error_correction_prompt, build_prompt
 
 _dir = os.path.dirname(os.path.abspath(__file__))
 with open(os.path.join(_dir, "rag.yaml")) as _f:
@@ -51,16 +54,16 @@ _CODE_OUTPUT_SCHEMA = {
                 "properties": {
                     "action": {"type": "string"},
                     "old_code": {"type": "string"},
-                    "new_code": {"type": "string"}
+                    "new_code": {"type": "string"},
                 },
                 "required": ["action", "new_code"],
-                "additionalProperties": False
-            }
+                "additionalProperties": False,
+            },
         },
-        "text_answer": {"type": "string"}
+        "text_answer": {"type": "string"},
     },
     "required": ["code_edits", "text_answer"],
-    "additionalProperties": False
+    "additionalProperties": False,
 }
 
 _EDIT_TOOL = {
@@ -101,7 +104,7 @@ _EDIT_WORKFLOW_TOOL = {
             "goal": {
                 "type": "string",
                 "description": "One sentence: what needs to be done",
-            }
+            },
         },
         "required": ["goal"],
         "additionalProperties": False,
@@ -275,7 +278,7 @@ class AnthropicClient:
                         download_adaptor_docs=download_adaptor_docs,
                         refresh_rag=refresh_rag,
                         workflow_yaml=workflow_yaml,
-                        subagent=subagent
+                        subagent=subagent,
                     )
 
                 else:
@@ -286,7 +289,7 @@ class AnthropicClient:
                         rag=rag,
                         api_key=self.api_key,
                         download_adaptor_docs=download_adaptor_docs,
-                        refresh_rag=refresh_rag
+                        refresh_rag=refresh_rag,
                         )
 
             # effort applies to all modes. For suggest_code we expose the `edit_job`
@@ -330,7 +333,7 @@ class AnthropicClient:
                             system=system_message,
                             thinking={"type": "adaptive"},
                             output_config=output_config,
-                            **tool_kwargs
+                            **tool_kwargs,
                         )
 
                         with self.client.messages.stream(**stream_kwargs) as stream_obj:
@@ -349,7 +352,7 @@ class AnthropicClient:
                                     sent_length,
                                     stream_manager,
                                     original_code,
-                                    content
+                                    content,
                                 )
                         message = stream_obj.get_final_message()
 
@@ -371,7 +374,7 @@ class AnthropicClient:
                             # required for non-streaming calls with max_tokens > ~21k,
                             # which the SDK otherwise rejects.
                             timeout=httpx.Timeout(600.0, connect=5.0),
-                            **tool_kwargs
+                            **tool_kwargs,
                         )
                         message = self.client.messages.create(**create_kwargs)
 
@@ -430,7 +433,7 @@ class AnthropicClient:
                     history=history,
                     usage=self.sum_usage(
                         *usage_events,
-                        *[usage_data for usage_key, usage_data in retrieved_knowledge.get("usage", {}).items()]
+                        *[usage_data for usage_key, usage_data in retrieved_knowledge.get("usage", {}).items()],
                     ),
                     rag=retrieved_knowledge,
                     handover=handover_reason,
@@ -491,7 +494,7 @@ class AnthropicClient:
 
             usage = self.sum_usage(
                 *usage_events,
-                *[usage_data for usage_key, usage_data in retrieved_knowledge.get("usage", {}).items()]
+                *[usage_data for usage_key, usage_data in retrieved_knowledge.get("usage", {}).items()],
             )
 
             stop_reason = getattr(message, "stop_reason", None)
@@ -529,7 +532,7 @@ class AnthropicClient:
                 history=updated_history,
                 usage=usage,
                 rag=retrieved_knowledge,
-                diff=diff
+                diff=diff,
             )
 
     def process_stream_event(
@@ -541,7 +544,7 @@ class AnthropicClient:
         sent_length,
         stream_manager,
         original_code=None,
-        content=None
+        content=None,
     ):
         """
         Process a single stream event from the Anthropic API.
@@ -571,10 +574,13 @@ class AnthropicClient:
             return text_answer, suggested_code, diff
             
         except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse JSON response: {e}")
+            # Type only. This log line is forwarded to the caller as an SSE
+            # event, and a JSON error quotes the document it failed on — which
+            # here is the model's answer about the user's job code.
+            logger.warning(f"Failed to parse JSON response ({type(e).__name__})")
             return response, None, None
         except Exception as e:
-            logger.error(f"Error parsing response: {e}")
+            logger.error(f"Error parsing response ({type(e).__name__})")
             return response, None, None
 
     def apply_code_edits(self, content: str, text_answer: str, original_code: str, code_edits: List[Dict[str, Any]]) -> tuple[Optional[str], Dict[str, Any]]:
@@ -593,11 +599,14 @@ class AnthropicClient:
                 if warning:
                     warnings.append(warning)
             except Exception as e:
-                logger.warning(f"Failed to apply edit {edit}: {e}")
-                warnings.append(f"Failed to apply edit: {str(e)}")
+                # Neither the edit nor the exception. `edit` holds the model's
+                # search and replace strings, which are lifted straight out of
+                # the user's job body, and this line reaches the caller as SSE.
+                logger.warning(f"Failed to apply edit ({type(e).__name__})")
+                warnings.append(f"Failed to apply edit ({type(e).__name__})")
         
         diff = {
-            "patches_applied": patches_applied
+            "patches_applied": patches_applied,
         }
         
         if warnings:
@@ -609,10 +618,14 @@ class AnthropicClient:
     def apply_single_edit(self, content: str, text_answer: str, code: str, edit: Dict[str, Any]) -> tuple[str, bool, Optional[str]]:
         """Apply a single code edit and return (new_code, success, warning)."""
 
-        sentry_sdk.set_context("code_edit_context", {
+        # Shape only. Both of these are the model's answer about the user's job
+        # body, and this context persists on the isolation scope — one request
+        # would attach its code to every later event in the process.
+        sentry_sdk.set_context("code_edit_context", drop_code({
             "llm_text_answer": text_answer,
             "llm_edit_answer": edit,
-        })
+            "edit_action": (edit or {}).get("action") if isinstance(edit, dict) else None,
+        }))
 
         action = edit.get("action")
 
@@ -628,7 +641,13 @@ class AnthropicClient:
         if action == "replace":
             old_code = edit.get("old_code")
             new_code = edit.get("new_code")
-            logger.info(f"attempting this edit: old code: {old_code}\nnew code: {new_code}")
+            # Sizes, not the code. `old_code` is a verbatim slice of the
+            # user's job body and this reaches the caller as an SSE event
+            # and Sentry as a breadcrumb.
+            logger.info(
+                f"attempting a replace edit: {len(old_code or '')} characters out, "
+                f"{len(new_code or '')} in",
+            )
             
             if not old_code or new_code is None:
                 msg = "Code edit failed: Replace action requires old_code and new_code"         
@@ -662,7 +681,7 @@ class AnthropicClient:
         new_code = edit.get("new_code")
         corrected_code, success, correction_warning = self.try_error_correction(
             content=content, error_message=error_message, old_code=old_code, 
-            new_code=new_code, full_code=code, text_explanation=text_answer
+            new_code=new_code, full_code=code, text_explanation=text_answer,
         )
 
         warning = "Initial error: " + error_message + (f". Correction warning: {correction_warning}" if correction_warning else "")
@@ -684,7 +703,7 @@ class AnthropicClient:
                 old_code=old_code,
                 new_code=new_code,
                 full_code=full_code,
-                text_explanation=text_explanation
+                text_explanation=text_explanation,
             )
             # structured outputs removed here too (see note in generate); the
             # correction prompt already instructs the {explanation, corrected_*}
@@ -695,7 +714,7 @@ class AnthropicClient:
                 model=self.config.model,
                 system=system_message,
                 output_config={"effort": "medium"},
-                thinking={"type": "adaptive"}
+                thinking={"type": "adaptive"},
             )
 
             response = "\n\n".join([block.text for block in message.content if block.type == "text"])
@@ -714,7 +733,10 @@ class AnthropicClient:
                 return full_code.replace(corrected_old, corrected_new, 1), True, warning
 
         except Exception as e:
-            warning = f"Error correction failed: {e}"
+            # Type only: this warning is logged (forwarded as SSE) and returned
+            # in the diff, and the exception here comes from re-applying an edit
+            # built out of the user's job body.
+            warning = f"Error correction failed ({type(e).__name__})"
             logger.warning(warning)
             return None, False, warning
         
@@ -747,8 +769,10 @@ def main(data_dict: dict) -> dict:
         # name list, which catches nested values and key-shaped strings too.
         sentry_sdk.set_context(
             "request_data",
-            mask_secrets(
-                {k: v for k, v in data_dict.items() if k != "_stream_manager"},
+            drop_code(
+                mask_secrets(
+                    {k: v for k, v in data_dict.items() if k != "_stream_manager"},
+                ),
             ),
         )
 
@@ -772,7 +796,7 @@ def main(data_dict: dict) -> dict:
 
         current_page = {
             "type": "job_code",
-            "name": page_name
+            "name": page_name,
         }
 
         if adaptor_string:
@@ -780,7 +804,7 @@ def main(data_dict: dict) -> dict:
                 adaptor = AdaptorSpecifier(adaptor_string)
                 current_page["adaptor"] = f"{adaptor.short_name}@{adaptor.version}"
             except Exception as e:
-                logger.warning(f"Failed to parse adaptor string '{adaptor_string}': {e}")
+                logger.warning(f"Failed to parse adaptor string ({type(e).__name__})")
 
         # Extract rag_data from meta if present
         rag_data = input_meta.get("rag") if isinstance(input_meta, dict) else None
@@ -840,7 +864,7 @@ def main(data_dict: dict) -> dict:
                 "suggested_code": result.suggested_code,
                 "history": result.history,
                 "usage": result.usage,
-                "meta": {"rag": result.rag, "apollo_version": APOLLO_VERSION}
+                "meta": {"rag": result.rag, "apollo_version": APOLLO_VERSION},
             }
 
             if result.diff:
@@ -854,7 +878,8 @@ def main(data_dict: dict) -> dict:
     except ApolloError:
         raise
     except ValueError as e:
-        raise ApolloError(400, str(e), type="BAD_REQUEST")
+        # Not an exception from a library that has seen the prompt.
+        raise ApolloError(400, str(e), type="BAD_REQUEST")  # safe-error-text: our own validation message
 
     except APIConnectionError as e:
         details = {"cause": str(e.__cause__)} if e.__cause__ else {}
@@ -869,21 +894,25 @@ def main(data_dict: dict) -> dict:
     except RateLimitError as e:
         retry_after = int(e.response.headers.get('retry-after', 60)) if hasattr(e, 'response') else 60
         raise ApolloError(
-            429, "Rate limit exceeded, please try again later", type="RATE_LIMIT", details={"retry_after": retry_after}
+            429, "Rate limit exceeded, please try again later", type="RATE_LIMIT", details={"retry_after": retry_after},
         )
     except BadRequestError as e:
-        if "prompt is too long" in str(e):
+        if "prompt is too long" in str(e):  # safe-error-text: a read, not a channel
             error_message = "Input prompt exceeds maximum token limit (200,000 tokens). Please reduce the amount of text or context provided."
             raise ApolloError(400, error_message, type="PROMPT_TOO_LONG")
-        raise ApolloError(400, str(e), type="BAD_REQUEST")
+        # Not `str(e)`. Anthropic echoes the offending request in its error
+        # text, and the request is the prompt — job code included.
+        raise ApolloError(400, f"The AI service rejected the request ({type(e).__name__})", type="BAD_REQUEST")
     except PermissionDeniedError as e:
         raise ApolloError(403, "Not authorized to perform this action", type="FORBIDDEN")
     except NotFoundError as e:
         raise ApolloError(404, "Resource not found", type="NOT_FOUND")
     except UnprocessableEntityError as e:
-        raise ApolloError(422, str(e), type="INVALID_REQUEST")
+        raise ApolloError(
+            422, f"The AI service could not process the request ({type(e).__name__})", type="INVALID_REQUEST",
+        )
     except InternalServerError as e:
         raise ApolloError(500, "The Anthropic AI Service encountered an error", type="PROVIDER_ERROR")
     except Exception as e:
-        logger.error(f"Unexpected error during chat generation: {str(e)}")
-        raise ApolloError(500, str(e))
+        logger.error(f"Unexpected error during chat generation ({type(e).__name__})")
+        raise ApolloError(500, f"Unexpected error during chat generation ({type(e).__name__})")

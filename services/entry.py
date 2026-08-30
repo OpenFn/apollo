@@ -61,6 +61,14 @@ sentry_sdk.init(
     traces_sample_rate=trace_rates.get(env, 0.0),
     enable_tracing=True,
     auto_enabling_integrations=False,
+    # Frame locals are off. `before_send` scrubs by field name and value shape,
+    # but a stack frame carries whole objects: `data` holds `workflow_yaml` and
+    # `history`, and `preserved_values` on the workflow_chat stack is the
+    # placeholder-to-job-code map for every step. Sentry also walks
+    # `__cause__`/`__context__`, so a handler that logs only an exception type
+    # and re-raises still ships the original frame chain. Redacting job code
+    # from the prompt and then posting it to Sentry is the same leak.
+    include_local_variables=False,
     before_send=_scrub_event,
     # before_send covers error events only, and tracing is on.
     before_send_transaction=_scrub_event,
@@ -94,7 +102,7 @@ def call(
             sentry_sdk.capture_exception(e)
             return _finish(
                 ApolloError(
-                    code=500, message="Input file not found", type="INTERNAL_ERROR"
+                    code=500, message="Input file not found", type="INTERNAL_ERROR",
                 ).to_dict(),
                 output_path,
             )
@@ -102,7 +110,7 @@ def call(
             sentry_sdk.capture_exception(e)
             return _finish(
                 ApolloError(
-                    code=500, message="Invalid JSON input", type="INTERNAL_ERROR"
+                    code=500, message="Invalid JSON input", type="INTERNAL_ERROR",
                 ).to_dict(),
                 output_path,
             )
@@ -119,7 +127,10 @@ def call(
     except ModuleNotFoundError as e:
         sentry_sdk.capture_exception(e)
         result = ApolloError(
-            code=500, message=str(e), type="INTERNAL_ERROR",
+            # The top-level fallback. Losing the message here leaves the caller
+            # with nothing at all, and this path is reached only when the
+            # service itself failed to build an ApolloError.
+            code=500, message=str(e), type="INTERNAL_ERROR",  # safe-error-text: top-level fallback
         ).to_dict()
     except ApolloError as e:
         sentry_sdk.capture_exception(e)
@@ -127,7 +138,10 @@ def call(
     except Exception as e:
         sentry_sdk.capture_exception(e)
         result = ApolloError(
-            code=500, message=str(e), type="INTERNAL_ERROR",
+            # The top-level fallback. Losing the message here leaves the caller
+            # with nothing at all, and this path is reached only when the
+            # service itself failed to build an ApolloError.
+            code=500, message=str(e), type="INTERNAL_ERROR",  # safe-error-text: top-level fallback
         ).to_dict()
 
     langfuse.flush()

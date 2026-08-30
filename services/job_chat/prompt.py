@@ -1,12 +1,14 @@
 """Prompt construction for the job_chat service."""
 
 import json
+
 import sentry_sdk
 from langfuse import observe
-from util import create_logger, ApolloError, AdaptorSpecifier, get_db_connection
-from yaml_utils import redact_job_bodies, normalize_name
-from .retrieve_docs import retrieve_knowledge
 from search_adaptor_docs.search_adaptor_docs import fetch_signatures
+from util import AdaptorSpecifier, ApolloError, create_logger, get_db_connection
+from yaml_utils import normalize_name, redact_job_bodies
+
+from .retrieve_docs import retrieve_knowledge
 
 logger = create_logger("job_chat.prompt")
 
@@ -367,25 +369,25 @@ def generate_system_message(context_dict, search_results, download_adaptor_docs=
                         sentry_sdk.set_context("adaptor_context", {
                             "adaptor_name": adaptor.name,
                             "version": adaptor.version,
-                            "parsed_from": context.adaptor
+                            "parsed_from": context.adaptor,
                         })
                         adaptor_string += "The user is using an OpenFn Adaptor to write the job."
                 except Exception as parse_error:
-                    msg = f"Failed to parse adaptor string '{context.adaptor}': {parse_error}"
+                    msg = f"Failed to parse adaptor string ({type(parse_error).__name__})"
                     logger.warning(msg)
                     sentry_sdk.capture_message(msg, level="warning")
                     sentry_sdk.set_context("adaptor_context", {
                         "parsed_from": context.adaptor,
-                        "error": str(parse_error)
+                        "error": type(parse_error).__name__,
                     })
                     adaptor_string += "The user is using an OpenFn Adaptor to write the job."
             finally:
                 conn.close()
         except ApolloError as e:
-            logger.warning(f"Database not available: {e.message}")
+            logger.warning(f"Database not available ({type(e).__name__})")
             adaptor_string += "The user is using an OpenFn Adaptor to write the job."
         except Exception as e:
-            logger.warning(f"Could not fetch adaptor docs for {context.adaptor}: {e}")
+            logger.warning(f"Could not fetch adaptor docs ({type(e).__name__})")
             adaptor_string += "The user is using an OpenFn Adaptor to write the job."
 
         if len(adaptor_string) >= 40000:
@@ -440,7 +442,7 @@ and system information. When debugging, analyze these logs carefully to identify
             header.append("READ other steps' code with `inspect_job_code` when the request refers to them.")
             redacted = redact_job_bodies(workflow_yaml)
             message.append(
-                f"<workflow_structure>\n{' '.join(header)}\n\n{redacted}\n</workflow_structure>"
+                f"<workflow_structure>\n{' '.join(header)}\n\n{redacted}\n</workflow_structure>",
             )
 
     # Output contract goes LAST so it is the final, most prominent instruction.
@@ -465,8 +467,8 @@ def build_prompt(content, history, context, rag=None, api_key=None, stream_manag
         "prompts_version": "",
         "usage": {
             "needs_docs": {},
-            "generate_queries": {}
-        }
+            "generate_queries": {},
+        },
     }
 
     # Run RAG if: (a) no RAG data provided, OR (b) refresh_rag flag is True
@@ -483,7 +485,7 @@ def build_prompt(content, history, context, rag=None, api_key=None, stream_manag
               stream_manager=stream_manager,
           )
       except Exception as e:
-          logger.error(f"Error retrieving knowledge: {str(e)}")
+          logger.error(f"Error retrieving knowledge ({type(e).__name__})")
 
     system_message = generate_system_message(
         context_dict=context,
@@ -533,5 +535,13 @@ Original edit details:
 Please provide corrected old_code and new_code that will successfully apply the intended change with string replacement."""
 
     prompt = [{"role": "user", "content": user_content}]
-    logger.info(f"prompt in full:\n{prompt}")
+    # Sizes only. This is the user's job body plus the adaptor docs, and an
+    # INFO log becomes a Sentry breadcrumb as well as an SSE event.
+    #
+    # `prompt` is a one-element list of messages, so `len(prompt)` was always
+    # "1 characters" — the leak was gone and the replacement measured nothing.
+    logger.info(
+        f"prompt built: {len(system_message)} characters of system message, "
+        f"{len(user_content)} of user content",
+    )
     return (system_message, prompt)

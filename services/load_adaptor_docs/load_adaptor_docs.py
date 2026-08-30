@@ -253,8 +253,8 @@ def process_adaptor_docs(adaptor: AdaptorSpecifier, raw_docs: List[Dict[str, Any
         }
 
     except Exception as e:
-        logger.error(f"Error uploading to database: {str(e)}")
-        raise ApolloError(500, f"Upload failed: {str(e)}", type="DATABASE_ERROR")
+        logger.error(f"Error uploading to database ({type(e).__name__})")
+        raise ApolloError(500, f"Upload failed ({type(e).__name__})", type="DATABASE_ERROR")
     finally:
         if should_close_conn:
             conn.close()
@@ -328,8 +328,8 @@ def load_adaptor_docs(adaptor: str, skip_if_exists: bool = True, conn=None) -> d
     except ApolloError:
         raise
     except Exception as e:
-        logger.error(f"Error calling adaptor_apis: {str(e)}")
-        raise ApolloError(500, f"Failed to fetch docs: {str(e)}", type="ADAPTOR_API_ERROR")
+        logger.error(f"Error calling adaptor_apis ({type(e).__name__})")
+        raise ApolloError(500, f"Failed to fetch docs ({type(e).__name__})", type="ADAPTOR_API_ERROR")
     finally:
         if should_close_conn:
             conn.close()

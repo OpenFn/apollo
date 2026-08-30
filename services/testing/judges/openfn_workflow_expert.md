@@ -17,7 +17,7 @@ These mirror the workflow-generation contract. Reject the YAML if any are violat
 - Output parses as valid YAML.
 - Every job, trigger, and edge in the returned workflow YAML has a non-empty `id` field. (The workflow_chat service auto-generates IDs for newly added items during post-processing, so the YAML you grade should already have them — flag any item that is still missing one.)
 - Every job has a `body` that is either real adaptor code or the canonical empty-job placeholder `// Add operations here`. Reject other placeholder markers such as `// PLACEHOLDER`, numbered placeholders, `TODO`, `FIXME`, or `<insert ... here>` — these are leftover generation artifacts.
-- Job names and edge `source_*` / `target_*` / key references contain only letters, numbers, spaces, hyphens, and underscores. Job names must be unique within a workflow and under 100 characters.
+- {name_rule}
 - When the user is editing an existing workflow, every job and edge from the existing YAML is present and unchanged in the response unless the user asked to remove or modify it. Additions are fine.
 
 ## Triggers
