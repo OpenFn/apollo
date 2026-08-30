@@ -168,7 +168,7 @@ def generate_queries(content, client, user_context=""):
             500,
             "Failed to generate search queries - invalid response from AI service",
             type="INVALID_LLM_RESPONSE",
-            details={"response_preview": text[:200]},
+            details={"response_length": len(text)},
         )
 
     if len(answer_parsed) >= 4:
