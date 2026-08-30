@@ -502,9 +502,9 @@ def truncate_graphemes(text: str, limit: int) -> str:
     return "".join(clusters[:limit])
 
 
-# Normalisation. `sanitize_name` normalises twice and step lookup matches names
-# as text, so Apollo and Lightning have to agree on the normal form or a lookup
-# for an accented name silently misses.
+# Normalisation. `sanitize_name` normalises on every pass and step lookup
+# matches names as text, so Apollo and Lightning have to agree on the normal
+# form or a lookup for an accented name silently misses.
 
 #: Canonical combining class for codepoints Python's `unicodedata` does not
 #: know yet. Break class and ccc are independent properties, so the codepoint
@@ -736,8 +736,14 @@ def sanitize_name(name: str, unicode_mode: bool | None = None) -> str:
         text = normalize_nfc(text.strip(_TRIM_CHARS))
         text = truncate_graphemes(text, MAX_NAME_LENGTH).strip(_TRIM_CHARS)
         if text == settled:
-            break
-    return text
+            return text
+
+    raise RuntimeError(
+        f"sanitize_name did not settle in {_SANITIZE_PASSES} passes. Two are "
+        "enough for every input tested, so reaching this means an assumption "
+        "in normalize_nfc or truncate_graphemes has moved. Returning here "
+        "would hand back a name that is_valid_name then calls invalid."
+    )
 
 
 def is_valid_name(name: str, unicode_mode: bool | None = None) -> bool:

@@ -49,7 +49,7 @@ def test_generate_queries_error_does_not_carry_the_response_body():
         with pytest.raises(ApolloError) as exc:
             rd.generate_queries("content", client=MagicMock())
 
-    assert secret not in str(exc.value.details)
+    assert exc.value.details == {"response_length": len(secret)}
     assert secret not in str(exc.value.message)
 
 
