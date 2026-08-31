@@ -127,9 +127,8 @@ def call(
     except ModuleNotFoundError as e:
         sentry_sdk.capture_exception(e)
         result = ApolloError(
-            # The top-level fallback. Losing the message here leaves the caller
-            # with nothing at all, and this path is reached only when the
-            # service itself failed to build an ApolloError.
+            # Reached only when the service failed to build an ApolloError, and
+            # losing the message leaves the caller with nothing at all.
             code=500, message=str(e), type="INTERNAL_ERROR",  # safe-error-text: top-level fallback
         ).to_dict()
     except ApolloError as e:
@@ -138,9 +137,7 @@ def call(
     except Exception as e:
         sentry_sdk.capture_exception(e)
         result = ApolloError(
-            # The top-level fallback. Losing the message here leaves the caller
-            # with nothing at all, and this path is reached only when the
-            # service itself failed to build an ApolloError.
+            # As above.
             code=500, message=str(e), type="INTERNAL_ERROR",  # safe-error-text: top-level fallback
         ).to_dict()
 

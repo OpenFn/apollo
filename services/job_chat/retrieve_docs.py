@@ -158,8 +158,8 @@ def generate_queries(content, client, user_context=""):
     try:
         answer_parsed = json.loads(text).get("queries", [])
     except json.JSONDecodeError as e:
-        # Neither the exception nor the response body: the response is the
-        # model answering about the user's job code.
+        # Neither the exception nor the response body: it is the model
+        # answering about the user's job code.
         logger.error(
             f"Failed to parse LLM response as JSON ({type(e).__name__}); "
             f"{len(text)} characters received",

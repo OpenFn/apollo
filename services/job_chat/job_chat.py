@@ -574,8 +574,7 @@ class AnthropicClient:
             return text_answer, suggested_code, diff
             
         except json.JSONDecodeError as e:
-            # Type only. This log line is forwarded to the caller as an SSE
-            # event, and a JSON error quotes the document it failed on — which
+            # Type only: a JSON error quotes the document it failed on, which
             # here is the model's answer about the user's job code.
             logger.warning(f"Failed to parse JSON response ({type(e).__name__})")
             return response, None, None
@@ -599,9 +598,8 @@ class AnthropicClient:
                 if warning:
                     warnings.append(warning)
             except Exception as e:
-                # Neither the edit nor the exception. `edit` holds the model's
-                # search and replace strings, which are lifted straight out of
-                # the user's job body, and this line reaches the caller as SSE.
+                # Neither the edit nor the exception: `edit` holds search and
+                # replace strings lifted straight out of the user's job body.
                 logger.warning(f"Failed to apply edit ({type(e).__name__})")
                 warnings.append(f"Failed to apply edit ({type(e).__name__})")
         
@@ -618,9 +616,7 @@ class AnthropicClient:
     def apply_single_edit(self, content: str, text_answer: str, code: str, edit: Dict[str, Any]) -> tuple[str, bool, Optional[str]]:
         """Apply a single code edit and return (new_code, success, warning)."""
 
-        # Shape only. Both of these are the model's answer about the user's job
-        # body, and this context persists on the isolation scope — one request
-        # would attach its code to every later event in the process.
+        # Shape only: both are the model's answer about the user's job body.
         sentry_sdk.set_context("code_edit_context", drop_code({
             "llm_text_answer": text_answer,
             "llm_edit_answer": edit,
@@ -641,9 +637,7 @@ class AnthropicClient:
         if action == "replace":
             old_code = edit.get("old_code")
             new_code = edit.get("new_code")
-            # Sizes, not the code. `old_code` is a verbatim slice of the
-            # user's job body and this reaches the caller as an SSE event
-            # and Sentry as a breadcrumb.
+            # Sizes, not the code: `old_code` is a verbatim slice of the body.
             logger.info(
                 f"attempting a replace edit: {len(old_code or '')} characters out, "
                 f"{len(new_code or '')} in",
@@ -733,9 +727,8 @@ class AnthropicClient:
                 return full_code.replace(corrected_old, corrected_new, 1), True, warning
 
         except Exception as e:
-            # Type only: this warning is logged (forwarded as SSE) and returned
-            # in the diff, and the exception here comes from re-applying an edit
-            # built out of the user's job body.
+            # Type only: the exception comes from re-applying an edit built
+            # out of the user's job body.
             warning = f"Error correction failed ({type(e).__name__})"
             logger.warning(warning)
             return None, False, warning
@@ -900,8 +893,7 @@ def main(data_dict: dict) -> dict:
         if "prompt is too long" in str(e):  # safe-error-text: a read, not a channel
             error_message = "Input prompt exceeds maximum token limit (200,000 tokens). Please reduce the amount of text or context provided."
             raise ApolloError(400, error_message, type="PROMPT_TOO_LONG")
-        # Not `str(e)`. Anthropic echoes the offending request in its error
-        # text, and the request is the prompt — job code included.
+        # Not `str(e)`: Anthropic echoes the offending request, which is the prompt.
         raise ApolloError(400, f"The AI service rejected the request ({type(e).__name__})", type="BAD_REQUEST")
     except PermissionDeniedError as e:
         raise ApolloError(403, "Not authorized to perform this action", type="FORBIDDEN")

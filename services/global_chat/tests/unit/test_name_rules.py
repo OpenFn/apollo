@@ -293,11 +293,9 @@ def test_cap_counts_emoji_as_one_each() -> None:
 #
 # The standing check is `tools/unicode_parity`, not a figure quoted here: it
 # puts every codepoint in 0x0..0x10FFFF in the same break class as Elixir and
-# compares cluster boundaries over the corpus `probe.exs` generates. Run it
-# rather than trusting a number in a comment — several numbers on this branch
-# turned out to be quoting corpora that no longer existed. There is no known
-# clustering divergence; if one appears, add the shape here rather than
-# widening the assertion.
+# compares cluster boundaries over the corpus `probe.exs` generates. There is
+# no known clustering divergence; if one appears, add the shape here rather
+# than widening the assertion.
 
 ELIXIR_PARITY = [
     ("ascii", [0x0061, 0x0062, 0x0063], 3),
@@ -415,11 +413,7 @@ def test_post_unicode_14_characters_are_classified() -> None:
 def test_there_is_no_regex_dependency() -> None:
     """Which algorithm runs must not depend on transitive resolution.
 
-    `regex` is spec-correct, which is why it is wrong here: it disagrees
-    with OTP in both directions over the corpus — undercounting on the two
-    deviations `name_rules` documents, which ships a name over the cap, and
-    overcounting on U+11A3A, which truncates one Lightning would accept. It was
-    also never a declared dependency. Re-derive with `tools/unicode_parity`.
+    `regex` is spec-correct, which is why it is wrong here — see `name_rules`.
     """
     tree = ast.parse(inspect.getsource(name_rules))
     imported = {
@@ -530,10 +524,8 @@ def test_a_non_pictograph_does_not_join_across_a_zwj() -> None:
 def test_the_extpict_set_matches_the_recorded_probe() -> None:
     """Canary for Elixir moving forward.
 
-    Python advancing only makes this module overcount, which truncates early.
-    Elixir advancing is what reintroduces undercounting, and an undercount
-    ships a name Ecto rejects. Regenerating the tables against a newer Elixir
-    changes these sizes, which fails here until PARITY_SOURCE is updated too.
+    Regenerating the tables against a newer Elixir changes these sizes, which
+    fails here until PARITY_SOURCE is updated too.
     """
     assert PARITY_SOURCE == {"elixir": "1.18.3", "otp": "27", "python_unicodedata": "14.0.0"}
     assert unicodedata.unidata_version == PARITY_SOURCE["python_unicodedata"], (
@@ -726,8 +718,8 @@ def test_ordinary_text_normalises_the_same_as_unicodedata() -> None:
 #: `tools/unicode_parity` generates, including an exhaustive sweep of that
 #: four-codepoint shape; the rows are listed in
 #: `tools/unicode_parity/known_nfc_divergences.txt`. See `normalize_nfc` for
-#: why it is not simply fixed. ZWNJ is ordinary in Persian and Indic text, so it is
-#: reachable — the earlier note calling it unreachable was wrong.
+#: why it is not simply fixed. ZWNJ is ordinary in Persian and Indic text, so
+#: this is reachable rather than exotic.
 NFC_DIVERGENCE = "A\u0302\u200c\u0323"
 
 #: What Elixir 1.18.3 returns for it.

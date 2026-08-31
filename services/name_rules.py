@@ -50,29 +50,24 @@ normal form, a lookup for a name containing an accent silently misses.
 import os
 import unicodedata
 
-#: Environment variable that selects the rule. Unset means the ASCII rule.
 UNICODE_FLAG_ENV = "APOLLO_UNICODE_STEP_NAMES"
 
-#: Values that turn the Unicode rule on. Anything else (including unset) is off.
 _TRUTHY = frozenset({"1", "true", "t", "yes", "y", "on"})
 
 #: Permitted in both modes, alongside the letters and digits.
 BASE_PUNCTUATION = " -_"
 
-#: ASCII letters and digits, the whole alphabet of the restrictive rule.
 _ASCII_ALNUM = frozenset(
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
 )
 
-#: Everything the restrictive rule permits.
 _ASCII_ALLOWED = _ASCII_ALNUM | frozenset(BASE_PUNCTUATION)
 
-#: Unicode general categories that count as "a letter, mark or digit".
 #: Used only by the lookup normalizer, not by the name rule.
 _LETTER_MARK_DIGIT = ("L", "M", "N")
 
-#: Longest name Lightning will store, counted in graphemes (Ecto's
-#: ``validate_length`` counts graphemes, and Lightning's client matches it).
+#: Longest name Lightning will store, counted in graphemes because Ecto's
+#: ``validate_length`` counts graphemes.
 MAX_NAME_LENGTH = 100
 
 # How many times sanitize_name may re-trim and re-normalise before giving up.
@@ -86,11 +81,6 @@ MAX_EDGE_KEY_LENGTH = MAX_NAME_LENGTH * 2 + len("->")
 
 #: Letters NFKD cannot decompose, so under the ASCII rule they would vanish and
 #: take the word with them (``straße`` -> ``strae``). Spelled out instead.
-#:
-#: DELIBERATE DEVIATION: this table is new, not part of the long-standing ASCII
-#: behaviour. It only affects characters that used to disappear entirely, so
-#: the result is strictly more readable, but it does mean ASCII-mode output for
-#: those letters differs from what Apollo produced before this change.
 _ASCII_TRANSLITERATIONS = str.maketrans({
     "ß": "ss", "ẞ": "SS",
     "æ": "ae", "Æ": "AE",
@@ -103,8 +93,6 @@ _ASCII_TRANSLITERATIONS = str.maketrans({
     "ı": "i", "ŋ": "n", "Ŋ": "N",  # noqa: RUF001 - dotless i is the character being mapped
 })
 
-#: The control set rejected in every mode, and the only thing the permissive
-#: rule rejects at all.
 _C0 = range(0x20)  # NUL through US
 _DEL = 0x7F
 _C1 = range(0x80, 0xA0)
@@ -135,10 +123,9 @@ _TRIM_CHARS = "\u0009\u000a\u000b\u000c\u000d\u0020\u0085\u00a0\u1680\u2000\u200
 #: regenerates them; if you re-run it against a different Elixir, update this
 #: too -- a unit test pins it, so a silent regeneration fails loudly.
 #:
-#: Python moving forward is benign: it only ever makes this module overcount,
-#: which truncates early. Elixir moving forward is the dangerous direction,
-#: because a script it learns to cluster and this module does not is an
-#: undercount, and an undercount ships a name Ecto rejects.
+#: Python moving forward only makes this module overcount, which truncates
+#: early. Elixir moving forward is the dangerous direction: it undercounts, and
+#: an undercount ships a name Ecto rejects.
 PARITY_SOURCE = {"elixir": "1.18.3", "otp": "27", "python_unicodedata": "14.0.0"}
 
 
@@ -152,19 +139,11 @@ def unicode_names_enabled() -> bool:
 
 
 def _is_forbidden(char: str) -> bool:
-    """True for the characters rejected in every mode.
+    """True for the characters rejected in every mode (see the module docstring).
 
-    C0 (U+0000-U+001F, NUL included), DEL (U+007F), C1 (U+0080-U+009F), the
-    noncharacters U+FFFE and U+FFFF, lone surrogates (which cannot be encoded
-    as UTF-8 at all), and U+2028/U+2029 (which do not survive the YAML round
-    trip into Lightning). Nothing else is ever rejected under the permissive
-    rule -- deliberately, because Apollo being stricter than Lightning means
-    Apollo renames names Lightning would have accepted.
-
-    Note this is a codepoint test, not a general-category test. Category ``C``
-    also covers format characters such as ZWJ (U+200D), which emoji sequences
-    need, and private-use and unassigned codepoints, all of which Lightning
-    accepts.
+    A codepoint test, not a general-category test. Category ``C`` also covers
+    format characters such as ZWJ (U+200D), which emoji sequences need, and
+    private-use and unassigned codepoints, all of which Lightning accepts.
     """
     code = ord(char)
     return (
@@ -191,15 +170,11 @@ def is_allowed_char(char: str, unicode_mode: bool | None = None) -> bool:
     return unicode_mode or char in _ASCII_ALLOWED
 
 
-# Grapheme clustering. Ecto's `validate_length` counts graphemes, so the length
-# cap has to as well: undercounting lets Apollo emit a name Lightning rejects,
-# and overcounting truncates a name Lightning would have accepted, cutting
-# mid-cluster and leaving an orphaned combining mark behind.
-#
-# The authority is Elixir's `String.length/1`, because that is what Ecto calls.
-# So the target is not "correct per UAX #29" but "identical to Elixir", and the
-# two are not the same thing. Elixir deviates from the spec in two places that
-# matter here, and this implementation deliberately copies both:
+# Grapheme clustering. The authority is Elixir's `String.length/1`, because
+# that is what Ecto calls. So the target is not "correct per UAX #29" but
+# "identical to Elixir", and the two are not the same thing. Elixir deviates
+# from the spec in two places that matter here, and this implementation
+# deliberately copies both:
 #
 #   * It does not implement GB9c, the Unicode 15.1 Indic conjunct rule, so
 #     `क` + virama + `ष` is two graphemes to Elixir and one to the spec.
@@ -207,34 +182,13 @@ def is_allowed_char(char: str, unicode_mode: bool | None = None) -> bool:
 #     follows, so `©<ZWJ><combining acute>` is two graphemes to Elixir and one
 #     to the spec (which would attach the mark under GB9).
 #
-# Everything is hand-written here on purpose. The `regex` module's `\X` is
-# spec-correct, and the target is OTP, not the spec -- so `\X` disagrees with
-# OTP in *both* directions:
+# Hand-written rather than the `regex` module's `\X`, which is spec-correct and
+# therefore disagrees with OTP in both directions: it undercounts on the two
+# deviations above, which ships a name over Ecto's cap, and it overcounts on
+# U+11A3A, which truncates a name Lightning would have accepted. `regex` was
+# also never a declared dependency -- it arrived transitively through nltk.
 #
-#   * It undercounts on the two deviations named above. `©<ZWJ><mark>` a
-#     hundred times is 200 graphemes to OTP and 100 to `\X`, so a name twice
-#     the cap passes the cap. This is the dangerous direction, because the name
-#     then fails Ecto's `validate_length` on Lightning's side.
-#   * It overcounts on U+11A3A, which it does not treat as GCB=Prepend. Here
-#     `\X` is not "spec-correct but different", it is simply wrong: GB9b says
-#     no break, and the spec, OTP and this module all agree. An overcount
-#     truncates a name Lightning would have accepted.
-#
-# Over the corpus `tools/unicode_parity` generates that is 184 undercounts and
-# 132 overcounts, against none in either direction here. Read those figures as
-# "both directions occur", not as a rate: the 132 are one codepoint multiplied
-# by the corpus cross-product, and the corpus contains only as many of each
-# shape as it was built to contain.
-#
-# `regex` was also never a declared dependency -- it arrived transitively
-# through nltk -- so which algorithm ran would have depended on resolution.
-#
-# Re-derive with `elixir probe.exs && python3 check.py`. Two earlier revisions
-# of this comment quoted figures from corpora that no longer existed, and one
-# had the direction backwards.
-#
-# Verified by tools/unicode_parity against Elixir 1.18.3. Re-run it whenever
-# either side's Unicode version moves.
+# Re-derive with `python3 edges.py && elixir probe.exs && python3 check.py`.
 
 _ZWJ = "\u200d"
 _CR = "\r"
@@ -294,9 +248,7 @@ _HANGUL_SYLLABLES = range(0xAC00, 0xD7A4)
 #: and an over-broad range here is invisible to that test. The earlier
 #: hand-written version collapsed sparse sets into solid blocks and claimed
 #: hundreds of codepoints too many -- U+2713 CHECK MARK among them, which made
-#: `✓<ZWJ><emoji>` one grapheme here and two in Elixir. (The exact count is not
-#: quoted because that table is gone and nothing in the tree reproduces it;
-#: `check.py` compares this table against Elixir directly instead.)
+#: `✓<ZWJ><emoji>` one grapheme here and two in Elixir.
 #: Regenerate with tools/unicode_parity/probe.exs (see extpict).
 _EXT_PICT_RANGES = (
     (0x00A9, 0x00A9), (0x00AE, 0x00AE), (0x203C, 0x203C),
@@ -362,7 +314,6 @@ def _is_ext_pict(code: int) -> bool:
 
 
 def _break_class(char: str) -> int:  # noqa: PLR0911, PLR0912 - one branch per UAX #29 class
-    """Return the grapheme-cluster-break class of one character."""
     code = ord(char)
     if char == _ZWJ:
         return _JOIN
@@ -401,7 +352,6 @@ def _break_class(char: str) -> int:  # noqa: PLR0911, PLR0912 - one branch per U
     return _OTHER
 
 
-#: Hangul jamo and syllables, which take the standard composition path.
 _HANGUL_CLASSES = (_L, _V, _T, _LV, _LVT)
 
 #: What an emoji run's lookback may cross on its way back to the pictograph.
@@ -420,13 +370,8 @@ def _ext_pict_run_before(codes: list[int], classes: list[int], zwj_index: int) -
 
 
 def _fallback_clusters(text: str) -> list[str]:  # noqa: PLR0912 - one branch per boundary rule
-    """Split into grapheme clusters the way Elixir does.
-
-    GB1-GB13, with two deliberate deviations from UAX #29 that copy Elixir:
-    GB9c (the Unicode 15.1 Indic conjunct rule) is not implemented, and an
-    emoji ZWJ run ends at the joiner unless a pictograph follows. Elixir is the
-    authority here, not the spec -- see the comment above.
-    """
+    """Split into grapheme clusters the way Elixir does, not the way UAX #29
+    says. GB1-GB13, with the two deviations described in the comment above."""
     if not text:
         return []
 
@@ -449,13 +394,7 @@ def _fallback_clusters(text: str) -> list[str]:  # noqa: PLR0912 - one branch pe
         elif _CONTROL in (before, after):
             brk = True  # GB4, GB5
         elif before == _JOIN and _ext_pict_run_before(codes, classes, index - 1):
-            # GB11, as Elixir actually implements it. The spec would keep any
-            # Extend attached across the joiner (GB9). Elixir instead ends the
-            # emoji run at the joiner unless another pictograph follows, so
-            # `©<ZWJ><combining acute>` is two graphemes to Elixir and one to
-            # the spec. Verified against Elixir 1.18.3 by the lead/follower
-            # sweep in `tools/unicode_parity/probe.exs`; the sizes are defined
-            # there rather than quoted here, so they cannot drift out of date.
+            # GB11 as Elixir implements it, not as the spec says. See above.
             brk = not _is_ext_pict(codes[index])
         elif before == _L and after in (_L, _V, _LV, _LVT):
             brk = False  # GB6
@@ -502,9 +441,7 @@ def truncate_graphemes(text: str, limit: int) -> str:
     return "".join(clusters[:limit])
 
 
-# Normalisation. `sanitize_name` normalises on every pass and step lookup
-# matches names as text, so Apollo and Lightning have to agree on the normal
-# form or a lookup for an accented name silently misses.
+# Normalisation.
 
 #: Canonical combining class for codepoints Python's `unicodedata` does not
 #: know yet. Break class and ccc are independent properties, so the codepoint
@@ -546,7 +483,6 @@ def _canonical_order(text: str) -> str:
 
 
 def _compose_pair(first: str, second: str) -> str | None:
-    """Return the single character `first` + `second` compose to, or None."""
     composed = unicodedata.normalize("NFC", first + second)
     return composed if len(composed) == 1 else None
 
@@ -567,11 +503,8 @@ def _compose(text: str) -> str:
     lookup matches names as text, so a name Apollo normalises differently is a
     name Apollo cannot find.
 
-    Measured over the parity corpus, the difference is not exotic: it reaches
-    Bengali, Tamil, Malayalam, Sinhala, Oriya, Telugu, Kannada, Balinese,
-    Chakma and Grantha two-part vowels, Thai and Lao SARA AM, and any base
-    followed by one of the combining-class-zero Extend characters -- every
-    variation selector, every skin-tone modifier, and U+034F.
+    The difference is not exotic: it reaches the two-part vowels of most Indic
+    scripts and any base followed by a combining-class-zero Extend character.
     """
     composed = []
     for cluster in grapheme_clusters(text):
@@ -582,33 +515,13 @@ def _compose(text: str) -> str:
             # intervening jamo, and `ᄀ까` (U+1100 U+AE4C) came out as `가ᄁ` —
             # a Korean step name rewritten into a different one.
             #
-            # This is a partial fix, not a correct one. OTP does not agree with
-            # the standard library here: it composes onto the cluster lead, so
-            # it decomposes a precomposed syllable that is not the lead, and
-            # `U+1113 U+AC00` is `1113,1100,1161` in OTP against `1113,AC00`
-            # here. Routing to the standard library trades one divergence for
-            # another, and the trade is not small: 17,422 unique signatures
-            # of the parity corpus are pinned as a result.
-            #
-            # FOUR mechanisms are involved, not one, and they do not all point
-            # the same way — a fix aimed at the obvious case (a jamo lead
-            # before a precomposed syllable) makes another of them worse,
-            # because they are opposite directions. Read the group 2 notes in
+            # This trades one divergence for another rather than fixing it, and
+            # four separate mechanisms are involved that do not all point the
+            # same way: a fix aimed at the obvious one makes another worse.
+            # Read the group 2 notes in
             # `tools/unicode_parity/known_nfc_divergences.txt` before changing
             # anything here. Settling it is OpenFn/apollo#655, which gates
             # APOLLO_UNICODE_STEP_NAMES.
-            #
-            # Do not read the pinned counts as the size of the gap: they are
-            # the size of its intersection with that corpus. Measured
-            # exhaustively rather than over the probe, the composition-rule
-            # group alone is 91,200 against the 32 the probe finds. The
-            # divergence in the largest group is 106 of 125 jamo leads (84.8%).
-            #
-            # Ordinary Korean text round-trips — `한국어`, `안녕하세요`,
-            # `환자 등록` — but one of the four mechanisms (OTP deleting
-            # U+11A7 after an LV syllable) is PURE Hangul, so "the divergence
-            # is cross-script" is wrong and earlier revisions of this comment
-            # said it.
             composed.append(unicodedata.normalize("NFC", cluster))
             continue
 
@@ -616,14 +529,9 @@ def _compose(text: str) -> str:
         previous_ccc = None
         for char in cluster[1:]:
             ccc = _combining_class(char)
-            # Standard blocking — a character composes unless the one before it
-            # has an equal or higher combining class — but measured against the
-            # *cluster's lead*, which never moves. The spec instead re-bases on
-            # every character of class zero it passes, and that is the whole
-            # difference: OTP keeps reaching back to the lead, so a mark can be
-            # pulled forward past several class-zero characters to compose with
-            # it. `"e" + VS16 + acute` is `"é" + VS16` here and three separate
-            # characters under the spec.
+            # Standard blocking, but measured against the cluster's lead, which
+            # never moves. The spec re-bases on every class-zero character it
+            # passes; OTP does not, and that is the whole difference.
             if previous_ccc is None or previous_ccc == 0 or previous_ccc < ccc:
                 merged = _compose_pair(lead, char)
                 if merged is not None:
@@ -669,12 +577,9 @@ def normalize_nfc(text: str) -> str:
     contains cases that require it not to. Do not "fix" this by guessing —
     extend the probe and fit against its output.
 
-    ACCEPTED, with the bound stated rather than hand-waved. What this costs is
-    a step lookup missing when a name in this shape reaches lookup without
-    being sanitized first. It is not bounded by "sanitized names are fixed
-    points" or by "no Lightning-valid name is altered" — both of those claims
-    appeared here and both were false. `sanitize_name` output *is* a fixed
-    point for every case the harness covers, which is evidence and not a proof.
+    ACCEPTED. What it costs is a step lookup missing when a name in this shape
+    reaches lookup without being sanitized first. `sanitize_name` output is a
+    fixed point for every case the harness covers, which is evidence, not proof.
     """
     if not text:
         return text
@@ -764,12 +669,7 @@ def first_invalid_char(name: str, unicode_mode: bool | None = None) -> str | Non
 
 
 def describe_rule(unicode_mode: bool | None = None) -> str:
-    """One sentence stating the active rule, for the workflow-generation prompt.
-
-    The prompt and the sanitiser must describe the same rule. Building the
-    prompt text from here means there is only one place to change when the
-    rule changes.
-    """
+    """One sentence stating the active rule, for the workflow-generation prompt."""
     if unicode_mode is None:
         unicode_mode = unicode_names_enabled()
     if unicode_mode:
@@ -797,10 +697,7 @@ def describe_rule_for_prompt(unicode_mode: bool | None = None) -> str:
 def describe_rule_for_judge(unicode_mode: bool | None = None) -> str:
     """The naming rule as a grading instruction, for the acceptance-test judges.
 
-    The judges are LLM prompts that grade generated workflows. They used to
-    restate the rule as static prose, which meant a third copy that could not
-    follow the flag: with the ASCII rule active they would have passed a name
-    the sanitizer was in fact folding. `judges.load_judge` substitutes this in.
+    `judges.load_judge` substitutes this into each rubric.
     """
     if unicode_mode is None:
         unicode_mode = unicode_names_enabled()
@@ -829,9 +726,8 @@ def normalize_for_lookup(name: str) -> str:
     """Fold a name into the key used to match it against a job key or job name.
 
     Case-folded, NFC-normalised, and every character that is not a letter, mark
-    or digit replaced with a hyphen. Unicode-aware in both modes: the old
-    ASCII-only version folded every non-Latin name to the empty string, so any
-    non-Latin lookup matched the first non-Latin job in the workflow.
+    or digit replaced with a hyphen. Unicode-aware in both modes, so a
+    non-Latin name folds to itself rather than to the empty string.
 
     Case folding rather than lowercasing, so that the pairs `.lower()` leaves
     distinct still match: Greek final sigma against medial sigma, and German

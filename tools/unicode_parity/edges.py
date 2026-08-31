@@ -1,10 +1,8 @@
 """Emit the edge codepoints of every range table in `services/name_rules.py`.
 
-`probe.exs` used to sweep a hand-picked slice of each Hangul range — a few
-syllables, `0x1161..0x1165` of the vowels — and the last three rounds of this
-review each found the same thing: a boundary the slice never touched. U+1160
-HANGUL JUNGSEONG FILLER is assigned and GCB=V, and narrowing `_HANGUL_V` to
-start at U+1161 left the harness at exit 0.
+`probe.exs` used to sweep a hand-picked slice of each range, which never steps
+across a boundary: U+1160 HANGUL JUNGSEONG FILLER is assigned and GCB=V, and
+narrowing `_HANGUL_V` to start at U+1161 left the harness at exit 0.
 
 So the probe reads this file rather than naming codepoints itself. Every range
 in the tables contributes its first and last member and one either side, which

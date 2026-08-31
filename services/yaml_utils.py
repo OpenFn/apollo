@@ -107,8 +107,7 @@ def find_job_in_yaml(yaml_str: str, step_name: str) -> tuple[str | None, dict | 
         return _only_match(exact_names, jobs, step_name, "name")
 
     # An empty normalization carries no information (the name was all
-    # punctuation), so never match on it — that is what used to make every
-    # non-Latin lookup return the first non-Latin job.
+    # punctuation), so never match on it.
     normalized_step = normalize_name(step_name)
     if not normalized_step:
         return None, None
@@ -276,9 +275,8 @@ def redact_job_bodies(yaml_str: str) -> str:  # noqa: PLR0911 - one return per w
         yaml_data = yaml.safe_load(yaml_str)
     except Exception as error:
         # Deliberately not `logger.exception`: PyYAML puts the offending
-        # document text in the error's mark, and the log masking filter only
-        # rewrites `record.msg`, never `exc_text`, so a traceback here would
-        # carry job code into Sentry.
+        # document text in the error's mark, and a traceback carries it into
+        # Sentry via `exc_text`, which the log mask never rewrites.
         logger.warning(f"Could not parse workflow YAML to redact job bodies ({type(error).__name__})")
         return WITHHELD_NOTICE
 
@@ -325,11 +323,7 @@ def remove_ids(node: object) -> None:
     guard is not cosmetic: YAML aliases let a small document expand
     enormously, and a walker without a visited set re-walks every expansion.
     Eight levels of nine-way alias expansion is 400 bytes on the wire and
-    nine-to-the-eighth node visits without the guard -- seconds, not
-    milliseconds, and each further level multiplies by nine. No wall-clock
-    figure is quoted because it is machine-dependent;
-    `test_yaml_utils.test_the_id_walker_terminates_on_alias_expansion` builds
-    the document and asserts a bound.
+    nine-to-the-eighth node visits without it.
     """
     seen: set[int] = set()
 
@@ -372,8 +366,7 @@ def stitch_job_code(yaml_str: str, job_key: str, new_code: str) -> str:
             f"The generated code has been discarded.",
         )
     except Exception as error:
-        # Not `logger.exception`: a PyYAML error mark carries document text,
-        # and the log mask only rewrites `record.msg`.
+        # Not `logger.exception`: a PyYAML error mark carries document text.
         logger.error(f"Could not stitch job code into the workflow YAML ({type(error).__name__})")
 
     return yaml_str

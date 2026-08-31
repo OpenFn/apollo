@@ -165,11 +165,9 @@ def assert_no_special_chars(yaml_str_or_dict, context: str = "") -> None:
 def _check_edge_key(edge_key: str, edge_data: dict, context: str) -> None:
     """Assert an edge's key is the label its own endpoints imply.
 
-    Deliberately does not split the key on "->" — under the permissive rule
-    "->" is a legal run of characters inside a step name, so that split is
-    ambiguous. The endpoint fields carry the real identity, so the key is
-    checked against them instead. This mirrors `_edge_label` in workflow_chat:
-    endpoints known means the key is derived, both here and there.
+    Deliberately does not split the key on "->", which is a legal run of
+    characters inside a step name under the permissive rule. Mirrors
+    `_edge_label` in workflow_chat: endpoints known means the key is derived.
     """
     edge_key = str(edge_key)
 
@@ -190,11 +188,8 @@ def _check_edge_key(edge_key: str, edge_data: dict, context: str) -> None:
 
     label = f"{source}->{target}"
 
-    # A workflow may hold more than one edge between the same pair (an
-    # on_success and an on_failure edge), so the sanitizer suffixes duplicates
-    # — and it makes room for the suffix inside the cap rather than appending
-    # past it. So the key is a grapheme prefix of the label, optionally with a
-    # `-N` tail. Mirror that rule rather than restating a simpler one.
+    # The sanitizer suffixes duplicate labels and makes room inside the cap, so
+    # the key is a grapheme prefix of the label, optionally with a `-N` tail.
     candidates = [edge_key]
     tail = _COLLISION_SUFFIX.search(edge_key)
     if tail:

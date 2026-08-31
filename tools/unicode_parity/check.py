@@ -162,12 +162,8 @@ def check_nfc_strings() -> tuple[int, int, list]:
         got = nr.normalize_nfc(text)
         if got == want:
             continue
-        # Keyed on the input *and the output we expect to produce for it*.
-        # Keying on the input alone exempted 26% of the corpus from output
-        # checking entirely: deleting the `previous_ccc == 0` clause from
-        # `_compose` — the whole point of the function — left this at exit 0
-        # while `U+09C7 U+200C U+09BE` normalised wrongly, because that row was
-        # already on the list for a different reason.
+        # Keyed on the input *and the output we expect to produce for it*, so
+        # a changed output fails even for a row already on the list.
         signature = f"{raw.strip()}\t{','.join(f'{ord(c):X}' for c in got)}"
         if signature in known_rows:
             # Counted as a set: the corpus contains a shape more than once
@@ -178,11 +174,8 @@ def check_nfc_strings() -> tuple[int, int, list]:
     return len(mismatches), total, mismatches, seen_known
 
 
-#: The exact inputs `normalize_nfc` is documented as getting wrong, one line of
-#: comma-separated hex per row. Keyed on the rows themselves, not on a shape:
-#: the shape predicate this replaced matched 3,552 rows in order to excuse 32,
-#: so a mutant that stopped normalising every shape-matching string broke 1,304
-#: rows and still exited zero. It could not tell the bug from a fix for it.
+#: The exact inputs `normalize_nfc` is documented as getting wrong. See that
+#: file's header for the format and for what each group is.
 KNOWN_DIVERGENCES = Path(__file__).parent / "known_nfc_divergences.txt"
 
 

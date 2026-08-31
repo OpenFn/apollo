@@ -25,10 +25,9 @@ from name_rules import describe_rule_for_judge
 
 _JUDGES_DIR = Path(__file__).parent / "judges"
 
-#: Placeholder in a judge markdown file, replaced with the active step-name
-#: rule at load time. A judge that restated the rule as static prose would go
-#: stale the moment APOLLO_UNICODE_STEP_NAMES moved, and would then either pass
-#: names the sanitizer mangles or fail names it correctly leaves alone.
+#: A judge that restated the rule as static prose would go stale the moment
+#: APOLLO_UNICODE_STEP_NAMES moved, and would then either pass names the
+#: sanitizer mangles or fail names it correctly leaves alone.
 _NAME_RULE_TOKEN = "{name_rule}"
 
 #: A bare `{lower_snake_case}` run. Prose and code samples in these files use

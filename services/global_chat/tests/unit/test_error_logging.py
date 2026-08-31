@@ -115,7 +115,7 @@ SANCTIONED = [
 
 #: An explicit, reasoned opt-out for a whole line. Unlike the constructs above
 #: this does skip the line, so every use is inventoried below and must carry a
-#: reason — an opt-out nobody counts is an opt-out that spreads.
+#: reason.
 MARKER = re.compile(r"#\s*safe-error-text:")
 
 
@@ -188,11 +188,9 @@ SINKS = re.compile(
 
 #: `len(x)` and `type(x)` describe a value without reproducing it.
 #:
-#: Removed as a SUBSTRING, exactly like `SANCTIONED`. It used to skip the whole
-#: line, which is the defect `SANCTIONED` was restructured to remove one rule
-#: over: `logger.info(f"body {len(body)} chars: {body[:100]}")` was invisible,
-#: and `job_chat.py:648` — a verbatim job-code leak one round ago — contains
-#: `len(old_code` and so had a permanent pass. Same shape, one round apart.
+#: Removed as a SUBSTRING, exactly like `SANCTIONED`. Skipping the whole line
+#: instead made `logger.info(f"body {len(body)} chars: {body[:100]}")`
+#: invisible, and gave a real job-code leak in `job_chat.py` a permanent pass.
 DESCRIBED = re.compile(r"(?:len|type|bool|id)\([^()]*\)")
 
 
@@ -336,9 +334,8 @@ def test_the_guard_catches_each_leak_shape() -> None:
 
 
 def test_a_safe_construct_does_not_exempt_the_rest_of_its_line() -> None:
-    """The bug this guard had: matching the safe construct against the whole
-    line and skipping it. `f"{type(e).__name__}: {e}"` is exactly what someone
-    writes once the guard has taught them the safe token."""
+    """`f"{type(e).__name__}: {e}"` is exactly what someone writes once the
+    guard has taught them the safe token."""
     patterns = _leak_patterns({"e"})
     line = 'logger.error(f"{type(e).__name__}: {e}")'
 
@@ -447,12 +444,8 @@ def test_an_apollo_error_carrying_document_text_is_still_not_logged(
 
 
 def test_a_described_value_does_not_exempt_the_rest_of_its_line() -> None:
-    """`DESCRIBED` used to skip the whole line, which is the defect
-    `SANCTIONED` was restructured to remove one rule over.
-
-    `job_chat.py` contains `len(old_code` on a line that was a verbatim
-    job-code leak one round earlier, so that line had a permanent pass.
-    """
+    """`DESCRIBED` used to skip the whole line, which gave any line containing
+    `len(...)` a permanent pass."""
     patterns = _code_patterns()
     line = '''logger.info(f"body {len(body)} chars: {body[:100]}")'''
 

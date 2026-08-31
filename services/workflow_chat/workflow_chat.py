@@ -232,8 +232,6 @@ class AnthropicClient:
                         # and it goes straight into the system prompt — so the
                         # job code this step exists to swap for placeholders
                         # would reach the model unredacted. Withhold instead.
-                        # Not the exception text: a PyYAML error mark carries
-                        # the document, and the log mask only sees `record.msg`.
                         logger.warning(
                             f"Could not extract components from the existing YAML "
                             f"({type(error).__name__}); withholding it from the prompt",
@@ -401,9 +399,7 @@ class AnthropicClient:
             remove_ids(yaml_data)
             return yaml.dump(yaml_data, sort_keys=False, default_flow_style=False, allow_unicode=True)
         except Exception as error:
-            # Only the exception type. A PyYAML problem mark quotes the offending
-            # document, this log line is forwarded to the caller as an SSE event,
-            # and the masking filter only rewrites `record.msg`.
+            # Type only: a PyYAML mark quotes the document.
             logger.warning(f"Could not remove IDs from YAML ({type(error).__name__})")
             return yaml_str
 
@@ -432,10 +428,7 @@ class AnthropicClient:
                 )
             return None
 
-        # Exact first, and exact is not automatically unique: `_unique_name` in
-        # this same class exists because two jobs can arrive sharing a name.
-        # Taking the first hit bound the edge to whichever came first in the
-        # document, silently, and flipped when the order flipped.
+        # Exact is not automatically unique: two jobs can arrive sharing a name.
         exact = [key for key, name in job_names.items() if name == reference]
         if exact:
             return unambiguous(exact, "exactly matches the name of")
@@ -448,12 +441,9 @@ class AnthropicClient:
         return unambiguous(folded, "matches the folded name of")
 
     #: Token-shaped text. Used for ONE question only: "is this a swap token we
-    #: never issued?" — the degrade branch. It is deliberately not used to find
-    #: our own tokens, because we know exactly which ones we issued and a
-    #: pattern can only guess at their shape. Two rounds of tuning this regex
-    #: traded one failure for another: non-greedy lost `sync__patients`, and
-    #: the lookahead that fixed that lost `__CODE_BLOCK_a__1` and merged two
-    #: adjacent tokens into one bogus match. The answer was to stop guessing.
+    #: never issued?" — the degrade branch. Deliberately not used to find our
+    #: own tokens: we know exactly which ones we issued, and a pattern can only
+    #: guess at their shape.
     _FOREIGN_TOKEN = re.compile(r"__CODE_BLOCK_\S*?__")
 
     @staticmethod
@@ -797,9 +787,7 @@ class AnthropicClient:
                 new_key = AnthropicClient._unique_name(
                     sanitize_name(original, unicode_mode), taken, f"{fallback_prefix}-{index + 1}",
                 )
-                # Keyed on type *and* text. `str(key)` alone made `1` and
-                # `"1"` shadow each other; the raw key alone swapped that for
-                # hash equality, so `True` shadowed `1`. Neither collides here.
+                # Keyed on type *and* text; see `_reference_key`.
                 mapping[AnthropicClient._reference_key(key)] = new_key
                 rebuilt[new_key] = data
                 if original != new_key:
@@ -953,9 +941,8 @@ class AnthropicClient:
                 # The label is not unique on its own: two edges may join the
                 # same pair of steps (an on_success and an on_failure edge is an
                 # ordinary workflow). Keying on the bare label would drop one of
-                # them, so disambiguate instead of overwriting. The suffix goes
-                # *inside* the cap, the same rule `_unique_name` follows —
-                # capping first and appending after gave a 204-grapheme key.
+                # them, so disambiguate instead of overwriting, with the suffix
+                # *inside* the cap, the same rule `_unique_name` follows.
                 sanitized_edge_key = truncate_graphemes(label, MAX_EDGE_KEY_LENGTH)
                 suffix = 2
                 while sanitized_edge_key in sanitized_edges:
@@ -980,12 +967,8 @@ class AnthropicClient:
             # A well-formed edge pointing at nothing looks fine to every
             # character check, so it used to ship in silence. It is still
             # emitted — dropping the edge would lose more than it saves — but
-            # it is no longer invisible.
-            # Only the count goes to Sentry. The names go to the log — which
-            # the bridge forwards to the caller as an SSE event, so this is not
-            # an operator-only channel. They are the caller's own step names, so
-            # returning them to the caller is fine; the point is that it is not
-            # a private log.
+            # it is no longer invisible. Only the count goes to Sentry; the
+            # names are the caller's own, so they go to the log.
             logger.warning(
                 f"Workflow has edge endpoints that match no step or trigger: "
                 f"{', '.join(sorted(dangling))}",
@@ -1022,10 +1005,8 @@ class AnthropicClient:
         # literal `__CODE_BLOCK_jobname__`, so a model quoting it back in a
         # comment would have had that step's body replaced with the empty
         # marker. The pass had no true-positive path and one way to destroy
-        # code, so it is gone.
-        #
-        # The id check below looks at ids only, not at bodies, for the same
-        # reason: `const __ID_FIELD = state.data.id;` is ordinary job code.
+        # code, so it is gone. The id check below looks at ids only, not at
+        # bodies, for the same reason.
         stray_ids = [
             value
             for holder in iter_id_holders(parsed_yaml)
@@ -1076,16 +1057,14 @@ class AnthropicClient:
                         else:
                             output_yaml = ""
                     except yaml.YAMLError as error:
-                        # The mark on a PyYAML error quotes the document, so only
-                        # the type goes out — this line reaches the caller as SSE.
+                        # Type only: a PyYAML mark quotes the document.
                         logger.warning(f"YAML parsing failed, discarding yaml content ({type(error).__name__})")
                         output_yaml = ""
                     except Exception as error:
                         # Not a parse failure — post-processing raised. Say so,
                         # rather than blaming the model's output. No traceback:
-                        # `logger.exception` sends frame locals to Sentry, and
                         # `preserved_values` on this stack maps placeholders to
-                        # real job code.
+                        # real job code, and frame locals go to Sentry.
                         logger.error(f"Post-processing the workflow YAML failed ({type(error).__name__}); discarding it")
                         output_yaml = ""
             else:
@@ -1210,10 +1189,8 @@ class AnthropicClient:
                 continue
 
             if not isinstance(current_body, str):
-                # A list or mapping body. The walker reaches these anywhere in
-                # the tree, and the `jobs:` pass below only reaches the top
-                # level — so `body: [__CODE_BLOCK_nested_0__]` under
-                # `workflows: -> jobs:` shipped a raw token.
+                # A list or mapping body, which the `jobs:` pass below does
+                # not reach.
                 if CODE_PLACEHOLDER_PREFIX in str(current_body):
                     msg = "A non-string job body carries a code placeholder; replacing it"
                     logger.warning(msg)
@@ -1362,17 +1339,14 @@ class AnthropicClient:
                                     stream_manager.send_changes({"yaml": restored_yaml})
                             except yaml.YAMLError as error:
                                 # Genuinely malformed YAML mid-stream: expected,
-                                # since the payload is still arriving.
-                                # Type only: a PyYAML mark quotes the document,
-                                # and this log line is forwarded to the caller.
+                                # since the payload is still arriving. Type only:
+                                # a PyYAML mark quotes the document.
                                 logger.debug(f"Partial YAML not parseable yet ({type(error).__name__})")
                             except Exception as error:
                                 # Anything else is a bug in the pipeline, not bad
                                 # input. Swallowing it silently is how a crash in
                                 # finalize_yaml showed up as "the model returned
                                 # no workflow" with nothing in the logs to say so.
-                                # No traceback: frame locals here include
-                                # `preserved_values`, which is placeholder-to-body.
                                 logger.error(
                                     f"Failed to finalize streamed workflow YAML "
                                     f"({type(error).__name__}); the user will see no workflow preview",
@@ -1506,7 +1480,7 @@ def main(data_dict: dict) -> dict:
             429, "Rate limit exceeded, please try again later", type="RATE_LIMIT", details={"retry_after": 60},
         )
     except BadRequestError as e:
-        # Not `str(e)`. Anthropic echoes the offending request in its error text, and the request is the prompt — job code and workflow YAML included.
+        # Not `str(e)`: Anthropic echoes the offending request, which is the prompt.
         raise ApolloError(400, f"The AI service rejected the request ({type(e).__name__})", type="BAD_REQUEST")
     except PermissionDeniedError as e:
         raise ApolloError(403, "Not authorized to perform this action", type="FORBIDDEN")

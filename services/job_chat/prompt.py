@@ -535,11 +535,8 @@ Original edit details:
 Please provide corrected old_code and new_code that will successfully apply the intended change with string replacement."""
 
     prompt = [{"role": "user", "content": user_content}]
-    # Sizes only. This is the user's job body plus the adaptor docs, and an
-    # INFO log becomes a Sentry breadcrumb as well as an SSE event.
-    #
-    # `prompt` is a one-element list of messages, so `len(prompt)` was always
-    # "1 characters" — the leak was gone and the replacement measured nothing.
+    # Sizes only: this is the user's job body plus the adaptor docs. Measured
+    # on the two strings, not on `prompt`, which is a one-element list.
     logger.info(
         f"prompt built: {len(system_message)} characters of system message, "
         f"{len(user_content)} of user content",

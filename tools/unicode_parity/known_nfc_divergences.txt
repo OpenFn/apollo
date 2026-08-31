@@ -27,19 +27,16 @@
 #
 #   * 2C IS THE REVERSE DIRECTION FROM 2B. A fix aimed only at 2B makes 2C
 #     worse. This is the trap in this artefact.
-#   * 2D is PURE HANGUL — no second script involved — so "the divergence is
-#     cross-script", which appeared in earlier revisions of this file and in
-#     `name_rules.py`, was wrong. It was invisible until the trailers were
-#     extended down to U+11A7; they started at U+11A8.
+#   * 2D is PURE HANGUL — no second script involved — so do not describe the
+#     gap as cross-script. It was invisible until the trailers were extended
+#     down to U+11A7; they started at U+11A8.
 #   * These counts are NOT the size of the gap. They are the size of the
 #     intersection between the gap and this corpus. Measured exhaustively
 #     rather than over the probe, groups 1, 2A and 2C are 91,200 / >=3,604 /
 #     10,773 — three orders of magnitude apart from what the probe finds for
 #     group 1. They looked steady across earlier widenings only because those
 #     widenings moved the axis 2B feeds on and left the others alone.
-#   * 2B does not converge. It diverges for 106 of 125 jamo leads (84.8%);
-#     the "73% of pairs" figure in earlier revisions was an artefact of which
-#     syllables the corpus happened to sample.
+#   * 2B does not converge. It diverges for 106 of 125 jamo leads (84.8%).
 #
 # --- what these are ---
 #

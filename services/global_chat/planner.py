@@ -200,8 +200,7 @@ class PlannerAgent:
                     raise
                 except Exception as e:
                     logger.error(f"Error in tool-calling loop ({type(e).__name__})")
-                    # Type only: this message is returned to the caller, and
-                    # the inner exception can quote the prompt back.
+                    # Type only: the inner exception can quote the prompt back.
                     raise ApolloError(500, f"Tool execution error ({type(e).__name__})")
 
             if response.stop_reason != "end_turn":

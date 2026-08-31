@@ -134,16 +134,11 @@ def main(data_dict: dict) -> dict:
 
     except ApolloError as e:
         # Type and status only. An ApolloError raised further in wraps an
-        # arbitrary inner exception -- `subagent_caller` builds its message from
-        # `str(e)`, and a PyYAML error's `str()` quotes the offending line of
-        # the document, which is client-supplied `workflow_yaml`. The bridge
-        # forwards this log line to the caller as an SSE event, and the masking
-        # filter is no defence: it redacts by credential field name and `sk-`
-        # shape, and rewrites `record.msg` never `exc_text`.
+        # arbitrary inner exception, and `subagent_caller` builds its message
+        # from `str(e)` — which can quote client-supplied `workflow_yaml` back.
         logger.error(f"ApolloError in global_chat (code={e.code})")
         raise e
     except Exception as e:
         logger.error(f"Unexpected error in global_chat ({type(e).__name__})")
-        # The message goes back to the caller as the error payload, so it gets
-        # the same treatment as the log line three lines up.
+        # Returned to the caller as the error payload, so same treatment.
         raise ApolloError(500, f"Unexpected error in global_chat ({type(e).__name__})")

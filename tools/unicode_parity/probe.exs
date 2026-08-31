@@ -25,10 +25,7 @@
 # Run `python3 edges.py` FIRST: it writes out/range_edges.txt from the range
 # tables in name_rules, and this probe crosses those edges into its shapes.
 #
-# Re-run whenever Elixir's or Python's Unicode version moves. Python lagging
-# behind Elixir is what makes Apollo overcount; Elixir moving ahead is what
-# reintroduces undercounting, which is the direction that ships a name
-# Lightning rejects.
+# Re-run whenever Elixir's or Python's Unicode version moves.
 
 File.mkdir_p!("out")
 
@@ -64,8 +61,7 @@ File.write!("out/classmap.txt", classmap <> "\n")
 
 # --- 2. Extended_Pictographic -------------------------------------------------
 # ExtPict is NOT a break class, so the bucket sweep above cannot see it and an
-# over-broad set here is invisible to that check. This is exactly how 531 wrong
-# codepoints survived two rounds of review. Probe it through GB11 instead:
+# over-broad set here is invisible to that check. Probe it through GB11 instead:
 # `cp ZWJ emoji` collapses to one grapheme only when cp is pictographic.
 lead = Enum.filter(codepoints, &(String.length(<<&1::utf8>> <> zwj <> emoji) == 1))
 follow = Enum.filter(codepoints, &(String.length(emoji <> zwj <> <<&1::utf8>>) == 1))

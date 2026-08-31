@@ -203,10 +203,8 @@ class RouterAgent:
                 job_key=decision_data.get("job_key"),
             )
         except (json.JSONDecodeError, KeyError) as e:
-            # Neither the exception nor the response body. `response_text` is
-            # the model's reply to a prompt built from the user's workflow, so
-            # it can quote job code back, and this line reaches the caller as
-            # an SSE event.
+            # Neither the exception nor the response body: `response_text` is
+            # the model's reply to a prompt built from the user's workflow.
             logger.error(
                 f"Failed to parse routing decision ({type(e).__name__}); "
                 f"{len(response_text)} characters received",
@@ -352,9 +350,7 @@ class RouterAgent:
                     else:
                         reason = f"job not found among keys {list(parsed['jobs'].keys())}"
                 except Exception as error:
-                    # Type only: a PyYAML mark quotes the offending document,
-                    # and `reason` is interpolated into a log line that the
-                    # bridge forwards to the caller as an SSE event.
+                    # Type only: a PyYAML mark quotes the document.
                     reason = f"workflow_yaml failed to parse ({type(error).__name__})"
             logger.warning(
                 f"No job matched for router_job_key='{router_job_key}' or page='{page}': {reason}",
