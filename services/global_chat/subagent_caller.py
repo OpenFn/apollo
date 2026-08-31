@@ -40,7 +40,9 @@ def call_workflow_agent(
     if not user_message:
         raise ApolloError(400, "message is required")
 
-    logger.info(f"Calling workflow_agent: {user_message[:120]}")
+    # Length only: the message is the planner's instruction, written out of the
+    # user's request and the workflow it is about.
+    logger.info(f"Calling workflow_agent with {len(user_message)} characters")
 
     workflow_payload = {
         "content": user_message,
@@ -57,8 +59,7 @@ def call_workflow_agent(
 
         result = workflow_chat_main(workflow_payload)
 
-        response_preview = result.get("response", "")[:120]
-        logger.info(f"workflow_agent response: {response_preview}")
+        logger.info(f"workflow_agent replied with {len(result.get('response', ''))} characters")
 
         result["_call_metadata"] = {"subagent": "workflow_agent"}
 
@@ -96,7 +97,7 @@ def call_job_agent(
     job_context = {}
 
     job_key = tool_input.get("job_key")
-    logger.info(f"Calling job_agent (job_key={job_key}): {user_message[:120]}")
+    logger.info(f"Calling job_agent (job_key={job_key}) with {len(user_message)} characters")
     if job_key and workflow_yaml:
         _, job_data = find_job_in_yaml(workflow_yaml, job_key)
         if job_data:
@@ -125,8 +126,7 @@ def call_job_agent(
 
         result = job_chat_main(job_payload)
 
-        response_preview = result.get("response", "")[:120]
-        logger.info(f"job_agent response: {response_preview}")
+        logger.info(f"job_agent replied with {len(result.get('response', ''))} characters")
 
         result["_call_metadata"] = {"subagent": "job_agent", "job_key": job_key}
 

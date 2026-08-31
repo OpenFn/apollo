@@ -536,9 +536,10 @@ Please provide corrected old_code and new_code that will successfully apply the 
 
     prompt = [{"role": "user", "content": user_content}]
     # Sizes only: this is the user's job body plus the adaptor docs. Measured
-    # on the two strings, not on `prompt`, which is a one-element list.
+    # on the two strings; `system_message` is a one-element list, so measuring
+    # that reported 1 on every request.
     logger.info(
-        f"prompt built: {len(system_message)} characters of system message, "
-        f"{len(user_content)} of user content",
+        f"prompt built: {len(error_correction_system_prompt)} characters of system "
+        f"message, {len(user_content)} of user content",
     )
     return (system_message, prompt)

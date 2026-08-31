@@ -86,7 +86,10 @@ def drop_code(data: Any, _depth: int = 0) -> Any:  # noqa: ANN401
     in the process.
     """
     if _depth > MAX_SCRUB_DEPTH:
-        return data
+        # Fail closed. Returning the subtree here hands back whatever it holds,
+        # which on a scrubber is the one outcome that must not happen.
+        # mask_secrets does the same thing below with [TRUNCATED].
+        return "<too deeply nested to scrub, withheld>"
     if isinstance(data, dict):
         scrubbed = {}
         for key, value in data.items():

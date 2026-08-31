@@ -43,7 +43,8 @@ def _search_implementation(query: str, num_results: int) -> Dict:
 
     Returns structured dict with search results.
     """
-    logger.info(f"Searching documentation for: {query[:100]}...")
+    # Length only: the model writes this query out of the user's request.
+    logger.info(f"Searching documentation ({len(query)} characters of query)")
 
     # Initialize docsite search
     docsite_search = DocsiteSearch()

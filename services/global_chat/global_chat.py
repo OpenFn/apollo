@@ -71,7 +71,8 @@ def main(data_dict: dict) -> dict:
     try:
         # 1. Validate payload
         data = Payload.from_dict(data_dict)
-        logger.info(f"Global agent called with content: {data.content[:100]}...")
+        # Length only: this is the client's raw chat message.
+        logger.info(f"Global agent called with {len(data.content)} characters of content")
 
         session_id = data.meta.get("session_id") if data.meta else None
         user_info = (data.meta.get("user") or {}) if data.meta else {}

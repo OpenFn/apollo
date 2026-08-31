@@ -16,6 +16,7 @@ import ast
 import logging
 import re
 from pathlib import Path
+from unittest import mock
 
 import pytest
 import yaml
@@ -239,6 +240,379 @@ def _leak_patterns(names: set[str]) -> list:
 SCRUBBED = re.compile(r"drop_code\s*\(|mask_secrets\s*\(")
 
 
+
+# --- default-deny inside a sink call ------------------------------------------
+#
+# Everything above this line is a denylist: thirteen identifiers in
+# `CODE_BEARING_NAMES`, a handful of exception spellings. A leak escapes a
+# denylist by picking a fourteenth name. `logger.info(f"Corrector response:
+# {response}")` put the corrector's verbatim slice of the user's job body on the
+# log and every pattern above walked straight past it, because the name was
+# `response` and not `response_text`. `.get("corrected_new_code")` slipped
+# through the mapping pattern for the same reason: the pattern only matches when
+# the quoted key *begins* with a listed name.
+#
+# So inside a sink call the rule is inverted. An interpolation is allowed only
+# if it is safe by construction, and anything else is a finding. Adding a
+# fourteenth name to the denylist buys nothing; this asks instead what the
+# expression can possibly evaluate to.
+
+#: Calls whose result describes a value without reproducing it.
+SAFE_CALLS = frozenset({"len", "bool", "id"})
+
+#: The scrubbers. `drop_code(x)` has already withheld `x` by the time the sink
+#: sees it, so it is the fix rather than the leak.
+SCRUBBER_CALLS = frozenset({"drop_code", "mask_secrets"})
+
+#: Calls that can only return a number, used to work out which locals hold a
+#: size, a counter or a duration. `type(x).__name__` is handled separately.
+NUMBER_CALLS = frozenset({"len", "int", "float", "sum", "ord", "abs", "round"})
+NUMBER_METHODS = frozenset({
+    "count", "index", "find", "rfind", "bit_length",
+    # The clocks. `duration = time.time() - start` is the other shape a
+    # shape-only log line comes in.
+    "time", "perf_counter", "monotonic", "total_seconds",
+})
+
+#: The interpolations that were already on the log when the rule above was
+#: inverted, reviewed one at a time and cleared. Keyed by module and matched on
+#: the expression exactly as `ast.unparse` writes it, so renaming the variable,
+#: moving the line to another module or reaching one level further down an
+#: attribute chain all fail closed and come back here.
+#:
+#: This is the only way past the allowlist other than a whole-line
+#: `safe-error-text:` marker, and it is deliberately narrower than one: it
+#: clears a single expression rather than handing a line a pass from every
+#: pattern in the file. Nothing here is the caller's content or the model's
+#: prose about it. Those were fixed instead.
+VETTED_INTERPOLATIONS: dict[str, frozenset[str]] = {
+    # Command-line arguments, printed by the operator's own shell invocation.
+    "entry.py": frozenset({"args.output", "args.port", "args.service"}),
+
+    # `ApolloError.code` is the HTTP status we chose.
+    "global_chat/global_chat.py": frozenset({"e.code"}),
+
+    # Configured model id; Anthropic's `stop_reason`; the names of our own tool
+    # definitions; and the job key, which names a node in the workflow and is
+    # what correlates a log line with the request that produced it. A key is a
+    # name the user typed into a form, never a job body.
+    "global_chat/planner.py": frozenset({
+        "self.model",
+        "response.stop_reason",
+        "stop_reason",
+        "tool_use_block.name",
+        "[b.name for b in tool_use_blocks]",
+        "matched_job_key",
+    }),
+
+    # Routing metadata: the destination the router picked, its confidence, the
+    # page the request came from, and the job key. `reason` is built a few lines
+    # up out of literals and `list(parsed.keys())` — the client document's key
+    # names, deliberately never its values, because a PyYAML mark quotes the
+    # document. `from_agent` is one of two literals at the two call sites.
+    "global_chat/router.py": frozenset({
+        "self.model",
+        "decision.confidence",
+        "decision.destination",
+        "decision.job_key",
+        "router_job_key",
+        "page",
+        "reason",
+        "from_agent",
+    }),
+
+    # The job key and the adaptor specifier. `drop_code` leaves `adaptor` alone
+    # for the same reason: a package name is not the user's code.
+    "global_chat/subagent_caller.py": frozenset({"job_key", "job_data['adaptor']"}),
+
+    # `error_message` is one of the three literals `apply_single_edit` sets, and
+    # `correction_warning` is `try_error_correction`'s third return, which is a
+    # literal or a character count at every one of its four exits. Between them
+    # they are the whole of the `warning` that becomes the Sentry issue title.
+    # The token counts are integers from the API response.
+    "job_chat/job_chat.py": frozenset({
+        "error_message",
+        "correction_warning",
+        "message.usage.cache_creation_input_tokens",
+        "message.usage.cache_read_input_tokens",
+    }),
+
+    # The adaptor package and version the job declares.
+    "job_chat/old_prompt.py": frozenset({"adaptor.specifier"}),
+    "job_chat/prompt.py": frozenset({"adaptor.specifier"}),
+    "load_adaptor_docs/load_adaptor_docs.py": frozenset({
+        "adaptor.specifier", "adaptor_spec.specifier",
+    }),
+    "latest_adaptors/latest_adaptors.py": frozenset({"package_name", "packages_url"}),
+
+    # The adaptor, the query mode, and the adaptor function being fetched. All
+    # of them describe the docs lookup, none of them touch the workflow.
+    "search_adaptor_docs/search_adaptor_docs.py": frozenset({
+        "adaptor.specifier",
+        "format",
+        "query_type",
+        "function_name",
+        "load_result.get('functions_uploaded', 0)",
+    }),
+
+    # The Pinecone namespace, and the names of the required fields a request
+    # left out — field names from a literal list, not the values.
+    "search_docsite/search_docsite.py": frozenset({
+        "most_recent_namespace", "', '.join(missing)", "', '.join(missing_keys)",
+    }),
+
+    # The SSE transport itself rather than a log, and already masked. See the
+    # comment on `_emit_event`: this is a third way out to the caller, so it
+    # carries its own mask.
+    "streaming_util.py": frozenset({"event_type", "json.dumps(mask_secrets(data))"}),
+
+    # Job and edge names before and after sanitising, the adaptor a job
+    # declares, and the `__ID_JOB_x__` placeholders this service invented
+    # itself. Names and ids, never a body.
+    "workflow_chat/workflow_chat.py": frozenset({
+        "adaptor",
+        "job_key",
+        "edge_key",
+        "sanitized_edge_key",
+        "original_name",
+        "sanitized_name",
+        "original_source",
+        "original_target",
+        "edge_data['source_job']",
+        "edge_data['target_job']",
+        "current_id",
+    }),
+}
+
+
+#: Callees that put a value outside the process. Kept in step with `SINKS`,
+#: which is the same list expressed for a line-at-a-time scan.
+SINK_CALLEES = frozenset({
+    "capture_message", "capture_exception", "set_context", "set_extra",
+    "set_tag", "add_breadcrumb", "print",
+})
+
+
+def _callee_name(func: ast.expr) -> str | None:
+    """The bare function name, whether it is called plain or off an object."""
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    if isinstance(func, ast.Name):
+        return func.id
+    return None
+
+
+def _is_sink_call(node: ast.Call) -> bool:
+    func = node.func
+    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) \
+            and func.value.id.endswith("logger"):
+        return True
+    return _callee_name(func) in SINK_CALLEES
+
+
+def _is_int_expression(node: ast.expr, known: set[str]) -> bool:  # noqa: PLR0911 - one return per node kind
+    """True when the expression can only evaluate to a number."""
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, int) and not isinstance(node.value, bool)
+    if isinstance(node, ast.Name):
+        return node.id in known
+    if isinstance(node, ast.Call):
+        func = node.func
+        if isinstance(func, ast.Name):
+            return func.id in NUMBER_CALLS
+        if isinstance(func, ast.Attribute):
+            return func.attr in NUMBER_METHODS
+        return False
+    if isinstance(node, ast.BinOp):
+        return _is_int_expression(node.left, known) and _is_int_expression(node.right, known)
+    if isinstance(node, ast.UnaryOp):
+        return _is_int_expression(node.operand, known)
+    if isinstance(node, ast.IfExp):
+        return _is_int_expression(node.body, known) and _is_int_expression(node.orelse, known)
+    return False
+
+
+def _int_valued_names(tree: ast.AST) -> set[str]:
+    """Locals that only ever hold a number.
+
+    A counter or a size is the one bare name that is safe to interpolate, and
+    the shape-only log lines this guard is meant to encourage are written with
+    them. Every assignment to the name in the module has to qualify, so one
+    `total = response_text` elsewhere disqualifies `total` everywhere.
+    """
+    assignments: dict[str, list[ast.expr]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    assignments.setdefault(target.id, []).append(node.value)
+        elif isinstance(node, (ast.AugAssign, ast.AnnAssign)):
+            if isinstance(node.target, ast.Name) and node.value is not None:
+                assignments.setdefault(node.target.id, []).append(node.value)
+        elif isinstance(node, (ast.For, ast.AsyncFor)) and isinstance(node.target, ast.Name):
+            # `for attempt in range(...)` binds a counter, which is the other
+            # place a safe interpolation comes from.
+            over_range = isinstance(node.iter, ast.Call) \
+                and isinstance(node.iter.func, ast.Name) and node.iter.func.id == "range"
+            assignments.setdefault(node.target.id, []).append(
+                ast.Constant(value=0) if over_range else node.iter,
+            )
+
+    known: set[str] = set()
+    for _ in range(len(assignments) + 1):
+        grew = False
+        for name, values in assignments.items():
+            if name in known:
+                continue
+            if all(_is_int_expression(value, known) for value in values):
+                known.add(name)
+                grew = True
+        if not grew:
+            break
+    return known
+
+
+def _is_safe_interpolation(  # noqa: PLR0911 - one return per allowlist entry
+    node: ast.expr, int_names: set[str], vetted: frozenset[str],
+) -> bool:
+    """The whole allowlist. Everything not named here is a finding."""
+    if isinstance(node, ast.Constant):
+        # A literal cannot carry anything the caller sent.
+        return True
+    if isinstance(node, ast.Name):
+        return node.id in int_names or node.id in vetted
+    if isinstance(node, ast.Attribute):
+        # `type(e).__name__`, and the same for a class or a function.
+        return node.attr == "__name__" or ast.unparse(node) in vetted
+    if isinstance(node, ast.Call):
+        if _callee_name(node.func) in SAFE_CALLS | SCRUBBER_CALLS:
+            return True
+        return ast.unparse(node) in vetted
+    if isinstance(node, (ast.BinOp, ast.UnaryOp, ast.IfExp)):
+        return _is_int_expression(node, int_names) or ast.unparse(node) in vetted
+    return ast.unparse(node) in vetted
+
+
+def _interpolations(node: ast.AST) -> list[ast.FormattedValue]:
+    """Every `{...}` under `node`, not descending into a scrubbed subtree."""
+    found: list[ast.FormattedValue] = []
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if current is not node and isinstance(current, ast.Call) \
+                and _callee_name(current.func) in SCRUBBER_CALLS:
+            continue
+        if isinstance(current, ast.FormattedValue):
+            found.append(current)
+        stack.extend(ast.iter_child_nodes(current))
+    return found
+
+
+def _unvetted_part(value: ast.expr, int_names: set[str], vetted: frozenset[str]) -> str | None:
+    """The first unvetted thing this expression builds a string out of.
+
+    An f-string or a concatenation assigned to a name, then handed to a sink on
+    a later line, defeated every pattern above: the code patterns only run on
+    lines inside a sink call, and the sink line carries nothing but a bare name.
+    `warning = f"...{corrected_new_code}"` followed by `logger.warning(warning)`
+    is the exact shape that reached Sentry as an issue title.
+    """
+    if isinstance(value, ast.JoinedStr):
+        for part in value.values:
+            if isinstance(part, ast.FormattedValue) \
+                    and not _is_safe_interpolation(part.value, int_names, vetted):
+                return ast.unparse(part.value)
+        return None
+    if isinstance(value, ast.BinOp) and isinstance(value.op, ast.Add):
+        return _unvetted_part(value.left, int_names, vetted) \
+            or _unvetted_part(value.right, int_names, vetted)
+    if isinstance(value, ast.IfExp):
+        return _unvetted_part(value.body, int_names, vetted) \
+            or _unvetted_part(value.orelse, int_names, vetted)
+    if isinstance(value, ast.Constant):
+        return None
+    # A bare name, a call, an attribute: the operand of a concatenation that
+    # nobody has vetted. `"failed: " + error_message` is how this starts.
+    return None if _is_safe_interpolation(value, int_names, vetted) else ast.unparse(value)
+
+
+def _text_assignments(
+    tree: ast.AST, int_names: set[str], vetted: frozenset[str],
+) -> dict[str, list[tuple[int, str | None]]]:
+    """Every assignment of a name to a built string: line, and whether unvetted.
+
+    Both halves matter. `msg` is assigned a leaky f-string in one branch of
+    `prompt.py` and a `type(e).__name__` one in the next, and only the first
+    should carry to the `logger.warning(msg)` under it, so the *nearest
+    preceding* assignment is what decides.
+
+    One hop only. `b = a` where `a` was built from a secret is not tracked, so
+    `logger.warning(b)` passes. Chasing arbitrary alias chains costs more than
+    it buys here, since every leak found so far has been direct or one hop, but
+    the gap is real and this is where to close it if a second hop ever turns up.
+    """
+    assignments: dict[str, list[tuple[int, str | None]]] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if not isinstance(target, ast.Name):
+                continue
+            unvetted = None
+            if isinstance(node.value, (ast.JoinedStr, ast.BinOp, ast.IfExp)):
+                unvetted = _unvetted_part(node.value, int_names, vetted)
+            assignments.setdefault(target.id, []).append((node.lineno, unvetted))
+    return {name: sorted(entries, key=lambda e: e[0]) for name, entries in assignments.items()}
+
+
+def _reaches_sink_unvetted(
+    name: str, line: int, assignments: dict[str, list[tuple[int, str | None]]],
+) -> tuple[int, str] | None:
+    """The assignment that makes `name` unsafe at `line`, and what made it so."""
+    entries = assignments.get(name)
+    if not entries:
+        return None
+    before = [entry for entry in entries if entry[0] < line]
+    if before:
+        assigned_at, unvetted = before[-1]
+        return (assigned_at, unvetted) if unvetted else None
+    # Nothing precedes the sink, so this is a loop or a closure. Stay
+    # conservative and take any unvetted assignment to the name.
+    return next(((at, part) for at, part in entries if part), None)
+
+
+def _sink_findings(module: str, source: str) -> list[tuple[int, str]]:
+    """Everything a sink call interpolates or is handed that is not vetted."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:  # pragma: no cover - a broken module fails elsewhere
+        return []
+    vetted = VETTED_INTERPOLATIONS.get(module, frozenset())
+    int_names = _int_valued_names(tree)
+    assignments = _text_assignments(tree, int_names, vetted)
+    found: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not _is_sink_call(node):
+            continue
+        for part in _interpolations(node):
+            if _is_safe_interpolation(part.value, int_names, vetted):
+                continue
+            line = min(max(part.lineno, node.lineno), node.end_lineno or part.lineno)
+            found.append((line, f"unvetted interpolation `{ast.unparse(part.value)}`"))
+        arguments = list(node.args) + [keyword.value for keyword in node.keywords]
+        for argument in arguments:
+            if not isinstance(argument, ast.Name):
+                continue
+            reached = _reaches_sink_unvetted(argument.id, node.lineno, assignments)
+            if reached is not None:
+                assigned_at, unvetted = reached
+                found.append((
+                    node.lineno,
+                    f"`{argument.id}` carries unvetted `{unvetted}` from line {assigned_at}",
+                ))
+    return found
+
+
 def _call_lines(source: str, opener: "re.Pattern[str]") -> set[int]:
     """Line numbers inside a call matching `opener`, continuations included."""
     inside: set[int] = set()
@@ -273,13 +647,15 @@ def _sink_lines(source: str) -> set[int]:
     return inside
 
 
-def _scan(module: str) -> list[str]:
-    source = (SERVICES / module).read_text()
+def _scan_source(module: str, source: str) -> list[str]:
+    """The whole guard, over one module's text. Split out from `_scan` so the
+    tests below can hand it a three-line sample instead of a file."""
     patterns = _leak_patterns(_exception_names(source)) + _code_patterns()
     docstrings = _docstring_lines(source)
     sink_lines = _sink_lines(source) - _call_lines(source, SCRUBBED)
-    findings = []
-    for number, line in enumerate(source.split("\n"), 1):
+    lines = source.split("\n")
+    findings: dict[int, str] = {}
+    for number, line in enumerate(lines, 1):
         stripped = line.strip()
         if stripped.startswith("#") or number in docstrings:
             continue
@@ -294,9 +670,21 @@ def _scan(module: str) -> list[str]:
             if "code" in label and number not in sink_lines:
                 continue
             if pattern.search(remainder):
-                findings.append(f"{module}:{number} [{label}] {stripped[:80]}")
+                findings[number] = f"{module}:{number} [{label}] {stripped[:80]}"
                 break
-    return findings
+
+    for number, label in _sink_findings(module, source):
+        if number in findings or not 1 <= number <= len(lines):
+            continue
+        if MARKER.search(lines[number - 1]):
+            continue
+        findings[number] = f"{module}:{number} [{label}] {lines[number - 1].strip()[:80]}"
+
+    return [findings[number] for number in sorted(findings)]
+
+
+def _scan(module: str) -> list[str]:
+    return _scan_source(module, (SERVICES / module).read_text())
 
 
 @pytest.mark.parametrize("module", CHAT_PATH_MODULES)
@@ -483,6 +871,144 @@ def test_the_scrubber_exempts_what_it_wraps() -> None:
     line_holding_the_value = 2
 
     assert line_holding_the_value in _call_lines(source, SCRUBBED)
+
+
+# --- the default-deny half ----------------------------------------------------
+
+#: The four shapes that were on the log when this rule was written, all of which
+#: the denylist above reported nothing for.
+LEAK_SAMPLES = {
+    "a raw model reply under an unlisted name":
+        'logger.info(f"Corrector response: {response}")',
+    "a mapping lookup whose key is not a listed prefix":
+        """logger.warning(f"Tried to apply: {correction_data.get('corrected_new_code')}")""",
+    "a slice of the client's chat message":
+        'logger.info(f"called with content: {data.content[:100]}...")',
+    "a preview of a subagent's reply":
+        'logger.info(f"workflow_agent response: {response_preview}")',
+}
+
+
+@pytest.mark.parametrize("shape", sorted(LEAK_SAMPLES))
+def test_the_allowlist_catches_a_leak_the_denylist_missed(shape: str) -> None:
+    """`CODE_BEARING_NAMES` is thirteen identifiers, so a leak escapes it by
+    picking a fourteenth. Every sample here did exactly that."""
+    findings = _scan_source("sample.py", LEAK_SAMPLES[shape] + "\n")
+
+    assert findings, shape
+
+
+def test_the_allowlist_permits_a_shape_only_line() -> None:
+    source = (
+        "count = len(body)\n"
+        'logger.info(f"body: {len(body)} characters, {count} of them, "\n'
+        '            f"empty: {bool(body)} ({type(body).__name__})")\n'
+    )
+
+    assert not _scan_source("sample.py", source)
+
+
+def test_an_assignment_hop_does_not_hide_a_leak() -> None:
+    """The whole of weakness (a): the code patterns only run on lines inside a
+    sink call, and the sink line carries nothing but a bare name."""
+    source = (
+        'warning = f"Tried to apply: {corrected_new_code}"\n'
+        "logger.warning(warning)\n"
+    )
+
+    findings = _scan_source("sample.py", source)
+
+    assert findings
+    assert "corrected_new_code" in findings[0]
+
+
+def test_a_concatenation_hop_does_not_hide_a_leak_either() -> None:
+    source = 'warning = "Initial error: " + error_message\nsentry_sdk.capture_message(warning)\n'
+
+    assert _scan_source("sample.py", source)
+
+
+def test_the_nearest_assignment_is_what_decides() -> None:
+    """`msg` is built leakily in one branch and safely in the next. Only the
+    first should carry to the sink under it, or every later branch inherits a
+    finding it did not earn."""
+    source = (
+        'msg = f"failed: {body}"\n'
+        "logger.warning(msg)\n"
+        'msg = f"failed ({type(error).__name__})"\n'
+        "logger.warning(msg)\n"
+    )
+
+    findings = _scan_source("sample.py", source)
+
+    assert [f.split(":")[1].split(" ")[0] for f in findings] == ["2"]
+
+
+def test_a_counter_is_the_one_bare_name_that_passes() -> None:
+    source = (
+        "total = 0\n"
+        "for attempt in range(3):\n"
+        "    total += 1\n"
+        '    logger.info(f"attempt {attempt + 1}, {total} so far")\n'
+    )
+
+    assert not _scan_source("sample.py", source)
+
+
+def test_a_counter_that_is_ever_a_string_is_not_a_counter() -> None:
+    """One `total = response_text` anywhere in the module disqualifies the name
+    everywhere, because this guard has no idea which branch ran."""
+    source = (
+        "total = 0\n"
+        "total = response_text\n"
+        'logger.info(f"{total}")\n'
+    )
+
+    assert _scan_source("sample.py", source)
+
+
+def test_a_vetted_expression_is_scoped_to_its_module() -> None:
+    """Renaming a variable or moving the line elsewhere has to fail closed."""
+    line = 'logger.info(f"model: {self.model}")\n'
+
+    assert not _scan_source("global_chat/planner.py", line)
+    assert _scan_source("job_chat/job_chat.py", line)
+
+
+#: Every expression cleared by hand in `VETTED_INTERPOLATIONS`. Pinned for the
+#: same reason as `EXPECTED_MARKERS`: an opt-out nobody counts is an opt-out
+#: that spreads.
+EXPECTED_VETTED_INTERPOLATIONS = 51
+
+
+def test_the_vetted_interpolations_are_inventoried() -> None:
+    total = sum(len(expressions) for expressions in VETTED_INTERPOLATIONS.values())
+
+    assert total == EXPECTED_VETTED_INTERPOLATIONS, (
+        f"the hand-cleared expression list changed to {total}. Each entry is a "
+        f"value this codebase puts on the log, so add one deliberately."
+    )
+
+
+@pytest.mark.parametrize("module", sorted(VETTED_INTERPOLATIONS))
+def test_every_vetted_module_is_still_on_the_chat_path(module: str) -> None:
+    assert module in CHAT_PATH_MODULES
+
+
+@pytest.mark.parametrize(
+    ("module", "expression"),
+    [(m, e) for m, es in sorted(VETTED_INTERPOLATIONS.items()) for e in sorted(es)],
+)
+def test_no_vetted_expression_is_dead(module: str, expression: str) -> None:
+    """A cleared expression that nothing writes any more is a pass sitting there
+    waiting for someone to reintroduce the name."""
+    narrowed = dict(VETTED_INTERPOLATIONS)
+    narrowed[module] = VETTED_INTERPOLATIONS[module] - {expression}
+
+    with mock.patch.dict(VETTED_INTERPOLATIONS, narrowed, clear=True):
+        findings = _scan(module)
+
+    assert findings, f"{module} no longer interpolates {expression}"
 
 
 def test_package_inits_are_in_the_closure() -> None:

@@ -63,7 +63,7 @@ import sentry_sdk
 from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
 from langfuse_util import should_track, build_tags, build_generation_diff, drop_code, mask_secrets
 from util import ApolloError, create_logger, add_page_prefix, APOLLO_VERSION
-from yaml_utils import WITHHELD_NOTICE
+from yaml_utils import WITHHELD_NOTICE, redact_job_bodies, remove_ids
 from .gen_project_prompt import build_prompt
 from workflow_chat.available_adaptors import get_available_adaptors
 from streaming_util import (
@@ -215,10 +215,12 @@ class AnthropicClient:
                         # would reach the model unredacted. Withhold instead.
                         logger.warning(
                             f"Could not extract components from the existing YAML "
-                            f"({type(error).__name__}); withholding it from the prompt",
+                            f"({type(error).__name__}); redacting it instead",
                         )
                         preserved_values = {}
-                        processed_existing_yaml = WITHHELD_NOTICE
+                        processed_existing_yaml = (
+                            redact_job_bodies(existing_yaml) or WITHHELD_NOTICE
+                        )
                 else:
                     # In read-only mode, remove IDs to prevent regurgitation
                     processed_existing_yaml = self.remove_ids_from_yaml(existing_yaml)
@@ -322,7 +324,11 @@ class AnthropicClient:
                 # If YAML parsing succeeded or we're on the last attempt, return the result
                 if response_yaml is not None or attempt == max_retries:
                     if self._handover:
-                        logger.info(f"workflow_chat handing over: {self._handover}")
+                        # Length only: free text the model wrote about the
+                        # user's request, so it can quote the workflow back.
+                        logger.info(
+                            f"workflow_chat handing over ({len(str(self._handover))} characters)",
+                        )
                         # Deliberately do NOT end the stream: the caller reroutes
                         # the request and the next agent continues on the same stream.
                         return ChatResponse(
@@ -375,15 +381,9 @@ class AnthropicClient:
         try:
             yaml_data = yaml.safe_load(yaml_str)
 
-            def remove_ids(obj):
-                if isinstance(obj, dict):
-                    obj.pop("id", None)
-                    for v in obj.values():
-                        remove_ids(v)
-                elif isinstance(obj, list):
-                    for item in obj:
-                        remove_ids(item)
-
+            # The shared walker: same container coverage, same cycle guard.
+            # This used to be a third id-walker with neither, and it runs on
+            # client-supplied YAML whenever read_only is set.
             remove_ids(yaml_data)
             return yaml.dump(yaml_data, sort_keys=False, default_flow_style=False)
         except Exception as error:
@@ -558,7 +558,20 @@ class AnthropicClient:
         """
         if not yaml_data:
             return {}, None
-        
+
+        if not isinstance(yaml_data, dict):
+            # A workflow is a mapping, the same guard `redact_job_bodies` makes.
+            # `existing_yaml` is an unvalidated client string, and on a top-level
+            # sequence `"jobs" in yaml_data` is a membership test over the list's
+            # items rather than a key lookup, so it is False, nothing is swapped
+            # for a placeholder, and the document is dumped into the prompt with
+            # every job body intact.
+            logger.warning(
+                f"Existing workflow YAML is a {type(yaml_data).__name__}, not a "
+                f"mapping; withholding it",
+            )
+            return {}, WITHHELD_NOTICE
+
         preserved_values = {}
         
         if "jobs" in yaml_data:

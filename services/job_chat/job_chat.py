@@ -424,7 +424,9 @@ class AnthropicClient:
                     ]
 
             if handover_reason:
-                logger.info(f"job_chat handing over: {handover_reason}")
+                # Length only: the goal is free text the model wrote about the
+                # user's request, so it can quote the job body back.
+                logger.info(f"job_chat handing over ({len(handover_reason)} characters)")
                 # Deliberately do NOT end the stream: the caller reroutes the
                 # request and the next agent continues on the same stream.
                 return ChatResponse(
@@ -716,7 +718,17 @@ class AnthropicClient:
 
             corrected_old = correction_data.get("corrected_old_code")
             corrected_new = correction_data.get("corrected_new_code")
-            logger.info(f"Corrector response: {response}")
+            # Shape only: `corrected_old_code` is by construction a verbatim
+            # slice of the user's job body, and `response` is the whole reply it
+            # sits in. The two flags are what an operator actually needs, which
+            # is whether the corrector answered in the shape we asked for.
+            # Placed after the two lookups above so it cannot be the thing that
+            # raises on a reply that is not a mapping.
+            logger.info(
+                f"corrector replied with {len(response)} characters, "
+                f"{len(correction_data)} keys, corrected_old_code present: "
+                f"{bool(corrected_old)}, corrected_new_code present: {bool(corrected_new)}",
+            )
             
             if corrected_old and corrected_new is not None and corrected_old in full_code:
                 warning = None
@@ -733,7 +745,12 @@ class AnthropicClient:
             logger.warning(warning)
             return None, False, warning
         
-        warning = f"Error correction failed. Tried to apply: {correction_data.get('corrected_new_code')}"
+        # Length only, exactly as in the `except` branch above: this warning is
+        # returned, concatenated into `warning` in `handle_replace_error` and
+        # passed to `capture_message`, so whatever is in it becomes the Sentry
+        # issue title and the text of any alert routed off it.
+        attempted = correction_data.get("corrected_new_code") or ""
+        warning = f"Error correction failed. Tried to apply {len(attempted)} characters"
         logger.warning(warning)
         return None, False, warning
 

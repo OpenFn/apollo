@@ -446,7 +446,11 @@ class RouterAgent:
         never sees the aborted attempt.
         """
         reason = subagent_result["handover"]
-        logger.warning(f"{from_agent} handed over: {reason}. Rerouting to planner")
+        # Length only: the subagent wrote this about the user's request, so it
+        # can quote the workflow or the job body back.
+        logger.warning(
+            f"{from_agent} handed over ({len(str(reason))} characters). Rerouting to planner",
+        )
         self._track_reroute({"handover_from": from_agent, "handover_reason": reason})
 
         planner_result = self._route_to_planner(content, workflow_yaml, page, history, stream, confidence)
