@@ -50,6 +50,67 @@ def _is_secret_name(key: object) -> bool:
     return _normalise_name(key) in _NORMALISED_SECRET_NAMES
 
 
+#: Payload fields that carry the user's job code or workflow. `mask_secrets`
+#: matches credential field names and key-shaped values; it has no notion of
+#: job code, so these sail through it untouched.
+CODE_BEARING_FIELDS = frozenset({
+    "existing_yaml",
+    "workflow_yaml",
+    "expression",
+    "code",
+    "old_code",
+    "new_code",
+    "body",
+    "history",
+    "content",
+    "text_answer",
+    "llm_text_answer",
+    "llm_edit_answer",
+    "suggested_code",
+})
+
+
+#: How deep to recurse before giving up. A cyclic payload is not expected, but
+#: this runs on the error path and must not be the thing that raises.
+MAX_SCRUB_DEPTH = 6
+
+
+def drop_code(data: Any, _depth: int = 0) -> Any:  # noqa: ANN401
+    """Replace job code and workflow YAML with a size, recursively.
+
+    Used before anything is attached to a Sentry event. Keeping the field name
+    and the size preserves everything an operator needs to tell one failure
+    from another; keeping the value exports the user's workflow to a third
+    party on every captured event, and `set_context` persists on the isolation
+    scope, so one chat request would attach its workflow to every later event
+    in the process.
+    """
+    if _depth > MAX_SCRUB_DEPTH:
+        return data
+    if isinstance(data, dict):
+        scrubbed = {}
+        for key, value in data.items():
+            if isinstance(key, str) and key.lower() in CODE_BEARING_FIELDS:
+                scrubbed[key] = _summarise(value)
+            else:
+                scrubbed[key] = drop_code(value, _depth + 1)
+        return scrubbed
+    if isinstance(data, (list, tuple)):
+        return type(data)(drop_code(item, _depth + 1) for item in data)
+    return data
+
+
+def _summarise(value: Any) -> str:  # noqa: ANN401
+    """Describe a value without reproducing it."""
+    if value is None:
+        return "<absent>"
+    if isinstance(value, str):
+        return f"<{len(value)} characters withheld>"
+    if isinstance(value, (list, tuple, dict)):
+        return f"<{type(value).__name__} of {len(value)} withheld>"
+    return f"<{type(value).__name__} withheld>"
+
+
 def mask_secrets(data: Any, _depth: int = 0) -> Any:  # noqa: ANN401
     """Langfuse mask callback: redact API keys from all traced data.
 
@@ -159,5 +220,5 @@ def build_generation_diff(
         }
     except Exception as e:
         # print, not create_logger: this must stay out of the user-facing stream
-        print(f"build_generation_diff failed, skipping diff metadata: {e}")  # noqa: T201
+        print(f"build_generation_diff failed, skipping diff metadata ({type(e).__name__})")  # noqa: T201
         return None

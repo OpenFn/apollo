@@ -1,23 +1,24 @@
-import os
 import json
+import os
+
 import anthropic
+import sentry_sdk
 from anthropic import (
     APIConnectionError,
-    BadRequestError,
     AuthenticationError,
-    PermissionDeniedError,
-    NotFoundError,
-    UnprocessableEntityError,
-    RateLimitError,
+    BadRequestError,
     InternalServerError,
+    NotFoundError,
+    PermissionDeniedError,
+    RateLimitError,
+    UnprocessableEntityError,
 )
-import sentry_sdk
 from langfuse import observe
-from util import ApolloError, create_logger
 from models import resolve_model
 from search_docsite.search_docsite import DocsiteSearch
+from util import ApolloError, create_logger
+
 from .rag_config_loader import ConfigLoader
-from streaming_util import StreamManager
 
 logger = create_logger("job_chat.retrieve_docs")
 
@@ -77,12 +78,12 @@ def retrieve_knowledge(content, history, code="", adaptor="", api_key=None, stre
                     search_results = search_docs(
                         search_queries,
                         top_k=config["top_k"],
-                        threshold=config["threshold"]
+                        threshold=config["threshold"],
                     )
                     search_results = list(set(search_results))
                     search_results_sections = list(set(result.metadata["doc_title"] for result in search_results))
                 except Exception as e:
-                    logger.error(f"Pinecone search failed: {e}")
+                    logger.error(f"Pinecone search failed ({type(e).__name__})")
                     sentry_sdk.capture_exception(e)
                     # Continue with empty results - chat can still work without docs
                     search_results = []
@@ -96,8 +97,8 @@ def retrieve_knowledge(content, history, code="", adaptor="", api_key=None, stre
             "prompts_version": config.get("prompts_version"),
             "usage": {
                 "needs_docs": needs_docs_usage,
-                "generate_queries": generate_queries_usage
-            }
+                "generate_queries": generate_queries_usage,
+            },
         }
         
         return results
@@ -107,7 +108,7 @@ def needs_docs(content, client, user_context=""):
     formatted_user_prompt = config_loader.get_prompt(
         "needs_docs_user_prompt",
         user_context=user_context, 
-        user_question=content
+        user_question=content,
     )
     
     response_text, usage = call_llm(
@@ -115,7 +116,7 @@ def needs_docs(content, client, user_context=""):
         temperature=config["temperature"],
         system_prompt=config_loader.prompts["prompts"]["needs_docs_system_prompt"],
         user_prompt=formatted_user_prompt,
-        client=client
+        client=client,
     )
     
     return (response_text, usage)
@@ -125,7 +126,7 @@ def generate_queries(content, client, user_context=""):
     formatted_user_prompt = config_loader.get_prompt(
         "search_docs_user_prompt",
         user_context=user_context,
-        user_question=content
+        user_question=content,
     )
 
     queries_schema = {
@@ -137,12 +138,12 @@ def generate_queries(content, client, user_context=""):
                     "type": "object",
                     "properties": {"query": {"type": "string"}},
                     "required": ["query"],
-                    "additionalProperties": False
-                }
-            }
+                    "additionalProperties": False,
+                },
+            },
         },
         "required": ["queries"],
-        "additionalProperties": False
+        "additionalProperties": False,
     }
 
     text, usage = call_llm(
@@ -151,18 +152,23 @@ def generate_queries(content, client, user_context=""):
         system_prompt=config_loader.prompts["prompts"]["search_docs_system_prompt"],
         user_prompt=formatted_user_prompt,
         client=client,
-        output_schema=queries_schema
+        output_schema=queries_schema,
     )
 
     try:
         answer_parsed = json.loads(text).get("queries", [])
     except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse LLM response as JSON: {e}. Response text: {text[:200]}")
+        # Neither the exception nor the response body: it is the model
+        # answering about the user's job code.
+        logger.error(
+            f"Failed to parse LLM response as JSON ({type(e).__name__}); "
+            f"{len(text)} characters received",
+        )
         raise ApolloError(
             500,
             "Failed to generate search queries - invalid response from AI service",
             type="INVALID_LLM_RESPONSE",
-            details={"response_preview": text[:200]}
+            details={"response_length": len(text)},
         )
 
     if len(answer_parsed) >= 4:
@@ -179,7 +185,7 @@ def search_docs(search_queries, top_k, threshold):
             q.get("query"), 
             top_k=top_k, 
             threshold=threshold, 
-            docs_type="general_docs"
+            docs_type="general_docs",
         )
         search_results.extend(query_search_result)
     
@@ -209,10 +215,10 @@ def call_llm(model, temperature, system_prompt, user_prompt, client, output_sche
                 "content": [
                     {
                         "type": "text",
-                        "text": user_prompt
-                    }
-                ]
-            }
+                        "text": user_prompt,
+                    },
+                ],
+            },
         ]
 
         kwargs = dict(
@@ -220,11 +226,11 @@ def call_llm(model, temperature, system_prompt, user_prompt, client, output_sche
             max_tokens=1024,
             temperature=temperature,
             system=system_prompt,
-            messages=messages
+            messages=messages,
         )
         if output_schema:
             kwargs["output_config"] = {
-                "format": {"type": "json_schema", "schema": output_schema}
+                "format": {"type": "json_schema", "schema": output_schema},
             }
 
         message = client.messages.create(**kwargs)
@@ -240,7 +246,7 @@ def call_llm(model, temperature, system_prompt, user_prompt, client, output_sche
         return (response_text, message.usage.model_dump())
 
     except APIConnectionError as e:
-        logger.error(f"API connection error during knowledge retrieval: {e}")
+        logger.error(f"API connection error during knowledge retrieval ({type(e).__name__})")
         details = {"cause": str(e.__cause__)} if e.__cause__ else {}
         raise ApolloError(
             503,
@@ -249,32 +255,34 @@ def call_llm(model, temperature, system_prompt, user_prompt, client, output_sche
             details=details,
         )
     except AuthenticationError as e:
-        logger.error(f"Authentication error during knowledge retrieval: {e}")
+        logger.error(f"Authentication error during knowledge retrieval ({type(e).__name__})")
         raise ApolloError(401, "Authentication failed with AI service", type="AUTH_ERROR")
     except RateLimitError as e:
-        logger.error(f"Rate limit error during knowledge retrieval: {e}")
+        logger.error(f"Rate limit error during knowledge retrieval ({type(e).__name__})")
         retry_after = int(e.response.headers.get('retry-after', 60)) if hasattr(e, 'response') else 60
         raise ApolloError(
             429,
             "Rate limit exceeded for documentation search, please try again later",
             type="RATE_LIMIT",
-            details={"retry_after": retry_after}
+            details={"retry_after": retry_after},
         )
     except BadRequestError as e:
-        logger.error(f"Bad request error during knowledge retrieval: {e}")
-        raise ApolloError(400, f"Invalid request to AI service: {str(e)}", type="BAD_REQUEST")
+        logger.error(f"Bad request error during knowledge retrieval ({type(e).__name__})")
+        raise ApolloError(400, f"Invalid request to AI service ({type(e).__name__})", type="BAD_REQUEST")
     except PermissionDeniedError as e:
-        logger.error(f"Permission denied error during knowledge retrieval: {e}")
+        logger.error(f"Permission denied error during knowledge retrieval ({type(e).__name__})")
         raise ApolloError(403, "Not authorized to perform this action", type="FORBIDDEN")
     except NotFoundError as e:
-        logger.error(f"Not found error during knowledge retrieval: {e}")
+        logger.error(f"Not found error during knowledge retrieval ({type(e).__name__})")
         raise ApolloError(404, "Resource not found", type="NOT_FOUND")
     except UnprocessableEntityError as e:
-        logger.error(f"Unprocessable entity error during knowledge retrieval: {e}")
-        raise ApolloError(422, str(e), type="INVALID_REQUEST")
+        logger.error(f"Unprocessable entity error during knowledge retrieval ({type(e).__name__})")
+        raise ApolloError(422, f"Invalid request to AI service ({type(e).__name__})", type="INVALID_REQUEST")
     except InternalServerError as e:
-        logger.error(f"Internal server error from AI service during knowledge retrieval: {e}")
+        logger.error(f"Internal server error from AI service during knowledge retrieval ({type(e).__name__})")
         raise ApolloError(500, "The AI service encountered an error", type="PROVIDER_ERROR")
     except Exception as e:
-        logger.error(f"Unexpected error during LLM call for knowledge retrieval: {str(e)}")
-        raise ApolloError(500, f"Unexpected error during documentation search: {str(e)}", type="UNKNOWN_ERROR")
+        logger.error(f"Unexpected error during LLM call for knowledge retrieval ({type(e).__name__})")
+        raise ApolloError(
+            500, f"Unexpected error during documentation search ({type(e).__name__})", type="UNKNOWN_ERROR",
+        )

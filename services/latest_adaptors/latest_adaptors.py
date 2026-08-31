@@ -61,10 +61,10 @@ def get_latest_adaptors(previous: dict | None = None) -> dict:
         except Exception as e:
             old_entry = previous.get(package_name)
             if old_entry is not None:
-                logger.warning(f"Failed to fetch {package_name}, keeping cached entry: {e}")
+                logger.warning(f"Failed to fetch {package_name}, keeping cached entry ({type(e).__name__})")
                 descriptions[package_name] = old_entry
             else:
-                logger.error(f"Failed to fetch {package_name} and no cached entry: {e}")
+                logger.error(f"Failed to fetch {package_name} and no cached entry ({type(e).__name__})")
 
     logger.info('All adaptor metadata downloaded')
 
@@ -79,7 +79,7 @@ def load_cache() -> dict | None:
             data = json.load(f)
         return {name: info for name, info in data.items() if info is not None}
     except Exception as e:
-        logger.warning(f"Failed to read adaptors cache: {e}")
+        logger.warning(f"Failed to read adaptors cache ({type(e).__name__})")
         return None
 
 

@@ -3,32 +3,32 @@ Planner Agent - Coordinates tools and subagents for complex multi-step tasks.
 """
 
 import os
-from typing import List, Dict, Optional
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-import httpx
-from anthropic import Anthropic
-import sentry_sdk
-
-import sys
 from pathlib import Path
+from typing import Dict, List, Optional
+
+import httpx
+import sentry_sdk
+from anthropic import Anthropic
 
 sys.path.append(str(Path(__file__).parent.parent))
 
+from global_chat.config_loader import ConfigLoader
+from global_chat.subagent_caller import call_job_agent, call_workflow_agent, format_subagent_result_for_llm
+from global_chat.tools.tool_definitions import TOOL_DEFINITIONS
 from langfuse import observe
-from util import create_logger, ApolloError, sum_usage
+from models import resolve_model
 from streaming_util import (
-    StreamManager,
-    STATUS_REVIEWING_WORKFLOW,
     STATUS_NEW_WORKFLOW,
     STATUS_PLANNING,
+    STATUS_REVIEWING_WORKFLOW,
+    StreamManager,
 )
-from global_chat.config_loader import ConfigLoader
-from models import resolve_model
-from global_chat.tools.tool_definitions import TOOL_DEFINITIONS
-from yaml_utils import stitch_job_code, redact_job_bodies, find_job_in_yaml, get_step_name_from_page, inspect_job_code
 from tools.search_documentation.search_documentation import search_documentation_tool
-from global_chat.subagent_caller import call_workflow_agent, call_job_agent, format_subagent_result_for_llm
+from util import ApolloError, create_logger, sum_usage
+from yaml_utils import find_job_in_yaml, get_step_name_from_page, inspect_job_code, redact_job_bodies, stitch_job_code
 
 logger = create_logger(__name__)
 
@@ -169,7 +169,7 @@ class PlannerAgent:
                         logger.info(f"Executing {len(tool_use_blocks)} tool(s): {[b.name for b in tool_use_blocks]}")
 
                         tool_results = self._execute_tool_blocks(
-                            tool_use_blocks, stream_manager, total_usage, tool_calls_meta
+                            tool_use_blocks, stream_manager, total_usage, tool_calls_meta,
                         )
 
                         content_blocks = []
@@ -184,7 +184,7 @@ class PlannerAgent:
                                 content_blocks.append({"type": "text", "text": block.text})
                             elif block.type == "tool_use":
                                 content_blocks.append(
-                                    {"type": "tool_use", "id": block.id, "name": block.name, "input": block.input}
+                                    {"type": "tool_use", "id": block.id, "name": block.name, "input": block.input},
                                 )
 
                         messages.append({"role": "assistant", "content": content_blocks})
@@ -199,8 +199,9 @@ class PlannerAgent:
                 except ApolloError:
                     raise
                 except Exception as e:
-                    logger.exception("Error in tool-calling loop")
-                    raise ApolloError(500, f"Tool execution error: {str(e)}")
+                    logger.error(f"Error in tool-calling loop ({type(e).__name__})")
+                    # Type only: the inner exception can quote the prompt back.
+                    raise ApolloError(500, f"Tool execution error ({type(e).__name__})")
 
             if response.stop_reason != "end_turn":
                 logger.warning(f"Loop exited without end_turn (reason: {response.stop_reason})")
@@ -341,8 +342,8 @@ class PlannerAgent:
                             "keep": {"type": "tool_uses", "value": 10},
                             "exclude_tools": ["search_documentation"],
                             "clear_tool_inputs": True,
-                        }
-                    ]
+                        },
+                    ],
                 },
             )
             return response
@@ -403,9 +404,19 @@ class PlannerAgent:
                     metrics_opt_in=self._metrics_opt_in,
                 )
             except Exception as e:
-                logger.exception("call_workflow_agent failed")
-                tool_calls_meta.append({"tool": "call_workflow_agent", "input": tool_use_block.input, "error": str(e)})
-                return f"ERROR: The workflow agent failed: {e}. The workflow was not changed."
+                logger.error(f"call_workflow_agent failed ({type(e).__name__})")
+                # `tool_calls_meta` is returned to the caller in `meta`, and the
+                # string below is fed back to the model as a tool result — so
+                # neither may carry the exception text.
+                tool_calls_meta.append({
+                    "tool": "call_workflow_agent",
+                    "input": tool_use_block.input,
+                    "error": type(e).__name__,
+                })
+                return (
+                    f"ERROR: The workflow agent failed ({type(e).__name__}). "
+                    f"The workflow was not changed."
+                )
 
             if "usage" in subagent_result:
                 total_usage.update(sum_usage(total_usage, subagent_result["usage"]))
@@ -446,7 +457,7 @@ class PlannerAgent:
                 if not job_data:
                     tool_result = f"ERROR: Job key '{job_key}' not found in workflow YAML. Create the workflow with this job first."
                     tool_calls_meta.append(
-                        {"tool": "call_job_code_agent", "input": tool_use_block.input, "skipped": True}
+                        {"tool": "call_job_code_agent", "input": tool_use_block.input, "skipped": True},
                     )
                     return tool_result
 
@@ -459,9 +470,16 @@ class PlannerAgent:
                     metrics_opt_in=self._metrics_opt_in,
                 )
             except Exception as e:
-                logger.exception("call_job_code_agent failed")
-                tool_calls_meta.append({"tool": "call_job_code_agent", "input": tool_use_block.input, "error": str(e)})
-                return f"ERROR: The job code agent failed: {e}. No code was generated for this job."
+                logger.error(f"call_job_code_agent failed ({type(e).__name__})")
+                tool_calls_meta.append({
+                    "tool": "call_job_code_agent",
+                    "input": tool_use_block.input,
+                    "error": type(e).__name__,
+                })
+                return (
+                    f"ERROR: The job code agent failed ({type(e).__name__}). "
+                    f"No code was generated for this job."
+                )
 
             if "usage" in subagent_result:
                 total_usage.update(sum_usage(total_usage, subagent_result["usage"]))
@@ -528,12 +546,12 @@ class PlannerAgent:
             tool_result = self._execute_tool(tool_use_block, stream_manager, total_usage, tool_calls_meta)
             self._send_settled(stream_manager, self._settled_status_message(tool_use_block, yaml_before))
             tool_results.append(
-                {"type": "tool_result", "tool_use_id": tool_use_block.id, "content": tool_result}
+                {"type": "tool_result", "tool_use_id": tool_use_block.id, "content": tool_result},
             )
 
         if job_code_blocks:
             job_results = self._execute_job_code_tools_parallel(
-                job_code_blocks, stream_manager, total_usage, tool_calls_meta
+                job_code_blocks, stream_manager, total_usage, tool_calls_meta,
             )
             tool_results.extend(job_results)
 
@@ -597,8 +615,8 @@ class PlannerAgent:
                     try:
                         parallel_results[block.id] = future.result()
                     except Exception as e:
-                        logger.exception("call_job_code_agent failed")
-                        parallel_results[block.id] = {"_error": str(e)}
+                        logger.error(f"call_job_code_agent failed ({type(e).__name__})")
+                        parallel_results[block.id] = {"_error": type(e).__name__}
         elif to_run:
             block = to_run[0]
             try:
@@ -610,8 +628,8 @@ class PlannerAgent:
                     self._metrics_opt_in,
                 )
             except Exception as e:
-                logger.exception("call_job_code_agent failed")
-                parallel_results[block.id] = {"_error": str(e)}
+                logger.error(f"call_job_code_agent failed ({type(e).__name__})")
+                parallel_results[block.id] = {"_error": type(e).__name__}
 
         # Stitch results and update state sequentially
         tool_results = []
@@ -619,7 +637,7 @@ class PlannerAgent:
         for block in blocks:
             if block.id in skipped:
                 tool_results.append(
-                    {"type": "tool_result", "tool_use_id": block.id, "content": skipped[block.id]}
+                    {"type": "tool_result", "tool_use_id": block.id, "content": skipped[block.id]},
                 )
                 continue
 
@@ -629,7 +647,10 @@ class PlannerAgent:
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": block.id,
-                    "content": f"ERROR: The job code agent failed: {subagent_result['_error']}. No code was generated for this job.",
+                    "content": (
+                        f"ERROR: The job code agent failed ({subagent_result['_error']}). "
+                        f"No code was generated for this job."
+                    ),
                 })
                 continue
             matched_job_key = matched_keys.get(block.id)
@@ -657,7 +678,7 @@ class PlannerAgent:
 
             tool_calls_meta.append({"tool": "call_job_code_agent", "input": block.input})
             tool_results.append(
-                {"type": "tool_result", "tool_use_id": block.id, "content": tool_result}
+                {"type": "tool_result", "tool_use_id": block.id, "content": tool_result},
             )
 
         # Settle the spinner with the steps that were actually applied (drop any

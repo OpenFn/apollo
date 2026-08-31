@@ -12,7 +12,7 @@ from typing import Dict, Optional
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from langfuse import observe
-from util import create_logger, ApolloError
+from util import ApolloError, create_logger
 from yaml_utils import find_job_in_yaml
 
 logger = create_logger(__name__)
@@ -67,8 +67,8 @@ def call_workflow_agent(
     except ApolloError:
         raise
     except Exception as e:
-        logger.exception("Error calling workflow_agent")
-        raise ApolloError(500, f"workflow_agent failed: {str(e)}")
+        logger.error(f"Error calling workflow_agent ({type(e).__name__})")
+        raise ApolloError(500, f"workflow_agent failed ({type(e).__name__})")
 
 
 @observe(name="call_job_agent")
@@ -135,8 +135,8 @@ def call_job_agent(
     except ApolloError:
         raise
     except Exception as e:
-        logger.exception("Error calling job_agent")
-        raise ApolloError(500, f"job_agent failed: {str(e)}")
+        logger.error(f"Error calling job_agent ({type(e).__name__})")
+        raise ApolloError(500, f"job_agent failed ({type(e).__name__})")
 
 
 def format_subagent_result_for_llm(result: Dict) -> str:

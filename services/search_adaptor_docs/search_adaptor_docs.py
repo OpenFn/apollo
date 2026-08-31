@@ -35,7 +35,7 @@ def ensure_docs_loaded(adaptor: AdaptorSpecifier, conn, skip_if_exists: bool = T
             logger.warning(f"Failed to load adaptor docs for {adaptor.specifier} after {duration:.3f}s")
     except Exception as e:
         duration = time.time() - start_time if 'start_time' in locals() else 0
-        logger.warning(f"Failed to load adaptor docs after {duration:.3f}s: {e!s}")
+        logger.warning(f"Failed to load adaptor docs after {duration:.3f}s ({type(e).__name__})")
         sentry_sdk.capture_exception(e)
 
 
@@ -301,8 +301,8 @@ def main(data: dict) -> dict:
     except ApolloError:
         raise
     except Exception as e:
-        logger.error(f"Error querying database: {e!s}")
-        raise ApolloError(500, f"Query failed: {e!s}", type="DATABASE_ERROR")
+        logger.error(f"Error querying database ({type(e).__name__})")
+        raise ApolloError(500, f"Query failed ({type(e).__name__})", type="DATABASE_ERROR")
     finally:
         conn.close()
 

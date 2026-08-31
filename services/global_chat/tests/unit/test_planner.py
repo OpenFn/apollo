@@ -74,8 +74,11 @@ def test_job_agent_failure_returns_error_tool_result() -> None:
     with patch("global_chat.planner.call_job_agent", side_effect=RuntimeError("boom")):
         result = planner._execute_tool(block, StubStreamManager(), empty_usage(), meta)
 
-    assert result.startswith("ERROR: The job code agent failed: boom")
-    assert meta[0]["error"] == "boom"
+    assert result.startswith("ERROR: The job code agent failed (RuntimeError)")
+    assert "boom" not in result, "the exception text is returned to the caller and fed to the model"
+    # `tool_calls_meta` is returned to the caller in `meta`, so it carries the
+    # exception type, not its text.
+    assert meta[0]["error"] == "RuntimeError"
 
 
 def test_workflow_agent_failure_returns_error_tool_result() -> None:
@@ -85,7 +88,8 @@ def test_workflow_agent_failure_returns_error_tool_result() -> None:
     with patch("global_chat.planner.call_workflow_agent", side_effect=RuntimeError("boom")):
         result = planner._execute_tool(block, StubStreamManager(), empty_usage(), [])
 
-    assert result.startswith("ERROR: The workflow agent failed: boom")
+    assert result.startswith("ERROR: The workflow agent failed (RuntimeError)")
+    assert "boom" not in result, "the exception text is returned to the caller and fed to the model"
     assert planner.current_yaml == WORKFLOW_YAML
     assert planner.yaml_modified is False
 
@@ -150,7 +154,8 @@ def test_parallel_job_agent_failure_keeps_sibling_results() -> None:
 
     by_id = {r["tool_use_id"]: r["content"] for r in results}
     assert "stitched into the workflow" in by_id["tu_ok"]
-    assert by_id["tu_bad"].startswith("ERROR: The job code agent failed: boom")
+    assert by_id["tu_bad"].startswith("ERROR: The job code agent failed (RuntimeError)")
+    assert "boom" not in by_id["tu_bad"]
     assert "newCode();" in planner.current_yaml
     assert planner.yaml_modified is True
 

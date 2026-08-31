@@ -61,8 +61,9 @@ from anthropic import (
 )
 import sentry_sdk
 from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
-from langfuse_util import should_track, build_tags, build_generation_diff, mask_secrets
+from langfuse_util import should_track, build_tags, build_generation_diff, drop_code, mask_secrets
 from util import ApolloError, create_logger, add_page_prefix, APOLLO_VERSION
+from yaml_utils import WITHHELD_NOTICE
 from .gen_project_prompt import build_prompt
 from workflow_chat.available_adaptors import get_available_adaptors
 from streaming_util import (
@@ -207,8 +208,17 @@ class AnthropicClient:
                     try:
                         yaml_data = yaml.safe_load(existing_yaml)
                         preserved_values, processed_existing_yaml = self.extract_and_preserve_components(yaml_data)
-                    except Exception as e:
-                        logger.warning(f"Could not parse existing YAML for component extraction: {e}")
+                    except Exception as error:
+                        # `processed_existing_yaml` still holds the raw input,
+                        # and it goes straight into the system prompt — so the
+                        # job code this step exists to swap for placeholders
+                        # would reach the model unredacted. Withhold instead.
+                        logger.warning(
+                            f"Could not extract components from the existing YAML "
+                            f"({type(error).__name__}); withholding it from the prompt",
+                        )
+                        preserved_values = {}
+                        processed_existing_yaml = WITHHELD_NOTICE
                 else:
                     # In read-only mode, remove IDs to prevent regurgitation
                     processed_existing_yaml = self.remove_ids_from_yaml(existing_yaml)
@@ -376,8 +386,9 @@ class AnthropicClient:
 
             remove_ids(yaml_data)
             return yaml.dump(yaml_data, sort_keys=False, default_flow_style=False)
-        except Exception as e:
-            logger.warning(f"Could not remove IDs from YAML: {e}")
+        except Exception as error:
+            # Type only: a PyYAML mark quotes the document.
+            logger.warning(f"Could not remove IDs from YAML ({type(error).__name__})")
             return yaml_str
 
     @staticmethod
@@ -499,14 +510,22 @@ class AnthropicClient:
                             output_yaml = self.finalize_yaml(parsed_yaml, preserved_values)
                         else:
                             output_yaml = ""
-                    except Exception as e:
-                        logger.warning(f"YAML parsing failed, discarding yaml content: {e}")
+                    except yaml.YAMLError as error:
+                        # Type only: a PyYAML mark quotes the document.
+                        logger.warning(f"YAML parsing failed, discarding yaml content ({type(error).__name__})")
+                        output_yaml = ""
+                    except Exception as error:
+                        # Not a parse failure — post-processing raised. Say so,
+                        # rather than blaming the model's output. No traceback:
+                        # `preserved_values` on this stack maps placeholders to
+                        # real job code, and frame locals go to Sentry.
+                        logger.error(f"Post-processing the workflow YAML failed ({type(error).__name__}); discarding it")
                         output_yaml = ""
             else:
                 output_yaml = ""
 
-        except Exception as e:
-            logger.error(f"Error during JSON parsing: {str(e)}")
+        except Exception as error:
+            logger.error(f"Error during JSON parsing ({type(error).__name__})")
 
         return output_text, output_yaml
 
@@ -528,8 +547,8 @@ class AnthropicClient:
                         short_name = base[len("@openfn/language-"):]
                         if short_name not in valid_adaptor_names:
                             logger.warning(f"Invalid adaptor found in job '{job_key}': {adaptor}")
-        except Exception as e:
-            logger.error(f"validate_adaptors encountered an error: {e}")
+        except Exception as error:
+            logger.error(f"validate_adaptors encountered an error ({type(error).__name__})")
 
     @staticmethod
     def extract_and_preserve_components(yaml_data):
@@ -679,8 +698,20 @@ class AnthropicClient:
                                     restored_yaml = self.finalize_yaml(parsed, preserved_values)
                                     self._streamed_yaml = restored_yaml
                                     stream_manager.send_changes({"yaml": restored_yaml})
-                            except Exception:
-                                pass  # Invalid YAML, skip changes event
+                            except yaml.YAMLError as error:
+                                # Genuinely malformed YAML mid-stream: expected,
+                                # since the payload is still arriving. Type only:
+                                # a PyYAML mark quotes the document.
+                                logger.debug(f"Partial YAML not parseable yet ({type(error).__name__})")
+                            except Exception as error:
+                                # Anything else is a bug in the pipeline, not bad
+                                # input. Swallowing it silently is how a crash in
+                                # finalize_yaml showed up as "the model returned
+                                # no workflow" with nothing in the logs to say so.
+                                logger.error(
+                                    f"Failed to finalize streamed workflow YAML "
+                                    f"({type(error).__name__}); the user will see no workflow preview",
+                                )
 
                         # Mark where text content starts
                         sent_length = match.end()
@@ -710,8 +741,10 @@ def main(data_dict: dict) -> dict:
         # name list, which catches nested values and key-shaped strings too.
         sentry_sdk.set_context(
             "request_data",
-            mask_secrets(
-                {k: v for k, v in data_dict.items() if k != "_stream_manager"},
+            drop_code(
+                mask_secrets(
+                    {k: v for k, v in data_dict.items() if k != "_stream_manager"},
+                ),
             ),
         )
 
@@ -791,7 +824,8 @@ def main(data_dict: dict) -> dict:
     except ApolloError:
         raise
     except ValueError as e:
-        raise ApolloError(400, str(e), type="BAD_REQUEST")
+        # Not an exception from a library that has seen the prompt.
+        raise ApolloError(400, str(e), type="BAD_REQUEST")  # safe-error-text: our own validation message
 
     except APIConnectionError as e:
         raise ApolloError(
@@ -807,15 +841,18 @@ def main(data_dict: dict) -> dict:
             429, "Rate limit exceeded, please try again later", type="RATE_LIMIT", details={"retry_after": 60}
         )
     except BadRequestError as e:
-        raise ApolloError(400, str(e), type="BAD_REQUEST")
+        # Not `str(e)`: Anthropic echoes the offending request, which is the prompt.
+        raise ApolloError(400, f"The AI service rejected the request ({type(e).__name__})", type="BAD_REQUEST")
     except PermissionDeniedError as e:
         raise ApolloError(403, "Not authorized to perform this action", type="FORBIDDEN")
     except NotFoundError as e:
         raise ApolloError(404, "Resource not found", type="NOT_FOUND")
     except UnprocessableEntityError as e:
-        raise ApolloError(422, str(e), type="INVALID_REQUEST")
+        raise ApolloError(
+            422, f"The AI service could not process the request ({type(e).__name__})", type="INVALID_REQUEST",
+        )
     except InternalServerError as e:
         raise ApolloError(500, "The Anthropic AI Service encountered an error", type="PROVIDER_ERROR")
     except Exception as e:
-        logger.error(f"Unexpected error during chat generation: {str(e)}")
-        raise ApolloError(500, str(e))
+        logger.error(f"Unexpected error during chat generation ({type(e).__name__})")
+        raise ApolloError(500, f"Unexpected error during chat generation ({type(e).__name__})")

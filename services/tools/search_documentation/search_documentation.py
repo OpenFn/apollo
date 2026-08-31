@@ -5,17 +5,16 @@ Can be called:
 1. As a standalone service via entry.py: bun py tools/search_documentation
 2. As a tool by supervisor via search_documentation_tool()
 """
-import os
 import sys
-from pathlib import Path
-from typing import Dict, List, Optional
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict
 
 # Import utilities from services directory
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from util import create_logger, ApolloError
 from search_docsite.search_docsite import DocsiteSearch
+from util import ApolloError, create_logger
 
 logger = create_logger(__name__)
 
@@ -34,7 +33,7 @@ class SearchPayload:
 
         return cls(
             query=data["query"],
-            num_results=data.get("num_results", 5)
+            num_results=data.get("num_results", 5),
         )
 
 
@@ -54,7 +53,7 @@ def _search_implementation(query: str, num_results: int) -> Dict:
         query=query,
         top_k=num_results,
         threshold=0.7,  # Only return relevant results
-        strategy='semantic'
+        strategy='semantic',
     )
 
     logger.info(f"Found {len(search_results)} documentation results")
@@ -68,10 +67,10 @@ def _search_implementation(query: str, num_results: int) -> Dict:
                 "title": r.metadata.get("doc_title", "Unknown"),
                 "content": r.text[:500],
                 "score": r.score,
-                "url": r.metadata.get("url", "")
+                "url": r.metadata.get("url", ""),
             }
             for r in search_results
-        ]
+        ],
     }
 
 
@@ -90,8 +89,8 @@ def main(data: Dict) -> Dict:
     except ApolloError:
         raise
     except Exception as e:
-        logger.exception("Error in search_documentation service")
-        raise ApolloError(500, f"Documentation search failed: {str(e)}")
+        logger.error(f"Error in search_documentation service ({type(e).__name__})")
+        raise ApolloError(500, f"Documentation search failed ({type(e).__name__})")
 
 
 def search_documentation_tool(tool_input: Dict) -> str:
@@ -139,5 +138,5 @@ You can now synthesize this information into a helpful response."""
         return formatted_results
 
     except Exception as e:
-        logger.exception("Error in search_documentation tool")
-        raise ApolloError(500, f"Documentation search failed: {str(e)}")
+        logger.error(f"Error in search_documentation tool ({type(e).__name__})")
+        raise ApolloError(500, f"Documentation search failed ({type(e).__name__})")

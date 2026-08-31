@@ -40,6 +40,19 @@ def test_generate_queries_raises_apollo_error_on_invalid_json():
     assert exc.value.type == "INVALID_LLM_RESPONSE"
 
 
+def test_generate_queries_error_does_not_carry_the_response_body():
+    """The unparseable response is the model discussing the user's job code,
+    and these details reach both the caller and the Langfuse trace."""
+    secret = "const API_KEY = 'sk-live-do-not-log-me';"
+
+    with patch.object(rd, "call_llm", return_value=(secret, {})):
+        with pytest.raises(ApolloError) as exc:
+            rd.generate_queries("content", client=MagicMock())
+
+    assert exc.value.details == {"response_length": len(secret)}
+    assert secret not in str(exc.value.message)
+
+
 # --- call_llm ------------------------------------------------------------------
 
 def test_call_llm_returns_text_and_usage_on_success():
