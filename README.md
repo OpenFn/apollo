@@ -194,11 +194,12 @@ is to agree with Elixir, not with the spec.
 
 `tools/unicode_parity` is the harness that checks it. Run `python3 edges.py`,
 then `elixir probe.exs`, then `python3 check.py` with the Elixir version Lightning runs; `--tables`
-prints the literals to paste back into `name_rules`. It checks seven things:
-every codepoint's break class, every codepoint's canonical combining class, the
-`Extended_Pictographic` set, the trim set, what a GB11 emoji run may be
-separated from its joiner by, cluster boundaries over a generated corpus, and
-NFC over the same corpus.
+prints the literals to paste back into `name_rules`. It checks five things:
+every codepoint's break class, the `Extended_Pictographic` set, the trim set,
+what a GB11 emoji run may be separated from its joiner by, and cluster
+boundaries over a generated corpus. Normalisation is not among them:
+`normalize_nfc` is the standard library's, so there is no table of ours to
+check against Elixir.
 
 `Extended_Pictographic` needs its own check because it is *not* a break class,
 so a per-codepoint sweep cannot see it — an over-broad set there silently
