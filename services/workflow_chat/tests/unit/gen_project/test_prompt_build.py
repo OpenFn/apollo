@@ -1,3 +1,5 @@
+import pytest
+from name_rules import UNICODE_FLAG_ENV, describe_rule_for_prompt
 from workflow_chat.gen_project_prompt import build_prompt
 
 
@@ -77,3 +79,47 @@ def test_build_prompt_readonly_mode():
     assert "name: readonly-workflow" in system_msg
 
     assert prompt[-1]["content"] == "What does this workflow do?"
+
+
+@pytest.mark.parametrize("mode", ["false", "true"])
+def test_build_prompt_states_the_active_name_rule(monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
+    """The rule the model is told and the rule the sanitizer enforces come from
+    the same source, so the prompt has to move when the flag moves."""
+    monkeypatch.setenv(UNICODE_FLAG_ENV, mode)
+
+    system_msg, _ = build_prompt(content="Create a workflow")
+
+    assert describe_rule_for_prompt() in system_msg
+    assert "{name_rule}" not in system_msg
+
+
+def test_build_prompt_name_rule_differs_between_modes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(UNICODE_FLAG_ENV, "false")
+    ascii_msg, _ = build_prompt(content="Create a workflow")
+
+    monkeypatch.setenv(UNICODE_FLAG_ENV, "true")
+    unicode_msg, _ = build_prompt(content="Create a workflow")
+
+    assert ascii_msg != unicode_msg
+    assert "any script" in unicode_msg
+    assert "any script" not in ascii_msg
+
+
+def test_a_prompt_that_drops_the_name_rule_token_is_rejected_loudly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`str.format` ignores an unused keyword, so losing the token is silent.
+
+    The prompt would then state no naming rule at all while the sanitizer
+    carried on enforcing one, and the model would be left guessing.
+    """
+    from workflow_chat import gen_project_prompt
+
+    monkeypatch.setattr(
+        gen_project_prompt.config_loader,
+        "get_prompt",
+        lambda name: "no token here {adaptors}" if name == "general_knowledge" else "x",
+    )
+
+    with pytest.raises(ValueError, match="did not render the step-name rule"):
+        gen_project_prompt.build_prompt(content="Create a workflow")
