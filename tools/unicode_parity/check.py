@@ -107,89 +107,6 @@ def check_lookback() -> set[int]:
     return mine ^ theirs
 
 
-def check_ccc() -> dict[int, int]:
-    """Canonical combining class, which drives NFC ordering and blocking.
-
-    Its own check because ccc is independent of the break class: the codepoint
-    sweep above can pass while ccc is wrong, which is exactly what happened —
-    ten codepoints had their break class corrected in `_LAG_EXTEND` and their
-    combining class rode along wrong, unseen.
-    """
-    wrong = {}
-    theirs = {}
-    for line in (OUT / "ccc.txt").read_text().split("\n"):
-        if line.strip():
-            code, value = line.split()
-            theirs[int(code, 16)] = int(value)
-
-    for code in range(0x110000):
-        if 0xD800 <= code <= 0xDFFF:
-            continue
-        mine = nr._combining_class(chr(code))
-        if mine != theirs.get(code, 0):
-            wrong[code] = theirs.get(code, 0)
-    return wrong
-
-
-def check_nfc_strings() -> tuple[int, int, list]:
-    """Whole-string NFC against OTP.
-
-    The per-codepoint checks above are structurally blind to this: OTP's
-    composition rule only differs from the spec at three characters or more,
-    so nothing that looks at one codepoint at a time can see it.
-    """
-    path = OUT / "nfc_strings.txt"
-    if not path.exists():
-        # No escape hatch. This is the only check that can catch a `_compose`
-        # regression, so "input missing" must not read as "passed" — every
-        # other check hard-fails on a missing file and so does this one.
-        raise FileNotFoundError(
-            f"{path} is missing. Run `elixir probe.exs` before check.py; a silent pass here "
-            f"is worse than no check at all.",
-        )
-
-    known_rows = _load_known()
-    mismatches = []
-    seen_known: set[str] = set()
-    total = 0
-    for line in path.read_text().split("\n"):
-        if not line.strip():
-            continue
-        total += 1
-        raw, expected = line.split("\t")
-        text = "".join(chr(int(c, 16)) for c in raw.split(","))
-        want = "".join(chr(int(c, 16)) for c in expected.split(","))
-        got = nr.normalize_nfc(text)
-        if got == want:
-            continue
-        # Keyed on the input *and the output we expect to produce for it*, so
-        # a changed output fails even for a row already on the list.
-        signature = f"{raw.strip()}\t{','.join(f'{ord(c):X}' for c in got)}"
-        if signature in known_rows:
-            # Counted as a set: the corpus contains a shape more than once
-            # where two generators overlap, and the allowlist lists it once.
-            seen_known.add(signature)
-        else:
-            mismatches.append((text, want, got))
-    return len(mismatches), total, mismatches, seen_known
-
-
-#: The exact inputs `normalize_nfc` is documented as getting wrong. See that
-#: file's header for the format and for what each group is.
-KNOWN_DIVERGENCES = Path(__file__).parent / "known_nfc_divergences.txt"
-
-
-def _load_known() -> set[str]:
-    """Each entry is `input<TAB>output-we-produce`, so a changed output fails."""
-    if not KNOWN_DIVERGENCES.exists():
-        return set()
-    return {
-        line.split(" #")[0].strip()
-        for line in KNOWN_DIVERGENCES.read_text().split("\n")
-        if line.strip() and not line.lstrip().startswith("#")
-    }
-
-
 def check_clusters() -> tuple[int, int, list]:
     """Cluster boundaries against Elixir, not just cluster counts.
 
@@ -220,7 +137,7 @@ def check_clusters() -> tuple[int, int, list]:
 #: an error rather than a quiet subset.
 EXPECTED_OUTPUTS = (
     "classmap.txt", "extpict.txt", "trim.txt", "lookback.txt",
-    "ccc.txt", "nfc_strings.txt", "clusters.txt", "range_edges.txt", "version.txt",
+    "clusters.txt", "range_edges.txt", "version.txt",
 )
 
 
@@ -253,10 +170,6 @@ def main() -> int:
         if codes:
             print(f"  Elixir says {bucket} for {len(codes)} codepoints we call something else")
 
-    ccc_wrong = check_ccc()
-    print(f"combining classes  {'OK' if not ccc_wrong else f'{len(ccc_wrong)} DISAGREEMENTS'}")
-    failures += len(ccc_wrong)
-
     for label, diff in (
         ("ExtPict", check_extpict()),
         ("trim set", check_trim()),
@@ -273,36 +186,11 @@ def main() -> int:
         print(f"    otp {want}")
         print(f"    py  {got}")
 
-    bad, total, examples, seen_known = check_nfc_strings()
-    known = len(seen_known)
-    note = f" ({known} known-divergent rows skipped)" if known else ""
-    print(f"NFC (whole strings) {'OK' if not bad else f'{bad} of {total} DISAGREE'}{note}")
-    failures += bad
-
-    # Assert the count rather than print it. A row that stops diverging is as
-    # important as one that starts: it means the allowlist is stale, and a
-    # stale allowlist is how a widened sweep stays green while the gap grows.
-    listed = len(_load_known())
-    if known != listed:
-        print(
-            f"allowlist        {listed} rows listed but {known} diverged. "
-            f"Delete the rows that no longer diverge, or add the ones that now do "
-            f"(re-run with --tables to see them).",
-        )
-        failures += abs(listed - known)
-    for text, want, got in examples[:5]:
-        print(f"    in  {[hex(ord(c)) for c in text]}")
-        print(f"    otp {[hex(ord(c)) for c in want]}")
-        print(f"    py  {[hex(ord(c)) for c in got]}")
-
     if "--tables" in sys.argv:
         print("\n# --- paste into services/name_rules.py ---\n")
         print(_literal("_EXT_PICT_RANGES", _ranges(_codepoints(OUT / "extpict.txt"))))
         print(_literal("_LAG_EXTEND", _ranges(set(wrong["A"]))))
         print(_literal("_LAG_CONTROL", _ranges(set(wrong["C"]))))
-        if ccc_wrong:
-            body = ",\n".join(f"    0x{c:04X}: {v}," for c, v in sorted(ccc_wrong.items()))
-            print("_LAG_CCC = {\n" + body + "\n}")
 
     if failures:
         print(

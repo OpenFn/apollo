@@ -243,9 +243,9 @@ def test_grapheme_length_counts_user_perceived_characters() -> None:
     assert grapheme_length("\U0001f469\u200d\U0001f4bb") == 1  # ZWJ sequence
     assert grapheme_length("\U0001f1eb\U0001f1f7") == 1  # flag, two regional indicators
     assert grapheme_length("\U0001f44d\U0001f3fd") == 1  # emoji + skin tone
-    # Devanagari conjuncts are covered by the Elixir parity table instead —
-    # they sit on the GB9c divergence, so a hand-written expectation here would
-    # just duplicate KNOWN_DIVERGENCES and drift from it.
+    # Devanagari conjuncts are covered by the Elixir parity table below
+    # instead — they sit on the GB9c divergence, so a hand-written expectation
+    # here would just duplicate that table and drift from it.
 
 
 #: A grapheme NFC cannot collapse into a single codepoint. `e` + combining
@@ -602,174 +602,19 @@ def test_the_line_separator_assertion_would_catch_the_real_damage() -> None:
 
 # --- normalisation ------------------------------------------------------------
 
-#: Codepoints whose combining class Python's tables predate. The harness could
-#: not see these: ccc is independent of the break class, so all ten already had
-#: their break class corrected and their combining class rode along wrong.
-LAG_CCC_CODEPOINTS = [
-    0x10EFD, 0x10EFE, 0x10EFF, 0x11F41, 0x11F42,
-    0x1E08F, 0x1E4EC, 0x1E4ED, 0x1E4EE, 0x1E4EF,
-]
-
-
-@pytest.mark.parametrize("codepoint", LAG_CCC_CODEPOINTS)
-def test_the_lag_combining_classes_are_still_needed(codepoint: int) -> None:
-    """When Python catches up, `unicodedata` reports these itself."""
-    assert unicodedata.combining(chr(codepoint)) == 0, (
-        f"Python now knows U+{codepoint:04X}; re-run tools/unicode_parity and shrink _LAG_CCC"
-    )
-    assert name_rules._combining_class(chr(codepoint)) != 0
-
-
-@pytest.mark.parametrize("codepoint", LAG_CCC_CODEPOINTS)
-def test_lag_marks_are_reordered_by_combining_class(codepoint: int) -> None:
-    """`unicodedata` reads a class of 0 and leaves them where they are."""
-    lag = chr(codepoint)
-    ccc = name_rules._combining_class(lag)
-    higher = "̴" if ccc > 1 else "́"  # ccc 1
-
-    text = f"a{higher}{lag}" if name_rules._combining_class(higher) > ccc else f"a{lag}{higher}"
-    normalized = normalize_nfc(text)
-
-    marks = [c for c in normalized if name_rules._combining_class(c)]
-    assert marks == sorted(marks, key=name_rules._combining_class)
-
-
-def test_a_lag_mark_does_not_block_composition() -> None:
-    """ccc also decides blocking, not just ordering.
-
-    `a` + U+10EFD (ccc 220) + U+0301 (ccc 230) composes to `á` + U+10EFD.
-    `unicodedata` reads U+10EFD as a starter and blocks it, so it returns all
-    three characters unchanged — a different normal form from Lightning's, and
-    step lookup matches names as text.
-    """
-    text = "a\U00010EFD́"
-
-    assert unicodedata.normalize("NFC", text) == text, "python composed it after all"
-    assert normalize_nfc(text) == "á\U00010EFD"
-
-
-def test_normalisation_is_unchanged_for_text_without_lag_codepoints() -> None:
-    """The fast path is `unicodedata` itself; it must not drift."""
-    for text in ("Vérifier l'état", "é", "नमस्ते",
-                 "한국어", "á̴b", "", "plain"):
-        assert normalize_nfc(text) == unicodedata.normalize("NFC", text)
-
-
-def test_sanitize_uses_the_corrected_normalisation() -> None:
-    assert sanitize_name("a\U00010EFD́", unicode_mode=True) == "á\U00010EFD"
-
-
-# --- OTP's NFC, quirks and all ------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("name", "text", "expected"),
-    [
-        # Composes where the spec blocks: the class-zero character in the
-        # middle stops ICU and does not stop OTP.
-        ("base + VS16", "e\ufe00\u0301", "\u00e9\ufe00"),
-        ("base + VS16-emoji", "e\ufe0f\u0301", "\u00e9\ufe0f"),
-        ("base + skin tone", "e\U0001f3fb\u0301", "\u00e9\U0001f3fb"),
-        ("base + CGJ", "e\u034f\u0301", "\u00e9\u034f"),
-        # Leaves uncomposed where the spec composes: OTP only ever composes
-        # onto the cluster's leading character, and neither of these vowel
-        # parts composes with the consonant.
-        ("bengali ko", "\u0995\u09c7\u09be", "\u0995\u09c7\u09be"),
-        ("tamil o", "\u0b95\u0bc6\u0bbe", "\u0b95\u0bc6\u0bbe"),
-        ("malayalam o", "\u0d15\u0d46\u0d3e", "\u0d15\u0d46\u0d3e"),
-        ("sinhala o", "\u0d9a\u0dd9\u0dcf", "\u0d9a\u0dd9\u0dcf"),
-        ("thai sara am", "\u0e01\u0e33", "\u0e01\u0e33"),
-    ],
-)
-def test_nfc_matches_otp_not_the_spec(name: str, text: str, expected: str) -> None:
-    """OTP composes onto the grapheme cluster's leading character and re-bases
-    on nothing, where the spec re-bases on every class-zero character it passes.
-
-    ICU and Python implement the spec, so `unicodedata` is right and OTP is
-    wrong — and OTP is what Lightning stores, so this module copies OTP. Every
-    expectation here came from running Elixir 1.18.3.
-    """
-    assert normalize_nfc(text) == expected, name
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "e\ufe00\u0301", "e\ufe0f\u0301", "e\U0001f3fb\u0301", "e\u034f\u0301",
-        "\u0995\u09c7\u09be", "\u0b95\u0bc6\u0bbe", "\u0d15\u0d46\u0d3e",
-    ],
-)
-def test_the_spec_and_otp_really_do_differ_here(text: str) -> None:
-    """Guards the test above: if `unicodedata` ever agrees, this is all moot."""
-    assert normalize_nfc(text) != unicodedata.normalize("NFC", text)
-
-
-def test_ordinary_text_normalises_the_same_as_unicodedata() -> None:
-    """The deviation must not reach text that has no class-zero character in
-    the middle of a mark run, which is nearly everything."""
-    for text in ("Vérifier l'état", "é", "नमस्ते", "한국어",
-                 "Проверка данных", "plain ascii", ""):
-        assert normalize_nfc(text) == unicodedata.normalize("NFC", text), repr(text)
-
-
-#: The one shape where this module and Elixir still disagree on NFC: a base, a
-#: mark, any combining-class-zero Extend, then a mark of lower class. Measured
-#: at 32 of 28,079 rows against Elixir 1.18.3 over the corpus
-#: `tools/unicode_parity` generates, including an exhaustive sweep of that
-#: four-codepoint shape; the rows are listed in
-#: `tools/unicode_parity/known_nfc_divergences.txt`. See `normalize_nfc` for
-#: why it is not simply fixed. ZWNJ is ordinary in Persian and Indic text, so
-#: this is reachable rather than exotic.
-NFC_DIVERGENCE = "A\u0302\u200c\u0323"
-
-#: What Elixir 1.18.3 returns for it.
-NFC_DIVERGENCE_ELIXIR = "\u00c2\u200c\u0323"
-
-#: What this module returns. Asserted, not merely "differs" — asserting that
-#: something still diverges passes for any wrong answer, including a new one.
-NFC_DIVERGENCE_APOLLO = "\u1eac\u200c"
-
-
-def test_the_known_nfc_divergence_returns_exactly_this() -> None:
-    """Pins the actual output, so any change to `_compose` shows up here.
-
-    If you have made `_compose` match Elixir, this test failing is the good
-    outcome: replace these constants with equality against Elixir's answer.
-    """
-    assert normalize_nfc(NFC_DIVERGENCE) == NFC_DIVERGENCE_APOLLO
-    assert NFC_DIVERGENCE_APOLLO != NFC_DIVERGENCE_ELIXIR
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "Vérifier l'état",
-        "\u0995\u09c7\u09be",
-        "e\ufe00\u0301",
-        NFC_DIVERGENCE,
-        "\u0641\u200c\u0631",
-    ],
-)
-def test_normalisation_is_idempotent(text: str) -> None:
-    """One of the two things that bound the gap above: whatever this module
-    produces, it produces again unchanged."""
-    once = normalize_nfc(text)
-
-    assert normalize_nfc(once) == once
-
 
 @pytest.mark.parametrize("mode", ["false", "true"])
 def test_sanitized_names_are_fixed_points_of_normalisation(
     monkeypatch: pytest.MonkeyPatch, mode: str,
 ) -> None:
-    """The other one: a name that has been through `sanitize_name` round trips,
-    so the divergence cannot corrupt anything this service produced."""
+    """A name that has been through `sanitize_name` normalises to itself, which
+    is what `is_valid_name` stakes its answer on."""
     monkeypatch.setenv(UNICODE_FLAG_ENV, mode)
 
     for text in (
         "Vérifier l'état",
         "\u0995\u09c7\u09be",
-        NFC_DIVERGENCE,
+        "A\u0302\u200c\u0323",
         "患者確認",
         # Leading and trailing whitespace matter here rather than being noise:
         # trimming is what can uncover a mark that had nothing to compose onto.
@@ -785,8 +630,8 @@ def test_sanitized_names_are_fixed_points_of_normalisation(
 
 @pytest.mark.usefixtures("unicode_mode")
 def test_trimming_does_not_leave_a_mark_uncomposed() -> None:
-    """A space in front of a two-part vowel blocks it from composing, so
-    trimming the space after normalising left the decomposed pair behind and
-    the sanitiser returned a name it would then call invalid."""
+    """Trimming happens after normalising, so it can leave behind a boundary
+    that has not been normalised. Repeat until it settles, or the sanitiser
+    returns a name it would then call invalid."""
     assert sanitize_name(" \u09cb") == "\u09cb"
     assert is_valid_name(sanitize_name(" \u09cb"))

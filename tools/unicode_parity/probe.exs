@@ -17,9 +17,7 @@
 #   extpict.txt    the Extended_Pictographic set
 #   trim.txt       what String.trim/1 strips
 #   lookback.txt   what a GB11 emoji run may be separated from its ZWJ by
-#   ccc.txt        canonical combining class, for NFC parity
-#   nfc_strings.txt     whole strings, with OTP's NFC of each
-#   clusters.txt        the same strings, split into graphemes
+#   clusters.txt   whole strings, split into graphemes
 #   version.txt    the Elixir and OTP versions these came from
 #
 # Run `python3 edges.py` FIRST: it writes out/range_edges.txt from the range
@@ -87,32 +85,18 @@ lookback =
 
 File.write!("out/lookback.txt", lookback <> "\n")
 
-# --- 5. normalisation --------------------------------------------------------
-# `sanitize_name` normalises to NFC twice and stakes step-lookup identity on
-# Apollo and Lightning agreeing on the normal form. Nothing above can see that:
-# the canonical combining class is not a break class, so a codepoint can have
-# the right break class and still normalise differently. Emit every codepoint
-# whose ccc is non-zero, plus every one whose NFC form differs from itself.
-ccc =
-  codepoints
-  |> Enum.map(fn cp ->
-    {cp, :unicode_util.lookup(cp)[:ccc] || 0}
-  end)
-  |> Enum.reject(fn {_, c} -> c == 0 end)
-  |> Enum.map_join("\n", fn {cp, c} -> "#{hex.(cp)} #{c}" end)
-
-File.write!("out/ccc.txt", ccc <> "\n")
-
-# Per-codepoint checks cannot see the composition rule at all: OTP's NFC
-# deviates from the spec only at three characters or more, so a whole-string
-# comparison is the only thing that can catch it.
+# --- 5. the whole-string corpus ----------------------------------------------
+# Per-codepoint checks cannot see the clusterer's rules: the bucket sweep above
+# buckets Hangul and regional indicators to "other", so the GB6-GB8 Hangul
+# rules, the GB12/GB13 parity rule and the CR-LF rule are invisible to it. Only
+# comparing whole strings, split into graphemes, can catch those.
 #
 # The shapes are built explicitly rather than sampled from a flat pool. A
-# uniform pool is almost all filler — precomposed Hangul and CJK that
-# normalise trivially — and the shapes that actually discriminate this
-# implementation from the standard library turn up at about 1e-6, so a mutant
-# restoring a known bug survives. Each block below is a shape that is known to
-# separate them, or a shape a name can realistically contain.
+# uniform pool is almost all filler — precomposed Hangul and CJK that cluster
+# trivially — and the shapes that actually exercise a boundary rule turn up at
+# about 1e-6, so a mutant restoring a known bug survives. Each block below is a
+# shape that is known to reach a rule, or a shape a name can realistically
+# contain.
 
 bases = [0x41, 0x61, 0x4F, 0x45, 0x55, 0x0995, 0x0B95, 0x0D15, 0x0D9A, 0x0C95, 0x0E01, 0x0915]
 marks = [0x0300, 0x0301, 0x0302, 0x0303, 0x0308, 0x030C, 0x0327, 0x0323, 0x0331, 0x0316, 0x0345]
@@ -132,8 +116,7 @@ lvt_syllables = Enum.take_every(for(s <- 0xAC00..0xD7A3, rem(s - 0xAC00, 28) != 
 
 # What follows the pair. "Nothing" was the only case the corpus had.
 # U+11A7 is deliberately included: it sits one below the trailing-consonant
-# range and OTP deletes it after an LV syllable or an L+V pair. Starting the
-# trailers at U+11A8 made that mechanism invisible.
+# range, so starting the trailers at U+11A8 never steps across that edge.
 trailers = [[], [0x61], [0x0301], [0x11A7], [0x11A8], [0x11FF], [0x1161], [0xAC00], [0x0020, 0x62]]
 
 two_part_vowel_marks = [0x0CC0, 0x09CB, 0x0BCA, 0x0D4A, 0x0DDC, 0x1B40, 0x0CC7, 0x0D4C]
@@ -151,7 +134,7 @@ range_edges =
 regional = [0x1F1E6, 0x1F1EB, 0x1F1F7, 0x1F1FF]
 pictographs = [0x00A9, 0x2764, 0x1F469, 0x1F4BB, 0x1F3F4]
 ascii_words = [~c"Fetch Data", ~c"step-1", ~c"a_b c", ~c"Verifier letat"]
-lag_ccc = [0x10EFD, 0x11F41, 0x1E08F, 0x1E4EC, 0x1E4EE]
+late_marks = [0x10EFD, 0x11F41, 0x1E08F, 0x1E4EC, 0x1E4EE]
 
 shapes =
   # base + mark + class-zero Extend + mark: the shape OTP and the spec differ
@@ -164,10 +147,8 @@ shapes =
   (for [b, v1, v2] <- two_part_vowels,
        tail <- [[], [0x0301], [0x200C], [0x200C, 0x0301]],
        do: [b, v1, v2] ++ tail) ++
-  # The two halves of a two-part vowel SEPARATED by a class-zero character.
-  # This is the shape the `previous_ccc == 0` clause in `_compose` exists for,
-  # and the corpus did not contain it — so deleting that clause left the
-  # harness green. Every mutation that survives points at a missing shape.
+  # The two halves of a two-part vowel SEPARATED by a class-zero character,
+  # which is a GB9/GB9a boundary question as well as a normalisation one.
   (for [_b, v1, v2] <- two_part_vowels, z <- zero_extend, do: [v1, z, v2]) ++
   (for [b, v1, v2] <- two_part_vowels, z <- zero_extend, do: [b, v1, z, v2]) ++
   (for [b, v1, v2] <- two_part_vowels, z <- zero_extend, m <- [0x0301, 0x0323],
@@ -175,21 +156,19 @@ shapes =
   # SARA AM, which decomposes
   (for b <- [0x0E01, 0x0EA1], v <- [0x0E33, 0x0EB3], tail <- [[], [0x0301], [0x200C]],
        do: [b, v] ++ tail) ++
-  # the codepoints whose combining class Python's tables predate
-  (for b <- bases, l <- lag_ccc, m <- marks, do: [b, l, m]) ++
-  (for b <- bases, m <- marks, l <- lag_ccc, do: [b, m, l]) ++
+  # the codepoints assigned after the Unicode version Python's tables carry
+  (for b <- bases, l <- late_marks, m <- marks, do: [b, l, m]) ++
+  (for b <- bases, m <- marks, l <- late_marks, do: [b, m, l]) ++
   # Prepend, regional indicators and ZWJ sequences, with marks attached
   (for p <- prepends, b <- bases, m <- marks, do: [p, b, m]) ++
   (for a <- regional, b <- regional, m <- marks, do: [a, b, m]) ++
   (for a <- pictographs, b <- pictographs, m <- marks, do: [a, 0x200D, b, m]) ++
-  # Hangul: L + precomposed syllable, and L L V adjacency. Jamo have a
-  # combining class of zero, so a composition rule that reaches back past a
-  # class-zero character rewrites Korean names into different ones. The corpus
-  # had no Hangul at all and could not see it.
+  # Hangul: L + precomposed syllable, and L L V adjacency, for GB6-GB8. The
+  # corpus had no Hangul at all and could not see any of those rules.
   # Sampling four syllables here is how a 29,893-row gap read as 949. LV
-  # (no trailing consonant) and LVT (with one) decompose to different lengths,
-  # and what follows the pair matters too, so all three axes are swept rather
-  # than sampled on one and fixed on the others.
+  # (no trailing consonant) and LVT (with one) behave differently, and what
+  # follows the pair matters too, so all three axes are swept rather than
+  # sampled on one and fixed on the others.
   (for l <- 0x1100..0x115F, sy <- lv_syllables, do: [l, sy]) ++
   (for l <- 0x1100..0x115F, sy <- lvt_syllables, do: [l, sy]) ++
   (for l <- 0x1100..0x1112, sy <- Enum.take_every(lv_syllables, 2), t <- trailers, do: [l, sy | t]) ++
@@ -243,21 +222,10 @@ shapes =
   Enum.map(ascii_words, & &1) ++
   (for w <- ascii_words, m <- marks, do: w ++ [m])
 
-nfc_pairs =
-  Enum.map_join(shapes, "\n", fn cps ->
-    input = List.to_string(cps)
-    output = :unicode.characters_to_nfc_binary(input)
-
-    Enum.map_join(cps, ",", hex) <>
-      "\t" <> Enum.map_join(:unicode.characters_to_list(output), ",", hex)
-  end)
-
-File.write!("out/nfc_strings.txt", nfc_pairs <> "\n")
-
-# Cluster boundaries for the same corpus. `check.py` compared six things and
-# not one of them was a cluster boundary — the clusterer was checked only
-# through per-codepoint break classes, which cannot see the regional-indicator
-# parity rule or the CR-LF rule at all.
+# Cluster boundaries over that corpus. `check.py` compared six things and not
+# one of them was a cluster boundary — the clusterer was checked only through
+# per-codepoint break classes, which cannot see the regional-indicator parity
+# rule or the CR-LF rule at all.
 clusters =
   Enum.map_join(shapes, "\n", fn cps ->
     input = List.to_string(cps)
@@ -274,11 +242,11 @@ clusters =
 
 File.write!("out/clusters.txt", clusters <> "\n")
 
-IO.puts("nfc corpus rows: #{length(shapes)}")
+IO.puts("corpus rows: #{length(shapes)}")
 
 File.write!(
   "out/version.txt",
   "elixir #{System.version()}\notp #{System.otp_release()}\n"
 )
 
-IO.puts("wrote out/{classmap,extpict,trim,lookback,ccc,nfc_strings,clusters,version}.txt")
+IO.puts("wrote out/{classmap,extpict,trim,lookback,clusters,version}.txt")

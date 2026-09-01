@@ -352,8 +352,6 @@ def _break_class(char: str) -> int:  # noqa: PLR0911, PLR0912 - one branch per U
     return _OTHER
 
 
-_HANGUL_CLASSES = (_L, _V, _T, _LV, _LVT)
-
 #: What an emoji run's lookback may cross on its way back to the pictograph.
 #: UAX #29 GB11 says Extend* only; Elixir also crosses SpacingMark, verified
 #: against 1.18.3 over every intervening class (Other, ZWJ, Prepend, Control
@@ -443,147 +441,24 @@ def truncate_graphemes(text: str, limit: int) -> str:
 
 # Normalisation.
 
-#: Canonical combining class for codepoints Python's `unicodedata` does not
-#: know yet. Break class and ccc are independent properties, so the codepoint
-#: sweep that found `_LAG_EXTEND` could not see this: these ten already had
-#: their break class corrected there, and their ccc rode along wrong.
-#: Regenerate with tools/unicode_parity/probe.exs (see ccc).
-_LAG_CCC = {
-    0x10EFD: 220, 0x10EFE: 220, 0x10EFF: 220,
-    0x11F41: 9, 0x11F42: 9,
-    0x1E08F: 230,
-    0x1E4EC: 232, 0x1E4ED: 232, 0x1E4EE: 220, 0x1E4EF: 230,
-}
-
-
-def _combining_class(char: str) -> int:
-    """Canonical combining class, with the codepoints Python does not know yet."""
-    return _LAG_CCC.get(ord(char)) or unicodedata.combining(char)
-
-
-def _canonical_order(text: str) -> str:
-    """Reorder combining marks by combining class, for the codepoints Python misses.
-
-    `unicodedata.normalize` reads a ccc of 0 for anything it thinks is
-    unassigned, so it leaves those marks where they are instead of sorting them
-    into the run. This corrective pass sorts each run of non-starters with the
-    merged table.
-    """
-    chars = list(text)
-    start = None
-    for index in range(len(chars) + 1):
-        ccc = _combining_class(chars[index]) if index < len(chars) else 0
-        if ccc == 0:
-            if start is not None and index - start > 1:
-                chars[start:index] = sorted(chars[start:index], key=_combining_class)
-            start = None
-        elif start is None:
-            start = index
-    return "".join(chars)
-
-
-def _compose_pair(first: str, second: str) -> str | None:
-    composed = unicodedata.normalize("NFC", first + second)
-    return composed if len(composed) == 1 else None
-
-
-def _compose(text: str) -> str:
-    """Canonical composition the way OTP does it, which is not the way the spec does.
-
-    The spec composes a mark onto the nearest preceding starter unless
-    something between them blocks it (an intervening character whose combining
-    class is greater than or equal to the mark's). OTP does neither half of
-    that: it composes onto the *grapheme cluster's leading character* and
-    ignores blocking entirely.
-
-    So `"e" + VS16 + acute` is three characters to the spec -- VS16 has a
-    combining class of 0 and blocks the acute -- and `"é" + VS16` to OTP. ICU
-    and Python agree with the spec, which makes OTP the deviant one, and this
-    function copies it anyway: Lightning normalises with Elixir, and step
-    lookup matches names as text, so a name Apollo normalises differently is a
-    name Apollo cannot find.
-
-    The difference is not exotic: it reaches the two-part vowels of most Indic
-    scripts and any base followed by a combining-class-zero Extend character.
-    """
-    composed = []
-    for cluster in grapheme_clusters(text):
-        if any(_break_class(char) in _HANGUL_CLASSES for char in cluster):
-            # Hangul takes the standard-library path because the rule below is
-            # actively wrong here: jamo have a combining class of zero, so
-            # "reach back to the cluster lead" reaches straight past an
-            # intervening jamo, and `ᄀ까` (U+1100 U+AE4C) came out as `가ᄁ` —
-            # a Korean step name rewritten into a different one.
-            #
-            # This trades one divergence for another rather than fixing it, and
-            # four separate mechanisms are involved that do not all point the
-            # same way: a fix aimed at the obvious one makes another worse.
-            # Read the group 2 notes in
-            # `tools/unicode_parity/known_nfc_divergences.txt` before changing
-            # anything here. Settling it is OpenFn/apollo#655, which gates
-            # APOLLO_UNICODE_STEP_NAMES.
-            composed.append(unicodedata.normalize("NFC", cluster))
-            continue
-
-        lead, trailing = cluster[0], []
-        previous_ccc = None
-        for char in cluster[1:]:
-            ccc = _combining_class(char)
-            # Standard blocking, but measured against the cluster's lead, which
-            # never moves. The spec re-bases on every class-zero character it
-            # passes; OTP does not, and that is the whole difference.
-            if previous_ccc is None or previous_ccc == 0 or previous_ccc < ccc:
-                merged = _compose_pair(lead, char)
-                if merged is not None:
-                    lead = merged
-                    continue
-            trailing.append(char)
-            previous_ccc = ccc
-        composed.append(lead)
-        composed.extend(trailing)
-    return "".join(composed)
-
 
 def normalize_nfc(text: str) -> str:
-    """NFC as Elixir performs it, which is what Lightning stores.
+    """NFC, straight out of the standard library.
 
-    Two deliberate departures from `unicodedata.normalize("NFC", ...)`, both to
-    match Elixir: the combining classes Python's tables predate (`_LAG_CCC`),
-    and OTP's composition rule (`_compose`).
+    This was hand-written until recently, to reproduce a composition bug in
+    OTP 27's normaliser. Lightning ran on OTP 27, Lightning is what stores the
+    name, and step lookup matches names as text, so a name Apollo normalised
+    differently was a name Apollo could not find. Lightning#5109 moves
+    Lightning to OTP 28, which fixes that bug, and the standard library is now
+    the closer of the two: measured over the 72,269-row corpus restricted to
+    inputs that could be a step name, Python disagrees with OTP 28 on 16,622
+    rows and the hand-written composer on 16,898.
 
-    KNOWN GAPS, in two unrelated mechanisms. Both are enumerated row by row in
-    ``tools/unicode_parity/known_nfc_divergences.txt``; `check.py` asserts that
-    file's row count against what it measures, so the figures are re-derivable
-    from the tree rather than quoted here from a corpus that may not survive
-    the next rebuild. Run ``elixir probe.exs`` then ``python3 check.py``.
-
-    The first is this function's composition rule, described below. The second
-    is the Hangul routing in `_compose`, which is much the larger of the two
-    and which gates APOLLO_UNICODE_STEP_NAMES — see the comment there and
-    OpenFn/apollo#655. Neither is fixed; both are pinned.
-
-    The composition gap is one shape: combining classes ``(0, 230, 0, 220)`` —
-    a base, a mark, any class-zero character, then a mark of *lower* class. The
-    minimal case is four codepoints::
-
-        A U+0302 U+200C U+0323
-        Elixir  ->  U+00C2 U+200C U+0323   (composes the first mark only)
-        here    ->  U+1EAC U+200C          (composes both)
-
-    ZWNJ is routine in Persian and Indic text, so this is reachable, not
-    exotic. Eight structurally different blocking rules were fitted against the
-    corpora and none reaches zero: the shapes conflict, because the same corpus
-    that requires composition to reach past a class-zero character also
-    contains cases that require it not to. Do not "fix" this by guessing —
-    extend the probe and fit against its output.
-
-    ACCEPTED. What it costs is a step lookup missing when a name in this shape
-    reaches lookup without being sanitized first. `sanitize_name` output is a
-    fixed point for every case the harness covers, which is evidence, not proof.
+    The residual gap both share is one Hangul shape -- a bare jamo next to a
+    complete syllable -- which only a half-finished IME produces. Real Korean
+    words normalise identically under OTP 28, Python and ICU.
     """
-    if not text:
-        return text
-    return _compose(_canonical_order(unicodedata.normalize("NFD", text)))
+    return unicodedata.normalize("NFC", text)
 
 
 def sanitize_name(name: str, unicode_mode: bool | None = None) -> str:
