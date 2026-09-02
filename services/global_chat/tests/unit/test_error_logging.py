@@ -369,42 +369,18 @@ VETTED_INTERPOLATIONS: dict[str, frozenset[str]] = {
     # Job and edge names before and after sanitising, the adaptor a job
     # declares, and the `__ID_JOB_x__` placeholders this service invented
     # itself. Names and ids, never a body.
-    # The naming work replaced per-key logging with one line naming the whole
-    # renamed set, so the individual key expressions the leak branch vets are
-    # gone from this module here.
     "workflow_chat/workflow_chat.py": frozenset({
         "adaptor",
         "job_key",
+        "edge_key",
+        "sanitized_edge_key",
+        "original_name",
+        "sanitized_name",
+        "original_source",
+        "original_target",
+        "edge_data['source_job']",
+        "edge_data['target_job']",
         "current_id",
-        # Job names and edge endpoints, resolved or unresolved. `unclaimed`
-        # reads as bodies but holds the `__CODE_BLOCK_<key>__` tokens, so it is
-        # keys too. Same category as the names above, and the reason a name is
-        # loggable where a body is not: the user typed it into a form as a
-        # label, and a log line is unreadable without it.
-        "', '.join(sorted(matches))",
-        "', '.join(duplicated)",
-        "', '.join(unclaimed)",
-        "', '.join(renamed)",
-        "by_name",
-        "owner",
-        "', '.join(sorted(dangling))",
-        # Literals chosen at the call site, a parameter the callers pass a
-        # literal to, and a count. `msg` is built but only from `len()`.
-        "how",
-        "label",
-        "msg",
-        # More names: the reference as written, and what it sanitises to.
-        "reference",
-        "str(reference)",
-        "resolved",
-    }),
-
-    # Job names again, on the shared walkers.
-    "yaml_utils.py": frozenset({
-        "', '.join(sorted((str(match) for match in matches)))",
-        "job_key",
-        "how",
-        "step_name",
     }),
 }
 
@@ -1002,7 +978,7 @@ def test_a_vetted_expression_is_scoped_to_its_module() -> None:
 #: Every expression cleared by hand in `VETTED_INTERPOLATIONS`. Pinned for the
 #: same reason as `EXPECTED_MARKERS`: an opt-out nobody counts is an opt-out
 #: that spreads.
-EXPECTED_VETTED_INTERPOLATIONS = 60
+EXPECTED_VETTED_INTERPOLATIONS = 51
 
 
 def test_the_vetted_interpolations_are_inventoried() -> None:

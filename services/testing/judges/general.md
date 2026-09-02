@@ -8,7 +8,7 @@ You will be given (a) optional universal rules that apply to every response, (b)
 
 - Every job, trigger, and edge in a returned workflow YAML has a non-empty `id` field.
 - Every job in a returned workflow YAML has a `body` that is either real adaptor code or the canonical empty-job placeholder `// Add operations here`. Reject other placeholder-style markers such as `// PLACEHOLDER`, numbered placeholders, `TODO`, `FIXME`, or `<insert ... here>` — these are leftover generation artifacts.
-- {name_rule}
+- Job names and edge source/target/key references in a returned workflow YAML use only letters, numbers, spaces, hyphens, and underscores.
 - When the user is editing an existing workflow, every job and edge from the existing YAML is present and unchanged in the response unless the user asked to remove or modify it. Additions are fine.
 - Any returned YAML parses as valid YAML.
 - Never claim an adaptor function or signature doesn't exist or is wrong unless adaptor documentation provided in this evaluation contradicts it — you do not have reliable knowledge of adaptor APIs.
