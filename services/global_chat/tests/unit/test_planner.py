@@ -82,9 +82,9 @@ def test_job_agent_failure_returns_error_tool_result() -> None:
     meta = []
 
     with patch("global_chat.planner.call_job_agent", side_effect=RuntimeError("boom")):
-        result = planner._execute_tool(block, StubStreamManager(), empty_usage(), meta)
+        results = planner._execute_job_code_tools_parallel([block], StubStreamManager(), empty_usage(), meta)
 
-    assert result.startswith("ERROR: The job code agent failed: boom")
+    assert results[0]["content"].startswith("ERROR: The job code agent failed: boom")
     assert meta[0]["error"] == "boom"
 
 
@@ -106,10 +106,10 @@ def test_job_code_without_matched_key_is_reported_as_not_stitched() -> None:
     subagent_result = {"response": "done", "suggested_code": "newCode();", "usage": empty_usage()}
 
     with patch("global_chat.planner.call_job_agent", return_value=subagent_result):
-        result = planner._execute_tool(block, StubStreamManager(), empty_usage(), [])
+        results = planner._execute_job_code_tools_parallel([block], StubStreamManager(), empty_usage(), [])
 
-    assert "NOT added to the workflow" in result
-    assert "stitched into the workflow" not in result
+    assert "NOT added to the workflow" in results[0]["content"]
+    assert "stitched into the workflow" not in results[0]["content"]
     assert planner.current_yaml == WORKFLOW_YAML
     assert planner.yaml_modified is False
 

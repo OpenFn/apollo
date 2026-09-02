@@ -451,64 +451,6 @@ class PlannerAgent:
 
             tool_calls_meta.append({"tool": "call_workflow_agent", "input": tool_use_block.input})
 
-        elif tool_use_block.name == "call_job_code_agent":
-            job_key = tool_use_block.input.get("job_key")
-
-            # Guard: workflow must exist and contain the target job
-            if not self.current_yaml:
-                tool_result = "ERROR: No workflow exists yet. Call call_workflow_agent first to create the workflow, then call call_job_code_agent."
-                tool_calls_meta.append({"tool": "call_job_code_agent", "input": tool_use_block.input, "skipped": True})
-                return tool_result
-            matched_job_key = None
-            if job_key:
-                matched_job_key, job_data = find_job_in_yaml(self.current_yaml, job_key)
-                if not job_data:
-                    tool_result = f"ERROR: Job key '{job_key}' not found in workflow YAML. Create the workflow with this job first."
-                    tool_calls_meta.append(
-                        {"tool": "call_job_code_agent", "input": tool_use_block.input, "skipped": True}
-                    )
-                    return tool_result
-
-            try:
-                subagent_result = call_job_agent(
-                    tool_use_block.input,
-                    workflow_yaml=self.current_yaml,
-                    api_key=self.api_key,
-                    user=self._user,
-                    metrics_opt_in=self._metrics_opt_in,
-                )
-            except Exception as e:
-                logger.exception("call_job_code_agent failed")
-                tool_calls_meta.append({"tool": "call_job_code_agent", "input": tool_use_block.input, "error": str(e)})
-                return f"ERROR: The job code agent failed: {e}. No code was generated for this job."
-
-            if "usage" in subagent_result:
-                total_usage.update(sum_usage(total_usage, subagent_result["usage"]))
-
-            # Stitch code into live state immediately. Use the YAML key returned by
-            # find_job_in_yaml — `job_key` from the planner may be a fuzzy variant
-            # (case, hyphens vs underscores, or the job's name field), and
-            # stitch_job_code does an exact key match.
-            suggested_code = subagent_result.get("suggested_code")
-            stitched = False
-            if matched_job_key and suggested_code and self.current_yaml:
-                self.current_yaml = stitch_job_code(self.current_yaml, matched_job_key, suggested_code)
-                self.yaml_modified = True
-                stitched = True
-                self._send_yaml(stream_manager)
-                logger.info(f"Stitched code for job '{matched_job_key}' into current_yaml")
-
-            self.subagent_results.append(subagent_result)
-            tool_result = format_subagent_result_for_llm(subagent_result)
-            if stitched:
-                tool_result += "\n\n[Job code generated and stitched into the workflow.]"
-            elif suggested_code:
-                tool_result += "\n\n[Job code was generated but NOT added to the workflow — no job_key matched. Retry with the exact job key.]"
-            else:
-                tool_result += "\n\n[No job code was generated.]"
-
-            tool_calls_meta.append({"tool": "call_job_code_agent", "input": tool_use_block.input})
-
         elif tool_use_block.name == "inspect_job_code":
             # Accept job_keys (list); tolerate legacy single job_key
             job_keys = tool_use_block.input.get("job_keys") or []
@@ -717,13 +659,6 @@ class PlannerAgent:
             if self.current_yaml:
                 return "Reviewing the workflow..."
             return "Building workflow outline..."
-
-        if name == "call_job_code_agent":
-            job_key = inputs.get("job_key")
-            display_name = self._display_name_for_job(job_key)
-            if display_name:
-                return f"Writing code for \"{display_name}\"..."
-            return "Writing job code..."
 
         if name == "inspect_job_code":
             job_keys = inputs.get("job_keys") or ([inputs["job_key"]] if inputs.get("job_key") else [])
