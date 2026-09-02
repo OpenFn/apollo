@@ -101,10 +101,6 @@ class PlannerAgent:
         logger.info("Planner.run() called")
 
         stream_manager = stream_manager or StreamManager(model=self.model, stream=stream)
-        if workflow_yaml:
-            stream_manager.send_thinking(STATUS_REVIEWING_WORKFLOW + STATUS_PLANNING)
-        else:
-            stream_manager.send_thinking(STATUS_NEW_WORKFLOW + STATUS_PLANNING)
 
         self.current_yaml = workflow_yaml
         self.yaml_modified = False
@@ -112,7 +108,6 @@ class PlannerAgent:
         self._metrics_opt_in = metrics_opt_in
         self._segments: List[Dict] = []
 
-        stream_manager = StreamManager(model=self.model, stream=stream)
         if workflow_yaml:
             self._send_spinner(stream_manager, STATUS_REVIEWING_WORKFLOW + STATUS_PLANNING)
         else:

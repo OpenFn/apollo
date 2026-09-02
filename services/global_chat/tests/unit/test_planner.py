@@ -1,5 +1,6 @@
 """Unit tests for PlannerAgent tool execution and user-content building."""
 
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from global_chat.planner import PlannerAgent
@@ -48,12 +49,20 @@ class FakeToolUse:
 class StubStreamManager:
     def __init__(self) -> None:
         self.statuses: list[dict] = []
+        self.thinking: list[object] = []
+        self.ended = False
 
-    def send_thinking(self, *_args: object, **_kwargs: object) -> None:
-        pass
+    def send_thinking(self, text: object = None, *_args: object, **_kwargs: object) -> None:
+        self.thinking.append(text)
 
     def send_changes(self, *_args: object, **_kwargs: object) -> None:
         pass
+
+    def send_text(self, *_args: object, **_kwargs: object) -> None:
+        pass
+
+    def end_stream(self, *_args: object, **_kwargs: object) -> None:
+        self.ended = True
 
     def send_status(
         self,
@@ -198,6 +207,42 @@ def test_tool_blocks_run_workflow_before_job_against_updated_yaml() -> None:
     by_id = {r["tool_use_id"]: r["content"] for r in results}
     assert "stitched into the workflow" in by_id["tu_job"]
     assert "newCode();" in planner.current_yaml
+
+
+def test_run_uses_the_stream_manager_the_router_passed() -> None:
+    """The router's manager is the whole turn's stream; run() must not replace it."""
+    planner = make_planner()
+    planner.model = "claude-test"
+    planner.max_tool_calls = 5
+    stream = StubStreamManager()
+
+    response = SimpleNamespace(
+        stop_reason="end_turn",
+        content=[SimpleNamespace(type="text", text="Here you go.")],
+        usage=SimpleNamespace(
+            input_tokens=0,
+            output_tokens=0,
+            cache_creation_input_tokens=0,
+            cache_read_input_tokens=0,
+        ),
+    )
+
+    with patch.object(PlannerAgent, "_build_system_prompt", return_value=[]), \
+         patch.object(PlannerAgent, "_call_api", return_value=response), \
+         patch("global_chat.planner.StreamManager") as stream_manager_cls:
+        result = planner.run(
+            content="add a step",
+            workflow_yaml=WORKFLOW_YAML,
+            page=None,
+            history=[],
+            stream=True,
+            stream_manager=stream,
+        )
+
+    stream_manager_cls.assert_not_called()
+    assert len(stream.thinking) == 1
+    assert stream.ended is True
+    assert result.response == "Here you go."
 
 
 def test_user_content_names_the_step_being_viewed() -> None:
