@@ -181,7 +181,7 @@ def _normalize_yaml(yaml_str: str) -> str:
         return yaml_str
     if not isinstance(data, dict):
         return yaml_str
-    return yaml.dump(data, Dumper=_BlockScalarDumper, sort_keys=False, allow_unicode=True)
+    return yaml.dump(data, Dumper=_BlockScalarDumper, sort_keys=False)
 
 
 def build_generation_diff(

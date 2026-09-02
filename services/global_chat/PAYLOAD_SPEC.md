@@ -172,9 +172,7 @@ The `page` field is a simplified path/breadcrumb representing where the user is 
 workflows/<workflow-name>/<step-name>
 ```
 
-The step name should match a job key in the workflow YAML, either exactly or after normalization — NFC-normalized, lowercased, with every character that is not a letter, mark or digit replaced by a hyphen. Normalization is Unicode-aware, so `患者確認` normalizes to itself rather than to the empty string; a name that normalizes to nothing is never fuzzy-matched.
-
-The backend parses the URL by splitting on `/` and taking everything after the workflow segment as the step name, so a step name containing a `/` survives. A workflow name containing a `/` still makes the split ambiguous, so the parsed step name is validated against the workflow YAML rather than trusted.
+The step name should match a job key in the workflow YAML (exact match or normalized — lowercase, non-alphanumeric chars replaced with hyphens). The backend parses the URL by splitting on `/` and reading the 3rd segment as the step name.
 
 | Page URL | Router signal | What happens |
 |---|---|---|

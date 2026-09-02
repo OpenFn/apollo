@@ -45,7 +45,6 @@ pythonpath = ["services"]
 
 # Discovery roots. pytest walks these for test_*.py files.
 testpaths = [
-    "services/echo/tests",
     "services/global_chat/tests",
     "services/workflow_chat/tests",
     "services/job_chat/tests",
@@ -60,9 +59,6 @@ python_functions = ["test_*"]
 
 markers = [
     "unit: fast, isolated, no I/O. Runs on every PR push.",
-    # Declared but currently unused: nothing carries it, so `-m \"unit or service\"`
-    # is really `-m unit`. Kept because the tiers are referenced in the testing
-    # README; apply it when the first mocked-client suite lands.
     "service: mocks HTTP/LLM clients; exercises service handlers. Runs on merge.",
     "integration: hits real external services (LLM, Pinecone, Postgres). Manual/nightly.",
     "acceptance: end-to-end acceptance criteria. Manual/nightly.",

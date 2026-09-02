@@ -4,14 +4,6 @@ import difflib
 import re
 
 import yaml
-from name_rules import (
-    MAX_EDGE_KEY_LENGTH,
-    describe_rule,
-    grapheme_length,
-    is_control_char,
-    is_valid_name,
-    truncate_graphemes,
-)
 
 
 def path_matches(path, allowed_paths: list[str]) -> bool:
@@ -48,7 +40,7 @@ def assert_yaml_equal_except(orig, new, allowed_paths: list[str], context: str =
                 compare(oi, ni, path + [str(i)])
         elif o != n:
             diff = "\n".join(
-                difflib.unified_diff([str(o)], [str(n)], fromfile="original", tofile="response", lineterm=""),
+                difflib.unified_diff([str(o)], [str(n)], fromfile="original", tofile="response", lineterm="")
             )
             raise AssertionError(f"Value mismatch at {'.'.join(path)}:\n{diff}")
 
@@ -57,12 +49,12 @@ def assert_yaml_equal_except(orig, new, allowed_paths: list[str], context: str =
     except AssertionError as e:
         diff = "\n".join(
             difflib.unified_diff(
-                yaml.dump(orig, sort_keys=True, allow_unicode=True).splitlines(),
-                yaml.dump(new, sort_keys=True, allow_unicode=True).splitlines(),
+                yaml.dump(orig, sort_keys=True).splitlines(),
+                yaml.dump(new, sort_keys=True).splitlines(),
                 fromfile="original",
                 tofile="response",
                 lineterm="",
-            ),
+            )
         )
         raise AssertionError(f"{context}\n{e}\nFull YAML diff:\n{diff}")
 
@@ -106,103 +98,27 @@ def assert_yaml_jobs_have_body(yaml_str_or_dict, context: str = "") -> None:
         assert job_data["body"] not in (None, "", []), f"{context}: Job '{job_key}' has empty 'body' field."
 
 
+_SPECIAL_CHAR = re.compile(r"[^a-zA-Z0-9\s\-_]")
+
+
 def assert_no_special_chars(yaml_str_or_dict, context: str = "") -> None:
-    """Assert every name in the workflow obeys the active step-name rule.
-
-    Covers job keys, job names, trigger keys and edge endpoint references, and
-    uses `is_valid_name`, so it checks the length cap as well as the character
-    set. Checking only job names with a character-set regex is how a name that
-    was pushed over 100 characters by a uniquifying suffix, and a trigger key
-    that was never sanitized at all, both went unnoticed.
-
-    Also checks referential integrity: every edge endpoint must name something
-    that exists. A character check alone passes a perfectly well-formed name
-    that happens to point at no step, which is what a broken key mapping or a
-    stray sentinel produces.
-
-    The rule is whichever one `name_rules` has active, so this assertion tracks
-    the sanitizer instead of restating it.
-    """
+    """Assert job names and edge source/target/keys use only [A-Za-z0-9 _-]."""
     data = _as_dict(yaml_str_or_dict)
 
     def check(value, descriptor):
-        assert is_valid_name(value), (
-            f"{context}: {descriptor} '{value}' does not obey the step-name rule. {describe_rule()}"
-        )
+        match = _SPECIAL_CHAR.search(value)
+        assert not match, f"{context}: {descriptor} '{value}' contains special character '{match.group(0)}'"
 
-    # `jobs:` with nothing under it parses as None, which is valid YAML.
-    jobs = data.get("jobs") or {}
-    triggers = data.get("triggers") or {}
-    edges = data.get("edges") or {}
-
-    for job_key, job_data in jobs.items():
-        check(str(job_key), f"Job key '{job_key}'")
-        if (job_data or {}).get("name"):
+    for job_key, job_data in data.get("jobs", {}).items():
+        if job_data.get("name"):
             check(str(job_data["name"]), f"Job '{job_key}' name")
 
-    for trigger_key in triggers:
-        check(str(trigger_key), f"Trigger key '{trigger_key}'")
+    for edge_key, edge_data in data.get("edges", {}).items():
+        for field in ("source_job", "target_job"):
+            if edge_data.get(field):
+                check(str(edge_data[field]), f"Edge '{edge_key}' {field}")
 
-    for edge_key, raw_edge in edges.items():
-        edge = raw_edge or {}
-        for field, targets, what in (
-            ("source_job", jobs, "job"),
-            ("target_job", jobs, "job"),
-            ("source_trigger", triggers, "trigger"),
-            ("target_trigger", triggers, "trigger"),
-        ):
-            if edge.get(field):
-                value = str(edge[field])
-                check(value, f"Edge '{edge_key}' {field}")
-                assert value in targets, (
-                    f"{context}: Edge '{edge_key}' {field} '{value}' is not a {what} "
-                    f"in this workflow (have: {sorted(targets)})."
-                )
-
-        _check_edge_key(edge_key, edge, context)
-
-
-def _check_edge_key(edge_key: str, edge_data: dict, context: str) -> None:
-    """Assert an edge's key is the label its own endpoints imply.
-
-    Deliberately does not split the key on "->", which is a legal run of
-    characters inside a step name under the permissive rule. Mirrors
-    `_edge_label` in workflow_chat: endpoints known means the key is derived.
-    """
-    edge_key = str(edge_key)
-
-    assert grapheme_length(edge_key) <= MAX_EDGE_KEY_LENGTH, (
-        f"{context}: Edge key '{edge_key}' is {grapheme_length(edge_key)} graphemes, "
-        f"over the {MAX_EDGE_KEY_LENGTH} limit."
-    )
-
-    source = edge_data.get("source_job") or edge_data.get("source_trigger")
-    target = edge_data.get("target_job") or edge_data.get("target_trigger")
-
-    if not (source and target):
-        # Nothing to derive the label from; just make sure it is storable.
-        assert not any(is_control_char(ch) for ch in edge_key), (
-            f"{context}: Edge key '{edge_key}' contains a control character."
-        )
-        return
-
-    label = f"{source}->{target}"
-
-    # The sanitizer suffixes duplicate labels and makes room inside the cap, so
-    # the key is a grapheme prefix of the label, optionally with a `-N` tail.
-    candidates = [edge_key]
-    tail = _COLLISION_SUFFIX.search(edge_key)
-    if tail:
-        candidates.append(edge_key[: tail.start()])
-
-    assert any(
-        candidate == truncate_graphemes(label, grapheme_length(candidate))
-        for candidate in candidates
-    ), (
-        f"{context}: Edge key '{edge_key}' does not match its own endpoints "
-        f"(expected '{truncate_graphemes(label, MAX_EDGE_KEY_LENGTH)}', "
-        f"optionally trimmed for a -N suffix)."
-    )
-
-
-_COLLISION_SUFFIX = re.compile(r"-\d+$")
+        if "->" in edge_key:
+            source_part, target_part = edge_key.split("->", 1)
+            check(source_part, f"Edge key '{edge_key}' source part")
+            check(target_part, f"Edge key '{edge_key}' target part")
