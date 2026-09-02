@@ -367,7 +367,13 @@ class PlannerAgent:
         """
         stream_manager.send_thinking(status)
 
-    def _send_settled(self, stream_manager, content: str | None) -> None:
+    def _send_settled(
+        self,
+        stream_manager,
+        content: str | None,
+        steps: list[dict] | None = None,
+        summary: str | None = None,
+    ) -> None:
         """Send a completed-action line ("Edited workflow structure") as a
         custom `status` event and record it in the transcript.
 
@@ -376,11 +382,24 @@ class PlannerAgent:
         are recorded in `response_segments` so a page reload re-renders the
         same view. None means the action left nothing worth showing (e.g. a
         consult that changed nothing) — nothing is sent or recorded.
+
+        `steps` carries which workflow steps this action touched, as data
+        rather than as names buried in `content`, so a client can attach
+        per-step detail without parsing the sentence. `summary` is the
+        shorter line such a client shows instead, so names are not printed
+        twice. Both are recorded alongside the segment so a reload has the
+        same information the live stream did.
         """
         if not content:
             return
-        stream_manager.send_status(content)
-        self._segments.append({"type": "status", "content": content})
+        stream_manager.send_status(content, steps=steps, summary=summary)
+
+        segment = {"type": "status", "content": content}
+        if steps:
+            segment["steps"] = steps
+        if summary:
+            segment["summary"] = summary
+        self._segments.append(segment)
 
     def _find_all_tool_uses(self, content):
         """Find all tool_use blocks in response content."""
@@ -615,7 +634,7 @@ class PlannerAgent:
 
         # Stitch results and update state sequentially
         tool_results = []
-        stitched_names = []
+        stitched_steps = []
         for block in blocks:
             if block.id in skipped:
                 tool_results.append(
@@ -643,7 +662,12 @@ class PlannerAgent:
                 self.current_yaml = stitch_job_code(self.current_yaml, matched_job_key, suggested_code)
                 self.yaml_modified = True
                 stitched = True
-                stitched_names.append(self._display_name_for_job(matched_job_key))
+                stitched_steps.append(
+                    {
+                        "key": matched_job_key,
+                        "name": self._display_name_for_job(matched_job_key),
+                    },
+                )
                 logger.info(f"Stitched code for job '{matched_job_key}' into current_yaml")
 
             self.subagent_results.append(subagent_result)
@@ -663,10 +687,18 @@ class PlannerAgent:
         # Settle the spinner with the steps that were actually applied (drop any
         # that failed to stitch); nothing sent if none applied. One YAML send
         # covers the whole batch, mirroring the one combined status.
-        if stitched_names:
+        if stitched_steps:
             self._send_yaml(stream_manager)
-            joined = ", ".join(f"\"{n}\"" for n in stitched_names)
-            self._send_settled(stream_manager, f"Wrote code for {joined}")
+            joined = ", ".join(f"\"{step['name']}\"" for step in stitched_steps)
+            count = len(stitched_steps)
+            self._send_settled(
+                stream_manager,
+                f"Wrote code for {joined}",
+                steps=stitched_steps,
+                # Clients that render a block per step get the count instead,
+                # so the names appear once, on the blocks.
+                summary=f"Wrote code for {count} step{'' if count == 1 else 's'}",
+            )
 
         return tool_results
 
@@ -738,8 +770,9 @@ class PlannerAgent:
     def _display_name_for_job(self, job_key: str | None) -> str | None:
         """Look up a human-readable display name for a job key.
 
-        Checks the workflow YAML for a name field first, then falls back
-        to title-casing the key (e.g. "fetch-patients" -> "Fetch Patients").
+        Returns the workflow YAML's own name for the job when it has one,
+        otherwise title-cases the key (e.g. "fetch-patients" -> "Fetch
+        Patients").
         """
         if not job_key:
             return None
@@ -747,7 +780,11 @@ class PlannerAgent:
         if self.current_yaml:
             _, job_data = find_job_in_yaml(self.current_yaml, job_key)
             if job_data and job_data.get("name"):
-                return self._format_display_name(job_data["name"])
+                # The user named this step; use it verbatim. Title-casing it
+                # renames "Transform data" to "Transform Data" in the prose,
+                # which then disagrees with the name shown everywhere else
+                # in the UI.
+                return job_data["name"]
 
         return self._format_display_name(job_key)
 
