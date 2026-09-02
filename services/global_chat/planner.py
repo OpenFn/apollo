@@ -32,6 +32,12 @@ from global_chat.subagent_caller import call_workflow_agent, call_job_agent, for
 
 logger = create_logger(__name__)
 
+_FINAL_ROUND_NOTICE = (
+    "You have no tool calls left this turn. Answer now from what you already have: "
+    "summarise what changed, then say what is still outstanding and ask the user to "
+    "confirm before you continue."
+)
+
 
 @dataclass
 class PlannerResult:
@@ -134,9 +140,19 @@ class PlannerAgent:
         }
 
         try:
-            while tool_call_count < self.max_tool_calls:
+            # A run that spends its budget gets one more round with tools
+            # switched off, so it ends on an answer rather than mid-narration.
+            final_round = False
+            while not final_round:
+                final_round = tool_call_count >= self.max_tool_calls
                 try:
-                    response = self._call_api(system_prompt, messages, stream, stream_manager)
+                    response = self._call_api(
+                        system_prompt,
+                        messages,
+                        stream,
+                        stream_manager,
+                        tool_choice={"type": "none"} if final_round else None,
+                    )
 
                     for field in [
                         "input_tokens",
@@ -187,10 +203,12 @@ class PlannerAgent:
                                     {"type": "tool_use", "id": block.id, "name": block.name, "input": block.input}
                                 )
 
+                        tool_call_count += len(tool_use_blocks)
+                        if tool_call_count >= self.max_tool_calls:
+                            tool_results.append({"type": "text", "text": _FINAL_ROUND_NOTICE})
+
                         messages.append({"role": "assistant", "content": content_blocks})
                         messages.append({"role": "user", "content": tool_results})
-
-                        tool_call_count += len(tool_use_blocks)
 
                     else:
                         logger.warning(f"Unexpected stop_reason: {response.stop_reason}")
@@ -291,7 +309,7 @@ class PlannerAgent:
 
         return user_content
 
-    def _call_api(self, system_prompt, messages, stream, stream_manager):
+    def _call_api(self, system_prompt, messages, stream, stream_manager, tool_choice=None):
         """Make Claude API call. When streaming, forwards text deltas live.
 
         All text blocks stream to the client as they generate — including the
@@ -305,6 +323,10 @@ class PlannerAgent:
         names and agent architecture. User-facing progress comes from the
         task-specific status messages sent before each tool execution.
         """
+        # Omitted rather than passed as None: the SDK's "unset" sentinel is
+        # Omit, so an explicit None would be sent as a value.
+        choice = {"tool_choice": tool_choice} if tool_choice else {}
+
         if stream:
             with self.client.messages.stream(
                 model=self.model,
@@ -314,6 +336,7 @@ class PlannerAgent:
                 tools=self.tools,
                 thinking={"type": "adaptive"},
                 output_config={"effort": "medium"},
+                **choice,
             ) as stream_obj:
                 for event in stream_obj:
                     if event.type == "content_block_delta" and event.delta.type == "text_delta":
@@ -328,6 +351,7 @@ class PlannerAgent:
                 tools=self.tools,
                 thinking={"type": "adaptive"},
                 output_config={"effort": "medium"},
+                **choice,
                 # Per-request timeout (same values as the SDK default):
                 # required for non-streaming calls with max_tokens > ~21k,
                 # which the SDK otherwise rejects.
