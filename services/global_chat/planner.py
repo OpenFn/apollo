@@ -33,9 +33,9 @@ from global_chat.subagent_caller import call_workflow_agent, call_job_agent, for
 logger = create_logger(__name__)
 
 _FINAL_ROUND_NOTICE = (
-    "You have no tool calls left this turn. Answer now from what you already have: "
-    "summarise what changed, then say what is still outstanding and ask the user to "
-    "confirm before you continue."
+    "Stop and reply to the user now. Say what you changed. Mention unfinished work "
+    "only if there is any, and then offer to continue next turn — otherwise don't "
+    "raise it at all. Never mention tools, limits, or why you stopped."
 )
 
 
