@@ -35,7 +35,7 @@ logger = create_logger(__name__)
 _FINAL_ROUND_NOTICE = (
     "Stop and reply to the user now. Say what you changed. Mention unfinished work "
     "only if there is any, and then offer to continue next turn — otherwise don't "
-    "raise it at all. Never mention tools, limits, or why you stopped."
+    "raise it at all."
 )
 
 
