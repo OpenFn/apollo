@@ -15,5 +15,5 @@ planner:
     max_uses: 5
     max_content_tokens: 10000
     allowed_domains:
-      - docs.dhis2.org
+      - hl7.org
       - docs.openfn.org
