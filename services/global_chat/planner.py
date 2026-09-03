@@ -237,12 +237,10 @@ class PlannerAgent:
 
         if not final_text:
             stop_reason = getattr(response, "stop_reason", None)
-            if tool_call_count >= self.max_tool_calls:
-                empty_reason = "max_tool_calls_hit"
-            elif stop_reason == "max_tokens":
+            if stop_reason == "max_tokens":
                 empty_reason = "max_tokens"
             elif stop_reason == "end_turn":
-                empty_reason = "no_text_blocks"
+                empty_reason = "empty_final_round" if final_round else "no_text_blocks"
             else:
                 empty_reason = f"unexpected_stop_reason:{stop_reason}"
             sentry_sdk.set_tag("stop_reason", stop_reason)

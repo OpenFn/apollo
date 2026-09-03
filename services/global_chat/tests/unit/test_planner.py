@@ -361,10 +361,3 @@ def test_parallel_batch_overshooting_the_budget_still_ends_on_an_answer() -> Non
     assert tool_choices == [None, {"type": "none"}]
     assert notices == [False, True]
     assert response == "Here is what changed."
-
-
-def test_budget_left_keeps_tools_available() -> None:
-    tool_choices, notices, _ = run_planner(max_tool_calls=10, tool_uses_per_round=1)
-
-    assert tool_choices[0] is None
-    assert notices[0] is False

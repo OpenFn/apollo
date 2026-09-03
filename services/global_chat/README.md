@@ -176,8 +176,9 @@ The planner always calls `call_workflow_agent` first to establish the structure,
 then calls `call_job_code_agent` for each job that needs code. Job code is
 stitched into the workflow YAML immediately after each call.
 
-The loop continues until the model signals it is done (up to a configurable
-maximum of tool calls, currently 10 in `config.yaml`).
+The loop continues until the model signals it is done, or until it reaches the
+tool-call budget in `config.yaml`. A run that spends its budget gets one final
+round with tools switched off, so it ends on an answer rather than mid-narration.
 
 ## Testing
 
