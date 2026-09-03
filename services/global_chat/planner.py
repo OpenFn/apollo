@@ -321,8 +321,6 @@ class PlannerAgent:
         names and agent architecture. User-facing progress comes from the
         task-specific status messages sent before each tool execution.
         """
-        # Omitted rather than passed as None: the SDK's "unset" sentinel is
-        # Omit, so an explicit None would be sent as a value.
         choice = {"tool_choice": tool_choice} if tool_choice else {}
 
         if stream:
