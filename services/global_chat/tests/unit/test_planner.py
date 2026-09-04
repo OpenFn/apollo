@@ -2,7 +2,7 @@
 
 from unittest.mock import patch
 
-from global_chat.planner import PlannerAgent
+from global_chat.planner import _FINAL_ROUND_NOTICE, PlannerAgent
 
 WORKFLOW_YAML = """\
 name: wf
@@ -39,6 +39,8 @@ def empty_usage() -> dict:
 
 
 class FakeToolUse:
+    type = "tool_use"
+
     def __init__(self, name: str, tool_input: dict, block_id: str = "tu_1"):
         self.name = name
         self.input = tool_input
@@ -273,3 +275,89 @@ def test_settled_status_without_steps_records_only_the_sentence() -> None:
     assert planner._segments == [
         {"type": "status", "content": "Edited workflow structure"},
     ]
+
+
+class FakeUsage:
+    input_tokens = 0
+    output_tokens = 0
+    cache_creation_input_tokens = 0
+    cache_read_input_tokens = 0
+
+
+class FakeText:
+    type = "text"
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class FakeResponse:
+    def __init__(self, stop_reason: str, content: list) -> None:
+        self.stop_reason = stop_reason
+        self.content = content
+        self.usage = FakeUsage()
+
+
+def notice_sent(messages: list) -> bool:
+    """Did the wrap-up notice reach the model in this request?"""
+    return any(
+        isinstance(block, dict) and block.get("text") == _FINAL_ROUND_NOTICE
+        for message in messages
+        if isinstance(message["content"], list)
+        for block in message["content"]
+    )
+
+
+def run_planner(max_tool_calls: int, tool_uses_per_round: int) -> tuple[list, list, str]:
+    """Run the tool loop against a model that keeps calling tools.
+
+    Returns, per API call, the tool_choice and whether the wrap-up notice was
+    in the request, plus the final response.
+    """
+    planner = make_planner()
+    planner.model = "test-model"
+    planner.max_tool_calls = max_tool_calls
+    tool_choices: list = []
+    notices: list = []
+
+    def fake_api(*_args: object, tool_choice: dict | None = None) -> FakeResponse:
+        tool_choices.append(tool_choice)
+        notices.append(notice_sent(_args[1]))
+        if tool_choice is None:
+            blocks = [
+                FakeToolUse("inspect_job_code", {"job_keys": ["a"]}, f"tu_{i}")
+                for i in range(tool_uses_per_round)
+            ]
+            return FakeResponse("tool_use", blocks)
+        return FakeResponse("end_turn", [FakeText("Here is what changed.")])
+
+    def fake_execute(blocks: list, *_args: object) -> list[dict]:
+        return [{"type": "tool_result", "tool_use_id": b.id, "content": "ok"} for b in blocks]
+
+    with patch.object(planner, "_call_api", side_effect=fake_api), \
+         patch.object(planner, "_execute_tool_blocks", side_effect=fake_execute), \
+         patch.object(planner, "_build_system_prompt", return_value="sys"):
+        result = planner.run(
+            content="x", workflow_yaml=None, page=None, history=[], stream=False,
+        )
+
+    return tool_choices, notices, result.response
+
+
+def test_spent_budget_still_ends_on_an_answer() -> None:
+    tool_choices, notices, response = run_planner(max_tool_calls=2, tool_uses_per_round=1)
+
+    # Two rounds of tools, then one more with them switched off and the
+    # model told to wrap up
+    assert tool_choices == [None, None, {"type": "none"}]
+    assert notices == [False, False, True]
+    assert response == "Here is what changed."
+
+
+def test_parallel_batch_overshooting_the_budget_still_ends_on_an_answer() -> None:
+    # A batch can push the count past the budget in one go (5 calls, budget 3)
+    tool_choices, notices, response = run_planner(max_tool_calls=3, tool_uses_per_round=5)
+
+    assert tool_choices == [None, {"type": "none"}]
+    assert notices == [False, True]
+    assert response == "Here is what changed."

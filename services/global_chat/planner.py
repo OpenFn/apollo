@@ -32,6 +32,12 @@ from global_chat.subagent_caller import call_workflow_agent, call_job_agent, for
 
 logger = create_logger(__name__)
 
+_FINAL_ROUND_NOTICE = (
+    "Stop and reply to the user now. Say what you changed. Mention unfinished work "
+    "only if there is any, and then offer to continue next turn — otherwise don't "
+    "raise it at all."
+)
+
 
 @dataclass
 class PlannerResult:
@@ -134,9 +140,19 @@ class PlannerAgent:
         }
 
         try:
-            while tool_call_count < self.max_tool_calls:
+            # A run that spends its budget gets one more round with tools
+            # switched off, so it ends on an answer rather than mid-narration.
+            final_round = False
+            while not final_round:
+                final_round = tool_call_count >= self.max_tool_calls
                 try:
-                    response = self._call_api(system_prompt, messages, stream, stream_manager)
+                    response = self._call_api(
+                        system_prompt,
+                        messages,
+                        stream,
+                        stream_manager,
+                        tool_choice={"type": "none"} if final_round else None,
+                    )
 
                     for field in [
                         "input_tokens",
@@ -187,10 +203,12 @@ class PlannerAgent:
                                     {"type": "tool_use", "id": block.id, "name": block.name, "input": block.input}
                                 )
 
+                        tool_call_count += len(tool_use_blocks)
+                        if tool_call_count >= self.max_tool_calls:
+                            tool_results.append({"type": "text", "text": _FINAL_ROUND_NOTICE})
+
                         messages.append({"role": "assistant", "content": content_blocks})
                         messages.append({"role": "user", "content": tool_results})
-
-                        tool_call_count += len(tool_use_blocks)
 
                     else:
                         logger.warning(f"Unexpected stop_reason: {response.stop_reason}")
@@ -219,12 +237,10 @@ class PlannerAgent:
 
         if not final_text:
             stop_reason = getattr(response, "stop_reason", None)
-            if tool_call_count >= self.max_tool_calls:
-                empty_reason = "max_tool_calls_hit"
-            elif stop_reason == "max_tokens":
+            if stop_reason == "max_tokens":
                 empty_reason = "max_tokens"
             elif stop_reason == "end_turn":
-                empty_reason = "no_text_blocks"
+                empty_reason = "empty_final_round" if final_round else "no_text_blocks"
             else:
                 empty_reason = f"unexpected_stop_reason:{stop_reason}"
             sentry_sdk.set_tag("stop_reason", stop_reason)
@@ -291,7 +307,7 @@ class PlannerAgent:
 
         return user_content
 
-    def _call_api(self, system_prompt, messages, stream, stream_manager):
+    def _call_api(self, system_prompt, messages, stream, stream_manager, tool_choice=None):
         """Make Claude API call. When streaming, forwards text deltas live.
 
         All text blocks stream to the client as they generate — including the
@@ -305,6 +321,8 @@ class PlannerAgent:
         names and agent architecture. User-facing progress comes from the
         task-specific status messages sent before each tool execution.
         """
+        choice = {"tool_choice": tool_choice} if tool_choice else {}
+
         if stream:
             with self.client.messages.stream(
                 model=self.model,
@@ -314,6 +332,7 @@ class PlannerAgent:
                 tools=self.tools,
                 thinking={"type": "adaptive"},
                 output_config={"effort": "medium"},
+                **choice,
             ) as stream_obj:
                 for event in stream_obj:
                     if event.type == "content_block_delta" and event.delta.type == "text_delta":
@@ -328,17 +347,26 @@ class PlannerAgent:
                 tools=self.tools,
                 thinking={"type": "adaptive"},
                 output_config={"effort": "medium"},
+                **choice,
                 # Per-request timeout (same values as the SDK default):
                 # required for non-streaming calls with max_tokens > ~21k,
                 # which the SDK otherwise rejects.
                 timeout=httpx.Timeout(600.0, connect=5.0),
                 betas=["context-management-2025-06-27"],
+                # Sits above max_tool_calls on purpose. The budget already
+                # bounds the conversation, so a trigger at the budget could
+                # only ever fire on a round that overshoots it, which is the
+                # wrap-up round. Clearing there deletes the edits the wrap-up
+                # is being asked to describe, and `exclude_tools` means the
+                # doc lookups are what survives. Headroom for a parallel
+                # batch that overshoots, and `keep` covers a whole budget so
+                # a run's own edits are never the thing cleared.
                 context_management={
                     "edits": [
                         {
                             "type": "clear_tool_uses_20250919",
-                            "trigger": {"type": "tool_uses", "value": 20},
-                            "keep": {"type": "tool_uses", "value": 10},
+                            "trigger": {"type": "tool_uses", "value": 40},
+                            "keep": {"type": "tool_uses", "value": 20},
                             "exclude_tools": ["search_documentation"],
                             "clear_tool_inputs": True,
                         }
