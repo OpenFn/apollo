@@ -559,7 +559,8 @@ class AnthropicClient:
         if "triggers" in yaml_data:
             for trigger_key, trigger_data in yaml_data["triggers"].items():
                 if "id" in trigger_data:
-                    # Store the trigger ID directly without placeholder
+                    # Flat, not keyed on the trigger name: the model renames
+                    # that key when it swaps webhook for cron.
                     preserved_values["trigger_id"] = trigger_data["id"]
                     # Remove the id key from what we send to the model
                     del trigger_data["id"]

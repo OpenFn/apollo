@@ -77,3 +77,30 @@ def test_build_prompt_readonly_mode():
     assert "name: readonly-workflow" in system_msg
 
     assert prompt[-1]["content"] == "What does this workflow do?"
+
+
+def test_build_prompt_describes_webhook_custom_path():
+    system_msg, _ = build_prompt(
+        content="Create a workflow",
+        existing_yaml="name: test-workflow",
+        history=[],
+    )
+
+    assert "Lowercase letters, digits, hyphens and underscores" in system_msg
+    assert "255 characters or fewer" in system_msg
+    assert "cannot be a UUID" in system_msg
+    assert "Do not add one proactively" in system_msg
+    assert "custom_path: null" in system_msg
+
+    assert "May include optional sub-keys: custom_path, webhook_reply, webhook_response_config" in system_msg
+
+
+def test_build_prompt_read_only_mode_describes_custom_path():
+    system_msg, _ = build_prompt(
+        content="What does this workflow do?",
+        existing_yaml="name: test-workflow",
+        history=[],
+        read_only=True,
+    )
+
+    assert "May include optional sub-keys: custom_path, webhook_reply, status codes" in system_msg
