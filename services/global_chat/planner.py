@@ -32,6 +32,24 @@ from global_chat.subagent_caller import call_workflow_agent, call_job_agent, for
 
 logger = create_logger(__name__)
 
+# Shared by both calls so they cannot drift. The trigger sits above
+# max_tool_calls, so this is a backstop against a raised budget: at the budget
+# it could only fire on the wrap-up round, clearing what that round summarises.
+_CONTEXT_MANAGEMENT = {
+    "betas": ["context-management-2025-06-27"],
+    "context_management": {
+        "edits": [
+            {
+                "type": "clear_tool_uses_20250919",
+                "trigger": {"type": "tool_uses", "value": 40},
+                "keep": {"type": "tool_uses", "value": 20},
+                "exclude_tools": ["search_documentation"],
+                "clear_tool_inputs": True,
+            }
+        ]
+    },
+}
+
 _FINAL_ROUND_NOTICE = (
     "Stop and reply to the user now. Say what you changed. Mention unfinished work "
     "only if there is any, and then offer to continue next turn — otherwise don't "
@@ -324,7 +342,7 @@ class PlannerAgent:
         choice = {"tool_choice": tool_choice} if tool_choice else {}
 
         if stream:
-            with self.client.messages.stream(
+            with self.client.beta.messages.stream(
                 model=self.model,
                 max_tokens=self.max_tokens,
                 system=system_prompt,
@@ -333,6 +351,7 @@ class PlannerAgent:
                 thinking={"type": "adaptive"},
                 output_config={"effort": "medium"},
                 **choice,
+                **_CONTEXT_MANAGEMENT,
             ) as stream_obj:
                 for event in stream_obj:
                     if event.type == "content_block_delta" and event.delta.type == "text_delta":
@@ -352,20 +371,7 @@ class PlannerAgent:
                 # required for non-streaming calls with max_tokens > ~21k,
                 # which the SDK otherwise rejects.
                 timeout=httpx.Timeout(600.0, connect=5.0),
-                betas=["context-management-2025-06-27"],
-                # Above max_tool_calls: at the budget this could only fire
-                # on the wrap-up round, clearing the edits it summarises.
-                context_management={
-                    "edits": [
-                        {
-                            "type": "clear_tool_uses_20250919",
-                            "trigger": {"type": "tool_uses", "value": 40},
-                            "keep": {"type": "tool_uses", "value": 20},
-                            "exclude_tools": ["search_documentation"],
-                            "clear_tool_inputs": True,
-                        }
-                    ]
-                },
+                **_CONTEXT_MANAGEMENT,
             )
             return response
 
