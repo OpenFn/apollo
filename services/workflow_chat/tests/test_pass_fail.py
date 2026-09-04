@@ -19,6 +19,9 @@ from .test_utils import (
     print_response_details,
 )
 
+# Every test here shells out to entry.py, which calls a real model.
+pytestmark = pytest.mark.integration
+
 def test_change_trigger():
     print("==================TEST==================")
     print("Description: This tests that the service can change the workflow trigger as requested without changing anything else in the YAML.")
@@ -339,6 +342,173 @@ edges:
 
 
     print("\n✓ Prefix parsing test passed: History contains correct prefix")
+
+
+def test_keeps_custom_path_through_an_unrelated_edit():
+    print("==================TEST==================")
+    print("Description: A webhook's custom_path names its public URL. An edit that has nothing to do with the trigger must not drop it.")
+    existing_yaml = """
+name: facility-intake
+jobs:
+  parse-submission:
+    id: job-parse-id
+    name: Parse Submission
+    adaptor: '@openfn/language-common@latest'
+    body: 'print("parse")'
+triggers:
+  webhook:
+    id: trigger-webhook-id
+    type: webhook
+    enabled: false
+    custom_path: et-emr-facility-001
+edges:
+  webhook->parse-submission:
+    id: edge-webhook-parse-id
+    source_trigger: webhook
+    target_job: parse-submission
+    condition_type: always
+    enabled: true
+"""
+    content = "Rename the first step to 'Validate Submission'."
+    service_input = make_service_input(existing_yaml, [], content=content)
+    response = call_workflow_chat_service(service_input)
+    print_response_details(response, content=content)
+
+    yaml_str = response.get("response_yaml")
+    assert yaml_str is not None, "No YAML returned in response_yaml"
+    parsed = yaml.safe_load(yaml_str)
+
+    triggers = parsed.get("triggers", {})
+    assert "webhook" in triggers, f"Expected the webhook trigger to survive, got: {list(triggers.keys())}"
+    assert triggers["webhook"].get("custom_path") == "et-emr-facility-001", (
+        "custom_path was dropped or altered by an edit that never mentioned it. "
+        f"Trigger came back as: {triggers['webhook']}"
+    )
+    assert_yaml_has_ids(parsed, context="test_keeps_custom_path_through_an_unrelated_edit")
+
+
+def test_sets_a_custom_path_when_asked():
+    print("==================TEST==================")
+    print("Description: The user can name a webhook's URL through the assistant.")
+    existing_yaml = """
+name: facility-intake
+jobs:
+  parse-submission:
+    id: job-parse-id
+    name: Parse Submission
+    adaptor: '@openfn/language-common@latest'
+    body: 'print("parse")'
+triggers:
+  webhook:
+    id: trigger-webhook-id
+    type: webhook
+    enabled: false
+edges:
+  webhook->parse-submission:
+    id: edge-webhook-parse-id
+    source_trigger: webhook
+    target_job: parse-submission
+    condition_type: always
+    enabled: true
+"""
+    content = "Set the webhook's custom path to clinic-intake-002."
+    service_input = make_service_input(existing_yaml, [], content=content)
+    response = call_workflow_chat_service(service_input)
+    print_response_details(response, content=content)
+
+    yaml_str = response.get("response_yaml")
+    assert yaml_str is not None, "No YAML returned in response_yaml"
+    parsed = yaml.safe_load(yaml_str)
+
+    webhook = parsed.get("triggers", {}).get("webhook", {})
+    assert webhook.get("custom_path") == "clinic-intake-002", (
+        f"Expected the requested custom_path to be set, got: {webhook}"
+    )
+
+
+def test_does_not_invent_a_custom_path():
+    print("==================TEST==================")
+    print("Description: custom_path must be unique across the project and the model cannot see the project, so it must never make one up.")
+    existing_yaml = """
+name: facility-intake
+jobs:
+  parse-submission:
+    id: job-parse-id
+    name: Parse Submission
+    adaptor: '@openfn/language-common@latest'
+    body: 'print("parse")'
+triggers:
+  webhook:
+    id: trigger-webhook-id
+    type: webhook
+    enabled: false
+edges:
+  webhook->parse-submission:
+    id: edge-webhook-parse-id
+    source_trigger: webhook
+    target_job: parse-submission
+    condition_type: always
+    enabled: true
+"""
+    content = "Add a step after the first one that uploads the parsed data to Redis."
+    service_input = make_service_input(existing_yaml, [], content=content)
+    response = call_workflow_chat_service(service_input)
+    print_response_details(response, content=content)
+
+    yaml_str = response.get("response_yaml")
+    assert yaml_str is not None, "No YAML returned in response_yaml"
+    parsed = yaml.safe_load(yaml_str)
+
+    webhook = parsed.get("triggers", {}).get("webhook", {})
+    assert "custom_path" not in webhook, (
+        f"A custom_path was invented for a request that never asked for one: {webhook}"
+    )
+
+
+def test_removes_a_custom_path_with_an_explicit_null():
+    print("==================TEST==================")
+    print("Description: Lightning treats an absent custom_path as unchanged and restores the stored one, so dropping the key does not remove a path. Only an explicit null does.")
+    existing_yaml = """
+name: facility-intake
+jobs:
+  parse-submission:
+    id: job-parse-id
+    name: Parse Submission
+    adaptor: '@openfn/language-common@latest'
+    body: 'print("parse")'
+triggers:
+  webhook:
+    id: trigger-webhook-id
+    type: webhook
+    enabled: false
+    custom_path: et-emr-facility-001
+edges:
+  webhook->parse-submission:
+    id: edge-webhook-parse-id
+    source_trigger: webhook
+    target_job: parse-submission
+    condition_type: always
+    enabled: true
+"""
+    content = "Remove the custom path from this webhook, go back to the default URL."
+    service_input = make_service_input(existing_yaml, [], content=content)
+    response = call_workflow_chat_service(service_input)
+    print_response_details(response, content=content)
+
+    yaml_str = response.get("response_yaml")
+    assert yaml_str is not None, "No YAML returned in response_yaml"
+    parsed = yaml.safe_load(yaml_str)
+
+    webhook = parsed.get("triggers", {}).get("webhook", {})
+    assert "custom_path" in webhook, (
+        "The key was dropped rather than set to null. Lightning reads an absent "
+        "custom_path as 'unchanged' and restores the stored path, so the user is "
+        f"told the path was removed while the old URL keeps working. Got: {webhook}"
+    )
+    assert webhook["custom_path"] is None, (
+        f"Expected custom_path: null to clear the path, got: {webhook['custom_path']!r}"
+    )
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"]) 

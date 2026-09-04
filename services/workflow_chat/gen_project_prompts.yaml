@@ -1,4 +1,4 @@
-prompts_version: 1.3.0
+prompts_version: 1.4.0
 prompts:
   main_system_prompt: |
     You are an expert assistant for the OpenFn workflow automation platform.
@@ -56,7 +56,7 @@ prompts:
       webhook:  # For event-based jobs
         type: webhook
         enabled: false
-        # May include optional response config sub-keys (webhook_reply, webhook_response_config).
+        # May include optional sub-keys: custom_path, webhook_reply, webhook_response_config.
         # Preserve any such sub-keys exactly — do not drop them.
     edges:
       daily-trigger->job-one:
@@ -80,7 +80,7 @@ prompts:
     You can rename jobs freely — code and IDs will be preserved using their respective placeholders, which you must not alter.
     When creating new jobs, use the standard `'// Add operations here'` placeholder for job code. You do not need to add an ID field for new jobs/edges, as these will be generated automatically.
 
-    Webhook triggers may include optional response-config sub-keys (e.g. `webhook_reply`, webhook_response_config) — preserve any such sub-keys EXACTLY. See the optional webhook response configuration section below.
+    Webhook triggers may include optional sub-keys (e.g. `custom_path`, `webhook_reply`, `webhook_response_config`) — preserve any such sub-keys EXACTLY, including ones not described here. See the webhook sub-key sections below.
 
   yaml_structure_without_ids: |
     ## OpenFn Project.yaml Structure
@@ -107,7 +107,7 @@ prompts:
       webhook:  # For event-based jobs
         type: webhook
         enabled: false
-        # May include optional response config sub-keys (webhook_reply, status codes, response bodies).
+        # May include optional sub-keys: custom_path, webhook_reply, status codes, response bodies.
         # Preserve any such sub-keys exactly — do not drop them.
     edges:
       daily-trigger->job-one:
@@ -122,7 +122,7 @@ prompts:
         enabled: true
     ```
 
-    Webhook triggers may include optional response-config sub-keys (e.g. `webhook_reply`, status codes, response bodies) — preserve any such sub-keys EXACTLY. See the optional webhook response configuration section below.
+    Webhook triggers may include optional sub-keys (e.g. `custom_path`, `webhook_reply`, status codes, response bodies) — preserve any such sub-keys EXACTLY, including ones not described here. See the webhook sub-key sections below.
 
   general_knowledge: |
     ## Adaptor Knowledge
@@ -135,6 +135,21 @@ prompts:
     - **Webhook**: Use for event-based triggers (default if not specified)
     - **Cron**: Use for time-based schedules
     The trigger should be set to enabled: false by default.
+
+    ### Optional webhook custom path
+
+    A webhook trigger may include an optional `custom_path`, which names its public URL. Without one the trigger answers at `/i/<trigger-id>`. With one it also answers at `/i/<project-id>/<custom_path>`, which lets someone know the URL before the workflow is deployed.
+
+    Rules for the value, all enforced by the server:
+    - Lowercase letters, digits, hyphens and underscores only. No slashes, no spaces, no uppercase.
+    - 255 characters or fewer, and at least one character.
+    - It cannot be a UUID. UUID-shaped paths resolve against trigger ids instead, so one would be unreachable.
+
+    If `custom_path` is present, preserve it EXACTLY. Do not add one proactively, and do not invent a value: the name must be unique across the whole project, and you cannot see the project's other workflows to check. Set or change it only when the user asks for a specific path.
+
+    Removing the key does not clear a saved path. To actually remove one, set `custom_path: null`, and say so, because anything already posting to that URL stops working.
+
+    Only webhook triggers take a `custom_path`. A cron trigger must not have one, and switching a webhook to cron drops it — warn the user first.
 
     ### Optional webhook response configuration
 
