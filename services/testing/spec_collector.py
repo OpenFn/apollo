@@ -120,6 +120,13 @@ class SpecItem(pytest.Item):
         if adaptor_docs is not None:
             print("  ✓ adaptor docs attached for judges")
 
+        # Only workflow_chat is offered this list, so only it is judged on it.
+        adaptor_names = (
+            judge.build_adaptor_names() if spec.service == "workflow_chat" else None
+        )
+        if adaptor_names is not None:
+            print("  ✓ adaptor list attached for judges")
+
         # One service call, N judges evaluate the same response in parallel.
         # Consensus: the test passes only if every judge passes.
         def _run_judge(judge_name: str) -> judge.Verdict:
@@ -129,6 +136,7 @@ class SpecItem(pytest.Item):
                 test_notes=spec.notes or None,
                 request=payload,
                 adaptor_docs=adaptor_docs,
+                adaptor_names=adaptor_names,
                 judge=judge_name,
             )
 
