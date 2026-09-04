@@ -353,12 +353,20 @@ class PlannerAgent:
                 # which the SDK otherwise rejects.
                 timeout=httpx.Timeout(600.0, connect=5.0),
                 betas=["context-management-2025-06-27"],
+                # Sits above max_tool_calls on purpose. The budget already
+                # bounds the conversation, so a trigger at the budget could
+                # only ever fire on a round that overshoots it, which is the
+                # wrap-up round. Clearing there deletes the edits the wrap-up
+                # is being asked to describe, and `exclude_tools` means the
+                # doc lookups are what survives. Headroom for a parallel
+                # batch that overshoots, and `keep` covers a whole budget so
+                # a run's own edits are never the thing cleared.
                 context_management={
                     "edits": [
                         {
                             "type": "clear_tool_uses_20250919",
-                            "trigger": {"type": "tool_uses", "value": 20},
-                            "keep": {"type": "tool_uses", "value": 10},
+                            "trigger": {"type": "tool_uses", "value": 40},
+                            "keep": {"type": "tool_uses", "value": 20},
                             "exclude_tools": ["search_documentation"],
                             "clear_tool_inputs": True,
                         }
