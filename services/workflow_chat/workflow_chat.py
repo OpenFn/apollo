@@ -517,19 +517,45 @@ class AnthropicClient:
             available_adaptors = get_available_adaptors()
             valid_adaptor_names = {adaptor["name"] for adaptor in available_adaptors}
 
+            # An empty set means the lookup failed, not that no adaptor exists.
+            # Going on would call every adaptor in the workflow invented.
+            if not valid_adaptor_names:
+                logger.warning("Adaptor list unavailable, skipping validation")
+                return
+
             if yaml_data and "jobs" in yaml_data:
                 jobs = yaml_data["jobs"]
                 for job_key, job_data in jobs.items():
                     if "adaptor" in job_data:
                         adaptor = job_data["adaptor"]
-                        # Remove version if present (after last @)
-                        base = adaptor.rsplit("@", 1)[0]
-                        # Always remove '@openfn/language-' prefix
-                        short_name = base[len("@openfn/language-"):]
+                        short_name = AnthropicClient.adaptor_short_name(adaptor)
                         if short_name not in valid_adaptor_names:
-                            logger.warning(f"Invalid adaptor found in job '{job_key}': {adaptor}")
+                            logger.warning(
+                                f"Invalid adaptor found in job '{job_key}': {adaptor}"
+                            )
+                            # Constant message so Sentry groups these together.
+                            sentry_sdk.set_context(
+                                "invalid_adaptor",
+                                {"job": job_key, "adaptor": adaptor},
+                            )
+                            sentry_sdk.capture_message(
+                                "Model produced an adaptor that is not on the "
+                                "available list",
+                                level="warning",
+                            )
         except Exception as e:
             logger.error(f"validate_adaptors encountered an error: {e}")
+
+    @staticmethod
+    def adaptor_short_name(adaptor):
+        """The bare adaptor name, without the @openfn/language- prefix or version.
+
+        The prefix comes off first, or the leading `@` of an unversioned
+        `@openfn/language-common` reads as the version separator.
+        """
+        prefix = "@openfn/language-"
+        name = adaptor[len(prefix):] if adaptor.startswith(prefix) else adaptor
+        return name.rsplit("@", 1)[0]
 
     @staticmethod
     def extract_and_preserve_components(yaml_data):
