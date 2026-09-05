@@ -637,13 +637,6 @@ def test_edge_keys_are_length_capped(monkeypatch: pytest.MonkeyPatch, mode: str)
 
 # --- null sections across the whole finalize pipeline -------------------------
 
-NULL_SECTION_DOCUMENTS = [
-    "name: w\njobs:\n  a:\n    id: x\n    body: code()\n  b:\nedges:\n",
-    "name: w\njobs:\nedges:\n",
-    "name: w\ntriggers:\n  webhook:\nedges:\n  e:\n",
-    "name: w\njobs:\n  a:\nedges:\n  a->a:\n",
-    "name: w\n",
-]
 
 
 
@@ -808,16 +801,6 @@ def test_a_boolean_reference_does_not_bind_to_an_int_key() -> None:
 
 # --- preservation goes through the same walker as redaction --------------------
 
-LIGHTNING_EXPORT = """\
-name: my-project
-workflows:
-  my-workflow:
-    jobs:
-      a:
-        name: A
-        body: |
-          const SECRET_X = 'leak-me';
-"""
 
 
 
@@ -1058,16 +1041,6 @@ def test_two_jobs_sharing_a_name_are_refused_not_ordered(reverse: bool) -> None:
 
 # --- a decorated placeholder must not ship either ------------------------------
 
-DECORATED_PLACEHOLDERS = {
-    "fenced code block": "```\n__CODE_BLOCK_fetch__\n```",
-    "inline backticks": "`__CODE_BLOCK_fetch__`",
-    "line comment": "// __CODE_BLOCK_fetch__",
-    "byte order mark": "\ufeff__CODE_BLOCK_fetch__",
-    "zero width space": "\u200b__CODE_BLOCK_fetch__",
-    "quoted": '"__CODE_BLOCK_fetch__"',
-    "key prefix": "code: __CODE_BLOCK_fetch__",
-    "token then code": "__CODE_BLOCK_fetch__\nfn(s => s);",
-}
 
 
 
@@ -1147,7 +1120,6 @@ def test_a_null_name_is_still_left_alone() -> None:
     assert yaml_data["jobs"]["a"]["name"] is None
 
 
-# --- restoring must not discard the code around the token ----------------------
 
 
 
@@ -1168,7 +1140,6 @@ def test_two_tokens_we_never_issued_do_not_ship() -> None:
     assert "__CODE_BLOCK_" not in data["jobs"]["a"]["body"]
 
 
-# --- claims -------------------------------------------------------------------
 
 
 
@@ -1190,26 +1161,3 @@ def test_a_truncated_prefix_sibling_is_not_spliced_in() -> None:
     AnthropicClient.restore_components(client, data, preserved)
 
     assert data["jobs"]["sync__patients"]["body"] == "RIGHT();"
-
-
-
-
-# --- a block comment must not leave the step inert -----------------------------
-
-
-
-
-# --- a non-string body anywhere in the tree ------------------------------------
-
-
-
-
-
-
-# --- prefix-pair token texts ---------------------------------------------------
-
-
-
-
-
-

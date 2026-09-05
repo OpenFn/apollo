@@ -2,7 +2,6 @@ import json
 import os
 import re
 import uuid
-import unicodedata
 from typing import List, Optional, Dict, Any
 import yaml
 from dataclasses import dataclass
@@ -433,11 +432,6 @@ class AnthropicClient:
         folded = [key for key, name in job_names.items() if normalize_for_lookup(name) == wanted]
         return unambiguous(folded, "matches the folded name of")
 
-    #: Token-shaped text. Used for ONE question only: "is this a swap token we
-    #: never issued?" — the degrade branch. Deliberately not used to find our
-    #: own tokens: we know exactly which ones we issued, and a pattern can only
-    #: guess at their shape.
-
     @staticmethod
     def _reference_key(value):
         """A mapping key that distinguishes `1`, `"1"` and `True`.
@@ -448,31 +442,6 @@ class AnthropicClient:
         hash(1)`. Pairing the type name with the text avoids both.
         """
         return (type(value).__name__, str(value))
-
-    @staticmethod
-    def _section(yaml_data, name):
-        """Return `yaml_data[name]` as a dict of dicts, or {} if it is anything else.
-
-        `jobs:` with nothing under it parses as None, and a single bare entry
-        (`b:`) gives a None value. Both are valid YAML and both used to raise
-        somewhere in this pipeline, where the exception was swallowed and the
-        user got prose and no workflow.
-        """
-        if not isinstance(yaml_data, dict):
-            return {}
-        section = yaml_data.get(name)
-        if not isinstance(section, dict):
-            return {}
-        for key, value in list(section.items()):
-            if not isinstance(value, dict):
-                section[key] = {}
-        return section
-
-    #: Stand-in for a reference that sanitizes away to nothing. Uniquified
-    #: against the workflow's own keys at sanitize time, because a user can
-    #: perfectly well name a step "unresolved-step" — keys are uniquified
-    #: against each other, not against this. An edge carrying the sentinel
-    #: stays visibly broken rather than silently binding to a real step.
 
     @staticmethod
     def _unique_name(candidate: str, taken: set, fallback: str) -> str:
