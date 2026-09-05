@@ -32,6 +32,12 @@ from global_chat.subagent_caller import call_workflow_agent, call_job_agent, for
 
 logger = create_logger(__name__)
 
+_FINAL_ROUND_NOTICE = (
+    "Stop and reply to the user now. Say what you changed. Mention unfinished work "
+    "only if there is any, and then offer to continue next turn — otherwise don't "
+    "raise it at all."
+)
+
 
 @dataclass
 class PlannerResult:
@@ -140,9 +146,19 @@ class PlannerAgent:
         }
 
         try:
-            while tool_call_count < self.max_tool_calls:
+            # A run that spends its budget gets one more round with tools
+            # switched off, so it ends on an answer rather than mid-narration.
+            final_round = False
+            while not final_round:
+                final_round = tool_call_count >= self.max_tool_calls
                 try:
-                    response = self._call_api(system_prompt, messages, stream, stream_manager)
+                    response = self._call_api(
+                        system_prompt,
+                        messages,
+                        stream,
+                        stream_manager,
+                        tool_choice={"type": "none"} if final_round else None,
+                    )
 
                     for field in [
                         "input_tokens",
@@ -193,10 +209,12 @@ class PlannerAgent:
                                     {"type": "tool_use", "id": block.id, "name": block.name, "input": block.input}
                                 )
 
+                        tool_call_count += len(tool_use_blocks)
+                        if tool_call_count >= self.max_tool_calls:
+                            tool_results.append({"type": "text", "text": _FINAL_ROUND_NOTICE})
+
                         messages.append({"role": "assistant", "content": content_blocks})
                         messages.append({"role": "user", "content": tool_results})
-
-                        tool_call_count += len(tool_use_blocks)
 
                     else:
                         logger.warning(f"Unexpected stop_reason: {response.stop_reason}")
@@ -225,12 +243,10 @@ class PlannerAgent:
 
         if not final_text:
             stop_reason = getattr(response, "stop_reason", None)
-            if tool_call_count >= self.max_tool_calls:
-                empty_reason = "max_tool_calls_hit"
-            elif stop_reason == "max_tokens":
+            if stop_reason == "max_tokens":
                 empty_reason = "max_tokens"
             elif stop_reason == "end_turn":
-                empty_reason = "no_text_blocks"
+                empty_reason = "empty_final_round" if final_round else "no_text_blocks"
             else:
                 empty_reason = f"unexpected_stop_reason:{stop_reason}"
             sentry_sdk.set_tag("stop_reason", stop_reason)
@@ -307,7 +323,7 @@ class PlannerAgent:
 
         return user_content
 
-    def _call_api(self, system_prompt, messages, stream, stream_manager):
+    def _call_api(self, system_prompt, messages, stream, stream_manager, tool_choice=None):
         """Make Claude API call. When streaming, forwards text deltas live.
 
         All text blocks stream to the client as they generate — including the
@@ -321,6 +337,8 @@ class PlannerAgent:
         names and agent architecture. User-facing progress comes from the
         task-specific status messages sent before each tool execution.
         """
+        choice = {"tool_choice": tool_choice} if tool_choice else {}
+
         if stream:
             with self.client.messages.stream(
                 model=self.model,
@@ -330,6 +348,7 @@ class PlannerAgent:
                 tools=self.tools,
                 thinking={"type": "adaptive"},
                 output_config={"effort": "medium"},
+                **choice,
             ) as stream_obj:
                 for event in stream_obj:
                     if event.type == "content_block_delta" and event.delta.type == "text_delta":
@@ -344,17 +363,20 @@ class PlannerAgent:
                 tools=self.tools,
                 thinking={"type": "adaptive"},
                 output_config={"effort": "medium"},
+                **choice,
                 # Per-request timeout (same values as the SDK default):
                 # required for non-streaming calls with max_tokens > ~21k,
                 # which the SDK otherwise rejects.
                 timeout=httpx.Timeout(600.0, connect=5.0),
                 betas=["context-management-2025-06-27"],
+                # Above max_tool_calls: at the budget this could only fire
+                # on the wrap-up round, clearing the edits it summarises.
                 context_management={
                     "edits": [
                         {
                             "type": "clear_tool_uses_20250919",
-                            "trigger": {"type": "tool_uses", "value": 20},
-                            "keep": {"type": "tool_uses", "value": 10},
+                            "trigger": {"type": "tool_uses", "value": 40},
+                            "keep": {"type": "tool_uses", "value": 20},
                             "exclude_tools": ["search_documentation"],
                             "clear_tool_inputs": True,
                         }
@@ -383,7 +405,13 @@ class PlannerAgent:
         """
         stream_manager.send_thinking(status)
 
-    def _send_settled(self, stream_manager, content: str | None) -> None:
+    def _send_settled(
+        self,
+        stream_manager,
+        content: str | None,
+        steps: list[dict] | None = None,
+        summary: str | None = None,
+    ) -> None:
         """Send a completed-action line ("Edited workflow structure") as a
         custom `status` event and record it in the transcript.
 
@@ -392,11 +420,24 @@ class PlannerAgent:
         are recorded in `response_segments` so a page reload re-renders the
         same view. None means the action left nothing worth showing (e.g. a
         consult that changed nothing) — nothing is sent or recorded.
+
+        `steps` carries which workflow steps this action touched, as data
+        rather than as names buried in `content`, so a client can attach
+        per-step detail without parsing the sentence. `summary` is the
+        shorter line such a client shows instead, so names are not printed
+        twice. Both are recorded alongside the segment so a reload has the
+        same information the live stream did.
         """
         if not content:
             return
-        stream_manager.send_status(content)
-        self._segments.append({"type": "status", "content": content})
+        stream_manager.send_status(content, steps=steps, summary=summary)
+
+        segment = {"type": "status", "content": content}
+        if steps:
+            segment["steps"] = steps
+        if summary:
+            segment["summary"] = summary
+        self._segments.append(segment)
 
     def _find_all_tool_uses(self, content):
         """Find all tool_use blocks in response content."""
@@ -635,7 +676,7 @@ class PlannerAgent:
 
         # Stitch results and update state sequentially
         tool_results = []
-        stitched_names = []
+        stitched_steps = []
         for block in blocks:
             if block.id in skipped:
                 tool_results.append(
@@ -663,7 +704,12 @@ class PlannerAgent:
                 self.current_yaml = stitch_job_code(self.current_yaml, matched_job_key, suggested_code)
                 self.yaml_modified = True
                 stitched = True
-                stitched_names.append(self._display_name_for_job(matched_job_key))
+                stitched_steps.append(
+                    {
+                        "key": matched_job_key,
+                        "name": self._display_name_for_job(matched_job_key),
+                    },
+                )
                 logger.info(f"Stitched code for job '{matched_job_key}' into current_yaml")
 
             self.subagent_results.append(subagent_result)
@@ -683,10 +729,18 @@ class PlannerAgent:
         # Settle the spinner with the steps that were actually applied (drop any
         # that failed to stitch); nothing sent if none applied. One YAML send
         # covers the whole batch, mirroring the one combined status.
-        if stitched_names:
+        if stitched_steps:
             self._send_yaml(stream_manager)
-            joined = ", ".join(f"\"{n}\"" for n in stitched_names)
-            self._send_settled(stream_manager, f"Wrote code for {joined}")
+            joined = ", ".join(f"\"{step['name']}\"" for step in stitched_steps)
+            count = len(stitched_steps)
+            self._send_settled(
+                stream_manager,
+                f"Wrote code for {joined}",
+                steps=stitched_steps,
+                # Clients that render a block per step get the count instead,
+                # so the names appear once, on the blocks.
+                summary=f"Wrote code for {count} step{'' if count == 1 else 's'}",
+            )
 
         return tool_results
 
@@ -758,8 +812,9 @@ class PlannerAgent:
     def _display_name_for_job(self, job_key: str | None) -> str | None:
         """Look up a human-readable display name for a job key.
 
-        Checks the workflow YAML for a name field first, then falls back
-        to title-casing the key (e.g. "fetch-patients" -> "Fetch Patients").
+        Returns the workflow YAML's own name for the job when it has one,
+        otherwise title-cases the key (e.g. "fetch-patients" -> "Fetch
+        Patients").
         """
         if not job_key:
             return None
@@ -767,7 +822,11 @@ class PlannerAgent:
         if self.current_yaml:
             _, job_data = find_job_in_yaml(self.current_yaml, job_key)
             if job_data and job_data.get("name"):
-                return self._format_display_name(job_data["name"])
+                # The user named this step; use it verbatim. Title-casing it
+                # renames "Transform data" to "Transform Data" in the prose,
+                # which then disagrees with the name shown everywhere else
+                # in the UI.
+                return job_data["name"]
 
         return self._format_display_name(job_key)
 

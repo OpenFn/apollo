@@ -187,8 +187,9 @@ structure and can call `inspect_job_code`), `workflow_chat` drops its
 request back. A handover is reported to the planner as the reason that tool
 could not finish, for it to act on with a different one.
 
-The loop continues until the model signals it is done (up to a configurable
-maximum of tool calls, currently 10 in `config.yaml`).
+The loop continues until the model signals it is done, or until it reaches the
+tool-call budget in `config.yaml`. A run that spends its budget gets one final
+round with tools switched off, so it ends on an answer rather than mid-narration.
 
 ## Testing
 
