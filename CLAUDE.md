@@ -127,6 +127,15 @@ Every mounted service gets three endpoints automatically:
 - `sum_usage(*usages)` - Aggregate Anthropic token/cache usage across calls
 - `add_page_prefix(content, page)` - Tag a message with `[pg:type/name/adaptor]`
   for client-side navigation
+- `attachments_to_context(attachments)` - Map input attachments onto job_chat's
+  existing `log`/`input`/`output` context fields
+- `format_attachments(...)` / `select_attachments(...)` - Render attachments for
+  agents with no context fields (workflow_chat, planner); filter to the types a
+  planner tool call named
+- `check_attachment_size(attachments)` - Reject a turn over
+  `ATTACHMENT_TOTAL_CHAR_LIMIT`; attachments are never trimmed to fit
+- `attachment_text(content)` - Render attachment content by shape (a log's lines
+  joined, a dataclip object as JSON) rather than as Python repr
 
 ### Models (`services/models.py`)
 
@@ -141,6 +150,12 @@ Langfuse tracing is initialised in `entry.py` and applied per-service with
 `@observe`. It is opt-in per request: `should_track(data_dict)` checks the
 `metrics_opt_in` flag on the payload. Keys: `LANGFUSE_SECRET_KEY`,
 `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL`.
+
+Sentry captures every `ApolloError` via `_capture_apollo_error` in `entry.py`,
+tagged `apollo_error_type` (the error's `type`) with its `code` and `details`
+under an `apollo_error` context. A 4xx goes in at `warning` level and a 5xx at
+`error`, so a client error stays countable in search without alerting. Search
+one class of failure with `apollo_error_type:ATTACHMENT_TOO_LARGE`.
 
 ### Streaming (`services/streaming_util.py`)
 

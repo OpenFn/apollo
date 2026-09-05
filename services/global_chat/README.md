@@ -52,7 +52,11 @@ Request to build a new multi-step workflow from scratch:
 - `history` (optional, default: `[]`): Array of previous conversation turns
   `{role, content}`
 - `attachments` (optional): List of input context objects with `type` (e.g.
-  `"log"`, `"input_dataclip"`, `"run_output"`) and `content`
+  `"log"`, `"input_dataclip"`, `"run_output"`) and `content`. Passed unmodified
+  to the subagents that need them, and **not** stored in the returned history —
+  re-send them on each turn they apply to. Never trimmed: over 250,000
+  characters in total, the request is rejected with `400 ATTACHMENT_TOO_LARGE`
+  before any model call. See `PAYLOAD_SPEC.md` → Attachment handling
 - `options` (optional): Runtime options object (e.g. `{stream: false}`)
 - `api_key` (optional): Anthropic API key; falls back to `ANTHROPIC_API_KEY` env
   var
@@ -175,6 +179,13 @@ tool-calling loop with access to four tools:
 The planner always calls `call_workflow_agent` first to establish the structure,
 then calls `call_job_code_agent` for each job that needs code. Job code is
 stitched into the workflow YAML immediately after each call.
+
+Both subagent tools run their target in **subagent mode**, matching the router's
+direct routes: `job_chat` gets the full workflow YAML (so it sees the workflow
+structure and can call `inspect_job_code`), `workflow_chat` drops its
+"save and go to the Inspector" scope instruction, and both may hand a misrouted
+request back. A handover is reported to the planner as the reason that tool
+could not finish, for it to act on with a different one.
 
 The loop continues until the model signals it is done, or until it reaches the
 tool-call budget in `config.yaml`. A run that spends its budget gets one final

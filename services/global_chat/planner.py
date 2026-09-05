@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from langfuse import observe
-from util import create_logger, ApolloError, sum_usage, mask_secrets
+from util import create_logger, ApolloError, sum_usage, mask_secrets, format_attachments
 from streaming_util import (
     StreamManager,
     STATUS_REVIEWING_WORKFLOW,
@@ -221,6 +221,7 @@ class PlannerAgent:
         self.current_yaml: Optional[str] = None
         self.subagent_results = []
         self._segments: List[Dict] = []
+        self._attachments: List[Dict] = []
 
         logger.info(f"PlannerAgent initialized with model: {self.model}")
 
@@ -232,6 +233,7 @@ class PlannerAgent:
         page: Optional[str],
         history: List[Dict],
         stream: bool,
+        attachments: Optional[List[Dict]] = None,
         user: Optional[Dict] = None,
         metrics_opt_in: Optional[bool] = None,
         stream_manager: Optional[StreamManager] = None,
@@ -245,6 +247,9 @@ class PlannerAgent:
             page: Current page URL (e.g. workflows/name/step-name)
             history: Conversation history
             stream: Whether to stream text via SSE events
+            attachments: Input attachments for this turn (logs, dataclips).
+                Shown to the planner in full; each subagent call forwards only
+                the ones the planner names for it.
             stream_manager: Optional shared stream manager from the router, so
                 a handed-over request continues on the same stream
 
@@ -261,6 +266,7 @@ class PlannerAgent:
 
         self.current_yaml = workflow_yaml
         self.yaml_modified = False
+        self._attachments = attachments or []
         self._user = user
         self._metrics_opt_in = metrics_opt_in
         self._segments: List[Dict] = []
@@ -470,9 +476,19 @@ class PlannerAgent:
         )
 
     def _build_user_content(self, content: str, page: Optional[str]) -> str:
-        """Augment the user message with the step the user is viewing ("this step")
-        and the existing workflow structure (bodies redacted)."""
+        """Augment the user message with this turn's attachments, the step the
+        user is viewing ("this step"), and the existing workflow structure
+        (bodies redacted).
+
+        Everything added here is per-turn: run() records the raw `content` in
+        the returned history, so an attached log never becomes a permanent part
+        of the conversation.
+        """
         user_content = content
+
+        attachments = format_attachments(self._attachments)
+        if attachments:
+            user_content += f"\n\n{attachments}"
 
         if page:
             step_name = get_step_name_from_page(page)
@@ -536,14 +552,8 @@ class PlannerAgent:
                 # which the SDK otherwise rejects.
                 timeout=httpx.Timeout(600.0, connect=5.0),
                 betas=["context-management-2025-06-27"],
-                # Sits above max_tool_calls on purpose. The budget already
-                # bounds the conversation, so a trigger at the budget could
-                # only ever fire on a round that overshoots it, which is the
-                # wrap-up round. Clearing there deletes the edits the wrap-up
-                # is being asked to describe, and `exclude_tools` means the
-                # doc lookups are what survives. Headroom for a parallel
-                # batch that overshoots, and `keep` covers a whole budget so
-                # a run's own edits are never the thing cleared.
+                # Above max_tool_calls: at the budget this could only fire
+                # on the wrap-up round, clearing the edits it summarises.
                 context_management={
                     "edits": [
                         {
@@ -628,6 +638,7 @@ class PlannerAgent:
                 subagent_result = call_workflow_agent(
                     tool_use_block.input,
                     workflow_yaml=self.current_yaml,
+                    attachments=self._attachments,
                     api_key=self.api_key,
                     user=self._user,
                     metrics_opt_in=self._metrics_opt_in,
@@ -684,6 +695,7 @@ class PlannerAgent:
                 subagent_result = call_job_agent(
                     tool_use_block.input,
                     workflow_yaml=self.current_yaml,
+                    attachments=self._attachments,
                     api_key=self.api_key,
                     user=self._user,
                     metrics_opt_in=self._metrics_opt_in,
@@ -815,10 +827,11 @@ class PlannerAgent:
                     executor.submit(
                         call_job_agent,
                         block.input,
-                        self.current_yaml,
-                        self.api_key,
-                        self._user,
-                        self._metrics_opt_in,
+                        workflow_yaml=self.current_yaml,
+                        attachments=self._attachments,
+                        api_key=self.api_key,
+                        user=self._user,
+                        metrics_opt_in=self._metrics_opt_in,
                     ): block
                     for block in to_run
                 }
@@ -834,10 +847,11 @@ class PlannerAgent:
             try:
                 parallel_results[block.id] = call_job_agent(
                     block.input,
-                    self.current_yaml,
-                    self.api_key,
-                    self._user,
-                    self._metrics_opt_in,
+                    workflow_yaml=self.current_yaml,
+                    attachments=self._attachments,
+                    api_key=self.api_key,
+                    user=self._user,
+                    metrics_opt_in=self._metrics_opt_in,
                 )
             except Exception as e:
                 logger.exception("call_job_code_agent failed")

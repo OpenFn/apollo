@@ -80,11 +80,11 @@ edges:
     "content": "[CLI] ✔ Loaded credential at openmrs-prod (last-rotated 2024-09-12)\n[R/T] Starting job post-encounters-to-openmrs\n[R/T] adaptor: @openfn/language-openmrs@4.1.0\n[JOB] Iterating over 12 encounters from state.encounters\n[JOB] POST /openmrs/ws/rest/v1/encounter\n[JOB] ✗ Request failed with status 401 Unauthorized\n[JOB]   response body: {\"error\":{\"message\":\"User is not logged in.\",\"code\":\"org.openmrs.api.APIAuthenticationException\"}}\n[JOB] ✗ Request failed with status 401 Unauthorized (patient: 5f8a-...)\n[JOB] ✗ Request failed with status 401 Unauthorized (patient: 7b21-...)\n[R/T] Job failed: AuthError: Request failed with status 401 Unauthorized\n[R/T]   at create (@openfn/language-openmrs/dist/index.js:124)\n[R/T] Job exited with error code 1"
   },
   {
-    "type": "input",
+    "type": "input_dataclip",
     "content": "{\n  \"encounters\": [\n    {\n      \"resourceType\": \"Encounter\",\n      \"id\": \"enc-001\",\n      \"status\": \"finished\",\n      \"subject\": { \"reference\": \"Patient/5f8a-1234-abcd\" },\n      \"period\": { \"start\": \"2025-04-12T09:15:00+00:00\" },\n      \"location\": [{ \"location\": { \"reference\": \"Location/clinic-east-wing\" } }]\n    },\n    {\n      \"resourceType\": \"Encounter\",\n      \"id\": \"enc-002\",\n      \"status\": \"finished\",\n      \"subject\": { \"reference\": \"Patient/7b21-5678-efgh\" },\n      \"period\": { \"start\": \"2025-04-12T10:30:00+00:00\" },\n      \"location\": [{ \"location\": { \"reference\": \"Location/clinic-west-wing\" } }]\n    },\n    {\n      \"resourceType\": \"Encounter\",\n      \"id\": \"enc-003\",\n      \"status\": \"finished\",\n      \"subject\": { \"reference\": \"Patient/3c44-9876-ijkl\" },\n      \"period\": { \"start\": \"2025-04-12T11:45:00+00:00\" },\n      \"location\": [{ \"location\": { \"reference\": \"Location/clinic-east-wing\" } }]\n    }\n  ]\n}"
   },
   {
-    "type": "output",
+    "type": "output_dataclip",
     "content": "{\n  \"_lastSuccessfulRun\": \"2025-04-10T06:02:11Z\",\n  \"createdEncounters\": [\n    { \"uuid\": \"e1d8a4c0-3f12-4a3b-9b21-001\", \"patient\": \"5f8a-1234-abcd\" },\n    { \"uuid\": \"e1d8a4c0-3f12-4a3b-9b21-002\", \"patient\": \"7b21-5678-efgh\" },\n    { \"uuid\": \"e1d8a4c0-3f12-4a3b-9b21-003\", \"patient\": \"3c44-9876-ijkl\" }\n  ]\n}"
   }
 ]

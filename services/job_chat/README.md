@@ -58,9 +58,11 @@ Writing.
 
 ## Streaming
 
-Right now the service will return the complete response when loaded.
-
-Later, we may expose a streaming interface for better UX.
+Set `stream: true` in the payload and call the `/stream` (SSE) or WebSocket
+endpoint to receive the reply as it generates. The service emits
+Anthropic-shaped events plus progress statuses; see
+`services/streaming_util.py`. Without the flag it returns the complete response
+in one JSON body.
 
 ## Payload Reference
 
@@ -98,6 +100,11 @@ The input payload is a JSON object with the following structure
 ```
 
 All context is optional, as is history.
+
+`context.log` / `context.input` / `context.output` are how run logs and
+dataclips reach this service. `global_chat` maps the attachments on its own
+payload onto these same fields, so there is one way in regardless of caller, and
+none of it enters the returned `history`.
 
 - `meta.session_id` (optional): Session ID for grouping multi-turn conversations in Langfuse
 - `meta.user` (optional): User identity object with `id` (string) and `persona` (string, e.g. `"core-contributor"` or `"user"`) — attributed to Langfuse traces when tracking is enabled

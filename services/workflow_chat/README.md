@@ -39,6 +39,13 @@ Simple input:
 - `errors` (optional): Error message to fix
 - `history` (optional, default: `[]`): Array of previous conversation turns
 - `context` (optional): Context including `page_name` for navigation tracking
+- `attachments` (optional): Files the user attached to this message, as
+  `{type, content}` objects (`"log"`, `"input_dataclip"`, …). Rendered verbatim
+  at the end of the system message, alongside `existing_yaml`, and only when
+  present — with none, the prompt is unchanged. They stay out of the returned
+  `history`, so an attachment never carries into a later turn, and are rejected
+  with `400 ATTACHMENT_TOO_LARGE` above 250,000 characters rather than trimmed.
+  Populated by `global_chat` when it delegates
 - `stream` (optional, default: `false`): Enable streaming response
 - `read_only` (optional, default: `false`): Enable read-only mode (IDs removed, no code preservation)
 - `api_key` (optional): Anthropic API key (falls back to environment variable)
