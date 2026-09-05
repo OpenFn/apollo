@@ -7,6 +7,7 @@ from typing import List, Dict, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 import httpx
+import anthropic
 from anthropic import Anthropic
 import sentry_sdk
 
@@ -16,7 +17,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from langfuse import observe
-from util import create_logger, ApolloError, sum_usage, format_attachments
+from util import create_logger, ApolloError, sum_usage, mask_secrets, format_attachments
 from streaming_util import (
     StreamManager,
     STATUS_REVIEWING_WORKFLOW,
@@ -37,6 +38,152 @@ _FINAL_ROUND_NOTICE = (
     "only if there is any, and then offer to continue next turn — otherwise don't "
     "raise it at all."
 )
+
+
+def _api_error_message(error: Exception) -> str:
+    """The upstream sentence, for diagnostics rather than for a user.
+
+    str(e) and e.message are both the dict repr; the readable sentence is only
+    in the parsed body, and only when the body is Anthropic's shape. Every
+    other shape has an answer because raising here would escape the handler
+    that calls it.
+    """
+    body = getattr(error, "body", None)
+    if isinstance(body, dict):
+        detail = body.get("error")
+        if isinstance(detail, dict):
+            message = detail.get("message")
+            if isinstance(message, str) and message:
+                return message
+
+    if isinstance(error, (anthropic.APIConnectionError, httpx.RequestError)):
+        return str(error) or type(error).__name__
+
+    status = getattr(error, "status_code", None)
+    # A mid-stream failure carries the 200 that opened the stream.
+    if status is None or status < 400:
+        return type(error).__name__
+    return f"upstream returned {status}"
+
+
+# Fallback for a body with no readable type. Named directly so a missing SDK
+# class fails at import rather than inside the handler.
+_CLASS_KINDS = (
+    (anthropic.AuthenticationError, "authentication_error"),
+    (anthropic.PermissionDeniedError, "permission_error"),
+    (anthropic.NotFoundError, "not_found_error"),
+    (anthropic.RequestTooLargeError, "request_too_large"),
+    (anthropic.RateLimitError, "rate_limit_error"),
+    (anthropic.BadRequestError, "invalid_request_error"),
+    (anthropic.OverloadedError, "overloaded_error"),
+    (anthropic.InternalServerError, "overloaded_error"),
+)
+
+
+def _failure_kind(error: Exception) -> str:
+    """What went wrong, as one of Anthropic's error type names.
+
+    Body first, because a mid-stream failure is always a bare APIStatusError
+    whatever its cause: the SDK builds it from the 200 that opened the stream.
+    Global chat streams, so the class is the fallback, not the source.
+    """
+    body = getattr(error, "body", None)
+    if isinstance(body, dict):
+        detail = body.get("error")
+        if isinstance(detail, dict):
+            kind = detail.get("type")
+            if isinstance(kind, str) and kind:
+                return kind
+
+    for error_class, kind in _CLASS_KINDS:
+        if isinstance(error, error_class):
+            return kind
+    return ""
+
+
+# What a user is told, per kind. These reach the chat verbatim: Lightning
+# renders body["message"] and ignores the status and the type entirely
+# (ai_assistant.ex handle_error_response). The upstream sentence never
+# appears here; it goes to details and to Sentry, because it is written for
+# whoever is debugging us, not for whoever is using us.
+_OURS = "The AI service failed on our side, not yours. Please try again."
+
+_MESSAGES = {
+    "authentication_error": "The AI service is misconfigured on our side.",
+    "permission_error": "Our account cannot use the AI service right now.",
+    "billing_error": "Our account cannot use the AI service right now.",
+    "not_found_error": "The AI service is misconfigured on our side.",
+    "rate_limit_error": "The AI service is busy. Please try again shortly.",
+    "overloaded_error": "The AI service is busy. Please try again shortly.",
+    "prompt_too_long": (
+        "This conversation is too long for the AI service to read. "
+        "Start a new session to continue."
+    ),
+    "request_too_large": (
+        "This workflow is too large for the AI service to read. "
+        "Try again with a smaller workflow."
+    ),
+    "connection_error": "Unable to reach the AI service. Please try again.",
+}
+
+
+def _model_api_failure(error: Exception) -> tuple[int, str, str, dict]:
+    """How a model API failure reaches the caller: status, type, message, details.
+
+    The status says whose failure it is. A caller shapes only how much text
+    they send, so only those rejections keep their upstream status; the model,
+    the headers and the tool definitions are ours. Deliberately not job_chat's
+    mapping, which answers a caller 401 when our own key is rejected.
+    """
+    upstream = _api_error_message(error)
+    # details is serialised to the caller (errors.ts toErrorPayload), so it
+    # leaves the server and nothing upstream is trusted to be key-free.
+    details = {"upstream_message": mask_secrets(upstream)}
+
+    if isinstance(error, (anthropic.APIConnectionError, httpx.RequestError)):
+        cause = getattr(error, "__cause__", None)
+        if cause:
+            # A proxy error carries the proxy URL, credentials and all.
+            details["cause"] = mask_secrets(str(cause))
+        return 503, "CONNECTION_ERROR", _MESSAGES["connection_error"], details
+
+    kind = _failure_kind(error)
+
+    # Theirs: the two ways there can be too much of what they sent.
+    if kind == "invalid_request_error" and _is_context_overflow(upstream):
+        return 400, "PROMPT_TOO_LONG", _MESSAGES["prompt_too_long"], details
+    if kind == "request_too_large":
+        return 413, "REQUEST_TOO_LARGE", _MESSAGES["request_too_large"], details
+
+    if kind == "rate_limit_error":
+        response = getattr(error, "response", None)
+        # The header may legally be an HTTP date, and int() rejects some
+        # strings isdigit accepts, including runs over 4300 digits. Anything
+        # unusable falls back rather than raising inside this handler.
+        raw = response.headers.get("retry-after") if response is not None else None
+        usable = bool(raw) and raw.isascii() and raw.isdigit() and len(raw) <= 5
+        # Bounded because the value is someone else's.
+        details["retry_after"] = min(max(int(raw), 1), 300) if usable else 60
+        return 429, "RATE_LIMIT", _MESSAGES["rate_limit_error"], details
+
+    # 500 rather than the upstream 401: platform/src/auth/README.md reserves
+    # 401 for a caller who failed to authenticate.
+    if kind == "authentication_error":
+        return 500, "MODEL_API_ERROR", _MESSAGES["authentication_error"], details
+
+    return 502, "MODEL_API_ERROR", _MESSAGES.get(kind, _OURS), details
+
+
+def _is_context_overflow(message: str) -> bool:
+    """Whether a 400 is the conversation outgrowing the model's window.
+
+    The only 400 a caller can act on, and text is all there is to match on:
+    the type is plain invalid_request_error, same as a header we got wrong.
+    One phrase, the one the API actually sends. Any other wording falls to a
+    502 with the real sentence in details, rather than guessing which of our
+    own 400s to hand a user as theirs to fix.
+    """
+    return "prompt is too long" in message.lower()
 
 
 @dataclass
@@ -222,6 +369,42 @@ class PlannerAgent:
 
                 except ApolloError:
                     raise
+                except (anthropic.APIError, httpx.RequestError) as e:
+                    # A rejection from the model API is not a tool failure.
+                    #
+                    # httpx.RequestError as well as APIError: the SDK only
+                    # wraps httpx exceptions around the initial send, and on a
+                    # streaming request that returns once the headers arrive.
+                    # The body is read later, unwrapped, so a stream that dies
+                    # mid-generation raises a raw httpx error. Global chat
+                    # streams, so that is the common case here.
+                    status, error_type, message, details = _model_api_failure(e)
+                    # A mid-stream error carries the status of the response
+                    # that opened the stream, which was a 200, so recording it
+                    # would read as a call that succeeded.
+                    upstream = getattr(e, "status_code", None)
+                    if upstream is not None and upstream < 400:
+                        upstream = None
+
+                    # Tagged before the log call, not after. LoggingIntegration
+                    # is a Sentry default and captures at ERROR, so this line
+                    # sends the event that carries the SDK traceback; tags set
+                    # afterwards would land only on the later ApolloError event,
+                    # which is the one without it.
+                    if upstream is not None:
+                        sentry_sdk.set_tag("anthropic_status", upstream)
+                    # The status is null for every mid-stream failure, which is
+                    # the common path, so it is the type that makes overload,
+                    # a rate limit and a bad tool definition tell apart here.
+                    sentry_sdk.set_tag("anthropic_error", error_type)
+                    sentry_sdk.set_tag("planner_tool_calls", tool_call_count)
+                    logger.exception("Model API error in tool-calling loop")
+                    raise ApolloError(
+                        status,
+                        message,
+                        error_type,
+                        {**details, "upstream_status": upstream},
+                    ) from e
                 except Exception as e:
                     logger.exception("Error in tool-calling loop")
                     raise ApolloError(500, f"Tool execution error: {str(e)}")
