@@ -63,6 +63,7 @@ import sentry_sdk
 from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
 from langfuse_util import should_track, build_tags, build_generation_diff, mask_secrets
 from util import ApolloError, create_logger, add_page_prefix, APOLLO_VERSION
+from yaml_utils import _remove_ids
 from .gen_project_prompt import build_prompt
 from workflow_chat.available_adaptors import get_available_adaptors
 from streaming_util import (
@@ -364,17 +365,8 @@ class AnthropicClient:
             return yaml_str
         try:
             yaml_data = yaml.safe_load(yaml_str)
-
-            def remove_ids(obj):
-                if isinstance(obj, dict):
-                    obj.pop("id", None)
-                    for v in obj.values():
-                        remove_ids(v)
-                elif isinstance(obj, list):
-                    for item in obj:
-                        remove_ids(item)
-
-            remove_ids(yaml_data)
+            # Shared with redact_job_bodies so the cycle guard lives in one place.
+            _remove_ids(yaml_data)
             return yaml.dump(yaml_data, sort_keys=False, default_flow_style=False)
         except Exception as e:
             logger.warning(f"Could not remove IDs from YAML: {e}")
@@ -542,9 +534,11 @@ class AnthropicClient:
         
         preserved_values = {}
         
-        if "jobs" in yaml_data:
+        if isinstance(yaml_data.get("jobs"), dict):
             for job_key, job_data in yaml_data["jobs"].items():
-                if "body" in job_data:
+                if not isinstance(job_data, dict):
+                    continue
+                if isinstance(job_data.get("body"), str):
                     body_content = job_data["body"].strip()
                     if body_content and body_content != "// Add operations here":
                         placeholder = f"__CODE_BLOCK_{job_key}__"
@@ -556,17 +550,17 @@ class AnthropicClient:
                     preserved_values[placeholder] = job_data["id"]
                     job_data["id"] = placeholder
         
-        if "triggers" in yaml_data:
+        if isinstance(yaml_data.get("triggers"), dict):
             for trigger_key, trigger_data in yaml_data["triggers"].items():
-                if "id" in trigger_data:
+                if isinstance(trigger_data, dict) and "id" in trigger_data:
                     # Store the trigger ID directly without placeholder
                     preserved_values["trigger_id"] = trigger_data["id"]
                     # Remove the id key from what we send to the model
                     del trigger_data["id"]
         
-        if "edges" in yaml_data:
+        if isinstance(yaml_data.get("edges"), dict):
             for edge_key, edge_data in yaml_data["edges"].items():
-                if "id" in edge_data:
+                if isinstance(edge_data, dict) and "id" in edge_data:
                     placeholder = f"__ID_EDGE_{edge_key}__"
                     preserved_values[placeholder] = edge_data["id"]
                     edge_data["id"] = placeholder
