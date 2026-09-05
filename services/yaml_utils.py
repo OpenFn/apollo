@@ -69,7 +69,7 @@ def find_job_in_yaml(yaml_str: str, step_name: str) -> tuple[str | None, dict | 
     except Exception:
         return None, None
 
-    if not yaml_data or "jobs" not in yaml_data:
+    if not isinstance(yaml_data, dict) or "jobs" not in yaml_data:
         return None, None
 
     jobs = yaml_data["jobs"]
@@ -105,7 +105,7 @@ def workflow_has_job_code(yaml_str: str | None) -> bool:
         yaml_data = yaml.safe_load(yaml_str)
     except Exception:
         return False
-    if not yaml_data or "jobs" not in yaml_data:
+    if not isinstance(yaml_data, dict) or not isinstance(yaml_data.get("jobs"), dict):
         return False
     for job_data in yaml_data["jobs"].values():
         body = (job_data or {}).get("body")
@@ -114,9 +114,54 @@ def workflow_has_job_code(yaml_str: str | None) -> bool:
     return False
 
 
+#: What a job body is replaced with in the structural view.
+REDACTED_BODY = "# [use inspect_job_code to view]"
+
 #: Sent in place of the document when redaction cannot be completed. Returning
 #: the original would hand the model the very bodies this exists to hold back.
 WITHHELD_NOTICE = "# workflow withheld: it could not be read well enough to redact"
+
+
+#: The sections a workflow document is made of. A document holding none of
+#: them is not one we know how to redact, so it is withheld rather than dumped.
+WORKFLOW_SECTIONS = ("jobs", "triggers", "edges", "workflows")
+
+
+def _looks_like_a_workflow(yaml_data: object) -> bool:
+    """A mapping with at least one recognised section, none of them a scalar.
+
+    `jobs: <code>` has a section we recognise holding something we cannot walk,
+    so it is not safe to dump back.
+    """
+    if not isinstance(yaml_data, dict):
+        return False
+    present = [key for key in WORKFLOW_SECTIONS if key in yaml_data]
+    if not present:
+        return False
+    return all(isinstance(yaml_data[key], (dict, list)) for key in present)
+
+
+def _redact_bodies(obj: object, seen: set | None = None) -> None:
+    """Replace every `body` string anywhere in the tree, not just jobs.*.body.
+
+    A project export nests its jobs under each workflow, so a walk that only
+    looks at the top level hands those bodies straight to the model.
+    """
+    if seen is None:
+        seen = set()
+    if id(obj) in seen:
+        return
+    if isinstance(obj, dict):
+        seen.add(id(obj))
+        for key, value in obj.items():
+            if key == "body" and isinstance(value, str):
+                obj[key] = REDACTED_BODY
+            else:
+                _redact_bodies(value, seen)
+    elif isinstance(obj, list):
+        seen.add(id(obj))
+        for item in obj:
+            _redact_bodies(item, seen)
 
 
 def redact_job_bodies(yaml_str: str) -> str:
@@ -127,21 +172,20 @@ def redact_job_bodies(yaml_str: str) -> str:
     in subagent mode. It never round-trips back into a real workflow, so the
     UUID ids are pure noise to the model — dropping them saves tokens.
 
-    Withholds the document rather than returning it when anything goes wrong.
+    Withholds the document only when it cannot be read or written back.
+    Anything it can parse gets every body redacted, wherever they sit.
     """
     try:
         yaml_data = yaml.safe_load(yaml_str)
     except Exception:
         return WITHHELD_NOTICE
 
-    if not isinstance(yaml_data, dict) or not isinstance(yaml_data.get("jobs"), dict):
+    if not _looks_like_a_workflow(yaml_data):
         return WITHHELD_NOTICE
 
     try:
         _remove_ids(yaml_data)
-        for job_data in yaml_data["jobs"].values():
-            if isinstance(job_data, dict) and "body" in job_data:
-                job_data["body"] = "# [use inspect_job_code to view]"
+        _redact_bodies(yaml_data)
         return yaml.dump(yaml_data, sort_keys=False)
     except Exception:
         return WITHHELD_NOTICE

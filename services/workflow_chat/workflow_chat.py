@@ -63,6 +63,7 @@ import sentry_sdk
 from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
 from langfuse_util import should_track, build_tags, build_generation_diff, mask_secrets
 from util import ApolloError, create_logger, add_page_prefix, APOLLO_VERSION
+from yaml_utils import _remove_ids
 from .gen_project_prompt import build_prompt
 from workflow_chat.available_adaptors import get_available_adaptors
 from streaming_util import (
@@ -364,17 +365,8 @@ class AnthropicClient:
             return yaml_str
         try:
             yaml_data = yaml.safe_load(yaml_str)
-
-            def remove_ids(obj):
-                if isinstance(obj, dict):
-                    obj.pop("id", None)
-                    for v in obj.values():
-                        remove_ids(v)
-                elif isinstance(obj, list):
-                    for item in obj:
-                        remove_ids(item)
-
-            remove_ids(yaml_data)
+            # Shared with redact_job_bodies so the cycle guard lives in one place.
+            _remove_ids(yaml_data)
             return yaml.dump(yaml_data, sort_keys=False, default_flow_style=False)
         except Exception as e:
             logger.warning(f"Could not remove IDs from YAML: {e}")

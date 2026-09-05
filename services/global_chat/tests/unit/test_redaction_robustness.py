@@ -8,7 +8,12 @@ PyYAML builds as a real cycle.
 import pytest
 import yaml
 from workflow_chat.workflow_chat import AnthropicClient
-from yaml_utils import WITHHELD_NOTICE, _remove_ids, redact_job_bodies
+from yaml_utils import (
+    WITHHELD_NOTICE,
+    _remove_ids,
+    redact_job_bodies,
+    workflow_has_job_code,
+)
 
 SECRET = "callSecretApi()"
 
@@ -25,11 +30,10 @@ def test_a_normal_workflow_is_still_redacted() -> None:
     "document",
     [
         f'jobs: {{a: {{body: "{SECRET}"}}\n  broken',
-        f"workflows:\n  wf:\n    jobs:\n      a:\n        body: {SECRET}\n",
         f"- {SECRET}\n",
         f"jobs: {SECRET}\n",
     ],
-    ids=["unparseable", "jobs-nested-deeper", "a-list", "jobs-not-a-mapping"],
+    ids=["unparseable", "a-list", "jobs-not-a-mapping"],
 )
 def test_a_document_it_cannot_redact_is_withheld(document: str) -> None:
     out = redact_job_bodies(document)
@@ -70,3 +74,41 @@ def test_preserving_components_tolerates_a_shape_it_did_not_expect(yaml_data: di
     preserved, _ = AnthropicClient.extract_and_preserve_components(yaml_data)
 
     assert isinstance(preserved, dict)
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        f'jobs:\n  a:\n    body: "ok"\n    steps:\n      inner:\n        body: "{SECRET}"\n',
+        f'jobs:\n  a:\n    - body: "{SECRET}"\n',
+        f'shared: &s\n  body: "{SECRET}"\njobs:\n  a:\n    <<: *s\n',
+        f"workflows:\n  wf:\n    jobs:\n      a:\n        body: {SECRET}\n",
+    ],
+    ids=["nested-deeper", "job-is-a-list", "merge-key", "project-export"],
+)
+def test_a_body_is_redacted_wherever_it_sits(document: str) -> None:
+    out = redact_job_bodies(document)
+
+    assert SECRET not in out
+    assert out != WITHHELD_NOTICE
+
+
+def test_a_workflow_with_no_bodies_is_kept_not_withheld() -> None:
+    """Withholding a document that has nothing to hide loses the planner its
+    structure for no gain."""
+    out = redact_job_bodies("triggers:\n  t:\n    type: cron\n")
+
+    assert out != WITHHELD_NOTICE
+    assert "cron" in out
+
+
+def test_the_read_only_id_strip_also_survives_a_cycle() -> None:
+    document = "jobs:\n  a: &x\n    id: SECRET-ID\n    body: code()\n    loop: *x\n"
+
+    out = AnthropicClient.remove_ids_from_yaml(AnthropicClient, document)
+
+    assert "SECRET-ID" not in out
+
+
+def test_a_scalar_document_is_not_treated_as_a_workflow() -> None:
+    assert redact_job_bodies("jobs") == WITHHELD_NOTICE
+    assert workflow_has_job_code("jobs") is False
