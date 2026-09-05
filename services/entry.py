@@ -72,7 +72,7 @@ HTTP_SERVER_ERROR = 500
 
 # 4xx that are our problem despite the code: the provider rejected or throttled
 # Apollo's own key, so no change by the caller would help.
-PROVIDER_FAILURE_TYPES = frozenset({"AUTH_ERROR", "RATE_LIMIT"})
+PROVIDER_FAILURE_TYPES = frozenset({"AUTH_ERROR", "RATE_LIMIT", "FORBIDDEN"})
 
 
 def _capture_apollo_error(e: ApolloError) -> None:
