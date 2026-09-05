@@ -4,9 +4,12 @@ Shared utility functions for working with workflow YAML strings.
 Used by global_chat (router, planner, subagent caller) and by job_chat in
 subagent mode for job extraction, code stitching, and step inspection.
 """
-import re
 
 import yaml
+from name_rules import normalize_for_lookup
+from util import create_logger
+
+logger = create_logger("yaml_utils")
 
 
 def get_page_view(page: str | None) -> tuple[str | None, str | None]:
@@ -50,43 +53,80 @@ def get_step_name_from_page(page: str | None) -> str | None:
 
 
 def normalize_name(name: str) -> str:
-    """Normalize a name for fuzzy matching: lowercase, non-alphanumeric chars become hyphens."""
-    return re.sub(r'[^a-z0-9]', '-', name.lower()).strip('-')
+    """Normalize a name for fuzzy matching: lowercase, non-alphanumeric chars become hyphens.
+
+    Unicode-aware — see ``name_rules.normalize_for_lookup``. "Alphanumeric"
+    means a letter, mark or digit in any script, so a non-Latin name folds to
+    itself rather than to the empty string.
+    """
+    return normalize_for_lookup(name)
 
 
 def find_job_in_yaml(yaml_str: str, step_name: str) -> tuple[str | None, dict | None]:
     """
     Find a job in the workflow YAML by step name.
 
-    Tries direct key match first, then normalized name comparison against
-    both the job key and the job's name field.
+    Resolution order, strictest first: an exact key, an exact name, then the
+    normalized fold — and the fold resolves only when it picks out exactly one
+    job. Anything ambiguous returns (None, None).
+
+    The order matters because the result is *written* to: `router` and
+    `planner` hand the key straight to `stitch_job_code`, which replaces that
+    step's body. Taking the first fold hit meant an earlier job's *key* fold
+    could beat a later job's *exact name* — steps keyed `upload-data`
+    ("Legacy uploader") and `upload-data-2` ("Upload Data"), a lookup for
+    "Upload Data", and the model's generated code landed on the legacy step.
+    A miss costs a retry; a wrong hit destroys work.
 
     Returns:
-        (job_key, job_data) or (None, None) if not found or on parse error
+        (job_key, job_data) or (None, None) if not found, ambiguous, or on
+        parse error
     """
     try:
         yaml_data = yaml.safe_load(yaml_str)
     except Exception:
         return None, None
 
-    if not yaml_data or "jobs" not in yaml_data:
+    if not isinstance(yaml_data, dict) or not isinstance(yaml_data.get("jobs"), dict):
         return None, None
 
     jobs = yaml_data["jobs"]
 
-    # Direct key match
     if step_name in jobs:
         return step_name, jobs[step_name]
 
-    # Normalized match: compare against job key and name field
-    normalized_step = normalize_name(step_name)
-    for job_key, job_data in jobs.items():
-        if normalize_name(job_key) == normalized_step:
-            return job_key, job_data
-        job_name = job_data.get("name", "")
-        if normalize_name(job_name) == normalized_step:
-            return job_key, job_data
+    exact_names = [
+        key for key, data in jobs.items() if (data or {}).get("name") == step_name
+    ]
+    if exact_names:
+        return _only_match(exact_names, jobs, step_name, "name")
 
+    # An empty normalization carries no information (the name was all
+    # punctuation), so never match on it.
+    normalized_step = normalize_name(step_name)
+    if not normalized_step:
+        return None, None
+
+    folded = [
+        key
+        for key, data in jobs.items()
+        if normalize_name(key) == normalized_step
+        or ((data or {}).get("name") and normalize_name(data["name"]) == normalized_step)
+    ]
+    return _only_match(folded, jobs, step_name, "folded name")
+
+
+def _only_match(
+    matches: list, jobs: dict, step_name: str, how: str,
+) -> tuple[str | None, dict | None]:
+    """Return the single match, or nothing when more than one job qualifies."""
+    if len(matches) == 1:
+        return matches[0], jobs[matches[0]]
+    logger.warning(
+        f"Step reference {step_name!r} matches the {how} of {len(matches)} jobs "
+        f"({', '.join(sorted(str(match) for match in matches))}); leaving it "
+        f"unresolved rather than guessing, because the caller writes to it",
+    )
     return None, None
 
 

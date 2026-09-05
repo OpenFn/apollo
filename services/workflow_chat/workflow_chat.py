@@ -62,6 +62,15 @@ from anthropic import (
 import sentry_sdk
 from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
 from langfuse_util import should_track, build_tags, build_generation_diff, mask_secrets
+from name_rules import (
+    MAX_EDGE_KEY_LENGTH,
+    MAX_NAME_LENGTH,
+    grapheme_length,
+    normalize_for_lookup,
+    sanitize_name,
+    truncate_graphemes,
+    unicode_names_enabled,
+)
 from util import ApolloError, create_logger, add_page_prefix, APOLLO_VERSION
 from .gen_project_prompt import build_prompt
 from workflow_chat.available_adaptors import get_available_adaptors
@@ -375,75 +384,388 @@ class AnthropicClient:
                         remove_ids(item)
 
             remove_ids(yaml_data)
-            return yaml.dump(yaml_data, sort_keys=False, default_flow_style=False)
+            return yaml.dump(yaml_data, sort_keys=False, default_flow_style=False, allow_unicode=True)
         except Exception as e:
             logger.warning(f"Could not remove IDs from YAML: {e}")
             return yaml_str
 
+    #: Key an edge falls back to when its reference cannot be resolved.
+    UNRESOLVED_REFERENCE = "unresolved-step"
+
+    #: Key for an edge whose own key sanitizes away to nothing and which has no
+    #: endpoints to derive a label from.
+    UNNAMED_EDGE = "edge"
+
     @staticmethod
-    def sanitize_job_names(yaml_data):
+    def _resolve_by_name(reference, job_names):
+        """Resolve a step reference against job *names*, or None.
+
+        Exact match wins outright. Only if nothing matches exactly does it fall
+        back to the lookup fold, and then only when the fold picks out exactly
+        one job: `Fetch Patients` and `fetch patients` are two different names
+        that fold together, so taking the first fold hit bound the edge to
+        whichever happened to come first in the document. An ambiguous
+        reference is not resolved at all — a visible dangle beats a silent
+        binding to the wrong step.
         """
-        Sanitize job names by removing special characters and normalizing diacritics.
-        Also sanitizes job references in edges (source and target fields) and edge keys.
+        if not reference:
+            return None
+
+        def unambiguous(matches, how):
+            if len(matches) == 1:
+                return matches[0]
+            if matches:
+                logger.warning(
+                    f"Step reference {reference!r} {how} {len(matches)} jobs "
+                    f"({', '.join(sorted(matches))}); leaving it unresolved rather than guessing",
+                )
+            return None
+
+        # Exact is not automatically unique: two jobs can arrive sharing a name.
+        exact = [key for key, name in job_names.items() if name == reference]
+        if exact:
+            return unambiguous(exact, "exactly matches the name of")
+
+        wanted = normalize_for_lookup(reference)
+        if not wanted:
+            return None
+
+        folded = [key for key, name in job_names.items() if normalize_for_lookup(name) == wanted]
+        return unambiguous(folded, "matches the folded name of")
+
+    #: Token-shaped text. Used for ONE question only: "is this a swap token we
+    #: never issued?" — the degrade branch. Deliberately not used to find our
+    #: own tokens: we know exactly which ones we issued, and a pattern can only
+    #: guess at their shape.
+
+    @staticmethod
+    def _reference_key(value):
+        """A mapping key that distinguishes `1`, `"1"` and `True`.
+
+        YAML types keys: `1:` is an int, `"1":` a string, `on:` a boolean.
+        Keying a mapping on `str(value)` makes the first two collide; keying it
+        on the raw value makes the last two collide, because `hash(True) ==
+        hash(1)`. Pairing the type name with the text avoids both.
         """
-        if not yaml_data:
+        return (type(value).__name__, str(value))
+
+    @staticmethod
+    def _section(yaml_data, name):
+        """Return `yaml_data[name]` as a dict of dicts, or {} if it is anything else.
+
+        `jobs:` with nothing under it parses as None, and a single bare entry
+        (`b:`) gives a None value. Both are valid YAML and both used to raise
+        somewhere in this pipeline, where the exception was swallowed and the
+        user got prose and no workflow.
+        """
+        if not isinstance(yaml_data, dict):
+            return {}
+        section = yaml_data.get(name)
+        if not isinstance(section, dict):
+            return {}
+        for key, value in list(section.items()):
+            if not isinstance(value, dict):
+                section[key] = {}
+        return section
+
+    #: Stand-in for a reference that sanitizes away to nothing. Uniquified
+    #: against the workflow's own keys at sanitize time, because a user can
+    #: perfectly well name a step "unresolved-step" — keys are uniquified
+    #: against each other, not against this. An edge carrying the sentinel
+    #: stays visibly broken rather than silently binding to a real step.
+
+    @staticmethod
+    def _unique_name(candidate: str, taken: set, fallback: str) -> str:
+        """Return `candidate` (or `fallback` if it sanitized away) made unique against `taken`.
+
+        Job names and job keys must both be unique within a workflow. Two names
+        that differ only in characters the rule strips — `Résumé` and `Resume`
+        under the ASCII rule — would otherwise collapse onto each other and the
+        second job would overwrite the first.
+
+        The suffix is added inside the length cap, not on top of it: appending
+        `-2` to a name that is already at the limit would push it over, and
+        Lightning would reject the result.
+        """
+        candidate = candidate or fallback
+        if candidate not in taken:
+            taken.add(candidate)
+            return candidate
+
+        suffix = 2
+        while True:
+            tail = f"-{suffix}"
+            trimmed = truncate_graphemes(candidate, MAX_NAME_LENGTH - grapheme_length(tail))
+            unique = f"{trimmed}{tail}"
+            if unique not in taken:
+                taken.add(unique)
+                return unique
+            suffix += 1
+
+    @staticmethod
+    def _edge_label(edge_key: str, edge_data: object, remap_reference: object) -> str:
+        """Derive an edge's `source->target` label after its endpoints were renamed.
+
+        The label comes from the edge's own `source_*`/`target_*` fields
+        wherever it has them, rather than from splitting the old label on "->".
+        Under the permissive rule "->" is a legal run of characters inside a
+        step name, which makes that split ambiguous — and the fields are the
+        real identity anyway; the key is only a label.
+
+        An edge whose endpoints are both known always gets the derived label,
+        whatever its old key looked like. Deriving it for `a->b` but leaving
+        `e1` alone would mean the sanitizer emits keys its own test assertion
+        rejects. Only an edge with no usable endpoints keeps its old key, and
+        then it is split on the first "->" if it has one.
+        """
+        # YAML gives an unquoted `on:` as the boolean True, not a string.
+        edge_key = str(edge_key)
+
+        if isinstance(edge_data, dict):
+            source = edge_data.get("source_job") or edge_data.get("source_trigger")
+            target = edge_data.get("target_job") or edge_data.get("target_trigger")
+            if source and target:
+                return f"{source}->{target}"
+
+        if "->" not in edge_key:
+            # Nothing to derive a label from and no arrow to split on. Still
+            # sanitize it — a key carrying a NUL crashes the insert on
+            # Lightning's side just as surely as a name would.
+            return sanitize_name(edge_key, unicode_names_enabled()) or AnthropicClient.UNNAMED_EDGE
+
+        source_part, target_part = edge_key.split("->", 1)
+        return f"{remap_reference(source_part)}->{remap_reference(target_part)}"
+
+    @staticmethod
+    def sanitize_job_names(yaml_data: object) -> None:
+        """
+        Bring every job key, job name, trigger key and edge reference in the
+        workflow into line with the active step-name rule (see `name_rules`).
+
+        Keys are rewritten alongside names, and edges are rewritten through the
+        resulting key mapping rather than sanitized independently. Sanitizing
+        the two separately is how edges used to end up pointing at jobs that no
+        longer existed.
+        """
+        if not isinstance(yaml_data, dict):
+            # A non-dict payload is not a workflow. One caller swallows every
+            # exception from this, so raising here would silently drop YAML.
             return
-            
-        def sanitize_single_name(name):
-            if not name or not isinstance(name, str):
-                return name
-            # Normalize unicode characters (removes diacritics)
-            normalized = unicodedata.normalize('NFKD', name)
-            ascii_name = normalized.encode('ascii', 'ignore').decode('ascii')
-            # Keep only alphanumeric, spaces, hyphens, and underscores
-            return re.sub(r'[^a-zA-Z0-9\s\-_]', '', ascii_name)
-        
-        if "jobs" in yaml_data:
-            jobs = yaml_data["jobs"]
-            name_mapping = {}
-            
+
+        unicode_mode = unicode_names_enabled()
+
+        # One mapping per section, never shared. A workflow may legitimately
+        # have a trigger and a job whose original keys are the same string, and
+        # a single mapping keyed on that string would let the jobs pass
+        # overwrite the trigger's entry — rewriting the edge's source_trigger
+        # to point at a job and orphaning the trigger.
+        key_mappings = {"jobs": {}, "triggers": {}}
+
+        def sanitize_section(section: str, fallback_prefix: str, label: str) -> dict | None:
+            """Sanitize the keys of `jobs:` or `triggers:`, recording the renames."""
+            entries = yaml_data.get(section)
+            if not isinstance(entries, dict):
+                return None
+
+            mapping = key_mappings[section]
+            taken = set()
+            rebuilt = {}
+            renamed = []
+            for index, (key, data) in enumerate(entries.items()):
+                original = str(key)
+                new_key = AnthropicClient._unique_name(
+                    sanitize_name(original, unicode_mode), taken, f"{fallback_prefix}-{index + 1}",
+                )
+                # Keyed on type *and* text; see `_reference_key`.
+                mapping[AnthropicClient._reference_key(key)] = new_key
+                rebuilt[new_key] = data
+                if original != new_key:
+                    renamed.append(f"{original!r} -> {new_key!r}")
+
+            if renamed:
+                logger.info(f"Sanitized {len(renamed)} {label} key(s): {', '.join(renamed)}")
+
+            yaml_data[section] = rebuilt
+            return rebuilt
+
+        triggers = sanitize_section("triggers", "trigger", "trigger")
+        jobs = sanitize_section("jobs", "step", "job")
+
+        # Captured before the renaming loop below, so a by-name reference is
+        # matched against what the model actually wrote.
+        # `str(...)`, not a string-only filter. A model writing `name: 2024`,
+        # `name: on` or `name: 01` is ordinary output, and YAML hands those over
+        # as an int, a bool and an int. Filtering them out left them unsanitized
+        # and unrenamed, and Ecto rejects a `:string` cast from an integer, so a
+        # workflow that used to save stopped saving. The `None` case the filter
+        # was written for is handled by excluding None explicitly.
+        original_job_names = {
+            job_key: str(job_data["name"])
+            for job_key, job_data in (jobs or {}).items()
+            if isinstance(job_data, dict)
+            and job_data.get("name") is not None
+            and str(job_data["name"]).strip()
+        }
+
+        taken_names = set()
+        if jobs:
+            renamed = []
             for job_key, job_data in jobs.items():
-                if "name" in job_data:
+                if isinstance(job_data, dict) and job_data.get("name") is not None:
                     original_name = str(job_data["name"])
-                    sanitized_name = sanitize_single_name(original_name)
-                    
-                    job_data["name"] = sanitized_name
-                    name_mapping[original_name] = sanitized_name
-                    
-                    if original_name != sanitized_name:
-                        logger.info(f"Sanitized job name: '{original_name}' -> '{sanitized_name}'")
-        
-        if "edges" in yaml_data:
+                    new_name = AnthropicClient._unique_name(
+                        sanitize_name(original_name, unicode_mode), taken_names, job_key,
+                    )
+                    job_data["name"] = new_name
+                    if original_name != new_name:
+                        renamed.append(f"{original_name!r} -> {new_name!r}")
+
+            if renamed:
+                logger.info(f"Sanitized {len(renamed)} job name(s): {', '.join(renamed)}")
+
+        # The sentinel must not collide with anything a user can type — keys or
+        # names. Names count because a dangling edge is reported by name, and a
+        # reader matching it against the step list would be misled.
+        unresolved = AnthropicClient._unique_name(
+            AnthropicClient.UNRESOLVED_REFERENCE,
+            set(jobs or {}) | set(triggers or {}) | taken_names,
+            AnthropicClient.UNRESOLVED_REFERENCE,
+        )
+
+        def remap_reference(reference: object, section: str | None = None) -> str:
+            """Map a reference through the mapping for `section` (or either, for a key part).
+
+            `source_job` resolves against jobs and `source_trigger` against
+            triggers. An edge *key* part has no field to say which it is, so it
+            tries jobs first and then triggers.
+            """
+            sections = (section,) if section else ("jobs", "triggers")
+            for name in sections:
+                new_key = key_mappings[name].get(AnthropicClient._reference_key(reference))
+                if new_key is not None:
+                    return new_key
+
+            # Not a key. The likeliest model mistake is referring to a step by
+            # its *name* instead of its key, which otherwise ships as a
+            # well-formed edge pointing at nothing.
+            if "jobs" in sections and reference is not None:
+                by_name = AnthropicClient._resolve_by_name(str(reference), original_job_names)
+                if by_name is not None:
+                    logger.info(
+                        f"Edge referred to step by name {str(reference)!r}; "
+                        f"resolved to job key {by_name!r}",
+                    )
+                    return by_name
+
+            # Genuinely unresolvable. Sanitize it so it at least obeys the rule;
+            # if nothing survives, say so rather than leaking the raw value out.
+            resolved = sanitize_name(str(reference), unicode_mode) or unresolved
+
+            # If the sanitized form is a real key, that is usually the right
+            # answer and not a coincidence: a key with a trailing space, a tab,
+            # a NUL, or one written in a different normal form all sanitize to
+            # exactly what the model wrote. Only treat it as a collision when
+            # the *original* key it belongs to was something else entirely.
+            owner = _sanitized_key_owner(resolved, sections)
+            if owner is not None:
+                if _is_the_same_reference(owner, reference):
+                    return resolved
+                logger.warning(
+                    f"Unresolvable reference {str(reference)!r} sanitizes to {resolved!r}, "
+                    f"which belongs to a different step ({owner!r}); using the unresolved "
+                    f"marker rather than binding to it",
+                )
+                resolved = unresolved
+
+            dangling.add(resolved)
+            return resolved
+
+        def _sanitized_key_owner(resolved: str, sections: tuple) -> object:
+            """Return the original key that `resolved` is the sanitized form of."""
+            for name in sections:
+                for original, new_key in key_mappings[name].items():
+                    if new_key == resolved:
+                        return original[1]
+            return None
+
+        def _is_the_same_reference(original_key: str, reference: object) -> bool:
+            """True if `original_key` and `reference` are the same name written differently.
+
+            Whitespace, control characters and normal form are all differences a
+            reader would not see. A genuinely different name is not.
+
+            The length cap is *not* one of them: `normalize_for_lookup` does not
+            truncate, so a 150-character key sanitizes to a 100-character one
+            that a 100-character reference matches, and this returns False —
+            the edge goes to the sentinel. That is a real gap, and it is here
+            rather than hidden because the fix belongs in whichever of the two
+            should stop caring about length.
+            """
+            return normalize_for_lookup(original_key) == normalize_for_lookup(str(reference))
+
+        dangling = set()
+
+        edges = yaml_data.get("edges")
+        if isinstance(edges, dict):
             sanitized_edges = {}
-            
-            for edge_key, edge_data in yaml_data["edges"].items():
-                if "source_job" in edge_data:
-                    original_source = str(edge_data["source_job"])
-                    edge_data["source_job"] = sanitize_single_name(original_source)
-                    if original_source != edge_data["source_job"]:
-                        logger.info(f"Sanitized edge source_job: '{original_source}' -> '{edge_data['source_job']}'")
-                
-                if "target_job" in edge_data:
-                    original_target = str(edge_data["target_job"])
-                    edge_data["target_job"] = sanitize_single_name(original_target)
-                    if original_target != edge_data["target_job"]:
-                        logger.info(f"Sanitized edge target_job: '{original_target}' -> '{edge_data['target_job']}'")
-                
-                if "->" in edge_key:
-                    source_part, target_part = edge_key.split("->", 1)
-                    sanitized_source = sanitize_single_name(source_part)
-                    sanitized_target = sanitize_single_name(target_part)
-                    sanitized_edge_key = f"{sanitized_source}->{sanitized_target}"
-                    
-                    if sanitized_edge_key != edge_key:
-                        logger.info(f"Sanitized edge key: '{edge_key}' -> '{sanitized_edge_key}'")
-                    
-                    sanitized_edges[sanitized_edge_key] = edge_data
-                else:
-                    # If there's no arrow, just keep the original key
-                    sanitized_edges[edge_key] = edge_data
-            
+
+            remapped_fields = 0
+
+            for edge_key, edge_data in edges.items():
+                if isinstance(edge_data, dict):
+                    for field, section in (
+                        ("source_job", "jobs"),
+                        ("target_job", "jobs"),
+                        ("source_trigger", "triggers"),
+                        ("target_trigger", "triggers"),
+                    ):
+                        if field in edge_data:
+                            original_reference = edge_data[field]
+                            edge_data[field] = remap_reference(original_reference, section)
+                            if str(original_reference) != edge_data[field]:
+                                remapped_fields += 1
+
+                label = AnthropicClient._edge_label(edge_key, edge_data, remap_reference)
+
+                # The label is not unique on its own: two edges may join the
+                # same pair of steps (an on_success and an on_failure edge is an
+                # ordinary workflow). Keying on the bare label would drop one of
+                # them, so disambiguate instead of overwriting, with the suffix
+                # *inside* the cap, the same rule `_unique_name` follows.
+                sanitized_edge_key = truncate_graphemes(label, MAX_EDGE_KEY_LENGTH)
+                suffix = 2
+                while sanitized_edge_key in sanitized_edges:
+                    tail = f"-{suffix}"
+                    trimmed = truncate_graphemes(label, MAX_EDGE_KEY_LENGTH - grapheme_length(tail))
+                    sanitized_edge_key = f"{trimmed}{tail}"
+                    suffix += 1
+
+                sanitized_edges[sanitized_edge_key] = edge_data
+
+            if remapped_fields:
+                logger.info(f"Remapped {remapped_fields} edge endpoint reference(s)")
+
+            if len(sanitized_edges) != len(edges):  # pragma: no cover - defensive
+                logger.error(
+                    f"Edge count changed while sanitizing: {len(edges)} in, {len(sanitized_edges)} out",
+                )
+
             yaml_data["edges"] = sanitized_edges
+
+        if dangling:
+            # A well-formed edge pointing at nothing looks fine to every
+            # character check, so it used to ship in silence. It is still
+            # emitted — dropping the edge would lose more than it saves — but
+            # it is no longer invisible. Only the count goes to Sentry; the
+            # names are the caller's own, so they go to the log.
+            logger.warning(
+                f"Workflow has edge endpoints that match no step or trigger: "
+                f"{', '.join(sorted(dangling))}",
+            )
+            sentry_sdk.capture_message(
+                f"Workflow has {len(dangling)} edge endpoint(s) matching no step or trigger",
+                level="warning",
+            )
 
     def finalize_yaml(self, parsed_yaml, preserved_values=None):
         """
@@ -461,7 +783,7 @@ class AnthropicClient:
             self.sanitize_job_names(parsed_yaml)
         with sentry_sdk.start_span(description="restore_components"):
             self.restore_components(parsed_yaml, preserved_values)
-        return yaml.dump(parsed_yaml, sort_keys=False)
+        return yaml.dump(parsed_yaml, sort_keys=False, allow_unicode=True)
 
     def split_format_yaml(self, response, preserved_values=None, stream_manager=None):
         """Split text and YAML in response and format the YAML."""
@@ -571,7 +893,7 @@ class AnthropicClient:
                     preserved_values[placeholder] = edge_data["id"]
                     edge_data["id"] = placeholder
         
-        return preserved_values, yaml.dump(yaml_data, sort_keys=False)
+        return preserved_values, yaml.dump(yaml_data, sort_keys=False, allow_unicode=True)
 
     def restore_components(self, yaml_data, preserved_values=None):
         """
