@@ -22,20 +22,24 @@ def get_page_view(page: str | None) -> tuple[str | None, str | None]:
       workflows/<workflow>        -> ("overview", None)     workflow canvas
       settings / absent / anything else -> (None, None)
 
-    Because a name may itself contain "/", the returned step name is a
-    best-effort candidate — the caller must validate it against the workflow
-    YAML rather than trust it.
+    A step name may itself contain "/", so everything after the workflow
+    segment is taken as the step name rather than just the third segment —
+    otherwise "workflows/wf/Import A/B" loses the step focus entirely. The
+    split between workflow and step is still a guess when the *workflow* name
+    contains a "/", so the returned step name is a best-effort candidate: the
+    caller must validate it against the workflow YAML rather than trust it.
     """
     if not page:
         return None, None
     parts = page.strip("/").split("/")
-    if parts[0] != "workflows":
+    if parts[0] != "workflows" or len(parts) < 2:
         return None, None
     if len(parts) == 2:
         return "overview", None
-    if len(parts) == 3 and parts[2] != "settings":
-        return "step", parts[2]
-    return None, None
+    step = "/".join(parts[2:])
+    if step == "settings":
+        return None, None
+    return "step", step
 
 
 def get_step_name_from_page(page: str | None) -> str | None:
