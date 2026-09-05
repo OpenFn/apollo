@@ -114,6 +114,11 @@ def workflow_has_job_code(yaml_str: str | None) -> bool:
     return False
 
 
+#: Sent in place of the document when redaction cannot be completed. Returning
+#: the original would hand the model the very bodies this exists to hold back.
+WITHHELD_NOTICE = "# workflow withheld: it could not be read well enough to redact"
+
+
 def redact_job_bodies(yaml_str: str) -> str:
     """Return workflow YAML with job bodies replaced by a placeholder and id
     fields removed.
@@ -121,29 +126,46 @@ def redact_job_bodies(yaml_str: str) -> str:
     This is the read-only structural view shown to the planner and to job_chat
     in subagent mode. It never round-trips back into a real workflow, so the
     UUID ids are pure noise to the model — dropping them saves tokens.
+
+    Withholds the document rather than returning it when anything goes wrong.
     """
     try:
         yaml_data = yaml.safe_load(yaml_str)
-        if yaml_data and "jobs" in yaml_data:
-            _remove_ids(yaml_data)
-            for job_data in yaml_data["jobs"].values():
-                if "body" in job_data:
-                    job_data["body"] = "# [use inspect_job_code to view]"
-            return yaml.dump(yaml_data, sort_keys=False)
     except Exception:
-        pass
-    return yaml_str
+        return WITHHELD_NOTICE
+
+    if not isinstance(yaml_data, dict) or not isinstance(yaml_data.get("jobs"), dict):
+        return WITHHELD_NOTICE
+
+    try:
+        _remove_ids(yaml_data)
+        for job_data in yaml_data["jobs"].values():
+            if isinstance(job_data, dict) and "body" in job_data:
+                job_data["body"] = "# [use inspect_job_code to view]"
+        return yaml.dump(yaml_data, sort_keys=False)
+    except Exception:
+        return WITHHELD_NOTICE
 
 
-def _remove_ids(obj: object) -> None:
-    """Recursively remove 'id' keys from a parsed YAML structure."""
+def _remove_ids(obj: object, seen: set | None = None) -> None:
+    """Recursively remove 'id' keys from a parsed YAML structure.
+
+    A YAML anchor can refer to its own container, and PyYAML builds that as a
+    real cycle, so the walk tracks what it has already entered.
+    """
+    if seen is None:
+        seen = set()
+    if id(obj) in seen:
+        return
     if isinstance(obj, dict):
+        seen.add(id(obj))
         obj.pop("id", None)
         for value in obj.values():
-            _remove_ids(value)
+            _remove_ids(value, seen)
     elif isinstance(obj, list):
+        seen.add(id(obj))
         for item in obj:
-            _remove_ids(item)
+            _remove_ids(item, seen)
 
 
 def stitch_job_code(yaml_str: str, job_key: str, new_code: str) -> str:

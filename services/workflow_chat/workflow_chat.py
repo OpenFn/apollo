@@ -542,9 +542,11 @@ class AnthropicClient:
         
         preserved_values = {}
         
-        if "jobs" in yaml_data:
+        if isinstance(yaml_data.get("jobs"), dict):
             for job_key, job_data in yaml_data["jobs"].items():
-                if "body" in job_data:
+                if not isinstance(job_data, dict):
+                    continue
+                if isinstance(job_data.get("body"), str):
                     body_content = job_data["body"].strip()
                     if body_content and body_content != "// Add operations here":
                         placeholder = f"__CODE_BLOCK_{job_key}__"
@@ -556,17 +558,17 @@ class AnthropicClient:
                     preserved_values[placeholder] = job_data["id"]
                     job_data["id"] = placeholder
         
-        if "triggers" in yaml_data:
+        if isinstance(yaml_data.get("triggers"), dict):
             for trigger_key, trigger_data in yaml_data["triggers"].items():
-                if "id" in trigger_data:
+                if isinstance(trigger_data, dict) and "id" in trigger_data:
                     # Store the trigger ID directly without placeholder
                     preserved_values["trigger_id"] = trigger_data["id"]
                     # Remove the id key from what we send to the model
                     del trigger_data["id"]
         
-        if "edges" in yaml_data:
+        if isinstance(yaml_data.get("edges"), dict):
             for edge_key, edge_data in yaml_data["edges"].items():
-                if "id" in edge_data:
+                if isinstance(edge_data, dict) and "id" in edge_data:
                     placeholder = f"__ID_EDGE_{edge_key}__"
                     preserved_values[placeholder] = edge_data["id"]
                     edge_data["id"] = placeholder
