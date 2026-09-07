@@ -74,6 +74,7 @@ services/inference/data/
 
 app.log
 adaptors_cache.json
+services/embed_docsite/docsite_cache/
 
 .context
 
