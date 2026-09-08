@@ -50,12 +50,10 @@ prompts:
       cron:  # For scheduled jobs
         type: cron
         cron_expression: 0 0 * * *  # Format: minute hour day month weekday
-        enabled: false
         cron_cursor_job_id: '__ID_JOB_job-two__'
       # OR
       webhook:  # For event-based jobs
         type: webhook
-        enabled: false
         # May include optional response config sub-keys (webhook_reply, webhook_response_config).
         # Preserve any such sub-keys exactly — do not drop them.
     edges:
@@ -102,11 +100,9 @@ prompts:
       cron:  # For scheduled jobs
         type: cron
         cron_expression: 0 0 * * *  # Format: minute hour day month weekday
-        enabled: false
       # OR
       webhook:  # For event-based jobs
         type: webhook
-        enabled: false
         # May include optional response config sub-keys (webhook_reply, status codes, response bodies).
         # Preserve any such sub-keys exactly — do not drop them.
     edges:
@@ -134,7 +130,6 @@ prompts:
 
     - **Webhook**: Use for event-based triggers (default if not specified)
     - **Cron**: Use for time-based schedules
-    The trigger should be set to enabled: false by default.
 
     ### Optional webhook response configuration
 
@@ -177,7 +172,7 @@ prompts:
 
     The output should be:
     {{
-      "yaml": "name: Daily CommCare to Satusehat Encounter Sync\njobs:\n  Fetch-visits-from-CommCare:\n    name: Fetch visits from CommCare\n    adaptor: \"@openfn/language-commcare@latest\"\n    body: \"// Add operations here\"\n  Create-FHIR-Encounter-for-visitors-with-IHS-number:\n    name: Create FHIR Encounter for visitors with IHS number\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\n  Lookup-IHS-number-in-Satusehat:\n    name: Lookup IHS number in Satusehat\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\n  Create-FHIR-Encounter-after-IHS-lookup:\n    name: Create FHIR Encounter after IHS lookup\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\ntriggers:\n  cron:\n    type: cron\n    cron_expression: 0 0 * * *\n    enabled: false\nedges:\n  cron->Fetch-visits-from-CommCare:\n    source_trigger: cron\n    target_job: Fetch-visits-from-CommCare\n    condition_type: always\n    enabled: true\n  Fetch-visits-from-CommCare->Create-FHIR-Encounter-for-visitors-with-IHS-number:\n    source_job: Fetch-visits-from-CommCare\n    target_job: Create-FHIR-Encounter-for-visitors-with-IHS-number\n    condition_type: on_job_success\n    enabled: true\n  Fetch-visits-from-CommCare->Lookup-IHS-number-in-Satusehat:\n    source_job: Fetch-visits-from-CommCare\n    target_job: Lookup-IHS-number-in-Satusehat\n    condition_type: on_job_success\n    enabled: true\n  Lookup-IHS-number-in-Satusehat->Create-FHIR-Encounter-after-IHS-lookup:\n    source_job: Lookup-IHS-number-in-Satusehat\n    target_job: Create-FHIR-Encounter-after-IHS-lookup\n    condition_type: on_job_success\n    enabled: true",
+      "yaml": "name: Daily CommCare to Satusehat Encounter Sync\njobs:\n  Fetch-visits-from-CommCare:\n    name: Fetch visits from CommCare\n    adaptor: \"@openfn/language-commcare@latest\"\n    body: \"// Add operations here\"\n  Create-FHIR-Encounter-for-visitors-with-IHS-number:\n    name: Create FHIR Encounter for visitors with IHS number\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\n  Lookup-IHS-number-in-Satusehat:\n    name: Lookup IHS number in Satusehat\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\n  Create-FHIR-Encounter-after-IHS-lookup:\n    name: Create FHIR Encounter after IHS lookup\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\ntriggers:\n  cron:\n    type: cron\n    cron_expression: 0 0 * * *\nedges:\n  cron->Fetch-visits-from-CommCare:\n    source_trigger: cron\n    target_job: Fetch-visits-from-CommCare\n    condition_type: always\n    enabled: true\n  Fetch-visits-from-CommCare->Create-FHIR-Encounter-for-visitors-with-IHS-number:\n    source_job: Fetch-visits-from-CommCare\n    target_job: Create-FHIR-Encounter-for-visitors-with-IHS-number\n    condition_type: on_job_success\n    enabled: true\n  Fetch-visits-from-CommCare->Lookup-IHS-number-in-Satusehat:\n    source_job: Fetch-visits-from-CommCare\n    target_job: Lookup-IHS-number-in-Satusehat\n    condition_type: on_job_success\n    enabled: true\n  Lookup-IHS-number-in-Satusehat->Create-FHIR-Encounter-after-IHS-lookup:\n    source_job: Lookup-IHS-number-in-Satusehat\n    target_job: Create-FHIR-Encounter-after-IHS-lookup\n    condition_type: on_job_success\n    enabled: true",
       "text": "Your reasoning (max ~4 sentences)."
     }}
 
@@ -217,7 +212,7 @@ prompts:
     The output should be:
     {{
       "yaml": null,
-      "text": "I'd structure this as a daily cron-triggered workflow with four jobs. First, fetch visits from CommCare. Then branch based on whether visitors have IHS numbers: create encounters directly for those who do, or lookup the number first for those who don't. Here's the structure:\n\n```yaml\nname: Daily CommCare to Satusehat Encounter Sync\njobs:\n  Fetch-visits-from-CommCare:\n    name: Fetch visits from CommCare\n    adaptor: \"@openfn/language-commcare@latest\"\n    body: \"// Add operations here\"\n  Create-FHIR-Encounter-for-visitors-with-IHS-number:\n    name: Create FHIR Encounter for visitors with IHS number\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\n  Lookup-IHS-number-in-Satusehat:\n    name: Lookup IHS number in Satusehat\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\n  Create-FHIR-Encounter-after-IHS-lookup:\n    name: Create FHIR Encounter after IHS lookup\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\ntriggers:\n  cron:\n    type: cron\n    cron_expression: 0 0 * * *\n    enabled: false\nedges:\n  cron->Fetch-visits-from-CommCare:\n    source_trigger: cron\n    target_job: Fetch-visits-from-CommCare\n    condition_type: always\n    enabled: true\n  Fetch-visits-from-CommCare->Create-FHIR-Encounter-for-visitors-with-IHS-number:\n    source_job: Fetch-visits-from-CommCare\n    target_job: Create-FHIR-Encounter-for-visitors-with-IHS-number\n    condition_type: on_job_success\n    enabled: true\n  Fetch-visits-from-CommCare->Lookup-IHS-number-in-Satusehat:\n    source_job: Fetch-visits-from-CommCare\n    target_job: Lookup-IHS-number-in-Satusehat\n    condition_type: on_job_success\n    enabled: true\n  Lookup-IHS-number-in-Satusehat->Create-FHIR-Encounter-after-IHS-lookup:\n    source_job: Lookup-IHS-number-in-Satusehat\n    target_job: Create-FHIR-Encounter-after-IHS-lookup\n    condition_type: on_job_success\n    enabled: true\n```"
+      "text": "I'd structure this as a daily cron-triggered workflow with four jobs. First, fetch visits from CommCare. Then branch based on whether visitors have IHS numbers: create encounters directly for those who do, or lookup the number first for those who don't. Here's the structure:\n\n```yaml\nname: Daily CommCare to Satusehat Encounter Sync\njobs:\n  Fetch-visits-from-CommCare:\n    name: Fetch visits from CommCare\n    adaptor: \"@openfn/language-commcare@latest\"\n    body: \"// Add operations here\"\n  Create-FHIR-Encounter-for-visitors-with-IHS-number:\n    name: Create FHIR Encounter for visitors with IHS number\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\n  Lookup-IHS-number-in-Satusehat:\n    name: Lookup IHS number in Satusehat\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\n  Create-FHIR-Encounter-after-IHS-lookup:\n    name: Create FHIR Encounter after IHS lookup\n    adaptor: \"@openfn/language-satusehat@latest\"\n    body: \"// Add operations here\"\ntriggers:\n  cron:\n    type: cron\n    cron_expression: 0 0 * * *\nedges:\n  cron->Fetch-visits-from-CommCare:\n    source_trigger: cron\n    target_job: Fetch-visits-from-CommCare\n    condition_type: always\n    enabled: true\n  Fetch-visits-from-CommCare->Create-FHIR-Encounter-for-visitors-with-IHS-number:\n    source_job: Fetch-visits-from-CommCare\n    target_job: Create-FHIR-Encounter-for-visitors-with-IHS-number\n    condition_type: on_job_success\n    enabled: true\n  Fetch-visits-from-CommCare->Lookup-IHS-number-in-Satusehat:\n    source_job: Fetch-visits-from-CommCare\n    target_job: Lookup-IHS-number-in-Satusehat\n    condition_type: on_job_success\n    enabled: true\n  Lookup-IHS-number-in-Satusehat->Create-FHIR-Encounter-after-IHS-lookup:\n    source_job: Lookup-IHS-number-in-Satusehat\n    target_job: Create-FHIR-Encounter-after-IHS-lookup\n    condition_type: on_job_success\n    enabled: true\n```"
     }}
 
     ## Output Format
