@@ -687,10 +687,8 @@ class PlannerAgent:
                 tool_result = "ERROR: No workflow exists yet. Call call_workflow_agent first to create the workflow, then call call_job_code_agent."
                 tool_calls_meta.append({"tool": "call_job_code_agent", "input": tool_use_block.input, "skipped": True})
                 return tool_result
-            # Without a key there is nothing to stitch the result into, so the
-            # code would be written and then dropped. Fail before spending the
-            # subagent call: `required` in the schema is a hint the model
-            # usually honours, this is what enforces it.
+            # No key means nowhere to stitch the result, so the code would be
+            # written and dropped. `required` is a hint; this enforces it.
             if not job_key:
                 tool_result = (
                     "ERROR: job_key is required. Name the step to edit, one of: "

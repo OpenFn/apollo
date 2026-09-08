@@ -403,11 +403,9 @@ class RouterAgent:
 
         meta = {"agents": ["router", "job_code_agent"], "router_confidence": confidence}
 
-        # Whether the edits landed, in the shape the planner reports, so a
-        # client has one place to look. This route is the shortcut for a
-        # single-step edit, so it is the common case: without this, a reply
-        # that changed nothing is indistinguishable from one that changed
-        # something.
+        # In the shape the planner reports, so a client has one place to look.
+        # This route is the shortcut for a single-step edit, so it is the case
+        # that matters most.
         if result.get("diff"):
             meta["subagent_calls"] = [
                 {"_call_metadata": {"subagent": "job_agent"}, "diff": result["diff"]}
