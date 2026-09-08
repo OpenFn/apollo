@@ -118,8 +118,17 @@ def workflow_has_job_code(yaml_str: str | None) -> bool:
 REDACTED_BODY = "# [use inspect_job_code to view]"
 
 #: Sent in place of the document when redaction cannot be completed. Returning
-#: the original would hand the model the very bodies this exists to hold back.
-WITHHELD_NOTICE = "# workflow withheld: it could not be read well enough to redact"
+#: the original would hand the model the very bodies this exists to hold back:
+#: YAML that fails to parse still has its job code sitting in it.
+#:
+#: Two causes, two notices, so the planner can tell a document it could have
+#: read from one that was never valid.
+WITHHELD_UNPARSEABLE = (
+    "# workflow withheld: the YAML does not parse, so its job code could not be redacted"
+)
+WITHHELD_UNREDACTABLE = (
+    "# workflow withheld: the YAML parsed but no safe view of it could be built"
+)
 
 
 #: The sections a workflow document is made of. A document holding none of
@@ -178,17 +187,17 @@ def redact_job_bodies(yaml_str: str) -> str:
     try:
         yaml_data = yaml.safe_load(yaml_str)
     except Exception:
-        return WITHHELD_NOTICE
+        return WITHHELD_UNPARSEABLE
 
     if not _looks_like_a_workflow(yaml_data):
-        return WITHHELD_NOTICE
+        return WITHHELD_UNREDACTABLE
 
     try:
         _remove_ids(yaml_data)
         _redact_bodies(yaml_data)
         return yaml.dump(yaml_data, sort_keys=False)
     except Exception:
-        return WITHHELD_NOTICE
+        return WITHHELD_UNREDACTABLE
 
 
 def _remove_ids(obj: object, seen: set | None = None) -> None:

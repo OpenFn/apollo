@@ -9,13 +9,15 @@ import pytest
 import yaml
 from workflow_chat.workflow_chat import AnthropicClient
 from yaml_utils import (
-    WITHHELD_NOTICE,
+    WITHHELD_UNPARSEABLE,
+    WITHHELD_UNREDACTABLE,
     _remove_ids,
     redact_job_bodies,
     workflow_has_job_code,
 )
 
 SECRET = "callSecretApi()"
+WITHHELD = (WITHHELD_UNPARSEABLE, WITHHELD_UNREDACTABLE)
 
 
 def test_a_normal_workflow_is_still_redacted() -> None:
@@ -27,19 +29,19 @@ def test_a_normal_workflow_is_still_redacted() -> None:
 
 
 @pytest.mark.parametrize(
-    "document",
+    ("document", "notice"),
     [
-        f'jobs: {{a: {{body: "{SECRET}"}}\n  broken',
-        f"- {SECRET}\n",
-        f"jobs: {SECRET}\n",
+        (f'jobs: {{a: {{body: "{SECRET}"}}\n  broken', WITHHELD_UNPARSEABLE),
+        (f"- {SECRET}\n", WITHHELD_UNREDACTABLE),
+        (f"jobs: {SECRET}\n", WITHHELD_UNREDACTABLE),
     ],
     ids=["unparseable", "a-list", "jobs-not-a-mapping"],
 )
-def test_a_document_it_cannot_redact_is_withheld(document: str) -> None:
+def test_a_document_it_cannot_redact_is_withheld(document: str, notice: str) -> None:
     out = redact_job_bodies(document)
 
     assert SECRET not in out
-    assert out == WITHHELD_NOTICE
+    assert out == notice
 
 
 def test_the_id_walk_terminates_on_a_self_referential_anchor() -> None:
@@ -89,7 +91,7 @@ def test_a_body_is_redacted_wherever_it_sits(document: str) -> None:
     out = redact_job_bodies(document)
 
     assert SECRET not in out
-    assert out != WITHHELD_NOTICE
+    assert out not in WITHHELD
 
 
 def test_a_workflow_with_no_bodies_is_kept_not_withheld() -> None:
@@ -97,7 +99,7 @@ def test_a_workflow_with_no_bodies_is_kept_not_withheld() -> None:
     structure for no gain."""
     out = redact_job_bodies("triggers:\n  t:\n    type: cron\n")
 
-    assert out != WITHHELD_NOTICE
+    assert out not in WITHHELD
     assert "cron" in out
 
 
@@ -110,5 +112,5 @@ def test_the_read_only_id_strip_also_survives_a_cycle() -> None:
 
 
 def test_a_scalar_document_is_not_treated_as_a_workflow() -> None:
-    assert redact_job_bodies("jobs") == WITHHELD_NOTICE
+    assert redact_job_bodies("jobs") == WITHHELD_UNREDACTABLE
     assert workflow_has_job_code("jobs") is False
