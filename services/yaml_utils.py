@@ -90,6 +90,21 @@ def find_job_in_yaml(yaml_str: str, step_name: str) -> tuple[str | None, dict | 
     return None, None
 
 
+def job_keys_in_yaml(yaml_str: str | None) -> str:
+    """The workflow's job keys, comma separated, for an error the model reads.
+
+    Naming them is what lets it correct itself in the same turn; "use the exact
+    key" leaves it guessing at the thing it just got wrong.
+    """
+    try:
+        yaml_data = yaml.safe_load(yaml_str) or {}
+    except Exception:
+        return "none found"
+
+    jobs = yaml_data.get("jobs") or {}
+    return ", ".join(jobs.keys()) if jobs else "none found"
+
+
 EMPTY_JOB_BODY = "// Add operations here"
 
 

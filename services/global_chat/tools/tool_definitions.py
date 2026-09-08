@@ -78,7 +78,7 @@ Describe the goal in plain language; the job code agent is the expert on adaptor
                 "description": "Attachment types to hand this agent, e.g. [\"log\"]. It sees only what you pass here, and your message is no substitute — you cannot restate a log without losing what it says. Name every attachment this call's work depends on. Leave out only the ones about a different step or a different problem."
             }
         },
-        "required": ["message", "attachments"]
+        "required": ["message", "job_key", "attachments"]
     },
     "cache_control": {"type": "ephemeral"}
 }

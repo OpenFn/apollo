@@ -114,17 +114,48 @@ def test_workflow_agent_failure_returns_error_tool_result() -> None:
     assert planner.yaml_modified is False
 
 
-def test_job_code_without_matched_key_is_reported_as_not_stitched() -> None:
+def test_job_code_without_a_key_never_runs_the_subagent() -> None:
+    """Code written with nowhere to go is thrown away, and the user is told a
+    change was made that was not. Refuse before spending the call."""
     planner = make_planner()
     block = FakeToolUse("call_job_code_agent", {"message": "write code"})  # no job_key
-    subagent_result = {"response": "done", "suggested_code": "newCode();", "usage": empty_usage()}
 
-    with patch("global_chat.planner.call_job_agent", return_value=subagent_result):
+    with patch("global_chat.planner.call_job_agent") as call_job_agent:
         result = planner._execute_tool(block, StubStreamManager(), empty_usage(), [])
 
-    assert "NOT added to the workflow" in result
-    assert "stitched into the workflow" not in result
+    call_job_agent.assert_not_called()
+    assert result.startswith("ERROR: job_key is required")
+    # Naming the keys is what lets the planner correct itself this turn.
+    assert "fetch-patients" in result
+    assert "load-dhis2" in result
     assert planner.current_yaml == WORKFLOW_YAML
+    assert planner.yaml_modified is False
+
+
+def test_job_code_with_an_unknown_key_names_the_real_ones() -> None:
+    planner = make_planner()
+    block = FakeToolUse("call_job_code_agent", {"message": "write code", "job_key": "fetch_the_patients"})
+
+    with patch("global_chat.planner.call_job_agent") as call_job_agent:
+        result = planner._execute_tool(block, StubStreamManager(), empty_usage(), [])
+
+    call_job_agent.assert_not_called()
+    assert "not found in workflow YAML" in result
+    assert "fetch-patients, load-dhis2" in result
+
+
+def test_parallel_job_code_without_a_key_never_runs_the_subagent() -> None:
+    """The parallel path had the same hole as the single one."""
+    planner = make_planner()
+    blocks = [FakeToolUse("call_job_code_agent", {"message": "write code"})]
+
+    with patch("global_chat.planner.call_job_agent") as call_job_agent:
+        results = planner._execute_job_code_tools_parallel(
+            blocks, StubStreamManager(), empty_usage(), []
+        )
+
+    call_job_agent.assert_not_called()
+    assert results[0]["content"].startswith("ERROR: job_key is required")
     assert planner.yaml_modified is False
 
 

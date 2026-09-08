@@ -27,7 +27,7 @@ from streaming_util import (
 from global_chat.config_loader import ConfigLoader
 from models import resolve_model
 from global_chat.tools.tool_definitions import TOOL_DEFINITIONS
-from yaml_utils import stitch_job_code, redact_job_bodies, find_job_in_yaml, get_step_name_from_page, inspect_job_code
+from yaml_utils import stitch_job_code, redact_job_bodies, find_job_in_yaml, get_step_name_from_page, inspect_job_code, job_keys_in_yaml
 from tools.search_documentation.search_documentation import search_documentation_tool
 from global_chat.subagent_caller import call_workflow_agent, call_job_agent, format_subagent_result_for_llm
 
@@ -687,15 +687,29 @@ class PlannerAgent:
                 tool_result = "ERROR: No workflow exists yet. Call call_workflow_agent first to create the workflow, then call call_job_code_agent."
                 tool_calls_meta.append({"tool": "call_job_code_agent", "input": tool_use_block.input, "skipped": True})
                 return tool_result
-            matched_job_key = None
-            if job_key:
-                matched_job_key, job_data = find_job_in_yaml(self.current_yaml, job_key)
-                if not job_data:
-                    tool_result = f"ERROR: Job key '{job_key}' not found in workflow YAML. Create the workflow with this job first."
-                    tool_calls_meta.append(
-                        {"tool": "call_job_code_agent", "input": tool_use_block.input, "skipped": True}
-                    )
-                    return tool_result
+            # Without a key there is nothing to stitch the result into, so the
+            # code would be written and then dropped. Fail before spending the
+            # subagent call. The schema requires job_key; this is the belt.
+            if not job_key:
+                tool_result = (
+                    "ERROR: job_key is required. Name the step to edit, one of: "
+                    f"{job_keys_in_yaml(self.current_yaml)}."
+                )
+                tool_calls_meta.append(
+                    {"tool": "call_job_code_agent", "input": tool_use_block.input, "skipped": True}
+                )
+                return tool_result
+
+            matched_job_key, job_data = find_job_in_yaml(self.current_yaml, job_key)
+            if not job_data:
+                tool_result = (
+                    f"ERROR: Job key '{job_key}' not found in workflow YAML. "
+                    f"The workflow's steps are: {job_keys_in_yaml(self.current_yaml)}."
+                )
+                tool_calls_meta.append(
+                    {"tool": "call_job_code_agent", "input": tool_use_block.input, "skipped": True}
+                )
+                return tool_result
 
             try:
                 subagent_result = call_job_agent(
@@ -814,16 +828,23 @@ class PlannerAgent:
             if not self.current_yaml:
                 skipped[block.id] = "ERROR: No workflow exists yet. Call call_workflow_agent first to create the workflow, then call call_job_code_agent."
                 tool_calls_meta.append({"tool": "call_job_code_agent", "input": block.input, "skipped": True})
-            elif job_key:
+            elif not job_key:
+                skipped[block.id] = (
+                    "ERROR: job_key is required. Name the step to edit, one of: "
+                    f"{job_keys_in_yaml(self.current_yaml)}."
+                )
+                tool_calls_meta.append({"tool": "call_job_code_agent", "input": block.input, "skipped": True})
+            else:
                 matched_job_key, job_data = find_job_in_yaml(self.current_yaml, job_key)
                 if not job_data:
-                    skipped[block.id] = f"ERROR: Job key '{job_key}' not found in workflow YAML. Create the workflow with this job first."
+                    skipped[block.id] = (
+                        f"ERROR: Job key '{job_key}' not found in workflow YAML. "
+                        f"The workflow's steps are: {job_keys_in_yaml(self.current_yaml)}."
+                    )
                     tool_calls_meta.append({"tool": "call_job_code_agent", "input": block.input, "skipped": True})
                 else:
                     matched_keys[block.id] = matched_job_key
                     to_run.append(block)
-            else:
-                to_run.append(block)
 
         # Run subagent API calls in parallel (the slow part)
         parallel_results = {}
