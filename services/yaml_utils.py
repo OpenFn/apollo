@@ -49,9 +49,13 @@ def get_step_name_from_page(page: str | None) -> str | None:
     return step if view == "step" else None
 
 
-def normalize_name(name: str) -> str:
-    """Normalize a name for fuzzy matching: lowercase, non-alphanumeric chars become hyphens."""
-    return re.sub(r'[^a-z0-9]', '-', name.lower()).strip('-')
+def normalize_name(name: object) -> str:
+    """Normalize a name for fuzzy matching: lowercase, non-alphanumeric chars become hyphens.
+
+    Coerces first: YAML gives an int for a key like `2024`, and the workflow is
+    a client payload rather than something we produced.
+    """
+    return re.sub(r'[^a-z0-9]', '-', str(name).lower()).strip('-')
 
 
 def find_job_in_yaml(yaml_str: str, step_name: str) -> tuple[str | None, dict | None]:
@@ -69,10 +73,12 @@ def find_job_in_yaml(yaml_str: str, step_name: str) -> tuple[str | None, dict | 
     except Exception:
         return None, None
 
-    if not yaml_data or "jobs" not in yaml_data:
+    if not isinstance(yaml_data, dict):
         return None, None
 
-    jobs = yaml_data["jobs"]
+    jobs = yaml_data.get("jobs")
+    if not isinstance(jobs, dict):
+        return None, None
 
     # Direct key match
     if step_name in jobs:
@@ -97,12 +103,13 @@ def job_keys_in_yaml(yaml_str: str | None) -> str:
     key" leaves it guessing at the thing it just got wrong.
     """
     try:
-        yaml_data = yaml.safe_load(yaml_str) or {}
+        yaml_data = yaml.safe_load(yaml_str)
+        jobs = yaml_data.get("jobs") if isinstance(yaml_data, dict) else None
+        if not isinstance(jobs, dict) or not jobs:
+            return "none found"
+        return ", ".join(str(key) for key in jobs)
     except Exception:
         return "none found"
-
-    jobs = yaml_data.get("jobs") or {}
-    return ", ".join(jobs.keys()) if jobs else "none found"
 
 
 EMPTY_JOB_BODY = "// Add operations here"

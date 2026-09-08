@@ -689,7 +689,8 @@ class PlannerAgent:
                 return tool_result
             # Without a key there is nothing to stitch the result into, so the
             # code would be written and then dropped. Fail before spending the
-            # subagent call. The schema requires job_key; this is the belt.
+            # subagent call: `required` in the schema is a hint the model
+            # usually honours, this is what enforces it.
             if not job_key:
                 tool_result = (
                     "ERROR: job_key is required. Name the step to edit, one of: "
@@ -701,7 +702,7 @@ class PlannerAgent:
                 return tool_result
 
             matched_job_key, job_data = find_job_in_yaml(self.current_yaml, job_key)
-            if not job_data:
+            if matched_job_key is None:
                 tool_result = (
                     f"ERROR: Job key '{job_key}' not found in workflow YAML. "
                     f"The workflow's steps are: {job_keys_in_yaml(self.current_yaml)}."
@@ -836,7 +837,7 @@ class PlannerAgent:
                 tool_calls_meta.append({"tool": "call_job_code_agent", "input": block.input, "skipped": True})
             else:
                 matched_job_key, job_data = find_job_in_yaml(self.current_yaml, job_key)
-                if not job_data:
+                if matched_job_key is None:
                     skipped[block.id] = (
                         f"ERROR: Job key '{job_key}' not found in workflow YAML. "
                         f"The workflow's steps are: {job_keys_in_yaml(self.current_yaml)}."

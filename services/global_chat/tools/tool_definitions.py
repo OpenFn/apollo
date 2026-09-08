@@ -70,7 +70,7 @@ Describe the goal in plain language; the job code agent is the expert on adaptor
             },
             "job_key": {
                 "type": "string",
-                "description": "The key of the job in the workflow YAML to write or edit code for (e.g. 'fetch-patients'). When provided, the existing job body is extracted from the workflow YAML and passed to the job code agent as the current code to edit."
+                "description": "The key of the job in the workflow YAML to write or edit code for (e.g. 'fetch-patients'). Must be a key that exists in the workflow. The existing job body is extracted from the workflow YAML and passed to the job code agent as the current code to edit."
             },
             "attachments": {
                 "type": "array",
