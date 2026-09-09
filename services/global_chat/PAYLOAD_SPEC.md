@@ -166,7 +166,7 @@ Each tool beat streams as: `thinking` spinner → `changes` (if the workflow was
   - **`router_confidence`** (number): Router's confidence score (1–5).
   - **`planner_iterations`** (number): Number of tool-calling iterations (planner path only).
   - **`tool_calls`** (array): List of `{tool, input}` objects for each tool the planner invoked (planner path only).
-  - **`subagent_calls`** (array): Raw sub-agent result dicts including `_call_metadata` (planner path only, useful for debugging).
+  - **`subagent_calls`** (array): Raw sub-agent result dicts including `_call_metadata`. On the planner path these are the full results, useful for debugging. On the router's direct job-code path it carries a single entry with just `_call_metadata` and `diff`, so a client can tell on either route whether a code edit actually landed (`diff.patches_applied`).
   - **`total_tool_calls`** (number): Total number of tool calls made by the planner (planner path only).
 
 ---

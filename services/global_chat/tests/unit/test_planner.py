@@ -92,13 +92,13 @@ def test_inspect_job_code_accepts_multiple_keys() -> None:
 
 def test_job_agent_failure_returns_error_tool_result() -> None:
     planner = make_planner()
-    block = FakeToolUse("call_job_code_agent", {"message": "write code", "job_key": "fetch-patients"})
+    blocks = [FakeToolUse("call_job_code_agent", {"message": "write code", "job_key": "fetch-patients"})]
     meta = []
 
     with patch("global_chat.planner.call_job_agent", side_effect=RuntimeError("boom")):
-        result = planner._execute_tool(block, StubStreamManager(), empty_usage(), meta)
+        results = planner._execute_job_code_tools_parallel(blocks, StubStreamManager(), empty_usage(), meta)
 
-    assert result.startswith("ERROR: The job code agent failed: boom")
+    assert results[0]["content"].startswith("ERROR: The job code agent failed: boom")
     assert meta[0]["error"] == "boom"
 
 
@@ -114,16 +114,62 @@ def test_workflow_agent_failure_returns_error_tool_result() -> None:
     assert planner.yaml_modified is False
 
 
-def test_job_code_without_matched_key_is_reported_as_not_stitched() -> None:
+def test_job_key_is_required_by_the_schema() -> None:
+    """The runtime guard is the enforcement, but `required` is what stops the
+    model omitting the key in the first place. Nothing else pins it."""
+    from global_chat.tools.tool_definitions import CALL_JOB_CODE_AGENT_TOOL
+
+    assert "job_key" in CALL_JOB_CODE_AGENT_TOOL["input_schema"]["required"]
+
+
+def test_job_code_with_an_unknown_key_names_the_real_ones() -> None:
+    """_execute_tool_blocks routes every job-code block here, single or not, so
+    this is the path production takes."""
     planner = make_planner()
-    block = FakeToolUse("call_job_code_agent", {"message": "write code"})  # no job_key
-    subagent_result = {"response": "done", "suggested_code": "newCode();", "usage": empty_usage()}
+    blocks = [FakeToolUse("call_job_code_agent", {"message": "write code", "job_key": "fetch_the_patients"})]
 
-    with patch("global_chat.planner.call_job_agent", return_value=subagent_result):
-        result = planner._execute_tool(block, StubStreamManager(), empty_usage(), [])
+    with patch("global_chat.planner.call_job_agent") as call_job_agent:
+        results = planner._execute_job_code_tools_parallel(
+            blocks, StubStreamManager(), empty_usage(), []
+        )
 
-    assert "NOT added to the workflow" in result
-    assert "stitched into the workflow" not in result
+    call_job_agent.assert_not_called()
+    assert "not found in workflow YAML" in results[0]["content"]
+    assert "fetch-patients, load-dhis2" in results[0]["content"]
+
+
+def test_unparseable_workflow_yaml_does_not_crash_the_turn() -> None:
+    """current_yaml is an unvalidated client payload. Anything that parses has
+    to reach an error message, not an exception."""
+    for yaml_str in ["the workflow could not be built", "- a\n- b", "jobs:\n  - one\n  - two", "jobs:\n  2024: {}"]:
+        planner = make_planner()
+        planner.current_yaml = yaml_str
+        blocks = [FakeToolUse("call_job_code_agent", {"message": "write code", "job_key": "fetch-patients"})]
+
+        with patch("global_chat.planner.call_job_agent") as call_job_agent:
+            results = planner._execute_job_code_tools_parallel(blocks, StubStreamManager(), empty_usage(), [])
+
+        call_job_agent.assert_not_called()
+        assert results[0]["content"].startswith("ERROR:"), yaml_str
+
+
+def test_job_code_without_a_key_never_runs_the_subagent() -> None:
+    """Code written with nowhere to go is thrown away, and the user is told a
+    change was made that was not. Refuse before spending the call."""
+    planner = make_planner()
+    blocks = [FakeToolUse("call_job_code_agent", {"message": "write code"})]  # no job_key
+
+    with patch("global_chat.planner.call_job_agent") as call_job_agent:
+        results = planner._execute_job_code_tools_parallel(
+            blocks, StubStreamManager(), empty_usage(), []
+        )
+
+    call_job_agent.assert_not_called()
+    result = results[0]["content"]
+    assert result.startswith("ERROR: job_key is required")
+    # Naming the keys is what lets the planner correct itself this turn.
+    assert "fetch-patients" in result
+    assert "load-dhis2" in result
     assert planner.current_yaml == WORKFLOW_YAML
     assert planner.yaml_modified is False
 

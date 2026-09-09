@@ -238,8 +238,8 @@ def test_planner_offers_every_attachment_to_the_caller() -> None:
     subagent_result = {"response": "ok", "usage": {}, "suggested_code": None}
 
     with patch("global_chat.planner.call_job_agent", return_value=subagent_result) as job_mock:
-        planner._execute_tool(
-            _FakeToolUse("call_job_code_agent", {"message": "fix it", "job_key": "fetch-patients"}),
+        planner._execute_job_code_tools_parallel(
+            [_FakeToolUse("call_job_code_agent", {"message": "fix it", "job_key": "fetch-patients"})],
             _StubStreamManager(), {}, [],
         )
 

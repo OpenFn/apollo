@@ -55,14 +55,48 @@ def test_job_route_returns_only_full_yaml_attachment() -> None:
 
 
 def test_job_route_with_unmatched_job_returns_no_attachments() -> None:
+    """job_chat applied its edits, but they went nowhere: the client must not
+    be told an edit landed."""
     router = make_router()
+    result_dict = job_chat_result("newCode();") | {"diff": {"patches_applied": 1}}
 
-    with patch("job_chat.job_chat.main", return_value=job_chat_result("newCode();")):
+    with patch("job_chat.job_chat.main", return_value=result_dict):
         result = router._route_to_job_chat(
             "edit this", WORKFLOW_YAML, "workflows/wf/settings", [], False, 5, router_job_key="nonexistent",
         )
 
     assert result.attachments == []
+    diff = result.meta["subagent_calls"][0]["diff"]
+    assert diff["patches_applied"] == 0
+    assert "no job matched" in diff["warning"]
+
+
+def test_job_route_reports_whether_the_edits_landed() -> None:
+    """This route is the shortcut for a single-step edit, so it is the common
+    case. Without the diff a reply that changed nothing looks like one that
+    changed something."""
+    router = make_router()
+    result_dict = job_chat_result(None) | {"diff": {"patches_applied": 0, "warning": "boom"}}
+
+    with patch("job_chat.job_chat.main", return_value=result_dict):
+        result = router._route_to_job_chat(
+            "edit this", WORKFLOW_YAML, "workflows/wf/fetch-patients", [], False, 5,
+        )
+
+    assert result.meta["subagent_calls"] == [
+        {"_call_metadata": {"subagent": "job_agent"}, "diff": {"patches_applied": 0, "warning": "boom"}}
+    ]
+
+
+def test_job_route_omits_the_diff_when_no_edit_was_attempted() -> None:
+    router = make_router()
+
+    with patch("job_chat.job_chat.main", return_value=job_chat_result(None)):
+        result = router._route_to_job_chat(
+            "what does this do?", WORKFLOW_YAML, "workflows/wf/fetch-patients", [], False, 5,
+        )
+
+    assert "subagent_calls" not in result.meta
 
 
 def test_workflow_has_job_code_detects_real_code() -> None:
