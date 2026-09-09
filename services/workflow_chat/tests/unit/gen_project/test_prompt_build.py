@@ -65,6 +65,36 @@ def test_build_prompt_subagent_strips_inspector_instruction():
     assert "Job Code Requests" in system_msg
 
 
+def test_build_prompt_attaches_input_to_the_current_turn_only():
+    log = "[R/T] Job exited with error code 1"
+
+    system_msg, prompt = build_prompt(
+        content="add a retry step",
+        existing_yaml="name: test-workflow",
+        history=[{"role": "user", "content": "hello"}],
+        attachments=[{"type": "log", "content": log}],
+    )
+
+    # Rendered verbatim at the end of the system message, where this service's
+    # other context already lives — and nowhere in the messages, so it cannot
+    # accumulate in the history built from the raw content
+    assert log in system_msg
+    assert log not in prompt[-1]["content"]
+    assert prompt[-1]["content"] == "add a retry step"
+    assert prompt[0]["content"] == "hello"
+
+
+def test_build_prompt_without_attachments_is_unchanged():
+    """Production callers send no attachments; their prompt must not move."""
+    with_none, _ = build_prompt(content="add a step", existing_yaml="name: wf", history=[])
+    with_empty, _ = build_prompt(
+        content="add a step", existing_yaml="name: wf", history=[], attachments=[],
+    )
+
+    assert with_none == with_empty
+    assert "attachment" not in with_none
+
+
 def test_build_prompt_readonly_mode():
     system_msg, prompt = build_prompt(
         content="What does this workflow do?",
@@ -123,3 +153,29 @@ def test_a_prompt_that_drops_the_name_rule_token_is_rejected_loudly(
 
     with pytest.raises(ValueError, match="did not render the step-name rule"):
         gen_project_prompt.build_prompt(content="Create a workflow")
+
+def test_build_prompt_describes_webhook_custom_path():
+    system_msg, _ = build_prompt(
+        content="Create a workflow",
+        existing_yaml="name: test-workflow",
+        history=[],
+    )
+
+    assert "Lowercase letters, digits, hyphens and underscores" in system_msg
+    assert "255 characters or fewer" in system_msg
+    assert "cannot be a UUID" in system_msg
+    assert "Do not add one proactively" in system_msg
+    assert "custom_path: null" in system_msg
+
+    assert "May include optional sub-keys: custom_path, webhook_reply, webhook_response_config" in system_msg
+
+
+def test_build_prompt_read_only_mode_describes_custom_path():
+    system_msg, _ = build_prompt(
+        content="What does this workflow do?",
+        existing_yaml="name: test-workflow",
+        history=[],
+        read_only=True,
+    )
+
+    assert "May include optional sub-keys: custom_path, webhook_reply, status codes" in system_msg

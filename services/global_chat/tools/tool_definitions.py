@@ -42,9 +42,14 @@ The current workflow YAML is passed automatically. Do NOT include YAML in your m
             "message": {
                 "type": "string",
                 "description": "Message for the workflow_agent with relevant context"
+            },
+            "attachments": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Attachment types to hand this agent, e.g. [\"log\"]. It sees only what you pass here, and your message is no substitute — you cannot restate a log without losing what it says. Name every attachment this call's work depends on. Leave out only the ones about a different step or a different problem."
             }
         },
-        "required": ["message"]
+        "required": ["message", "attachments"]
     }
 }
 
@@ -66,9 +71,14 @@ Describe the goal in plain language; the job code agent is the expert on adaptor
             "job_key": {
                 "type": "string",
                 "description": "The key of the job in the workflow YAML to write or edit code for (e.g. 'fetch-patients'). When provided, the existing job body is extracted from the workflow YAML and passed to the job code agent as the current code to edit."
+            },
+            "attachments": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Attachment types to hand this agent, e.g. [\"log\"]. It sees only what you pass here, and your message is no substitute — you cannot restate a log without losing what it says. Name every attachment this call's work depends on. Leave out only the ones about a different step or a different problem."
             }
         },
-        "required": ["message"]
+        "required": ["message", "attachments"]
     },
     "cache_control": {"type": "ephemeral"}
 }

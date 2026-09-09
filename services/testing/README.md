@@ -6,6 +6,30 @@ This directory is on the Python path via `pyproject.toml`
 (`pythonpath = ["services"]`), so tests import as
 `from testing.yaml_assertions import assert_yaml_equal_except`.
 
+## Test tiers
+
+**The directory is the marker.** A test in `tests/<tier>/` is marked `<tier>`
+automatically by the repo-root `conftest.py` — there is nothing to declare.
+Pick the tier by what the test touches:
+
+| Tier | Directory | Touches | Runs |
+|---|---|---|---|
+| `unit` | `tests/unit/` | Nothing. Network, subprocess, DB and LLM-client construction all raise `UnitTestViolation` | Every PR push |
+| `service` | `tests/service/` | Real service handlers, with the LLM/HTTP clients mocked | On merge |
+| `integration` | `tests/integration/` | Real LLM, Pinecone, Postgres | Manual / nightly |
+| `acceptance` | `tests/acceptance/` | Real everything, judged by an LLM (the `.md` specs below) | Manual / nightly |
+
+Two rules of thumb:
+
+- **Assert on bytes, not on wording, wherever you can.** If the question is
+  "did this content reach the model", that is a `service`-tier test with a
+  scripted client — put an improbable canary in the input and assert it appears
+  in the request. It is free, deterministic, and needs no human to read it.
+  Reserve `acceptance` for the questions only a judge can answer: is the answer
+  *good*.
+- **A guard you have not seen fail is not a guard.** Break the code, watch the
+  test go red, put it back.
+
 ## Modules
 
 - `yaml_assertions.py` — pure-function YAML structural assertions, safe for

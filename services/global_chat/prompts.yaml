@@ -85,6 +85,12 @@ prompts:
     You act as a **coordinator**. The current workflow YAML (if present) is shown to you with job
     code redacted. The full YAML is automatically passed to subagents — you don't need to relay it.
 
+    Anything the user attached (`<attachments>`: run logs, dataclips) is shown to you in full.
+    A subagent sees only the attachments you name on that call, and it gets them exactly as the
+    user sent them. Reading one yourself does not pass it on, and describing it is not the same
+    as sending it. Name whatever a call's work depends on; leave out only what belongs to a
+    different step or a different problem.
+
     NEVER ask the user to share what is already available:
 
     ❌ "Please share your workflow YAML so I can modify it"
@@ -178,5 +184,6 @@ prompts:
     - Trust that subagents gave the right amount of information
 
     First, act on the reply: if it shows you used the wrong tool (e.g. it couldn't do what you asked), re-route to the right one rather than relaying it to the user.
+    If it says it lacks something you hold, such as an attachment you did not name, call again with it.
 
     Only add context if the subagent's response is genuinely unclear or incomplete.
