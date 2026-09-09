@@ -55,14 +55,20 @@ def test_job_route_returns_only_full_yaml_attachment() -> None:
 
 
 def test_job_route_with_unmatched_job_returns_no_attachments() -> None:
+    """job_chat applied its edits, but they went nowhere: the client must not
+    be told an edit landed."""
     router = make_router()
+    result_dict = job_chat_result("newCode();") | {"diff": {"patches_applied": 1}}
 
-    with patch("job_chat.job_chat.main", return_value=job_chat_result("newCode();")):
+    with patch("job_chat.job_chat.main", return_value=result_dict):
         result = router._route_to_job_chat(
             "edit this", WORKFLOW_YAML, "workflows/wf/settings", [], False, 5, router_job_key="nonexistent",
         )
 
     assert result.attachments == []
+    diff = result.meta["subagent_calls"][0]["diff"]
+    assert diff["patches_applied"] == 0
+    assert "no job matched" in diff["warning"]
 
 
 def test_job_route_reports_whether_the_edits_landed() -> None:

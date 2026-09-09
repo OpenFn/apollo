@@ -392,23 +392,28 @@ class RouterAgent:
         # Stitch suggested_code back into the workflow YAML. The full YAML is
         # the only artifact returned — no separate job_code attachment.
         attachments = []
+        dropped = None
         if result.get("suggested_code"):
             if workflow_yaml and matched_job_key:
                 updated_yaml = stitch_job_code(workflow_yaml, matched_job_key, result["suggested_code"])
                 attachments.append({"type": "workflow_yaml", "content": updated_yaml})
             else:
-                logger.warning(
-                    f"suggested_code generated but no job matched for page '{page}' - code dropped from response"
-                )
+                dropped = f"suggested_code generated but no job matched for page '{page}' - code dropped from response"
+                logger.warning(dropped)
 
         meta = {"agents": ["router", "job_code_agent"], "router_confidence": confidence}
 
         # In the shape the planner reports, so a client has one place to look.
         # This route is the shortcut for a single-step edit, so it is the case
-        # that matters most.
+        # that matters most. job_chat counts patches to the code string; the
+        # client reads the count as edits that reached the workflow, so code we
+        # dropped here has to report as none.
         if result.get("diff"):
+            diff = result["diff"]
+            if dropped:
+                diff = {**diff, "patches_applied": 0, "warning": dropped}
             meta["subagent_calls"] = [
-                {"_call_metadata": {"subagent": "job_agent"}, "diff": result["diff"]}
+                {"_call_metadata": {"subagent": "job_agent"}, "diff": diff}
             ]
 
         return RouterResult(
