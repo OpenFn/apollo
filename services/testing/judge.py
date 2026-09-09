@@ -97,7 +97,31 @@ def _build_system_prompt(judge_name: str) -> str:
 
 
 _ADAPTOR_DOCS_CAP = 40_000
+_ADAPTOR_NAMES_CAP = 20_000
 _COMMON_ADAPTOR = "@openfn/language-common@latest"
+
+
+def build_adaptor_names() -> Optional[str]:
+    """The adaptor packages that actually exist, for grounding package claims.
+
+    The workflow service puts this same list in front of the model, so an
+    adaptor it picked is one it was offered. Without it the judge answers from
+    memory and flags real but less common packages as invented. Fails open: on
+    any error returns None and the judges fall back to their no-list humility
+    rules.
+    """
+    try:
+        from workflow_chat.available_adaptors import get_available_adaptors
+
+        names = sorted(
+            a["name"] for a in get_available_adaptors() if a.get("name")
+        )
+        if not names:
+            return None
+        listing = ", ".join(f"@openfn/language-{name}" for name in names)
+        return listing[:_ADAPTOR_NAMES_CAP]
+    except Exception:
+        return None
 
 
 def build_adaptor_docs(workflow_yaml: Optional[str]) -> Optional[str]:
@@ -159,6 +183,7 @@ def _build_user_prompt(
     test_notes: Optional[str],
     request: Optional[dict],
     adaptor_docs: Optional[str] = None,
+    adaptor_names: Optional[str] = None,
 ) -> str:
     parts = []
     if test_notes:
@@ -171,6 +196,18 @@ def _build_user_prompt(
         parts += [
             "ORIGINAL REQUEST sent to the service (use as ground truth for what existed before and what was asked):",
             json.dumps(request, indent=2, default=str),
+            "",
+        ]
+    if adaptor_names:
+        parts += [
+            "ADAPTOR PACKAGES that exist (the workflow service offers this same "
+            "list to the model, so an adaptor it chose is one it was given):",
+            adaptor_names,
+            "",
+            "Use this to decide whether an adaptor package is real. Do not call a "
+            "package invented when it appears here. If a package is absent from "
+            "this list, say it is not on the available list rather than that it "
+            "does not exist.",
             "",
         ]
     if adaptor_docs:
@@ -334,6 +371,7 @@ def evaluate(
     test_notes: Optional[str] = None,
     request: Optional[dict] = None,
     adaptor_docs: Optional[str] = None,
+    adaptor_names: Optional[str] = None,
     judge: str = DEFAULT_JUDGE,
     model: str = DEFAULT_MODEL,
     client: Optional[Anthropic] = None,
@@ -351,6 +389,8 @@ def evaluate(
             guessing.
         adaptor_docs: Optional adaptor function signatures (from
             build_adaptor_docs) grounding claims about which functions exist.
+        adaptor_names: Optional list of real adaptor packages (from
+            build_adaptor_names) grounding claims about which packages exist.
         judge: Name of the judge (file at services/testing/judges/<name>.md).
             Defaults to "general".
         model: Model to use. Defaults to CLAUDE_SONNET from services/models.py.
@@ -370,7 +410,9 @@ def evaluate(
         client = Anthropic(api_key=api_key)
 
     system_prompt = _build_system_prompt(judge)
-    user_prompt = _build_user_prompt(criteria, candidate, test_notes, request, adaptor_docs)
+    user_prompt = _build_user_prompt(
+        criteria, candidate, test_notes, request, adaptor_docs, adaptor_names
+    )
 
     response = client.messages.create(
         model=model,

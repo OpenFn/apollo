@@ -127,7 +127,7 @@ def workflow_has_job_code(yaml_str: str | None) -> bool:
         yaml_data = yaml.safe_load(yaml_str)
     except Exception:
         return False
-    if not yaml_data or "jobs" not in yaml_data:
+    if not isinstance(yaml_data, dict) or not isinstance(yaml_data.get("jobs"), dict):
         return False
     for job_data in yaml_data["jobs"].values():
         body = (job_data or {}).get("body")
@@ -136,36 +136,76 @@ def workflow_has_job_code(yaml_str: str | None) -> bool:
     return False
 
 
+#: What a job body is replaced with in the structural view.
+REDACTED_BODY = "# [use inspect_job_code to view]"
+
+
+def _redact_bodies(obj: object, seen: set | None = None) -> None:
+    """Replace every `body` string anywhere in the tree, not just jobs.*.body.
+
+    A project export nests its jobs under each workflow, so a walk that only
+    looks at the top level hands those bodies straight to the model.
+    """
+    if seen is None:
+        seen = set()
+    if id(obj) in seen:
+        return
+    if isinstance(obj, dict):
+        seen.add(id(obj))
+        for key, value in obj.items():
+            if key == "body" and isinstance(value, str):
+                obj[key] = REDACTED_BODY
+            else:
+                _redact_bodies(value, seen)
+    elif isinstance(obj, list):
+        seen.add(id(obj))
+        for item in obj:
+            _redact_bodies(item, seen)
+
+
 def redact_job_bodies(yaml_str: str) -> str:
     """Return workflow YAML with job bodies replaced by a placeholder and id
     fields removed.
 
     This is the read-only structural view shown to the planner and to job_chat
-    in subagent mode. It never round-trips back into a real workflow, so the
-    UUID ids are pure noise to the model — dropping them saves tokens.
+    in subagent mode. Bodies are deferred rather than hidden: the model reads
+    any of them with inspect_job_code, so this is about tokens, not secrecy.
+    The UUID ids never round-trip back into a real workflow, so dropping them
+    saves tokens too.
+
+    A document we cannot read is returned as it came. The model can say what is
+    wrong with it, which is more use than telling it there is no workflow.
     """
     try:
         yaml_data = yaml.safe_load(yaml_str)
-        if yaml_data and "jobs" in yaml_data:
-            _remove_ids(yaml_data)
-            for job_data in yaml_data["jobs"].values():
-                if "body" in job_data:
-                    job_data["body"] = "# [use inspect_job_code to view]"
-            return yaml.dump(yaml_data, sort_keys=False)
+        if not isinstance(yaml_data, dict):
+            return yaml_str
+        _remove_ids(yaml_data)
+        _redact_bodies(yaml_data)
+        return yaml.dump(yaml_data, sort_keys=False)
     except Exception:
-        pass
-    return yaml_str
+        return yaml_str
 
 
-def _remove_ids(obj: object) -> None:
-    """Recursively remove 'id' keys from a parsed YAML structure."""
+def _remove_ids(obj: object, seen: set | None = None) -> None:
+    """Recursively remove 'id' keys from a parsed YAML structure.
+
+    A YAML anchor can refer to its own container, and PyYAML builds that as a
+    real cycle, so the walk tracks what it has already entered.
+    """
+    if seen is None:
+        seen = set()
+    if id(obj) in seen:
+        return
     if isinstance(obj, dict):
+        seen.add(id(obj))
         obj.pop("id", None)
         for value in obj.values():
-            _remove_ids(value)
+            _remove_ids(value, seen)
     elif isinstance(obj, list):
+        seen.add(id(obj))
         for item in obj:
-            _remove_ids(item)
+            _remove_ids(item, seen)
 
 
 def stitch_job_code(yaml_str: str, job_key: str, new_code: str) -> str:
