@@ -312,8 +312,10 @@ def build_focus_line(viewing, focused):
     are a step and coincide (the common case) they fuse into one clause; they
     diverge only when the request targets a step other than the one open.
 
-    Returns "" when there is nothing worth stating (no viewing info): the model
-    works from <user_code> and the tools, and we avoid narrating editing plumbing
+    With no `viewing` at all — the planner path, which knows which step it is
+    editing but not what the user has on screen — the editable step is still
+    named on its own. Returns "" only when neither is known: the model works
+    from <user_code> and the tools, and we avoid narrating editing plumbing
     the model could echo back to the user.
     """
     if viewing and viewing != "canvas":
@@ -326,6 +328,8 @@ def build_focus_line(viewing, focused):
         if focused:
             return f"The user is viewing the workflow canvas, not a specific step; the '{focused}' step is the one you're currently editing."
         return "The user is viewing the workflow canvas."
+    if focused:
+        return f"The step you're editing is '{focused}'."
     return ""
 
 

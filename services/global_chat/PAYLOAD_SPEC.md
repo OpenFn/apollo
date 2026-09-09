@@ -35,7 +35,7 @@ This document defines the input and output payload structure for the Global Agen
   "attachments": [                        // Input attachments (optional)
     {
       "type": "string",                   //   e.g. "log", "input_dataclip", "output_dataclip", "run_input", "run_output"
-      "content": "string"                 //   The attachment content
+      "content": "string|array|object"    //   Text, a log's lines, or a dataclip object
     }
   ],
 
@@ -72,6 +72,13 @@ This document defines the input and output payload structure for the Global Agen
   - `output_dataclip` — output data from a step
   - `run_input` — input payload for the whole run
   - `run_output` — final output of a run
+
+  `content` may be a string, an array of lines (a log), or an object (a
+  dataclip). Apollo renders each by shape — lines joined by newlines, objects as
+  indented JSON — so a log stays readable rather than collapsing onto one line.
+  The character limit below counts the rendered text.
+
+  The `type` is passed to the model as a label, so an unrecognised type is delivered rather than dropped. See [Attachment handling](#attachment-handling) for how they travel and why they are not persisted.
 
 - **`options`** (object, optional): Runtime options.
   - **`stream`** (boolean): Enable streaming response (default: false).
@@ -253,10 +260,69 @@ The step name should match a job key in the workflow YAML (exact match or normal
 
 ## Design Principles
 
-1. **Attachments carry artifacts**: Output `attachments` contain structured artifacts (currently `workflow_yaml`). The frontend reads the array to find and diff workflow YAML changes. Input `attachments` carry contextual data (logs, dataclips, etc.) that enrich the agent's understanding of the request.
+1. **Attachments carry artifacts**: Output `attachments` contain structured artifacts (currently `workflow_yaml`). The frontend reads the array to find and diff workflow YAML changes. Input `attachments` carry contextual data (logs, dataclips, etc.) that enrich the agent's understanding of the request; they reach every agent unmodified and belong to the turn they arrived on (see [Attachment handling](#attachment-handling)).
 2. **Page-driven routing**: The `page` URL tells the router what the user is focused on, avoiding ambiguous name matching.
 3. **Transparent execution**: `meta.agents` shows the full execution path.
 4. **Usage tracking**: Token usage is aggregated across all agents invoked in a single request.
+
+### Attachment handling
+
+Input attachments travel **structurally**, the same way the workflow YAML does —
+as a payload field, never as text spliced into the user's message.
+
+Each agent receives them the way it already receives context of that kind:
+
+- **`job_chat`** has typed `context.log` / `context.input` / `context.output`
+  fields, which render as `<run_logs>` / `<input>` / `<output>`. Attachments are
+  mapped onto those, so there is one way this content reaches the service
+  whether the caller is Lightning or `global_chat`. Two attachments that share a
+  field (`input_dataclip` and `run_input` both describe input) are joined rather
+  than overwritten. A type with no field is logged and not passed on.
+- **`workflow_chat`** and the **planner** have no typed fields, so they take an
+  `attachments` payload field and render it verbatim where their other context
+  goes.
+
+Three consequences worth knowing about:
+
+1. **Subagents get the original bytes.** The router forwards everything to
+   whichever subagent it picks. The planner instead names, per call, which
+   attachments that subagent needs to read for itself — so a step being told
+   "change `state.patients` to `state.cases`" is not billed for the log the
+   planner already read. Named or not, what travels is the original content,
+   never a summary of it.
+2. **Attachments are never written to `history`.** Every service builds its
+   returned history from the raw `content`, so a run log attached on turn one is
+   not replayed on turn five, where the model would have no way to tell it was
+   stale. **The client must re-send an attachment on every turn it should apply
+   to** — Apollo will not remember it.
+3. **Attachments are never trimmed; oversized ones are refused.** If a turn's
+   attachments total more than **250,000 characters**, the request is rejected
+   with `400 ATTACHMENT_TOO_LARGE` before any model is called. The error names
+   the largest attachment and carries a machine-readable `details` block:
+
+   ```json
+   {
+     "code": 400,
+     "type": "ATTACHMENT_TOO_LARGE",
+     "message": "Attachments are too large to analyse: 612,430 characters against a 250,000 limit. The biggest is the 'log' attachment at 610,002 characters. Attach a shorter section — for a run log, the part around the failure is usually enough.",
+     "details": {
+       "total_characters": 612430,
+       "limit_characters": 250000,
+       "largest_attachment": { "type": "log", "characters": 610002 }
+     }
+   }
+   ```
+
+   The limit is a **total across all attachments**, because the prompt carries
+   them together, and is derived from what a subagent prompt can actually hold —
+   see the note on `ATTACHMENT_TOTAL_CHAR_LIMIT` in `services/util.py`.
+
+   Silently shortening user-supplied content would mean answering from evidence
+   they believe we read in full. (Context Apollo injects on spec, such as adaptor
+   docs, is a different case and *is* truncated.) This error is the user-facing
+   path rather than a last resort: the client is expected to send, catch it, and
+   rephrase it for the user, so `details` carries what a message needs without
+   parsing the prose.
 
 ### Job code stitching (planner path)
 

@@ -18,13 +18,14 @@ These mirror the workflow-generation contract. Reject the YAML if any are violat
 - Every job, trigger, and edge in the returned workflow YAML has a non-empty `id` field. (The workflow_chat service auto-generates IDs for newly added items during post-processing, so the YAML you grade should already have them — flag any item that is still missing one.)
 - Every job has a `body` that is either real adaptor code or the canonical empty-job placeholder `// Add operations here`. Reject other placeholder markers such as `// PLACEHOLDER`, numbered placeholders, `TODO`, `FIXME`, or `<insert ... here>` — these are leftover generation artifacts.
 - Job names and edge `source_*` / `target_*` / key references contain only letters, numbers, spaces, hyphens, and underscores. Job names must be unique within a workflow and under 100 characters.
-- When the user is editing an existing workflow, every job and edge from the existing YAML is present and unchanged in the response unless the user asked to remove or modify it. Additions are fine.
+- When the user is editing an existing workflow, every job, trigger and edge from the existing YAML is present and unchanged in the response unless the user asked to remove or modify it. This includes optional trigger sub-keys such as `custom_path`, `webhook_reply` and `webhook_response_config` — dropping one is a change the user did not ask for. Additions are fine.
 
 ## Triggers
 
 - Exactly one trigger per workflow. Choose `webhook` for event-driven workflows (HTTP POST in) and `cron` for scheduled workflows.
 - A cron trigger needs a valid `cron_expression` (5-field: minute hour day month weekday).
 - New workflows should default `enabled: false` on the trigger.
+- A webhook trigger may carry `custom_path`, which names its public URL. Valid values are lowercase letters, digits, hyphens and underscores, at most 255 characters, and never a UUID. `custom_path: null` is also valid and is how a path is removed — an absent key means "leave it as it is", so a removal that drops the key instead of writing null silently fails. It must not be invented: the name has to be unique across the project and the workflow expert cannot see the project's other workflows. Flag a `custom_path` that was not in the input YAML and that the user did not ask for, an invalid value, or one on a cron trigger.
 - **Only one step can come off the trigger.** If the user describes multiple parallel things "to do first," the workflow expert should pick one of them as the first step and either fan out from there or sequence the others — not attach two edges directly to the trigger.
 - For cron triggers, input state on each run is the final state of the previous successful run — useful for incremental sync via `cursor(...)`. Flag a design that contradicts this (e.g. assumes the cron trigger receives a fresh payload).
 
@@ -32,7 +33,7 @@ These mirror the workflow-generation contract. Reject the YAML if any are violat
 
 - One step per backend system or per clearly distinct action. If the user's description involves fetching from system A, transforming, and posting to system B, that's typically three steps: fetch with the A adaptor → transform with `@openfn/language-common` → post with the B adaptor.
 - Adaptor choice should match the system named by the user. Use `@openfn/language-common` for pure transforms and `@openfn/language-http` for generic HTTP integrations where no specific adaptor exists. Prefer the most specific adaptor available over `http`.
-- Do not invent adaptor packages. If an adaptor name doesn't follow the `@openfn/language-<name>` convention or doesn't correspond to a real system, flag it.
+- Do not invent adaptor packages. Flag a name that doesn't follow the `@openfn/language-<name>` convention. If a list of real adaptor packages is provided in this evaluation, flag a name that is absent from it; without that list, do not flag a package merely because you don't recognise the system — you do not have reliable knowledge of which adaptors exist.
 - Version handling: by default, adaptors should use the latest version (the workflow_chat service surfaces it as `@latest` in its YAML examples). When the user is editing existing YAML that already pins a specific version on a step, that pin must be preserved unless the user asks to change it. Flag silent downgrades or upgrades of existing pins.
 - Step names should be descriptive of the action ("Fetch visits from CommCare"), not generic ("Job 1"). Each name must be unique within the workflow.
 - The workflow_chat agent must NOT generate job code into `body` when creating workflow structure — `body` stays as `'// Add operations here'`. If the assistant fills `body` with real code during a workflow-shaping turn, flag it. (Code is written separately in the per-job code page.)
