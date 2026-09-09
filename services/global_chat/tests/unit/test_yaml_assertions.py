@@ -151,7 +151,7 @@ def test_judges_state_the_active_rule(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(UNICODE_FLAG_ENV, "false")
     ascii_rules = load_judge("general").rules
     assert describe_rule_for_judge() in ascii_rules
-    assert "unaccented English letters" in ascii_rules
+    assert "ASCII letters" in ascii_rules
 
     monkeypatch.setenv(UNICODE_FLAG_ENV, "true")
     unicode_rules = load_judge("general").rules

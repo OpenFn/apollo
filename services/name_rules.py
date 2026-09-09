@@ -549,16 +549,10 @@ def describe_rule(unicode_mode: bool | None = None) -> str:
         unicode_mode = unicode_names_enabled()
     if unicode_mode:
         return (
-            "Job names may contain anything except control characters. Letters and marks from any "
-            "script, punctuation, symbols and emoji are all fine, so `Vérifier l'état`, `患者確認`, "
-            "`Проверка данных` and `Import A/B` are all valid names. Write the name the user asked "
-            "for, as they wrote it — do not strip accents or transliterate."
+            "Job names may contain anything except control characters, in any script. Write the "
+            "name as the user wrote it; never strip accents or transliterate."
         )
-    return (
-        "Job names may use only unaccented English letters, digits, spaces, hyphens and underscores. "
-        "Write accented or non-Latin names in that form instead (`Vérifier l'état` becomes "
-        "`Verifier letat`)."
-    )
+    return "Job names may use only ASCII letters, digits, spaces, hyphens and underscores."
 
 
 def describe_rule_for_prompt(unicode_mode: bool | None = None) -> str:
@@ -587,9 +581,8 @@ def describe_rule_for_judge(unicode_mode: bool | None = None) -> str:
     else:
         common = (
             "Job names, job keys, trigger keys and edge `source_*`/`target_*` references must use "
-            "only unaccented English letters, digits, spaces, hyphens and underscores. Flag "
-            "anything else: an accented or non-Latin name that reached the output means the "
-            "service failed to fold it."
+            "only ASCII letters, digits, spaces, hyphens and underscores. Flag anything else: an "
+            "accented or non-Latin name that reached the output means the service failed to fold it."
         )
     return (
         f"{common} Job names must be unique within a workflow and at most "

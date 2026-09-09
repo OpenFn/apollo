@@ -200,7 +200,7 @@ def test_the_prompt_text_changes_with_the_mode() -> None:
     unicode_text = describe_rule(unicode_mode=True)
 
     assert ascii_text != unicode_text
-    assert "only unaccented English letters" in ascii_text
+    assert "only ASCII letters" in ascii_text
     assert "any script" in unicode_text
     assert "100" in describe_rule_for_prompt(unicode_mode=False)
     assert "unique" in describe_rule_for_prompt(unicode_mode=True)
