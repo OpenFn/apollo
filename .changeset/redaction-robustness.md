@@ -2,4 +2,4 @@
 "apollo": patch
 ---
 
-Withhold a workflow that cannot be redacted, rather than passing it to the model in full
+Replace a job body wherever it sits in the workflow, not only at the top level, and stop three crashes on a shape the model did not expect

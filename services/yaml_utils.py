@@ -117,38 +117,6 @@ def workflow_has_job_code(yaml_str: str | None) -> bool:
 #: What a job body is replaced with in the structural view.
 REDACTED_BODY = "# [use inspect_job_code to view]"
 
-#: Sent in place of the document when redaction cannot be completed. Returning
-#: the original would hand the model the very bodies this exists to hold back:
-#: YAML that fails to parse still has its job code sitting in it.
-#:
-#: Two causes, two notices, so the planner can tell a document it could have
-#: read from one that was never valid.
-WITHHELD_UNPARSEABLE = (
-    "# workflow withheld: the YAML does not parse, so its job code could not be redacted"
-)
-WITHHELD_UNREDACTABLE = (
-    "# workflow withheld: the YAML parsed but no safe view of it could be built"
-)
-
-
-#: The sections a workflow document is made of. A document holding none of
-#: them is not one we know how to redact, so it is withheld rather than dumped.
-WORKFLOW_SECTIONS = ("jobs", "triggers", "edges", "workflows")
-
-
-def _looks_like_a_workflow(yaml_data: object) -> bool:
-    """A mapping with at least one recognised section, none of them a scalar.
-
-    `jobs: <code>` has a section we recognise holding something we cannot walk,
-    so it is not safe to dump back.
-    """
-    if not isinstance(yaml_data, dict):
-        return False
-    present = [key for key in WORKFLOW_SECTIONS if key in yaml_data]
-    if not present:
-        return False
-    return all(isinstance(yaml_data[key], (dict, list)) for key in present)
-
 
 def _redact_bodies(obj: object, seen: set | None = None) -> None:
     """Replace every `body` string anywhere in the tree, not just jobs.*.body.
@@ -178,26 +146,23 @@ def redact_job_bodies(yaml_str: str) -> str:
     fields removed.
 
     This is the read-only structural view shown to the planner and to job_chat
-    in subagent mode. It never round-trips back into a real workflow, so the
-    UUID ids are pure noise to the model — dropping them saves tokens.
+    in subagent mode. Bodies are deferred rather than hidden: the model reads
+    any of them with inspect_job_code, so this is about tokens, not secrecy.
+    The UUID ids never round-trip back into a real workflow, so dropping them
+    saves tokens too.
 
-    Withholds the document only when it cannot be read or written back.
-    Anything it can parse gets every body redacted, wherever they sit.
+    A document we cannot read is returned as it came. The model can say what is
+    wrong with it, which is more use than telling it there is no workflow.
     """
     try:
         yaml_data = yaml.safe_load(yaml_str)
-    except Exception:
-        return WITHHELD_UNPARSEABLE
-
-    if not _looks_like_a_workflow(yaml_data):
-        return WITHHELD_UNREDACTABLE
-
-    try:
+        if not isinstance(yaml_data, dict):
+            return yaml_str
         _remove_ids(yaml_data)
         _redact_bodies(yaml_data)
         return yaml.dump(yaml_data, sort_keys=False)
     except Exception:
-        return WITHHELD_UNREDACTABLE
+        return yaml_str
 
 
 def _remove_ids(obj: object, seen: set | None = None) -> None:

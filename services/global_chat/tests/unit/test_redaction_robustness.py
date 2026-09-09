@@ -1,23 +1,21 @@
-"""Redaction has to hold back job code even when the document is odd.
+"""Redaction has to survive an odd document rather than throw or mangle it.
 
-Returning the original on failure hands the model the very bodies redaction
-exists to withhold, and a YAML anchor can point at its own container, which
-PyYAML builds as a real cycle.
+Bodies are deferred to save tokens, not hidden: the model can read any of them
+with inspect_job_code. So a document we cannot parse comes back as it came,
+where the model can diagnose it. A YAML anchor can point at its own container,
+which PyYAML builds as a real cycle.
 """
 
 import pytest
 import yaml
 from workflow_chat.workflow_chat import AnthropicClient
 from yaml_utils import (
-    WITHHELD_UNPARSEABLE,
-    WITHHELD_UNREDACTABLE,
     _remove_ids,
     redact_job_bodies,
     workflow_has_job_code,
 )
 
 SECRET = "callSecretApi()"
-WITHHELD = (WITHHELD_UNPARSEABLE, WITHHELD_UNREDACTABLE)
 
 
 def test_a_normal_workflow_is_still_redacted() -> None:
@@ -29,19 +27,18 @@ def test_a_normal_workflow_is_still_redacted() -> None:
 
 
 @pytest.mark.parametrize(
-    ("document", "notice"),
+    "document",
     [
-        (f'jobs: {{a: {{body: "{SECRET}"}}\n  broken', WITHHELD_UNPARSEABLE),
-        (f"- {SECRET}\n", WITHHELD_UNREDACTABLE),
-        (f"jobs: {SECRET}\n", WITHHELD_UNREDACTABLE),
+        f'jobs: {{a: {{body: "{SECRET}"}}\n  broken',
+        f"- {SECRET}\n",
+        f"jobs: {SECRET}\n",
     ],
     ids=["unparseable", "a-list", "jobs-not-a-mapping"],
 )
-def test_a_document_it_cannot_redact_is_withheld(document: str, notice: str) -> None:
-    out = redact_job_bodies(document)
-
-    assert SECRET not in out
-    assert out == notice
+def test_a_document_it_cannot_redact_comes_back_as_it_came(document: str) -> None:
+    """Withholding it would only cost the model the structure. It can already
+    read any body it wants, so there is nothing here to keep from it."""
+    assert redact_job_bodies(document) == document
 
 
 def test_the_id_walk_terminates_on_a_self_referential_anchor() -> None:
@@ -91,15 +88,11 @@ def test_a_body_is_redacted_wherever_it_sits(document: str) -> None:
     out = redact_job_bodies(document)
 
     assert SECRET not in out
-    assert out not in WITHHELD
 
 
-def test_a_workflow_with_no_bodies_is_kept_not_withheld() -> None:
-    """Withholding a document that has nothing to hide loses the planner its
-    structure for no gain."""
+def test_a_workflow_with_no_bodies_is_kept() -> None:
     out = redact_job_bodies("triggers:\n  t:\n    type: cron\n")
 
-    assert out not in WITHHELD
     assert "cron" in out
 
 
@@ -112,5 +105,5 @@ def test_the_read_only_id_strip_also_survives_a_cycle() -> None:
 
 
 def test_a_scalar_document_is_not_treated_as_a_workflow() -> None:
-    assert redact_job_bodies("jobs") == WITHHELD_UNREDACTABLE
+    assert redact_job_bodies("jobs") == "jobs"
     assert workflow_has_job_code("jobs") is False
