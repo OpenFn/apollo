@@ -134,6 +134,22 @@ def _only_match(
     return None, None
 
 
+def job_keys_in_yaml(yaml_str: str | None) -> str:
+    """The workflow's job keys, comma separated, for an error the model reads.
+
+    Naming them is what lets it correct itself in the same turn; "use the exact
+    key" leaves it guessing at the thing it just got wrong.
+    """
+    try:
+        yaml_data = yaml.safe_load(yaml_str)
+        jobs = yaml_data.get("jobs") if isinstance(yaml_data, dict) else None
+        if not isinstance(jobs, dict) or not jobs:
+            return "none found"
+        return ", ".join(str(key) for key in jobs)
+    except Exception:
+        return "none found"
+
+
 EMPTY_JOB_BODY = "// Add operations here"
 
 
