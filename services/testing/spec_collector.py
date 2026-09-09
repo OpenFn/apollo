@@ -113,6 +113,20 @@ class SpecItem(pytest.Item):
         if text_path is not None:
             print(f"  ✓ response text saved to {text_path}")
 
+        # Fetched once per spec; all judges share it. None (no YAML / no DB /
+        # no docs) simply omits the block and judges fall back to their
+        # no-docs humility rules.
+        adaptor_docs = judge.build_adaptor_docs(_extract_yaml_from_response(response))
+        if adaptor_docs is not None:
+            print("  ✓ adaptor docs attached for judges")
+
+        # Only workflow_chat is offered this list, so only it is judged on it.
+        adaptor_names = (
+            judge.build_adaptor_names() if spec.service == "workflow_chat" else None
+        )
+        if adaptor_names is not None:
+            print("  ✓ adaptor list attached for judges")
+
         # One service call, N judges evaluate the same response in parallel.
         # Consensus: the test passes only if every judge passes.
         def _run_judge(judge_name: str) -> judge.Verdict:
@@ -121,6 +135,8 @@ class SpecItem(pytest.Item):
                 candidate=response,
                 test_notes=spec.notes or None,
                 request=payload,
+                adaptor_docs=adaptor_docs,
+                adaptor_names=adaptor_names,
                 judge=judge_name,
             )
 

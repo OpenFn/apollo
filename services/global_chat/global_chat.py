@@ -13,8 +13,8 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
-from util import ApolloError, create_logger, APOLLO_VERSION
-from langfuse_util import should_track, build_tags
+from util import ApolloError, create_logger, check_attachment_size, APOLLO_VERSION
+from langfuse_util import should_track, build_tags, build_generation_diff
 from global_chat.config_loader import ConfigLoader
 from global_chat.router import RouterAgent
 
@@ -39,6 +39,11 @@ class Payload:
         """Validate and create Payload from dict."""
         if "content" not in data:
             raise ApolloError(400, "content is required")
+
+        # Fail here rather than three agents deep: an oversized attachment can't
+        # be answered by any route, so there is no point paying for the routing
+        # call first.
+        check_attachment_size(data.get("attachments"))
 
         return cls(
             content=data["content"],
@@ -105,9 +110,24 @@ def main(data_dict: dict) -> dict:
                 metrics_opt_in=data.metrics_opt_in,
             )
 
+            if tracking:
+                final_yaml = next(
+                    (a.get("content") for a in reversed(result.attachments or [])
+                     if a.get("type") == "workflow_yaml"),
+                    None,
+                )
+                diff_meta = build_generation_diff(
+                    original=data.workflow_yaml,
+                    generated=final_yaml,
+                    yaml_mode=True,
+                )
+                if diff_meta:
+                    langfuse.update_current_span(metadata=diff_meta)
+
             # 5. Return structured response
             return {
                 "response": result.response,
+                "response_segments": result.response_segments,
                 "attachments": result.attachments,
                 "history": result.history,
                 "usage": result.usage,

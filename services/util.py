@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import sys
@@ -6,6 +7,8 @@ from typing import Any
 
 import psycopg2
 import requests
+import sentry_sdk
+from langfuse_util import mask_secrets
 
 APOLLO_VERSION = os.getenv("APOLLO_VERSION", "unknown")
 
@@ -57,19 +60,77 @@ class ApolloError(Exception):
         return error_dict
 
 
-filename = None
 loggers: dict[str, logging.Logger] = {}
 apollo_port = 3000
 
 
-def set_log_output(f: str | None) -> None:
-    """Set the output file for logging."""
-    global filename  # noqa: PLW0603
+class _MaskingFilter(logging.Filter):
+    """Masks key-shaped values on their way out to the log stream.
 
-    if f is not None:
-        print(f"[entry.py] writing logs to {f}")  # noqa: T201
+    This output does not stay on the server: the bridge matches the log prefix
+    on stdout and forwards the line to the caller as an SSE event. A service
+    that logs its own payload would therefore hand the caller the key the
+    server put there.
 
-    filename = f
+    Attached to the stdout handler rather than to each logger, because a
+    filter on a logger only runs for records emitted through it - a plain
+    `logging.getLogger(__name__)`, or a third-party logger like httpx, writes
+    to the same handler and would sail past.
+
+    Note the two levels are not equally strong. A dict is masked by field name
+    and by value shape; anything already rendered to text, including a payload
+    interpolated into an f-string, has only the shape to go on.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        # A container is worth masking structurally, so field names apply.
+        if isinstance(record.msg, (dict, list, tuple)) and not record.args:
+            record.msg = mask_secrets(record.msg)
+            return True
+
+        # Otherwise mask the text that will actually be emitted. Rendering
+        # normally happens inside the handler, where a bad format string is
+        # caught and reported; here it would escape into the caller's own
+        # logging call, so a cosmetic typo must not fail their request.
+        try:
+            rendered = record.getMessage()
+        except Exception:
+            return True
+
+        record.msg = mask_secrets(rendered)
+        record.args = ()
+        return True
+
+
+_masking_filter = _MaskingFilter()
+
+
+def install_log_masking() -> None:
+    """Put the mask on every handler that exists right now.
+
+    Called at import and again from create_logger, because handlers appear at
+    two different times: some libraries install their own before any service
+    module is imported (langfuse attaches one to the httpx logger, and it
+    writes to stderr, which the bridge forwards to the caller line for line),
+    and the root handler only exists once basicConfig has run.
+
+    A filter on a handler covers every record reaching that stream whatever
+    logger produced it - which a filter on a logger does not.
+
+    loggerDict is copied rather than walked live: a thread creating a logger
+    resizes it mid-walk, which raises RuntimeError.
+    """
+    root = logging.getLogger()
+    known = [root, *(
+        logger
+        for logger in list(root.manager.loggerDict.values())
+        if isinstance(logger, logging.Logger)
+    )]
+
+    for logger in known:
+        for handler in logger.handlers:
+            if _masking_filter not in handler.filters:
+                handler.addFilter(_masking_filter)
 
 
 def create_logger(name: str) -> logging.Logger:
@@ -78,10 +139,14 @@ def create_logger(name: str) -> logging.Logger:
     Logs to stdout by default.
     """
     logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+    install_log_masking()
+
     if name not in loggers:
-        logger = logging.getLogger(name)
-        loggers[name] = logger
+        loggers[name] = logging.getLogger(name)
     return loggers[name]
+
+
+install_log_masking()
 
 
 def set_apollo_port(p: int) -> None:
@@ -246,3 +311,186 @@ def add_page_prefix(content: str, page: dict | None) -> str:
 
     prefix = f"[pg:{'/'.join(prefix_parts)}]"
     return f"{prefix} {content}"
+
+
+# Total characters allowed across ALL of one turn's attachments — the prompt
+# carries them together, so the sum is what matters, not any single one.
+#
+# Derived rather than guessed. A job_chat subagent prompt leaves ~155k tokens
+# once you subtract the 200k window's max_tokens reserve (24.5k), the measured
+# static prompt (~2.7k), adaptor docs at their own cap (~9.3k) and a generous
+# allowance for RAG results, workflow structure, code and history (~8k). Run
+# logs measure ~2.1 chars/token — far denser than prose, because of timestamps,
+# hex ids and stack traces — so 250k chars is ~118k tokens in the worst case,
+# leaving room for a long conversation underneath it.
+#
+# Re-derive this if the model, the window, or max_tokens changes; do not tune it
+# by feel. `messages.count_tokens` is free, so measure instead of estimating.
+ATTACHMENT_TOTAL_CHAR_LIMIT = 250_000
+
+
+def attachment_text(content: Any) -> str:  # noqa: ANN401
+    """Render an attachment's content as the text an agent will read.
+
+    Content may arrive typed rather than as a string — a list of lines for a
+    log, an object for a dataclip. A plain str() would show Python repr, which
+    puts a whole log on one line and a dataclip in single quotes with True and
+    None. Rendering by shape keeps both readable.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, dict):
+        return json.dumps(content, indent=2, default=str)
+    if isinstance(content, (list, tuple)):
+        return "\n".join(attachment_text(item) for item in content)
+    return "" if content is None else str(content)
+
+
+def check_attachment_size(attachments: list[dict] | None) -> None:
+    """Reject a turn whose attachments cannot fit, before any model is called.
+
+    Deliberately loud rather than lossy. Attachments are content the user chose
+    to send — usually the most relevant thing in the request — so silently
+    dropping part of a log to make it fit would answer from evidence the user
+    thinks we read in full. (Contrast adaptor docs, which we inject on spec and
+    may fairly truncate.) The caller gets a typed error naming the offender so
+    the client can say something useful and offer a shorter selection.
+    """
+    if not attachments:
+        return
+
+    sizes = [
+        (str(attachment.get("type") or "unknown"), len(attachment_text(attachment.get("content"))))
+        for attachment in attachments
+    ]
+    total = sum(size for _, size in sizes)
+    if total <= ATTACHMENT_TOTAL_CHAR_LIMIT:
+        return
+
+    largest_type, largest_size = max(sizes, key=lambda entry: entry[1])
+    raise ApolloError(
+        400,
+        f"Attachments are too large to analyse: {total:,} characters against a "
+        f"{ATTACHMENT_TOTAL_CHAR_LIMIT:,} limit. The biggest is the '{largest_type}' "
+        f"attachment at {largest_size:,} characters. Attach a shorter section — for a "
+        "run log, the part around the failure is usually enough.",
+        type="ATTACHMENT_TOO_LARGE",
+        details={
+            "total_characters": total,
+            "limit_characters": ATTACHMENT_TOTAL_CHAR_LIMIT,
+            "largest_attachment": {"type": largest_type, "characters": largest_size},
+        },
+    )
+
+
+# Payload attachment type -> the job_chat context field that already renders it.
+# job_chat has had typed <run_logs>/<input>/<output> blocks all along; attachments
+# arriving from global_chat reuse them rather than adding a second channel.
+# A new attachment type needs a line here, which is the cost of the reuse.
+_ATTACHMENT_CONTEXT_FIELDS = {
+    "log": "log",
+    "input_dataclip": "input",
+    "run_input": "input",
+    "output_dataclip": "output",
+    "run_output": "output",
+}
+
+
+def _report_unmapped_attachment(att_type: str) -> None:
+    """A type with no field is content the user sent and we did not pass on.
+
+    Worth seeing rather than only logging: it means the client is sending a type
+    this mapping does not know, which no one finds out about otherwise. Warning
+    level, so it is countable without paging.
+    """
+    create_logger(__name__).warning(
+        "attachment type %r has no job_chat context field — not passed on", att_type,
+    )
+    sentry_sdk.capture_message(
+        f"Attachment type {att_type!r} has no job_chat context field",
+        level="warning",
+        tags={"unmapped_attachment_type": att_type},
+    )
+
+
+def attachments_to_context(attachments: list[dict] | None) -> dict:
+    """Map input attachments onto job_chat's existing context fields.
+
+    Returns the fields to merge into a job_chat `context`. Nothing lands in the
+    conversation history this way, because job_chat builds history from the raw
+    `content` — so an attachment can't be re-read as the current run on a later
+    turn.
+
+    Two attachments can want the same field: input_dataclip is a step's input
+    and run_input is the whole run's, and both describe input. They are kept
+    and labelled rather than one overwriting the other.
+    """
+    if not attachments:
+        return {}
+
+    check_attachment_size(attachments)
+
+    grouped: dict[str, list[tuple[str, str]]] = {}
+    for attachment in attachments:
+        body = attachment_text(attachment.get("content"))
+        if not body.strip():
+            continue
+
+        att_type = str(attachment.get("type") or "")
+        field = _ATTACHMENT_CONTEXT_FIELDS.get(att_type)
+        if not field:
+            _report_unmapped_attachment(att_type)
+            continue
+
+        grouped.setdefault(field, []).append((att_type, body))
+
+    context: dict[str, str] = {}
+    for field, items in grouped.items():
+        # Labelled only where a field has two sources, since unlabelled there
+        # would tell the model a run's input is the step's.
+        if len(items) == 1:
+            context[field] = items[0][1]
+        else:
+            context[field] = "\n\n".join(f"[{att_type}]\n{body}" for att_type, body in items)
+
+    return context
+
+
+def select_attachments(attachments: list[dict] | None, types: list[str] | None) -> list[dict]:
+    """Keep the attachments whose type the caller named.
+
+    A subagent sees only what it is handed, so nothing travels unless it is
+    named — there is no implicit default either way.
+    """
+    if not attachments or not types:
+        return []
+
+    # A model that returns "log" for an array field would otherwise match
+    # nothing, which is the silent drop this whole path exists to avoid.
+    wanted = {types} if isinstance(types, str) else set(types)
+    return [a for a in attachments if str(a.get("type") or "") in wanted]
+
+
+def format_attachments(attachments: list[dict] | None) -> str:
+    """Render attachments for an agent with no typed context fields of its own.
+
+    Used by the planner and workflow_chat. Returns "" when there is nothing to
+    show, so callers can append it unconditionally. Callers add their own
+    one-line introduction and put it where their other context goes; nothing
+    here goes into history.
+    """
+    if not attachments:
+        return ""
+
+    check_attachment_size(attachments)
+
+    rendered = ((a.get("type") or "unknown", attachment_text(a.get("content"))) for a in attachments)
+    blocks = [
+        f'<attachment type="{att_type}">\n{body}\n</attachment>'
+        for att_type, body in rendered
+        if body.strip()
+    ]
+    if not blocks:
+        return ""
+
+    return "<attachments>\n" + "\n".join(blocks) + "\n</attachments>"

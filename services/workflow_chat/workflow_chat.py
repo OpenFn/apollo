@@ -29,6 +29,25 @@ _OUTPUT_SCHEMA = {
     "required": ["yaml", "text"],
     "additionalProperties": False
 }
+
+# Subagent mode (called from global_chat): adds a "handover" field so the model
+# can hand a misrouted request back to the caller. It comes FIRST so it is
+# generated before yaml/text — streaming can then suppress output and the
+# router reroutes before the user sees anything.
+_SUBAGENT_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "handover": {
+            "anyOf": [
+                {"type": "string"},
+                {"type": "null"}
+            ]
+        },
+        **_OUTPUT_SCHEMA["properties"]
+    },
+    "required": ["handover", "yaml", "text"],
+    "additionalProperties": False
+}
 from anthropic import (
     Anthropic,
     APIConnectionError,
@@ -42,7 +61,7 @@ from anthropic import (
 )
 import sentry_sdk
 from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
-from langfuse_util import should_track, build_tags
+from langfuse_util import should_track, build_tags, build_generation_diff, mask_secrets
 from util import ApolloError, create_logger, add_page_prefix, APOLLO_VERSION
 from .gen_project_prompt import build_prompt
 from workflow_chat.available_adaptors import get_available_adaptors
@@ -89,6 +108,13 @@ class Payload:
     stream: Optional[bool] = False
     read_only: Optional[bool] = False
     metrics_opt_in: Optional[bool] = None
+    # This turn's input attachments (logs, dataclips) as {type, content} dicts.
+    # Rendered into the message sent to the model and deliberately left out of
+    # the returned history, which is built from the raw content.
+    attachments: Optional[List[Dict]] = None
+    # Subagent mode: set only when called from global_chat, never by direct
+    # production callers. Enables the handover response field.
+    subagent: Optional[bool] = False
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
@@ -107,6 +133,8 @@ class Payload:
             stream=data.get("stream", False),
             read_only=data.get("read_only", False),
             metrics_opt_in=data.get("metrics_opt_in"),
+            attachments=data.get("attachments"),
+            subagent=data.get("subagent", False),
         )
 
 
@@ -123,6 +151,8 @@ class ChatResponse:
     content_yaml: str
     history: List[Dict[str, str]]
     usage: Dict[str, Any]
+    # Subagent mode only: reason the request was handed back to the caller
+    handover: Optional[str] = None
 
 
 class AnthropicClient:
@@ -137,6 +167,9 @@ class AnthropicClient:
         # so restore_components runs once and new-component UUIDs stay identical
         # between the streamed preview and the persisted payload.
         self._streamed_yaml = None
+        # Subagent mode: handover reason parsed from the model's response.
+        # Set as early as possible while streaming so text output is suppressed.
+        self._handover = None
 
     @staticmethod
     def _unescape_json_string(text):
@@ -160,13 +193,16 @@ class AnthropicClient:
         stream: Optional[bool] = False,
         current_page: Optional[dict] = None,
         read_only: Optional[bool] = False,
+        attachments: Optional[List[Dict]] = None,
+        subagent: Optional[bool] = False,
+        stream_manager: Optional[StreamManager] = None,
     ) -> ChatResponse:
         """Generate a response using the Claude API. Retry up to 2 times if YAML/JSON parsing fails."""
-        
+
         with sentry_sdk.start_transaction(name="workflow_generation") as transaction:
             history = history.copy() if history else []
 
-            stream_manager = StreamManager(model=self.config.model, stream=stream)
+            stream_manager = stream_manager or StreamManager(model=self.config.model, stream=stream)
             
             # Extract and preserve existing components (skip in read-only mode)
             preserved_values = {}
@@ -189,14 +225,16 @@ class AnthropicClient:
                     existing_yaml=processed_existing_yaml,
                     errors=errors,
                     history=history,
-                    read_only=read_only
+                    read_only=read_only,
+                    attachments=attachments,
+                    subagent=subagent
                 )
 
             # Structured outputs config — guarantees valid JSON matching schema
             output_config = {
                 "format": {
                     "type": "json_schema",
-                    "schema": _OUTPUT_SCHEMA
+                    "schema": _SUBAGENT_OUTPUT_SCHEMA if subagent else _OUTPUT_SCHEMA
                 },
                 "effort": "medium"
             }
@@ -212,6 +250,7 @@ class AnthropicClient:
             for attempt in range(max_retries + 1):
                 # Reset per attempt so a retry never reuses a prior stream's YAML
                 self._streamed_yaml = None
+                self._handover = None
                 with sentry_sdk.start_span(description="anthropic_api_call"):
                     if stream:
                         logger.info("Making streaming API call")
@@ -244,7 +283,7 @@ class AnthropicClient:
                         message = stream_obj.get_final_message()
 
                         # Flush any remaining buffered text, stripping JSON closing chars
-                        if text_started:
+                        if text_started and not self._handover:
                             if sent_length < len(accumulated_response):
                                 remaining = accumulated_response[sent_length:]
                                 remaining = re.sub(r'"\s*}\s*$', '', remaining)
@@ -279,6 +318,18 @@ class AnthropicClient:
 
                 # If YAML parsing succeeded or we're on the last attempt, return the result
                 if response_yaml is not None or attempt == max_retries:
+                    if self._handover:
+                        logger.info(f"workflow_chat handing over: {self._handover}")
+                        # Deliberately do NOT end the stream: the caller reroutes
+                        # the request and the next agent continues on the same stream.
+                        return ChatResponse(
+                            content=response_text or "",
+                            content_yaml=None,
+                            history=history,
+                            usage=accumulated_usage,
+                            handover=self._handover,
+                        )
+
                     if not response_text:
                         stop_reason = getattr(message, "stop_reason", None)
                         empty_reason = "max_tokens" if stop_reason == "max_tokens" else "no_text_blocks"
@@ -294,7 +345,9 @@ class AnthropicClient:
                             raise ApolloError(502, "Response truncated", type="OUTPUT_TRUNCATED")
                         raise ApolloError(502, "Model returned no usable text", type="EMPTY_OUTPUT")
 
-                    # Add prefix to content when building history
+                    # Add prefix to content when building history. History is
+                    # built from the RAW content, never the enriched message
+                    # sent to the model: attachments belong to this turn only.
                     prefixed_content = add_page_prefix(content, current_page)
 
                     updated_history = history + [
@@ -427,6 +480,12 @@ class AnthropicClient:
             # Try to parse the response as JSON
             response_data = json.loads(response)
 
+            # Subagent mode: a handover means the request is being handed back
+            # to the caller — capture the reason and skip the YAML entirely
+            if response_data.get("handover"):
+                self._handover = response_data["handover"]
+                return response_data.get("text", "").strip(), ""
+
             # Extract text and yaml from the JSON
             output_text = response_data.get("text", "").strip()
             raw_yaml = response_data.get("yaml") or ""
@@ -467,19 +526,45 @@ class AnthropicClient:
             available_adaptors = get_available_adaptors()
             valid_adaptor_names = {adaptor["name"] for adaptor in available_adaptors}
 
+            # An empty set means the lookup failed, not that no adaptor exists.
+            # Going on would call every adaptor in the workflow invented.
+            if not valid_adaptor_names:
+                logger.warning("Adaptor list unavailable, skipping validation")
+                return
+
             if yaml_data and "jobs" in yaml_data:
                 jobs = yaml_data["jobs"]
                 for job_key, job_data in jobs.items():
                     if "adaptor" in job_data:
                         adaptor = job_data["adaptor"]
-                        # Remove version if present (after last @)
-                        base = adaptor.rsplit("@", 1)[0]
-                        # Always remove '@openfn/language-' prefix
-                        short_name = base[len("@openfn/language-"):]
+                        short_name = AnthropicClient.adaptor_short_name(adaptor)
                         if short_name not in valid_adaptor_names:
-                            logger.warning(f"Invalid adaptor found in job '{job_key}': {adaptor}")
+                            logger.warning(
+                                f"Invalid adaptor found in job '{job_key}': {adaptor}"
+                            )
+                            # Constant message so Sentry groups these together.
+                            sentry_sdk.set_context(
+                                "invalid_adaptor",
+                                {"job": job_key, "adaptor": adaptor},
+                            )
+                            sentry_sdk.capture_message(
+                                "Model produced an adaptor that is not on the "
+                                "available list",
+                                level="warning",
+                            )
         except Exception as e:
             logger.error(f"validate_adaptors encountered an error: {e}")
+
+    @staticmethod
+    def adaptor_short_name(adaptor):
+        """The bare adaptor name, without the @openfn/language- prefix or version.
+
+        The prefix comes off first, or the leading `@` of an unversioned
+        `@openfn/language-common` reads as the version separator.
+        """
+        prefix = "@openfn/language-"
+        name = adaptor[len(prefix):] if adaptor.startswith(prefix) else adaptor
+        return name.rsplit("@", 1)[0]
 
     @staticmethod
     def extract_and_preserve_components(yaml_data):
@@ -509,7 +594,8 @@ class AnthropicClient:
         if "triggers" in yaml_data:
             for trigger_key, trigger_data in yaml_data["triggers"].items():
                 if "id" in trigger_data:
-                    # Store the trigger ID directly without placeholder
+                    # Flat, not keyed on the trigger name: the model renames
+                    # that key when it swaps webhook for cron.
                     preserved_values["trigger_id"] = trigger_data["id"]
                     # Remove the id key from what we send to the model
                     del trigger_data["id"]
@@ -600,15 +686,25 @@ class AnthropicClient:
                     match = re.search(r'"text"\s*:\s*"', accumulated_response)
 
                     if match:
-                        # Close the partial object and extract the yaml field
+                        # Close the partial object and extract the fields
+                        # generated before "text" (yaml, and in subagent mode
+                        # the handover reason, which comes first)
                         yaml_part = accumulated_response[:match.start()]
                         yaml_raw = yaml_part.rstrip().rstrip(",") + "}"
                         try:
-                            yaml_value = json.loads(yaml_raw).get("yaml")
-                        except (json.JSONDecodeError, ValueError, AttributeError):
-                            yaml_value = None
+                            partial = json.loads(yaml_raw)
+                        except (json.JSONDecodeError, ValueError):
+                            partial = None
+                        if not isinstance(partial, dict):
+                            partial = {}
 
-                        if yaml_value:
+                        if partial.get("handover"):
+                            # Handed back to the caller: suppress all output —
+                            # the rerouted agent produces the user-facing reply
+                            self._handover = partial["handover"]
+
+                        yaml_value = partial.get("yaml")
+                        if yaml_value and not self._handover:
                             # Finalize before sending so the streamed preview carries
                             # real IDs/code, not raw placeholders. Cache it so the final
                             # response reuses the identical YAML. Only send if the content
@@ -626,7 +722,7 @@ class AnthropicClient:
                         sent_length = match.end()
                         text_started = True
 
-                if text_started:
+                if text_started and not self._handover:
                     # Text phase: stream with buffer for split escape sequences
                     buffer_size = 2
                     safe_to_send_until = len(accumulated_response) - buffer_size
@@ -645,9 +741,15 @@ def main(data_dict: dict) -> dict:
     Main entry point with improved error handling and input validation.
     """
     try:
-        sentry_sdk.set_context("request_data", {
-            k: v for k, v in data_dict.items() if k != "api_key"
-            })
+        # The stream manager is an object rather than data, so it is dropped.
+        # Everything else goes through the shared mask instead of a per-service
+        # name list, which catches nested values and key-shaped strings too.
+        sentry_sdk.set_context(
+            "request_data",
+            mask_secrets(
+                {k: v for k, v in data_dict.items() if k != "_stream_manager"},
+            ),
+        )
 
         data = Payload.from_dict(data_dict)
 
@@ -686,8 +788,28 @@ def main(data_dict: dict) -> dict:
                 history=data.history,
                 stream=data.stream,
                 current_page=current_page,
-                read_only=data.read_only
+                read_only=data.read_only,
+                attachments=data.attachments,
+                subagent=data.subagent,
+                # In-process callers (global_chat) may inject a shared stream
+                # manager so a handed-over request continues the same stream
+                stream_manager=data_dict.get("_stream_manager"),
             )
+
+            if tracking:
+                diff_meta = build_generation_diff(
+                    original=data.existing_yaml,
+                    generated=result.content_yaml,
+                    yaml_mode=True,
+                )
+                if diff_meta:
+                    langfuse.update_current_span(metadata=diff_meta)
+
+            # Tag the trace when the request was handed back for rerouting to
+            # the planner, so we can filter for handovers.
+            if tracking and result.handover:
+                with propagate_attributes(tags=["handover"]):
+                    pass
 
             # Build response
             response_dict = {
@@ -697,6 +819,9 @@ def main(data_dict: dict) -> dict:
                 "usage": result.usage,
                 "meta": {"apollo_version": APOLLO_VERSION}
             }
+
+            if result.handover:
+                response_dict["handover"] = result.handover
 
             return response_dict
 

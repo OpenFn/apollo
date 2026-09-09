@@ -1,8 +1,9 @@
 import time
-from typing import Dict, List, Any
+
 import sentry_sdk
-from util import create_logger, ApolloError, AdaptorSpecifier, get_db_connection
+from langfuse_util import mask_secrets
 from load_adaptor_docs.load_adaptor_docs import load_adaptor_docs
+from util import AdaptorSpecifier, ApolloError, create_logger, get_db_connection
 
 logger = create_logger("search_adaptor_docs")
 
@@ -22,7 +23,7 @@ def ensure_docs_loaded(adaptor: AdaptorSpecifier, conn, skip_if_exists: bool = T
         load_result = load_adaptor_docs(
             adaptor=adaptor.specifier,
             skip_if_exists=skip_if_exists,
-            conn=conn
+            conn=conn,
         )
         duration = time.time() - start_time
 
@@ -34,7 +35,7 @@ def ensure_docs_loaded(adaptor: AdaptorSpecifier, conn, skip_if_exists: bool = T
             logger.warning(f"Failed to load adaptor docs for {adaptor.specifier} after {duration:.3f}s")
     except Exception as e:
         duration = time.time() - start_time if 'start_time' in locals() else 0
-        logger.warning(f"Failed to load adaptor docs after {duration:.3f}s: {str(e)}")
+        logger.warning(f"Failed to load adaptor docs after {duration:.3f}s: {e!s}")
         sentry_sdk.capture_exception(e)
 
 
@@ -189,7 +190,7 @@ def fetch_all_functions(adaptor: AdaptorSpecifier, conn, format: str = "json", a
             return [
                 {
                     "function_name": row[0],
-                    "text": json_to_natural_language(row[1], adaptor)
+                    "text": json_to_natural_language(row[1], adaptor),
                 }
                 for row in rows
             ]
@@ -211,7 +212,7 @@ def main(data: dict) -> dict:
     """
     logger.info("Starting search_adaptor_docs...")
 
-    sentry_sdk.set_context("request_data", data)
+    sentry_sdk.set_context("request_data", mask_secrets(data))
 
     # Validate required fields
     if "adaptor" not in data:
@@ -254,7 +255,7 @@ def main(data: dict) -> dict:
                 "adaptor": adaptor.name,
                 "version": adaptor.version,
                 "query_type": "list",
-                "functions": functions
+                "functions": functions,
             }
 
         elif query_type == "signatures":
@@ -265,7 +266,7 @@ def main(data: dict) -> dict:
                 "adaptor": adaptor.name,
                 "version": adaptor.version,
                 "query_type": "signatures",
-                "signatures": signatures
+                "signatures": signatures,
             }
 
         elif query_type == "function":
@@ -281,7 +282,7 @@ def main(data: dict) -> dict:
                 "query_type": "function",
                 "function_name": function_name,
                 "format": format,
-                "data": func_data
+                "data": func_data,
             }
 
         elif query_type == "all":
@@ -294,14 +295,14 @@ def main(data: dict) -> dict:
                 "query_type": "all",
                 "format": format,
                 "count": len(functions),
-                "functions": functions
+                "functions": functions,
             }
 
     except ApolloError:
         raise
     except Exception as e:
-        logger.error(f"Error querying database: {str(e)}")
-        raise ApolloError(500, f"Query failed: {str(e)}", type="DATABASE_ERROR")
+        logger.error(f"Error querying database: {e!s}")
+        raise ApolloError(500, f"Query failed: {e!s}", type="DATABASE_ERROR")
     finally:
         conn.close()
 

@@ -1,9 +1,21 @@
 import readline from "node:readline";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { rm } from "node:fs/promises";
+import { chmod, rm } from "node:fs/promises";
 import { getInternalToken } from "./auth/internal-token";
+import {
+  emptyResult,
+  malformedResult,
+  subprocessCancelled,
+  subprocessFailed,
+  subprocessKilled,
+  subprocessSpawnFailed,
+} from "./util/errors";
 import pkg from "../../package.json";
+
+// A line a service logged on purpose, as opposed to whatever else lands on a
+// stream. Only these are forwarded to the caller.
+const LOG_LINE = /^(INFO|DEBUG|ERROR|WARNING):/;
 
 /**
   Run a python script
@@ -17,22 +29,39 @@ export const run = async (
   port: number, // needed for self-calling services in pythonland
   args: any = {},
   onLog?: (str: string) => void,
-  onEvent?: (type: string, payload: any /* string or json tbh */) => void
+  onEvent?: (type: string, payload: any /* string or json tbh */) => void,
+  // Aborted when the client goes away
+  signal?: AbortSignal
 ) => {
-  return new Promise<JSON | null>(async (resolve, reject) => {
-    const id = crypto.randomUUID();
+  const id = crypto.randomUUID();
 
-    const tmpfile = path.resolve(`tmp/data/${id}-{}.json`);
+  const tmpfile = path.resolve(`tmp/data/${id}-{}.json`);
 
-    const inputPath = tmpfile.replace("{}", "input");
-    const outputPath = tmpfile.replace("{}", "output");
+  const inputPath = tmpfile.replace("{}", "input");
+  const outputPath = tmpfile.replace("{}", "output");
 
-    // console.log("Initing input file at", inputPath);
+  // Outside the promise, deliberately. The Promise constructor only catches a
+  // synchronous throw from its executor, so an await that rejects in there -
+  // a full disk, a read-only tmp - leaves the promise pending for ever and
+  // the caller's stream open. Out here, run() is async and simply rejects.
+  try {
     await Bun.write(inputPath, JSON.stringify(args));
 
-    // console.log("Initing output file at", outputPath);
-    await Bun.write(outputPath, "");
+    // The payload can hold values that belong to the deployment rather than
+    // the caller, and only the close handler removes this file - so a process
+    // that dies first leaves one behind.
+    await chmod(inputPath, 0o600);
 
+    await Bun.write(outputPath, "");
+  } catch (error) {
+    // Removed rather than left behind by a half-finished setup, for the same
+    // reason it is 0600 above.
+    await rm(inputPath).catch(() => {});
+    await rm(outputPath).catch(() => {});
+    throw subprocessSpawnFailed(scriptName, error);
+  }
+
+  return new Promise<JSON | null>((resolve, reject) => {
     const proc = spawn(
       "poetry",
       [
@@ -56,9 +85,38 @@ export const run = async (
       }
     );
 
-    proc.on("error", async (err) => {
-      console.log(err);
+    // Nothing was spawned, so no "close" is coming - without settling here the
+    // request stays open until something upstream gives up
+    proc.on("error", (err) => {
+      console.error("Failed to start python process", err);
+      reject(subprocessSpawnFailed(scriptName, err));
     });
+
+    // `poetry run` execs into python rather than forking it, so this pid is the
+    // interpreter and a plain signal reaches it. Killing it closes the socket to
+    // Anthropic, which stops generation on the streaming calls; a non-streaming
+    // call is already submitted and gets billed whatever we do here.
+    let cancelled = false;
+    let hardKill: ReturnType<typeof setTimeout> | undefined;
+
+    const onAbort = () => {
+      cancelled = true;
+      console.warn(`cancelling ${scriptName}: client went away`);
+      proc.kill("SIGTERM");
+
+      // Python installs no SIGTERM handler, so termination is immediate. This
+      // is only for a child wedged somewhere that never sees it.
+      hardKill = setTimeout(() => proc.kill("SIGKILL"), 5_000);
+      hardKill.unref?.();
+    };
+
+    if (signal) {
+      if (signal.aborted) {
+        onAbort();
+      } else {
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+    }
 
     const rl = readline.createInterface({
       input: proc.stdout,
@@ -66,7 +124,7 @@ export const run = async (
     });
     rl.on("line", (line) => {
       // Then divert any logs from a logger object to the websocket
-      if (/^(INFO|DEBUG|ERROR|WARNING)\:/.test(line)) {
+      if (LOG_LINE.test(line)) {
         // Divert the log line locally
         console.log(line);
         // TODO I'd love to break the log line up in to JSON actually
@@ -92,21 +150,30 @@ export const run = async (
     });
     rl2.on("line", (line) => {
       console.error(line);
-      // /Divert all errors to the websocket
-      onLog?.(line);
+
+      // Only forward what a service logged deliberately, the same rule stdout
+      // follows. Everything else on stderr is the interpreter talking: raw
+      // tracebacks carrying server paths, source lines, and whatever a frame
+      // held - which for a service is the payload.
+      if (LOG_LINE.test(line)) {
+        onLog?.(line);
+      }
     });
 
-    proc.on("close", async (code) => {
+    proc.on("close", async (code, closeSignal) => {
       // Clean up readline interfaces immediately to prevent race conditions
       rl.close();
       rl2.close();
 
-      if (code) {
-        console.error("Python process exited with code", code);
-        reject(code);
+      if (hardKill) {
+        clearTimeout(hardKill);
       }
-      const result = Bun.file(outputPath);
-      const text = await result.text();
+      signal?.removeEventListener("abort", onAbort);
+
+      // Read before cleaning up, and clean up on every exit path
+      const text = await Bun.file(outputPath)
+        .text()
+        .catch(() => "");
 
       try {
         await rm(inputPath);
@@ -116,12 +183,41 @@ export const run = async (
         console.error(e);
       }
 
-      if (text) {
-        resolve(JSON.parse(text));
-      } else {
-        console.warn("No data returned from pythonland");
-        resolve(null);
+      // We killed it on purpose, so this is not a service failure
+      if (cancelled) {
+        return reject(subprocessCancelled(scriptName, closeSignal ?? "SIGTERM"));
       }
+
+      if (code) {
+        console.error("Python process exited with code", code);
+        return reject(subprocessFailed(scriptName, code));
+      }
+
+      // A child killed by a signal reports a null code, so without this the
+      // OOM killer - the likeliest way a service dies without exiting - would
+      // be reported as an empty result and the signal thrown away.
+      if (closeSignal) {
+        console.error(`Python process killed by ${closeSignal}`);
+        return reject(subprocessKilled(scriptName, closeSignal));
+      }
+
+      if (text) {
+        // Parsed inside the try: this handler is async, so a throw here
+        // becomes an unhandled rejection and the run never settles at all.
+        // A half-written file is what a crash mid-dump leaves behind.
+        try {
+          return resolve(JSON.parse(text));
+        } catch (e) {
+          console.error(`Unreadable output from ${scriptName}`);
+          console.error(e);
+          return reject(malformedResult(scriptName));
+        }
+      }
+
+      // entry.py writes a result on every path it completes, including its own
+      // error envelopes, so an empty file means the run died
+      console.warn("No data returned from pythonland");
+      return reject(emptyResult(scriptName));
     });
 
     return;

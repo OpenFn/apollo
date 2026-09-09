@@ -1,5 +1,53 @@
 # apollo
 
+## 3.1.1
+
+### Patch Changes
+
+- 18e828b: Stop a service run when the client disconnects, so an abandoned
+  request no longer keeps calling the model
+- f19706b: Mask sensitive values on their way out of a service, rather than
+  relying on each one to remember: service loggers mask what they emit, echo
+  masks what it returns, and the error envelope masks the exception text. The
+  shared mask now covers every field the server may fill in, and no longer
+  matches ordinary hyphenated words
+- ea576f6: search_docsite: create the default OpenAIEmbeddings client lazily so
+  importing the module (e.g. via global chat's tool imports) no longer crashes
+  without OPENAI_API_KEY
+- a3719ae: Raise the server's socket idle timeout back to 255s so long-running
+  SSE streams are no longer cut off while a model is thinking
+- c4b957e: Send a periodic keepalive on streaming responses so a stream that is
+  working but quiet is no longer mistaken for a dead one
+- 93ef024: Report service failures with a real code and message instead of
+  "Unknown error", and stop a failed spawn from hanging the request
+
+## 3.1.0
+
+### Minor Changes
+
+- f1df29c: global chat: add answer streaming to the planner, breaking up
+  responses into chunks which can be rendered earlier
+
+### Patch Changes
+
+- 6c322ae: global_chat: enable subagents to pull missing context, recovering
+  from routing errors
+
+## 3.0.3
+
+### Patch Changes
+
+- c7ff646: bump openai, langchain, nltk, langfuse, ruff
+- dfb1d86: add generation diff metadata for langfuse
+- 2549840: clean up langfuse keys
+
+## 3.0.2
+
+### Patch Changes
+
+- 7939e6a: add incremental cache update in latest adaptors service
+- 5b2ab52: Security updates
+
 ## 3.0.1
 
 ### Patch Changes

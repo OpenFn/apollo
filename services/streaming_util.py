@@ -11,6 +11,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from langfuse_util import mask_secrets
 from models import CLAUDE_SONNET
 
 # Shared status message pools for user-facing progress indicators.
@@ -132,8 +133,16 @@ class StreamManager:
         """
         # Use EVENT: prefix format that bridge.ts expects
         # Bridge will convert this to proper SSE format
+        #
+        # Masked because this is a third way out to the caller, alongside the
+        # result and the log stream: it is neither, so neither of their masks
+        # sees it. Nothing puts a key in an event today, which is the point of
+        # doing it while that is still true.
         if self.stream:
-            print(f"EVENT:{event_type}:{json.dumps(data)}", flush=True)  # noqa: T201
+            print(  # noqa: T201
+                f"EVENT:{event_type}:{json.dumps(mask_secrets(data))}",
+                flush=True,
+            )
 
     def start_stream(self) -> None:
         """
@@ -309,6 +318,43 @@ class StreamManager:
 
         self._close_open_blocks()
         self._emit_event('changes', changes_data)
+
+    def send_status(
+        self,
+        content: str,
+        steps: list[dict] | None = None,
+        summary: str | None = None,
+    ) -> None:
+        """
+        Send a completed-action status ("Edited workflow structure") as a
+        custom `status` SSE event.
+
+        This is deliberately a different event type from the transient
+        spinners sent via send_thinking: thinking events are live progress
+        that the client replaces and never persists, while `status` events
+        are durable facts about what happened, which the client keeps. The
+        payload matches the `response_segments` entry shape so the client
+        can render live events and reloaded segments with the same code.
+
+        `steps` names the workflow steps this action touched, as data:
+        `[{"key": "transform-data", "name": "Transform data"}]`. A client
+        that renders per-step detail uses it to attach that detail to this
+        status without parsing `content`. `summary` is a shorter line for
+        those clients, so the step names are not printed twice; clients
+        that render prose only keep using `content`. Both are omitted from
+        the payload when absent, so this stays additive.
+        """
+        if not self.stream_started:
+            self.start_stream()
+
+        payload = {"type": "status", "content": content}
+        if steps:
+            payload["steps"] = steps
+        if summary:
+            payload["summary"] = summary
+
+        self._close_open_blocks()
+        self._emit_event('status', payload)
 
     def end_stream(self, stop_reason: str = "end_turn") -> None:
         """

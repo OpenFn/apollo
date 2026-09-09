@@ -338,24 +338,6 @@ where to contribute to the Apollo platform.
 
 ## Release
 
-New releases are assembled as Docker images whenever a version tag of the form
-`@openfn/apollo@x.y.x` is pushed to GitHub.
-
-This tag is automatically generated upon merging to main.
-
-Github's `main` should represent the latest production version of apollo.
-Ideally, releases should be assembled on a branch - usually `release/next` or
-`release/1.2.3`. But this is not required - releases can be cut straight from a
-fix or feature branch, or even from main.
-
-To release a new apollo version:
-
-- Checkout the branch that contains the release
-- Run `bun changeset version`
-- (if there are no changesets, you can either run `bun changeset` to create one,
-  or manually bump `package.json` and update `changelog.md`)
-- Sanity check the new version number and changelog updates, just to be sure
-  there's no funny stuff.
-- Commit changes and push
-- When the PR is merged to main, a new tag is generated and a new Docker image
-  is built
+See
+[How To Release](https://github.com/OpenFn/apollo/wiki/How-to-release-apollo)
+Wiki page.

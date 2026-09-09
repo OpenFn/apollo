@@ -14,7 +14,7 @@ in the issue).
 Please disclose whether you've used AI in this work (it's cool, we just want to
 know!):
 
-- [ ] Yes, I have not used AI
+- [ ] Yes, I have used AI
 - [ ] No, I have not used AI
 
 You can read more details in our

@@ -7,6 +7,7 @@ from typing import List, Dict, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 import httpx
+import anthropic
 from anthropic import Anthropic
 import sentry_sdk
 
@@ -16,7 +17,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from langfuse import observe
-from util import create_logger, ApolloError, sum_usage
+from util import create_logger, ApolloError, sum_usage, mask_secrets, format_attachments
 from streaming_util import (
     StreamManager,
     STATUS_REVIEWING_WORKFLOW,
@@ -26,11 +27,181 @@ from streaming_util import (
 from global_chat.config_loader import ConfigLoader
 from models import resolve_model
 from global_chat.tools.tool_definitions import TOOL_DEFINITIONS
-from global_chat.yaml_utils import stitch_job_code, redact_job_bodies, find_job_in_yaml, get_step_name_from_page
+from yaml_utils import stitch_job_code, redact_job_bodies, find_job_in_yaml, get_step_name_from_page, inspect_job_code
 from tools.search_documentation.search_documentation import search_documentation_tool
 from global_chat.subagent_caller import call_workflow_agent, call_job_agent, format_subagent_result_for_llm
 
 logger = create_logger(__name__)
+
+# Shared by both calls so they cannot drift. The trigger sits above
+# max_tool_calls, so this is a backstop against a raised budget: at the budget
+# it could only fire on the wrap-up round, clearing what that round summarises.
+_CONTEXT_MANAGEMENT = {
+    "betas": ["context-management-2025-06-27"],
+    "context_management": {
+        "edits": [
+            {
+                "type": "clear_tool_uses_20250919",
+                "trigger": {"type": "tool_uses", "value": 40},
+                "keep": {"type": "tool_uses", "value": 20},
+                "exclude_tools": ["search_documentation"],
+                "clear_tool_inputs": True,
+            }
+        ]
+    },
+}
+
+_FINAL_ROUND_NOTICE = (
+    "Stop and reply to the user now. Say what you changed. Mention unfinished work "
+    "only if there is any, and then offer to continue next turn — otherwise don't "
+    "raise it at all."
+)
+
+
+def _api_error_message(error: Exception) -> str:
+    """The upstream sentence, for diagnostics rather than for a user.
+
+    str(e) and e.message are both the dict repr; the readable sentence is only
+    in the parsed body, and only when the body is Anthropic's shape. Every
+    other shape has an answer because raising here would escape the handler
+    that calls it.
+    """
+    body = getattr(error, "body", None)
+    if isinstance(body, dict):
+        detail = body.get("error")
+        if isinstance(detail, dict):
+            message = detail.get("message")
+            if isinstance(message, str) and message:
+                return message
+
+    if isinstance(error, (anthropic.APIConnectionError, httpx.RequestError)):
+        return str(error) or type(error).__name__
+
+    status = getattr(error, "status_code", None)
+    # A mid-stream failure carries the 200 that opened the stream.
+    if status is None or status < 400:
+        return type(error).__name__
+    return f"upstream returned {status}"
+
+
+# Fallback for a body with no readable type. Named directly so a missing SDK
+# class fails at import rather than inside the handler.
+_CLASS_KINDS = (
+    (anthropic.AuthenticationError, "authentication_error"),
+    (anthropic.PermissionDeniedError, "permission_error"),
+    (anthropic.NotFoundError, "not_found_error"),
+    (anthropic.RequestTooLargeError, "request_too_large"),
+    (anthropic.RateLimitError, "rate_limit_error"),
+    (anthropic.BadRequestError, "invalid_request_error"),
+    (anthropic.OverloadedError, "overloaded_error"),
+    (anthropic.InternalServerError, "overloaded_error"),
+)
+
+
+def _failure_kind(error: Exception) -> str:
+    """What went wrong, as one of Anthropic's error type names.
+
+    Body first, because a mid-stream failure is always a bare APIStatusError
+    whatever its cause: the SDK builds it from the 200 that opened the stream.
+    Global chat streams, so the class is the fallback, not the source.
+    """
+    body = getattr(error, "body", None)
+    if isinstance(body, dict):
+        detail = body.get("error")
+        if isinstance(detail, dict):
+            kind = detail.get("type")
+            if isinstance(kind, str) and kind:
+                return kind
+
+    for error_class, kind in _CLASS_KINDS:
+        if isinstance(error, error_class):
+            return kind
+    return ""
+
+
+# What a user is told, per kind. These reach the chat verbatim: Lightning
+# renders body["message"] and ignores the status and the type entirely
+# (ai_assistant.ex handle_error_response). The upstream sentence never
+# appears here; it goes to details and to Sentry, because it is written for
+# whoever is debugging us, not for whoever is using us.
+_OURS = "The AI service failed on our side, not yours. Please try again."
+
+_MESSAGES = {
+    "authentication_error": "The AI service is misconfigured on our side.",
+    "permission_error": "Our account cannot use the AI service right now.",
+    "billing_error": "Our account cannot use the AI service right now.",
+    "not_found_error": "The AI service is misconfigured on our side.",
+    "rate_limit_error": "The AI service is busy. Please try again shortly.",
+    "overloaded_error": "The AI service is busy. Please try again shortly.",
+    "prompt_too_long": (
+        "This conversation is too long for the AI service to read. "
+        "Start a new session to continue."
+    ),
+    "request_too_large": (
+        "This workflow is too large for the AI service to read. "
+        "Try again with a smaller workflow."
+    ),
+    "connection_error": "Unable to reach the AI service. Please try again.",
+}
+
+
+def _model_api_failure(error: Exception) -> tuple[int, str, str, dict]:
+    """How a model API failure reaches the caller: status, type, message, details.
+
+    The status says whose failure it is. A caller shapes only how much text
+    they send, so only those rejections keep their upstream status; the model,
+    the headers and the tool definitions are ours. Deliberately not job_chat's
+    mapping, which answers a caller 401 when our own key is rejected.
+    """
+    upstream = _api_error_message(error)
+    # details is serialised to the caller (errors.ts toErrorPayload), so it
+    # leaves the server and nothing upstream is trusted to be key-free.
+    details = {"upstream_message": mask_secrets(upstream)}
+
+    if isinstance(error, (anthropic.APIConnectionError, httpx.RequestError)):
+        cause = getattr(error, "__cause__", None)
+        if cause:
+            # A proxy error carries the proxy URL, credentials and all.
+            details["cause"] = mask_secrets(str(cause))
+        return 503, "CONNECTION_ERROR", _MESSAGES["connection_error"], details
+
+    kind = _failure_kind(error)
+
+    # Theirs: the two ways there can be too much of what they sent.
+    if kind == "invalid_request_error" and _is_context_overflow(upstream):
+        return 400, "PROMPT_TOO_LONG", _MESSAGES["prompt_too_long"], details
+    if kind == "request_too_large":
+        return 413, "REQUEST_TOO_LARGE", _MESSAGES["request_too_large"], details
+
+    if kind == "rate_limit_error":
+        response = getattr(error, "response", None)
+        # The header may legally be an HTTP date, and int() rejects some
+        # strings isdigit accepts, including runs over 4300 digits. Anything
+        # unusable falls back rather than raising inside this handler.
+        raw = response.headers.get("retry-after") if response is not None else None
+        usable = bool(raw) and raw.isascii() and raw.isdigit() and len(raw) <= 5
+        # Bounded because the value is someone else's.
+        details["retry_after"] = min(max(int(raw), 1), 300) if usable else 60
+        return 429, "RATE_LIMIT", _MESSAGES["rate_limit_error"], details
+
+    # 500 rather than the upstream 401: platform/src/auth/README.md reserves
+    # 401 for a caller who failed to authenticate.
+    if kind == "authentication_error":
+        return 500, "MODEL_API_ERROR", _MESSAGES["authentication_error"], details
+
+    return 502, "MODEL_API_ERROR", _MESSAGES.get(kind, _OURS), details
+
+
+def _is_context_overflow(message: str) -> bool:
+    """Whether a 400 is the conversation outgrowing the model's window.
+
+    The only 400 a caller can act on, and text is all there is to match on:
+    the type is plain invalid_request_error, same as a header we got wrong.
+    One phrase, the one the API actually sends. Any other wording falls to a
+    502 with the real sentence in details, rather than guessing which of our
+    own 400s to hand a user as theirs to fix.
+    """
+    return "prompt is too long" in message.lower()
 
 
 @dataclass
@@ -38,6 +209,7 @@ class PlannerResult:
     """Result from planner run."""
 
     response: str
+    response_segments: List[Dict]
     attachments: List[Dict]
     history: List[Dict]
     usage: Dict
@@ -66,6 +238,8 @@ class PlannerAgent:
 
         self.current_yaml: Optional[str] = None
         self.subagent_results = []
+        self._segments: List[Dict] = []
+        self._attachments: List[Dict] = []
 
         logger.info(f"PlannerAgent initialized with model: {self.model}")
 
@@ -77,8 +251,10 @@ class PlannerAgent:
         page: Optional[str],
         history: List[Dict],
         stream: bool,
+        attachments: Optional[List[Dict]] = None,
         user: Optional[Dict] = None,
         metrics_opt_in: Optional[bool] = None,
+        stream_manager: Optional[StreamManager] = None,
     ) -> PlannerResult:
         """
         Run the planner agent with tool-calling loop.
@@ -89,13 +265,18 @@ class PlannerAgent:
             page: Current page URL (e.g. workflows/name/step-name)
             history: Conversation history
             stream: Whether to stream text via SSE events
+            attachments: Input attachments for this turn (logs, dataclips).
+                Shown to the planner in full; each subagent call forwards only
+                the ones the planner names for it.
+            stream_manager: Optional shared stream manager from the router, so
+                a handed-over request continues on the same stream
 
         Returns:
             PlannerResult with response, attachments, history, usage, meta
         """
         logger.info("Planner.run() called")
 
-        stream_manager = StreamManager(model=self.model, stream=stream)
+        stream_manager = stream_manager or StreamManager(model=self.model, stream=stream)
         if workflow_yaml:
             stream_manager.send_thinking(STATUS_REVIEWING_WORKFLOW + STATUS_PLANNING)
         else:
@@ -103,8 +284,16 @@ class PlannerAgent:
 
         self.current_yaml = workflow_yaml
         self.yaml_modified = False
+        self._attachments = attachments or []
         self._user = user
         self._metrics_opt_in = metrics_opt_in
+        self._segments: List[Dict] = []
+
+        stream_manager = StreamManager(model=self.model, stream=stream)
+        if workflow_yaml:
+            self._send_spinner(stream_manager, STATUS_REVIEWING_WORKFLOW + STATUS_PLANNING)
+        else:
+            self._send_spinner(stream_manager, STATUS_NEW_WORKFLOW + STATUS_PLANNING)
 
         system_prompt = self._build_system_prompt()
 
@@ -121,12 +310,20 @@ class PlannerAgent:
             "cache_read_input_tokens": 0,
         }
 
-        final_text = ""
-
         try:
-            while tool_call_count < self.max_tool_calls:
+            # A run that spends its budget gets one more round with tools
+            # switched off, so it ends on an answer rather than mid-narration.
+            final_round = False
+            while not final_round:
+                final_round = tool_call_count >= self.max_tool_calls
                 try:
-                    response, buffered_text = self._call_api(system_prompt, messages, stream)
+                    response = self._call_api(
+                        system_prompt,
+                        messages,
+                        stream,
+                        stream_manager,
+                        tool_choice={"type": "none"} if final_round else None,
+                    )
 
                     for field in [
                         "input_tokens",
@@ -138,17 +335,14 @@ class PlannerAgent:
 
                     logger.info(f"Claude API call {tool_call_count + 1}: stop_reason={response.stop_reason}")
 
+                    # Text from every round is part of the answer the user saw
+                    # (tool rounds may narrate before calling tools).
+                    round_text = self._extract_text(response)
+                    if round_text:
+                        self._segments.append({"type": "text", "content": round_text})
+
                     if response.stop_reason == "end_turn":
-                        # Send final YAML before text, matching workflow_chat/job_chat pattern
-                        if self.yaml_modified and self.current_yaml:
-                            stream_manager.send_changes({"yaml": self.current_yaml})
-
-                        # Flush buffered text chunks
-                        for chunk in buffered_text:
-                            stream_manager.send_text(chunk)
-
-                        final_text = self._extract_text(response)
-                        messages.append({"role": "assistant", "content": final_text})
+                        messages.append({"role": "assistant", "content": round_text})
                         logger.info(f"Tool loop completed. Total calls: {tool_call_count}")
                         break
 
@@ -180,10 +374,12 @@ class PlannerAgent:
                                     {"type": "tool_use", "id": block.id, "name": block.name, "input": block.input}
                                 )
 
+                        tool_call_count += len(tool_use_blocks)
+                        if tool_call_count >= self.max_tool_calls:
+                            tool_results.append({"type": "text", "text": _FINAL_ROUND_NOTICE})
+
                         messages.append({"role": "assistant", "content": content_blocks})
                         messages.append({"role": "user", "content": tool_results})
-
-                        tool_call_count += len(tool_use_blocks)
 
                     else:
                         logger.warning(f"Unexpected stop_reason: {response.stop_reason}")
@@ -191,24 +387,67 @@ class PlannerAgent:
 
                 except ApolloError:
                     raise
+                except (anthropic.APIError, httpx.RequestError) as e:
+                    # A rejection from the model API is not a tool failure.
+                    #
+                    # httpx.RequestError as well as APIError: the SDK only
+                    # wraps httpx exceptions around the initial send, and on a
+                    # streaming request that returns once the headers arrive.
+                    # The body is read later, unwrapped, so a stream that dies
+                    # mid-generation raises a raw httpx error. Global chat
+                    # streams, so that is the common case here.
+                    status, error_type, message, details = _model_api_failure(e)
+                    # A mid-stream error carries the status of the response
+                    # that opened the stream, which was a 200, so recording it
+                    # would read as a call that succeeded.
+                    upstream = getattr(e, "status_code", None)
+                    if upstream is not None and upstream < 400:
+                        upstream = None
+
+                    # Tagged before the log call, not after. LoggingIntegration
+                    # is a Sentry default and captures at ERROR, so this line
+                    # sends the event that carries the SDK traceback; tags set
+                    # afterwards would land only on the later ApolloError event,
+                    # which is the one without it.
+                    if upstream is not None:
+                        sentry_sdk.set_tag("anthropic_status", upstream)
+                    # The status is null for every mid-stream failure, which is
+                    # the common path, so it is the type that makes overload,
+                    # a rate limit and a bad tool definition tell apart here.
+                    sentry_sdk.set_tag("anthropic_error", error_type)
+                    sentry_sdk.set_tag("planner_tool_calls", tool_call_count)
+                    logger.exception("Model API error in tool-calling loop")
+                    raise ApolloError(
+                        status,
+                        message,
+                        error_type,
+                        {**details, "upstream_status": upstream},
+                    ) from e
                 except Exception as e:
                     logger.exception("Error in tool-calling loop")
                     raise ApolloError(500, f"Tool execution error: {str(e)}")
 
             if response.stop_reason != "end_turn":
-                final_text = self._extract_text(response)
                 logger.warning(f"Loop exited without end_turn (reason: {response.stop_reason})")
         finally:
             stream_manager.end_stream()
 
+        # The full transcript in stream order: text segments (one per round)
+        # interleaved with the status messages shown between them, so the
+        # client can persist and re-render the woven view.
+        response_segments = self._segments
+
+        # response and history keep only the last round's text (the actual
+        # answer), matching the direct routes and what was saved before
+        # narration was streamed. The narration survives in response_segments.
+        final_text = round_text
+
         if not final_text:
             stop_reason = getattr(response, "stop_reason", None)
-            if tool_call_count >= self.max_tool_calls:
-                empty_reason = "max_tool_calls_hit"
-            elif stop_reason == "max_tokens":
+            if stop_reason == "max_tokens":
                 empty_reason = "max_tokens"
             elif stop_reason == "end_turn":
-                empty_reason = "no_text_blocks"
+                empty_reason = "empty_final_round" if final_round else "no_text_blocks"
             else:
                 empty_reason = f"unexpected_stop_reason:{stop_reason}"
             sentry_sdk.set_tag("stop_reason", stop_reason)
@@ -241,6 +480,7 @@ class PlannerAgent:
 
         return PlannerResult(
             response=final_text,
+            response_segments=response_segments,
             attachments=attachments,
             history=return_history,
             usage=total_usage,
@@ -254,9 +494,19 @@ class PlannerAgent:
         )
 
     def _build_user_content(self, content: str, page: Optional[str]) -> str:
-        """Augment the user message with the step the user is viewing ("this step")
-        and the existing workflow structure (bodies redacted)."""
+        """Augment the user message with this turn's attachments, the step the
+        user is viewing ("this step"), and the existing workflow structure
+        (bodies redacted).
+
+        Everything added here is per-turn: run() records the raw `content` in
+        the returned history, so an attached log never becomes a permanent part
+        of the conversation.
+        """
         user_content = content
+
+        attachments = format_attachments(self._attachments)
+        if attachments:
+            user_content += f"\n\n{attachments}"
 
         if page:
             step_name = get_step_name_from_page(page)
@@ -264,7 +514,7 @@ class PlannerAgent:
                 matched_key, _ = find_job_in_yaml(self.current_yaml, step_name)
                 step_name = matched_key or step_name
             if step_name:
-                user_content += f"\n\n(The user is currently viewing the step '{step_name}' — \"this step\" refers to it.)"
+                user_content += f"\n\n(The user is currently viewing the step '{step_name}'.)"
             else:
                 user_content += f"\n\n(The user is currently viewing: {page})"
 
@@ -274,18 +524,24 @@ class PlannerAgent:
 
         return user_content
 
-    def _call_api(self, system_prompt, messages, stream):
-        """Make Claude API call. When streaming, buffers text deltas for the caller to flush.
+    def _call_api(self, system_prompt, messages, stream, stream_manager, tool_choice=None):
+        """Make Claude API call. When streaming, forwards text deltas live.
+
+        All text blocks stream to the client as they generate — including the
+        narration the model writes before tool calls. Each round's text lands
+        in its own content block (the status and changes events sent between
+        rounds close the open text block), so the client can weave text and
+        status events with its own formatting.
 
         Adaptive thinking is enabled for better reasoning but thinking content
         is not streamed to the client — it exposes internal details like tool
         names and agent architecture. User-facing progress comes from the
         task-specific status messages sent before each tool execution.
         """
-        if stream:
-            buffered_text = []
+        choice = {"tool_choice": tool_choice} if tool_choice else {}
 
-            with self.client.messages.stream(
+        if stream:
+            with self.client.beta.messages.stream(
                 model=self.model,
                 max_tokens=self.max_tokens,
                 system=system_prompt,
@@ -293,12 +549,13 @@ class PlannerAgent:
                 tools=self.tools,
                 thinking={"type": "adaptive"},
                 output_config={"effort": "medium"},
+                **choice,
+                **_CONTEXT_MANAGEMENT,
             ) as stream_obj:
                 for event in stream_obj:
-                    if event.type == "content_block_delta":
-                        if event.delta.type == "text_delta":
-                            buffered_text.append(event.delta.text)
-                return stream_obj.get_final_message(), buffered_text
+                    if event.type == "content_block_delta" and event.delta.type == "text_delta":
+                        stream_manager.send_text(event.delta.text)
+                return stream_obj.get_final_message()
         else:
             response = self.client.beta.messages.create(
                 model=self.model,
@@ -308,30 +565,74 @@ class PlannerAgent:
                 tools=self.tools,
                 thinking={"type": "adaptive"},
                 output_config={"effort": "medium"},
+                **choice,
                 # Per-request timeout (same values as the SDK default):
                 # required for non-streaming calls with max_tokens > ~21k,
                 # which the SDK otherwise rejects.
                 timeout=httpx.Timeout(600.0, connect=5.0),
-                betas=["context-management-2025-06-27"],
-                context_management={
-                    "edits": [
-                        {
-                            "type": "clear_tool_uses_20250919",
-                            "trigger": {"type": "tool_uses", "value": 20},
-                            "keep": {"type": "tool_uses", "value": 10},
-                            "exclude_tools": ["search_documentation"],
-                            "clear_tool_inputs": True,
-                        }
-                    ]
-                },
+                **_CONTEXT_MANAGEMENT,
             )
-            return response, []
+            return response
+
+    def _send_yaml(self, stream_manager) -> None:
+        """Stream the current YAML as a changes event.
+
+        Called wherever the YAML is actually updated (workflow edit, job-code
+        stitch), so each change reaches the client the moment it happens — e.g.
+        a newly added step renders before its code is written. No-op in
+        non-streaming mode, where the final payload's attachment carries the
+        YAML instead.
+        """
+        stream_manager.send_changes({"yaml": self.current_yaml})
+
+    def _send_spinner(self, stream_manager, status: str | list[str]) -> None:
+        """Send a transient "...ing" spinner as a thinking event.
+
+        Thinking events are live progress only: the client replaces each one
+        with the next status and never persists them, so spinners are not
+        recorded in the transcript.
+        """
+        stream_manager.send_thinking(status)
+
+    def _send_settled(
+        self,
+        stream_manager,
+        content: str | None,
+        steps: list[dict] | None = None,
+        summary: str | None = None,
+    ) -> None:
+        """Send a completed-action line ("Edited workflow structure") as a
+        custom `status` event and record it in the transcript.
+
+        Unlike spinners, these are durable facts about what happened: the
+        client persists them (they resolve the preceding spinner), and they
+        are recorded in `response_segments` so a page reload re-renders the
+        same view. None means the action left nothing worth showing (e.g. a
+        consult that changed nothing) — nothing is sent or recorded.
+
+        `steps` carries which workflow steps this action touched, as data
+        rather than as names buried in `content`, so a client can attach
+        per-step detail without parsing the sentence. `summary` is the
+        shorter line such a client shows instead, so names are not printed
+        twice. Both are recorded alongside the segment so a reload has the
+        same information the live stream did.
+        """
+        if not content:
+            return
+        stream_manager.send_status(content, steps=steps, summary=summary)
+
+        segment = {"type": "status", "content": content}
+        if steps:
+            segment["steps"] = steps
+        if summary:
+            segment["summary"] = summary
+        self._segments.append(segment)
 
     def _find_all_tool_uses(self, content):
         """Find all tool_use blocks in response content."""
         return [block for block in content if block.type == "tool_use"]
 
-    def _execute_tool(self, tool_use_block, total_usage, tool_calls_meta) -> str:
+    def _execute_tool(self, tool_use_block, stream_manager, total_usage, tool_calls_meta) -> str:
         """Execute a single tool call and return the result string."""
         if tool_use_block.name == "search_documentation":
             tool_result = search_documentation_tool(tool_use_block.input)
@@ -343,6 +644,7 @@ class PlannerAgent:
                 subagent_result = call_workflow_agent(
                     tool_use_block.input,
                     workflow_yaml=self.current_yaml,
+                    attachments=self._attachments,
                     api_key=self.api_key,
                     user=self._user,
                     metrics_opt_in=self._metrics_opt_in,
@@ -355,10 +657,11 @@ class PlannerAgent:
             if "usage" in subagent_result:
                 total_usage.update(sum_usage(total_usage, subagent_result["usage"]))
 
-            # Update live state eagerly
+            # Update live state and stream the change in the same breath
             if subagent_result.get("response_yaml"):
                 self.current_yaml = subagent_result["response_yaml"]
                 self.yaml_modified = True
+                self._send_yaml(stream_manager)
 
             self.subagent_results.append(subagent_result)
 
@@ -398,6 +701,7 @@ class PlannerAgent:
                 subagent_result = call_job_agent(
                     tool_use_block.input,
                     workflow_yaml=self.current_yaml,
+                    attachments=self._attachments,
                     api_key=self.api_key,
                     user=self._user,
                     metrics_opt_in=self._metrics_opt_in,
@@ -420,6 +724,7 @@ class PlannerAgent:
                 self.current_yaml = stitch_job_code(self.current_yaml, matched_job_key, suggested_code)
                 self.yaml_modified = True
                 stitched = True
+                self._send_yaml(stream_manager)
                 logger.info(f"Stitched code for job '{matched_job_key}' into current_yaml")
 
             self.subagent_results.append(subagent_result)
@@ -440,19 +745,7 @@ class PlannerAgent:
             if single_key:
                 job_keys.append(single_key)
 
-            if not self.current_yaml:
-                tool_result = "No workflow available to inspect."
-            elif not job_keys:
-                tool_result = "ERROR: No job keys provided."
-            else:
-                parts = []
-                for job_key in job_keys:
-                    _, job_data = find_job_in_yaml(self.current_yaml, job_key)
-                    if job_data and job_data.get("body"):
-                        parts.append(f"Job code for '{job_key}':\n\n{job_data['body']}")
-                    else:
-                        parts.append(f"No code found for job '{job_key}'.")
-                tool_result = "\n\n".join(parts)
+            tool_result = inspect_job_code(self.current_yaml, job_keys)
 
             tool_calls_meta.append({"tool": "inspect_job_code", "input": tool_use_block.input})
 
@@ -478,8 +771,10 @@ class PlannerAgent:
         tool_results = []
 
         for tool_use_block in other_blocks:
-            stream_manager.send_thinking(self._tool_status_message(tool_use_block))
-            tool_result = self._execute_tool(tool_use_block, total_usage, tool_calls_meta)
+            self._send_spinner(stream_manager, self._tool_status_message(tool_use_block))
+            yaml_before = self.current_yaml
+            tool_result = self._execute_tool(tool_use_block, stream_manager, total_usage, tool_calls_meta)
+            self._send_settled(stream_manager, self._settled_status_message(tool_use_block, yaml_before))
             tool_results.append(
                 {"type": "tool_result", "tool_use_id": tool_use_block.id, "content": tool_result}
             )
@@ -506,7 +801,7 @@ class PlannerAgent:
             status = f"Writing code for {joined}..."
         else:
             status = "Writing job code..."
-        stream_manager.send_thinking(status)
+        self._send_spinner(stream_manager, status)
 
         # Validate and prepare — skip invalid ones before launching threads.
         # matched_keys carries the YAML key resolved by find_job_in_yaml's
@@ -538,10 +833,11 @@ class PlannerAgent:
                     executor.submit(
                         call_job_agent,
                         block.input,
-                        self.current_yaml,
-                        self.api_key,
-                        self._user,
-                        self._metrics_opt_in,
+                        workflow_yaml=self.current_yaml,
+                        attachments=self._attachments,
+                        api_key=self.api_key,
+                        user=self._user,
+                        metrics_opt_in=self._metrics_opt_in,
                     ): block
                     for block in to_run
                 }
@@ -557,10 +853,11 @@ class PlannerAgent:
             try:
                 parallel_results[block.id] = call_job_agent(
                     block.input,
-                    self.current_yaml,
-                    self.api_key,
-                    self._user,
-                    self._metrics_opt_in,
+                    workflow_yaml=self.current_yaml,
+                    attachments=self._attachments,
+                    api_key=self.api_key,
+                    user=self._user,
+                    metrics_opt_in=self._metrics_opt_in,
                 )
             except Exception as e:
                 logger.exception("call_job_code_agent failed")
@@ -568,6 +865,7 @@ class PlannerAgent:
 
         # Stitch results and update state sequentially
         tool_results = []
+        stitched_steps = []
         for block in blocks:
             if block.id in skipped:
                 tool_results.append(
@@ -595,6 +893,12 @@ class PlannerAgent:
                 self.current_yaml = stitch_job_code(self.current_yaml, matched_job_key, suggested_code)
                 self.yaml_modified = True
                 stitched = True
+                stitched_steps.append(
+                    {
+                        "key": matched_job_key,
+                        "name": self._display_name_for_job(matched_job_key),
+                    },
+                )
                 logger.info(f"Stitched code for job '{matched_job_key}' into current_yaml")
 
             self.subagent_results.append(subagent_result)
@@ -609,6 +913,22 @@ class PlannerAgent:
             tool_calls_meta.append({"tool": "call_job_code_agent", "input": block.input})
             tool_results.append(
                 {"type": "tool_result", "tool_use_id": block.id, "content": tool_result}
+            )
+
+        # Settle the spinner with the steps that were actually applied (drop any
+        # that failed to stitch); nothing sent if none applied. One YAML send
+        # covers the whole batch, mirroring the one combined status.
+        if stitched_steps:
+            self._send_yaml(stream_manager)
+            joined = ", ".join(f"\"{step['name']}\"" for step in stitched_steps)
+            count = len(stitched_steps)
+            self._send_settled(
+                stream_manager,
+                f"Wrote code for {joined}",
+                steps=stitched_steps,
+                # Clients that render a block per step get the count instead,
+                # so the names appear once, on the blocks.
+                summary=f"Wrote code for {count} step{'' if count == 1 else 's'}",
             )
 
         return tool_results
@@ -626,7 +946,7 @@ class PlannerAgent:
 
         if name == "call_workflow_agent":
             if self.current_yaml:
-                return "Editing workflow..."
+                return "Reviewing the workflow..."
             return "Building workflow outline..."
 
         if name == "call_job_code_agent":
@@ -646,11 +966,44 @@ class PlannerAgent:
 
         return f"Running {name}..."
 
+    def _settled_status_message(self, tool_use_block, yaml_before: str | None) -> str | None:
+        """Past-tense line that resolves the spinner for a finished tool call.
+
+        Counterpart to _tool_status_message. For workflow edits the outcome is
+        read from whether the YAML actually changed: an unchanged workflow means
+        the agent only advised (or errored), so it settles to "Analyzed the
+        workflow" rather than claiming an edit. Returns None when there's
+        nothing worth persisting. Job-code settling is handled where the code is
+        stitched, since it depends on which steps were applied.
+        """
+        name = tool_use_block.name
+        inputs = tool_use_block.input or {}
+
+        if name == "call_workflow_agent":
+            if self.current_yaml == yaml_before:
+                return "Analyzed the workflow"
+            return "Edited workflow structure" if yaml_before else "Built workflow outline"
+
+        if name == "search_documentation":
+            query = inputs.get("query")
+            return f"Searched documentation for \"{query}\"" if query else "Searched documentation"
+
+        if name == "inspect_job_code":
+            job_keys = inputs.get("job_keys") or ([inputs["job_key"]] if inputs.get("job_key") else [])
+            names = [n for n in (self._display_name_for_job(k) for k in job_keys) if n]
+            if names:
+                joined = ", ".join(f"\"{n}\"" for n in names)
+                return f"Read code for {joined}"
+            return "Read code"
+
+        return None
+
     def _display_name_for_job(self, job_key: str | None) -> str | None:
         """Look up a human-readable display name for a job key.
 
-        Checks the workflow YAML for a name field first, then falls back
-        to title-casing the key (e.g. "fetch-patients" -> "Fetch Patients").
+        Returns the workflow YAML's own name for the job when it has one,
+        otherwise title-cases the key (e.g. "fetch-patients" -> "Fetch
+        Patients").
         """
         if not job_key:
             return None
@@ -658,7 +1011,11 @@ class PlannerAgent:
         if self.current_yaml:
             _, job_data = find_job_in_yaml(self.current_yaml, job_key)
             if job_data and job_data.get("name"):
-                return self._format_display_name(job_data["name"])
+                # The user named this step; use it verbatim. Title-casing it
+                # renames "Transform data" to "Transform Data" in the prose,
+                # which then disagrees with the name shown everywhere else
+                # in the UI.
+                return job_data["name"]
 
         return self._format_display_name(job_key)
 
@@ -668,12 +1025,8 @@ class PlannerAgent:
         return name.replace("-", " ").replace("_", " ").title()
 
     def _extract_text(self, response):
-        """Extract text from response content."""
-        text = ""
-        for block in response.content:
-            if block.type == "text":
-                text += block.text
-        return text
+        """Extract text from response content, concatenated as it was streamed."""
+        return "".join(block.text for block in response.content if block.type == "text")
 
     def _build_system_prompt(self) -> list:
         """Build system prompt for planner with cache control."""

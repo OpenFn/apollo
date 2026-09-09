@@ -1,22 +1,24 @@
-import sys
-import os
-import json
-import uuid
 import argparse
-from dotenv import load_dotenv
+import json
+import os
+import uuid
+
 import sentry_sdk
-from util import set_apollo_port, ApolloError
+from dotenv import load_dotenv
+from util import ApolloError, install_log_masking, set_apollo_port
 
 load_dotenv()
 
 # Langfuse: init after load_dotenv so env vars are available, before any Anthropic client is created
 from opentelemetry.instrumentation.anthropic import AnthropicInstrumentor
 from opentelemetry.instrumentation.threading import ThreadingInstrumentor
+
 AnthropicInstrumentor().instrument()
 ThreadingInstrumentor().instrument()
 
 from langfuse import Langfuse
 from langfuse.span_filter import is_default_export_span
+from langfuse_util import mask_secrets
 
 
 def _should_export_span(span):
@@ -27,7 +29,11 @@ def _should_export_span(span):
     return is_default_export_span(span)
 
 
-langfuse = Langfuse(should_export_span=_should_export_span, release=os.getenv("APOLLO_VERSION", "unknown"))
+langfuse = Langfuse(
+    should_export_span=_should_export_span,
+    mask=mask_secrets,
+    release=os.getenv("APOLLO_VERSION", "unknown"),
+)
 
 env = os.getenv('ENVIRONMENT', 'unknown')
 trace_rates = {
@@ -37,17 +43,57 @@ trace_rates = {
     'unknown': 0.0,
     }
 
+def _scrub_event(event: dict, _hint: dict) -> dict:
+    """Mask keys in what Sentry is about to send.
+
+    Sentry scrubs frame locals by name, but not the exception message, a
+    set_context payload, or a breadcrumb - and services raise
+    ApolloError(500, str(e)) with the request in scope. The whole event rather
+    than a list of sections, so a section nobody thought of is covered too.
+    """
+    return mask_secrets(event)
+
+
 sentry_sdk.init(
     dsn=os.getenv('SENTRY_DSN'),
     environment=env,
     sample_rate=1.0,
     traces_sample_rate=trace_rates.get(env, 0.0),
     enable_tracing=True,
-    auto_enabling_integrations=False
+    auto_enabling_integrations=False,
+    before_send=_scrub_event,
+    # before_send covers error events only, and tracing is on.
+    before_send_transaction=_scrub_event,
 )
 
+# At or above this the failure is ours; below it the caller sent something we
+# correctly refused.
+HTTP_SERVER_ERROR = 500
+
+# 4xx that are our problem despite the code: the provider rejected or throttled
+# Apollo's own key, so no change by the caller would help.
+PROVIDER_FAILURE_TYPES = frozenset({"AUTH_ERROR", "RATE_LIMIT", "FORBIDDEN"})
+
+
+def _capture_apollo_error(e: ApolloError) -> None:
+    """Send a typed error to Sentry so a class of failure can be counted.
+
+    The type is a tag rather than only a field on the response, so a search can
+    count one kind of failure without matching on message wording. An error the
+    caller caused goes in at warning level: still searchable, but not something
+    to be paged about. Anything we could have to fix stays at error.
+    """
+    caller_error = e.code < HTTP_SERVER_ERROR and e.type not in PROVIDER_FAILURE_TYPES
+    sentry_sdk.capture_exception(
+        e,
+        level="warning" if caller_error else "error",
+        tags={"apollo_error_type": e.type},
+        contexts={"apollo_error": {"code": e.code, **(e.details or {})}},
+    )
+
+
 def call(
-    service: str, *, input_path: str | None = None, output_path: str | None = None, apollo_port: int | None = None
+    service: str, *, input_path: str | None = None, output_path: str | None = None, apollo_port: int | None = None,
 ) -> dict:
     """
     Dynamically imports a module and invokes its main function with input data.
@@ -66,29 +112,66 @@ def call(
     data = {}
     if input_path:
         try:
-            with open(input_path, "r") as f:
+            with open(input_path) as f:
                 data = json.load(f)
-        except FileNotFoundError:
+        except FileNotFoundError as e:
+            # The path is the server's own, so it is for the log, not the
+            # caller.
             sentry_sdk.capture_exception(e)
-            return ApolloError(code=500, message=f"Input file not found: {input_path}", type="INTERNAL_ERROR").to_dict()
-        except json.JSONDecodeError:
+            return _finish(
+                ApolloError(
+                    code=500, message="Input file not found", type="INTERNAL_ERROR"
+                ).to_dict(),
+                output_path,
+            )
+        except json.JSONDecodeError as e:
             sentry_sdk.capture_exception(e)
-            return ApolloError(code=500, message="Invalid JSON input", type="INTERNAL_ERROR").to_dict()
+            return _finish(
+                ApolloError(
+                    code=500, message="Invalid JSON input", type="INTERNAL_ERROR"
+                ).to_dict(),
+                output_path,
+            )
 
     try:
         m = __import__(module_name, fromlist=["main"])
+
+        # Again here, after every import has had its chance to install a
+        # handler of its own. Some libraries add one that writes to stderr,
+        # which the bridge forwards to the caller line for line.
+        install_log_masking()
+
         result = m.main(data)
     except ModuleNotFoundError as e:
         sentry_sdk.capture_exception(e)
-        return ApolloError(code=500, message=str(e), type="INTERNAL_ERROR").to_dict()
+        result = ApolloError(
+            code=500, message=str(e), type="INTERNAL_ERROR",
+        ).to_dict()
     except ApolloError as e:
-        sentry_sdk.capture_exception(e)
+        _capture_apollo_error(e)
         result = e.to_dict()
     except Exception as e:
         sentry_sdk.capture_exception(e)
-        result = ApolloError(code=500, message=str(e), type="INTERNAL_ERROR").to_dict()
+        result = ApolloError(
+            code=500, message=str(e), type="INTERNAL_ERROR",
+        ).to_dict()
 
     langfuse.flush()
+
+    return _finish(result, output_path)
+
+
+def _finish(result: dict, output_path: str | None) -> dict:
+    """Mask, write the result where the caller expects it, then hand it back.
+
+    Every path out of `call` comes through here, which buys two things. The
+    output file is always written, so the bridge can read an empty one as the
+    run having died rather than as a polite failure. And a value the server put
+    on the payload cannot leave down a branch someone forgot: most services
+    catch broadly and rewrap as `ApolloError(500, str(e))`, so masking
+    per-branch would miss the one nearly all of them take.
+    """
+    result = mask_secrets(result)
 
     if output_path:
         with open(output_path, "w") as f:

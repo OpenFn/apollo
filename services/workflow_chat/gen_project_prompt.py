@@ -1,4 +1,5 @@
 import os
+from util import format_attachments
 from .config_loader import ConfigLoader
 from .available_adaptors import get_adaptors_string
 
@@ -30,17 +31,21 @@ def build_system_message(mode_config, existing_yaml=None):
     return system_message
 
 
-def build_prompt(content, existing_yaml=None, errors=None, history=None, read_only=False):
+def build_prompt(content, existing_yaml=None, errors=None, history=None, read_only=False, attachments=None,
+                 subagent=False):
     """
     Build a prompt for the LLM based on mode and context.
-    
+
     Args:
         content: User message content
         existing_yaml: Current YAML being edited (optional)
         errors: Error messages if in error mode (optional)
         history: Conversation history (optional)
         read_only: Whether in read-only mode
-    
+        attachments: This turn's input attachments (logs, dataclips), rendered
+            into the current message only — never into the returned history
+        subagent: Whether called from global_chat (adds handover instructions)
+
     Returns:
         Tuple of (system_message, prompt_messages)
     """
@@ -75,8 +80,32 @@ def build_prompt(content, existing_yaml=None, errors=None, history=None, read_on
         user_content = content
     
     system_message = build_system_message(mode_config, existing_yaml)
-    
+
+    if subagent:
+        # Job-code requests are handed over instead — remove the decline-and-
+        # navigate-to-the-Inspector instruction (it appears in two prompt
+        # sections) so it can never slip out. Must match prompts yaml verbatim;
+        # a unit test guards against the two drifting apart.
+        system_message = system_message.replace(
+            "If the user asks for job code, DECLINE to provide it yet, and explain that they "
+            "need to save their workflow and then navigate to the specific job's code page in "
+            "the Inspector. Once there, you can help them write the code (and will be able to "
+            "see any existing code for that job).",
+            'If the user asks for job code, set "handover" (see Job Code Requests below).',
+        )
+        system_message += "\n" + config_loader.get_prompt("subagent_handover_instructions")
+
+    # Attachments go last in the system message, where this service's other
+    # context (the existing YAML) already lives, and only when there are any —
+    # with none, the prompt is byte-identical to before. History is built from
+    # the raw content, so they never carry into a later turn.
+    attachments_block = format_attachments(attachments)
+    if attachments_block:
+        system_message += (
+            "\n\nThe user attached the following to their latest message:\n" + attachments_block
+        )
+
     prompt = list(history)  # Create a copy
     prompt.append({"role": "user", "content": user_content})
-    
+
     return (system_message, prompt)
