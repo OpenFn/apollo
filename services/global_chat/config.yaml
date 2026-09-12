@@ -15,6 +15,7 @@ planner:
   web_search: # Server-side web search/fetch for planner.
     max_uses: 5
     max_content_tokens: 10000
+    # Content from these domains steers the agent that edits workflows.
     allowed_domains:
       - hl7.org
       - docs.openfn.org
