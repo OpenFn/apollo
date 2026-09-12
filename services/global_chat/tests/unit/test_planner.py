@@ -105,12 +105,13 @@ class FakeResponse:
         self.usage = FakeUsage()
 
 
-def make_run_planner(max_tool_calls: int = 10) -> PlannerAgent:
+def make_run_planner(max_tool_calls: int = 10, max_pause_continuations: int = 5) -> PlannerAgent:
     """A planner wired for run(), with no config, client, or tools."""
     planner = make_planner()
     planner.model = "claude-test"
     planner.max_tokens = 1024
     planner.max_tool_calls = max_tool_calls
+    planner.max_pause_continuations = max_pause_continuations
     planner.tools = []
     planner.web_tools = []
     planner.web_search_enabled = False
@@ -273,9 +274,9 @@ def test_pause_turn_keeps_the_text_from_before_the_pause() -> None:
     assert [s["content"] for s in result.response_segments] == ["Half an answer. ", "The rest."]
 
 
-def test_paused_text_survives_the_max_tool_calls_exit_without_duplicating() -> None:
+def test_paused_text_survives_the_pause_budget_exit_without_duplicating() -> None:
     """Exiting the loop while still paused should keep the head exactly once."""
-    planner = make_run_planner(max_tool_calls=2)
+    planner = make_run_planner(max_pause_continuations=2)
     responses = [
         FakeResponse("pause_turn", [FakeTextBlock("A")]),
         FakeResponse("pause_turn", [FakeTextBlock("B")]),
@@ -284,8 +285,36 @@ def test_paused_text_survives_the_max_tool_calls_exit_without_duplicating() -> N
     result = run_with(planner, responses)
 
     assert result.response == "AB"
-    # Pause rounds spend the same budget as real tool calls, so the loop stops.
-    assert result.meta["planner_iterations"] == planner.max_tool_calls
+    # Not a finished answer: the server had more of the turn to send.
+    assert result.meta["truncated"] is True
+    assert result.meta["stop_reason"] == "pause_turn"
+
+
+def test_pauses_do_not_spend_the_subagent_budget() -> None:
+    """A paused round made no tool call, so max_tool_calls must be untouched."""
+    planner = make_run_planner(max_tool_calls=2)
+    responses = [
+        FakeResponse("pause_turn", [FakeTextBlock("Still working. ")]),
+        FakeResponse("pause_turn", [FakeTextBlock("Nearly. ")]),
+        FakeResponse("pause_turn", [FakeTextBlock("Almost. ")]),
+        FakeResponse("end_turn", [FakeTextBlock("Done.")]),
+    ]
+
+    result = run_with(planner, responses)
+
+    assert result.response == "Still working. Nearly. Almost. Done."
+    assert result.meta["planner_iterations"] == 0
+    assert "truncated" not in result.meta
+
+
+def test_a_completed_turn_is_not_flagged_as_truncated() -> None:
+    planner = make_run_planner()
+    responses = [FakeResponse("end_turn", [FakeTextBlock("Plain answer.")])]
+
+    result = run_with(planner, responses)
+
+    assert "truncated" not in result.meta
+    assert "stop_reason" not in result.meta
 
 
 def test_a_real_tool_round_resets_the_paused_text_buffer() -> None:

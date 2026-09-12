@@ -11,6 +11,7 @@ planner:
   model: "claude-opus"
   max_tokens: 24576
   max_tool_calls: 10
+  max_pause_continuations: 5
   web_search: # Server-side web search/fetch for planner.
     max_uses: 5
     max_content_tokens: 10000

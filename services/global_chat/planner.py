@@ -78,6 +78,7 @@ class PlannerAgent:
         self.model = resolve_model(planner_config.get("model", "claude-opus"))
         self.max_tokens = planner_config.get("max_tokens", 24576)
         self.max_tool_calls = planner_config.get("max_tool_calls", 20)
+        self.max_pause_continuations = planner_config.get("max_pause_continuations", 5)
 
         self.current_yaml: Optional[str] = None
         self.subagent_results = []
@@ -141,6 +142,7 @@ class PlannerAgent:
         tool_call_count = 0
         tool_calls_meta = []
         paused_text = ""
+        pause_count = 0
         web_usage = {"web_searches": 0, "web_fetches": 0, "web_domains": []}
         total_usage = {
             "input_tokens": 0,
@@ -227,7 +229,10 @@ class PlannerAgent:
                         messages.append({"role": "assistant", "content": response.content})
                         paused_text += round_text
                         round_text = ""
-                        tool_call_count += 1
+                        pause_count += 1
+                        if pause_count >= self.max_pause_continuations:
+                            logger.warning(f"Pause budget spent after {pause_count} continuations")
+                            break
                         continue
 
                     else:
@@ -302,6 +307,10 @@ class PlannerAgent:
             "subagent_calls": self.subagent_results,
             "total_tool_calls": tool_call_count,
         }
+
+        if response.stop_reason == "pause_turn":
+            meta["truncated"] = True
+            meta["stop_reason"] = "pause_turn"
 
         if self.web_search_enabled:
             meta.update(web_usage)
