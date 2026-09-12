@@ -137,8 +137,8 @@ This document defines the input and output payload structure for the Global Agen
 
     // Only when the planner has web tools on:
     "web_searches": 2,
-    "web_fetches": 1,
-    "web_domains": ["docs.dhis2.org"],
+    "web_fetches": 2,
+    "web_domains": ["hl7.org", "docs.openfn.org"],
     "web_search_downgraded": false
   }
 }
