@@ -714,6 +714,50 @@ def test_a_bad_request_without_web_tools_is_not_retried() -> None:
     assert calls == [1]
 
 
+def test_an_unrelated_bad_request_is_not_blamed_on_web_search() -> None:
+    """A 400 the web tools did not cause must not produce the web-search status."""
+    planner = make_run_planner()
+    planner.web_tools = build_web_tools(WEB_CONFIG)
+    planner.tools = TOOL_DEFINITIONS + planner.web_tools
+    planner.web_search_enabled = True
+    planner.config_loader = StubPromptLoader(planner_system_prompt="BASE PROMPT")
+
+    def always_fail(*_args: object) -> FakeResponse:
+        raise make_bad_request("prompt is too long: 250000 tokens > 200000 maximum")
+
+    with patch.object(PlannerAgent, "_call_api", side_effect=always_fail), \
+         pytest.raises(ApolloError) as excinfo:
+        planner.run("q", None, None, [], stream=False)
+
+    # The retry failed too, so the web tools were not the cause. The user gets
+    # the real error and nothing is recorded about web search.
+    assert "prompt is too long" in excinfo.value.message
+    assert planner._segments == []
+
+
+def test_the_web_search_status_is_only_sent_once_the_retry_has_earned_it() -> None:
+    planner = make_run_planner()
+    planner.web_tools = build_web_tools(WEB_CONFIG)
+    planner.tools = TOOL_DEFINITIONS + planner.web_tools
+    planner.web_search_enabled = True
+    planner.config_loader = StubPromptLoader(planner_system_prompt="BASE PROMPT")
+    segments_at_each_call = []
+
+    def fail_then_answer(*_args: object) -> FakeResponse:
+        # Snapshot before the retry runs: nothing may have been claimed yet.
+        segments_at_each_call.append(list(planner._segments))
+        if len(segments_at_each_call) == 1:
+            raise make_bad_request()
+        return FakeResponse("end_turn", [FakeTextBlock("Answered without the web.")])
+
+    with patch.object(PlannerAgent, "_call_api", side_effect=fail_then_answer):
+        result = planner.run("q", None, None, [], stream=False)
+
+    # Neither the first call nor the retry saw a status already recorded.
+    assert segments_at_each_call == [[], []]
+    assert result.response_segments[0]["type"] == "status"
+
+
 def test_a_second_bad_request_surfaces_the_original_error() -> None:
     planner = make_run_planner()
     planner.web_tools = build_web_tools(WEB_CONFIG)
@@ -732,3 +776,5 @@ def test_a_second_bad_request_surfaces_the_original_error() -> None:
     assert errors == []
     assert "web search is not enabled" in excinfo.value.message
     assert "something else" not in excinfo.value.message
+    # The retry failed, so nothing was claimed about web search.
+    assert planner._segments == []
