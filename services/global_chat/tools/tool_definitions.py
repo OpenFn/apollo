@@ -88,6 +88,10 @@ TOOL_DEFINITIONS = [
 
 def build_web_tools(config: dict) -> list[dict]:
     """Build Anthropic's server-side web search and fetch tool definitions.
+
+    `allowed_domains` is passed through from config unvalidated and is the boundary
+    between fetched page content and the planner. An empty list returns no tools, 
+    which is the kill switch for the feature.
     """
     web_config = (config.get("planner") or {}).get("web_search") or {}
     allowed_domains = list(web_config.get("allowed_domains") or [])
