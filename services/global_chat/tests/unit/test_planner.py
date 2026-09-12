@@ -504,19 +504,31 @@ def block_start(block_type: str) -> FakeEvent:
     return FakeEvent("content_block_start", content_block=FakeBlockRef(block_type))
 
 
+def block_stop(block_type: str, content: object) -> FakeEvent:
+    block = FakeBlockRef(block_type)
+    block.content = content
+    return FakeEvent("content_block_stop", content_block=block)
+
+
 def text_delta(text: str) -> FakeEvent:
     return FakeEvent("content_block_delta", delta=FakeEvent("text_delta", text=text))
 
 
-def test_server_tool_activity_spins_then_settles_once_per_round() -> None:
-    """Two server-tool uses in one round should result in one line."""
+SEARCH_OK = [{"type": "web_search_result", "url": "https://hl7.org/fhir/R4/patient.html"}]
+FETCH_OK = {"type": "web_fetch_result", "url": "https://hl7.org/fhir/R4/patient.html"}
+FETCH_BLOCKED = {"type": "web_fetch_tool_result_error", "error_code": "url_not_allowed"}
+SEARCH_EXHAUSTED = {"type": "web_search_tool_result_error", "error_code": "max_uses_exceeded"}
+
+
+def test_repeated_successful_lookups_settle_as_one_line() -> None:
+    """Two successful searches in one round should still read as one line."""
     planner = make_run_planner()
     final = FakeResponse("end_turn", [FakeTextBlock("Answer.")])
     events = [
         block_start("server_tool_use"),
-        block_start("web_search_tool_result"),
+        block_stop("web_search_tool_result", SEARCH_OK),
         block_start("server_tool_use"),
-        block_start("web_fetch_tool_result"),
+        block_stop("web_search_tool_result", SEARCH_OK),
         text_delta("Answer."),
     ]
     planner.client = FakeClient(FakeStream(events, final))
@@ -527,6 +539,94 @@ def test_server_tool_activity_spins_then_settles_once_per_round() -> None:
     assert manager.thinking == [STATUS_SEARCHING_WEB, STATUS_SEARCHING_WEB]
     assert manager.statuses == ["Searched the web"]
     assert planner._segments == [{"type": "status", "content": "Searched the web"}]
+
+
+def test_a_blocked_fetch_is_not_reported_as_a_successful_lookup() -> None:
+    """url_not_allowed comes back 200 with an error block, it must not say we read it."""
+    planner = make_run_planner()
+    final = FakeResponse("end_turn", [FakeTextBlock("Answering from memory.")])
+    events = [
+        block_start("server_tool_use"),
+        block_stop("web_fetch_tool_result", FETCH_BLOCKED),
+        text_delta("Answering from memory."),
+    ]
+    planner.client = FakeClient(FakeStream(events, final))
+    manager = StubStreamManager()
+
+    planner._call_api([], [], True, manager)
+
+    assert manager.statuses == ["Skipped a page outside the allowed sources"]
+    assert planner._segments == [
+        {"type": "status", "content": "Skipped a page outside the allowed sources"}
+    ]
+
+
+def test_a_failed_search_says_so_rather_than_claiming_a_result() -> None:
+    planner = make_run_planner()
+    final = FakeResponse("end_turn", [FakeTextBlock("No luck.")])
+    events = [
+        block_start("server_tool_use"),
+        block_stop("web_search_tool_result", SEARCH_EXHAUSTED),
+    ]
+    planner.client = FakeClient(FakeStream(events, final))
+    manager = StubStreamManager()
+
+    planner._call_api([], [], True, manager)
+
+    assert manager.statuses == ["A web lookup did not return anything"]
+
+
+def test_a_mixed_round_reports_both_outcomes_in_order() -> None:
+    """A search that worked followed by a fetch that was blocked is two facts."""
+    planner = make_run_planner()
+    final = FakeResponse("end_turn", [FakeTextBlock("Partial answer.")])
+    events = [
+        block_start("server_tool_use"),
+        block_stop("web_search_tool_result", SEARCH_OK),
+        block_start("server_tool_use"),
+        block_stop("web_fetch_tool_result", FETCH_BLOCKED),
+    ]
+    planner.client = FakeClient(FakeStream(events, final))
+    manager = StubStreamManager()
+
+    planner._call_api([], [], True, manager)
+
+    assert manager.statuses == [
+        "Searched the web",
+        "Skipped a page outside the allowed sources",
+    ]
+
+
+def test_a_result_block_with_no_content_claims_nothing() -> None:
+    """Better to say nothing than to claim a lookup we cannot see the outcome of."""
+    planner = make_run_planner()
+    final = FakeResponse("end_turn", [FakeTextBlock("Answer.")])
+    events = [
+        block_start("server_tool_use"),
+        block_stop("web_fetch_tool_result", None),
+    ]
+    planner.client = FakeClient(FakeStream(events, final))
+    manager = StubStreamManager()
+
+    planner._call_api([], [], True, manager)
+
+    assert manager.statuses == []
+    assert planner._segments == []
+
+
+def test_a_successful_fetch_says_it_read_the_page() -> None:
+    planner = make_run_planner()
+    final = FakeResponse("end_turn", [FakeTextBlock("Per the page.")])
+    events = [
+        block_start("server_tool_use"),
+        block_stop("web_fetch_tool_result", FETCH_OK),
+    ]
+    planner.client = FakeClient(FakeStream(events, final))
+    manager = StubStreamManager()
+
+    planner._call_api([], [], True, manager)
+
+    assert manager.statuses == ["Read a page from the web"]
 
 
 def test_the_spinner_uses_the_shared_web_status_pool() -> None:

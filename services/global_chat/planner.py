@@ -352,7 +352,7 @@ class PlannerAgent:
         task-specific status messages sent before each tool execution.
         """
         if stream:
-            settled_this_round = False
+            last_settled = None
             with self.client.messages.stream(
                 model=self.model,
                 max_tokens=self.max_tokens,
@@ -366,12 +366,15 @@ class PlannerAgent:
                     if event.type == "content_block_delta" and event.delta.type == "text_delta":
                         stream_manager.send_text(event.delta.text)
                     elif event.type == "content_block_start":
-                        block_type = event.content_block.type
-                        if block_type == "server_tool_use":
+                        if event.content_block.type == "server_tool_use":
                             self._send_spinner(stream_manager, STATUS_SEARCHING_WEB)
-                        elif block_type in ("web_search_tool_result", "web_fetch_tool_result") and not settled_this_round:
-                            self._send_settled(stream_manager, "Searched the web")
-                            settled_this_round = True
+                    elif event.type == "content_block_stop":
+                        block = getattr(event, "content_block", None)
+                        if getattr(block, "type", None) in self.WEB_RESULT_BLOCK_TYPES:
+                            message = self._web_result_message(block)
+                            if message and message != last_settled:
+                                self._send_settled(stream_manager, message)
+                                last_settled = message
                 return stream_obj.get_final_message()
         else:
             response = self.client.beta.messages.create(
@@ -833,6 +836,38 @@ class PlannerAgent:
                     hosts.append(host)
 
         return {"web_searches": searches, "web_fetches": fetches, "web_domains": hosts}
+
+    WEB_RESULT_BLOCK_TYPES = ("web_search_tool_result", "web_fetch_tool_result")
+
+    WEB_RESULT_BLOCKED_CODES = ("url_not_allowed", "url_not_in_prior_context")
+
+    @staticmethod
+    def _web_result_error_code(block: object) -> str | None:
+        """The error_code of a finished web result block, or None when it succeeded."""
+        content = getattr(block, "content", None)
+        if isinstance(content, list):
+            return None
+        if isinstance(content, dict):
+            if str(content.get("type") or "").endswith("_error"):
+                return content.get("error_code")
+            return None
+        if str(getattr(content, "type", "") or "").endswith("_error"):
+            return getattr(content, "error_code", None)
+        return None
+
+    @staticmethod
+    def _web_result_message(block: object) -> str | None:
+        """The settled line for one finished web result block, or None to say nothing."""
+        if getattr(block, "content", None) is None:
+            return None
+        error_code = PlannerAgent._web_result_error_code(block)
+        if error_code is None:
+            if getattr(block, "type", None) == "web_fetch_tool_result":
+                return "Read a page from the web"
+            return "Searched the web"
+        if error_code in PlannerAgent.WEB_RESULT_BLOCKED_CODES:
+            return "Skipped a page outside the allowed sources"
+        return "A web lookup did not return anything"
 
     def _build_system_prompt(self) -> list:
         """Build system prompt for planner with cache control."""
