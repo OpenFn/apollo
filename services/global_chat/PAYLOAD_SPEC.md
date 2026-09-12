@@ -135,6 +135,10 @@ This document defines the input and output payload structure for the Global Agen
     "subagent_calls": [],                // Raw sub-agent result dicts (for debugging)
     "total_tool_calls": 2,
 
+    // Only when the planner gave up mid-turn:
+    "truncated": true,
+    "stop_reason": "pause_turn",
+
     // Only when options.web_search was set:
     "web_search_requested": true,
 
@@ -179,6 +183,7 @@ Each tool beat streams as: `thinking` spinner → `changes` (if the workflow was
   - **`tool_calls`** (array): List of `{tool, input}` objects for each tool the planner invoked (planner path only).
   - **`subagent_calls`** (array): Raw sub-agent result dicts including `_call_metadata`. On the planner path these are the full results, useful for debugging. On the router's direct job-code path it carries a single entry with just `_call_metadata` and `diff`, so a client can tell on either route whether a code edit actually landed (`diff.patches_applied`).
   - **`total_tool_calls`** (number): Total number of tool calls made by the planner (planner path only).
+  - **`truncated`** (boolean): `true` when the planner spent its `max_pause_continuations` budget while the API still had more of the turn to send `response` is the head of a reply the server split and not a finished answer. Accompanied by **`stop_reason`** (`"pause_turn"`).
   - **`web_search_requested`** (boolean): Present and `true` only when the request set `options.web_search`.
   - **`web_searches`** / **`web_fetches`** (number): Server-side web search and web fetch calls the planner made this turn.
   - **`web_domains`** (array): Hostnames the planner fetched from this turn, deduplicated.
