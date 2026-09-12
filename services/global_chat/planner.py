@@ -342,8 +342,8 @@ class PlannerAgent:
                             tool_choice={"type": "none"} if final_round else None,
                         )
                     except BadRequestError as web_error:
-                        # Likeliest cause is a caller whose Anthropic key does
-                        # not have web search enabled.
+                        # We retry without the web tools to see if they were the cause
+                        # as the 400 body carries no machine-readable reason.
                         if not self.web_tools:
                             raise
                         logger.warning(f"BadRequestError with the web tools active, retrying without them: {web_error}")
@@ -351,10 +351,6 @@ class PlannerAgent:
                         self.tools = TOOL_DEFINITIONS
                         self.web_search_downgraded = True
                         system_prompt = self._build_system_prompt()
-                        self._send_settled(
-                            stream_manager,
-                            "Web search is unavailable for this account — answering without it",
-                        )
                         try:
                             response = self._call_api(
                                 system_prompt,
@@ -364,7 +360,13 @@ class PlannerAgent:
                                 tool_choice={"type": "none"} if final_round else None,
                             )
                         except BadRequestError:
+                            # The web tools were not the cause. Surface the
+                            # original error.
                             raise web_error from None
+                        self._send_settled(
+                            stream_manager,
+                            "Web search is unavailable for this account — answering without it",
+                        )
 
                     for field in [
                         "input_tokens",
