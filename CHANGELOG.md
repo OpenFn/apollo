@@ -1,5 +1,84 @@
 # apollo
 
+## 3.2.0
+
+### Minor Changes
+
+- b3c9b6d: Improve planner prompt for coherence
+- b8405ac: global_chat: pass input attachments to subagents verbatim, keep them
+  out of history, and reject oversized ones instead of trimming them. Attachment
+  content may now arrive typed (a log's lines, a dataclip object) and is
+  rendered by shape. Every ApolloError is tagged in Sentry by type, at warning
+  level when the caller caused it
+- e68ded0: Let step names keep their diacritics and their script, behind
+  APOLLO_UNICODE_STEP_NAMES
+
+### Patch Changes
+
+- 6912d22: workflow_chat: match an adaptor name against the available list
+  whether or not it carries a version, skip validation when the list comes back
+  empty rather than calling every adaptor invented, and report a name that is
+  genuinely off the list to Sentry
+- 2f4248b: Global chat: pass the context trim config on the streamed planner
+  call as well as the non-streamed one. Global chat streams, so the config only
+  ever reached a path production does not take. Both calls now share one
+  definition
+- 7534762: Global chat: report which workflow steps a settled status acted on,
+  as data rather than as names inside the sentence, so a client can attach
+  per-step detail without parsing the prose. Each status also carries a shorter
+  summary for clients that render that detail, so step names are not printed
+  twice. Both fields are optional. Step names are no longer title-cased either,
+  so a step the user called "Transform data" is no longer reported as "Transform
+  Data"
+- eca6cac: Global chat: say when a code change did not land. A job code call
+  must now name the step it edits — without a key there was nothing to stitch
+  the result into, so the subagent still ran, wrote code, and the planner
+  dropped it, reaching the user as a reply that talks about a change that was
+  never made. `job_key` is required, both execution paths refuse before spending
+  the call, and a key that matches nothing is answered with the workflow's
+  actual step keys so the planner can correct itself in the same turn. The
+  router's direct route now reports whether the edits landed, in the same shape
+  the planner does (`meta.subagent_calls[].diff`); that route is the shortcut
+  for a single-step edit, so it was the case where a client could least tell a
+  reply that changed something from one that changed nothing. The YAML helpers
+  also no longer raise on a workflow that is not a mapping of jobs
+- ef8b0a5: job_chat: update prompts for better code writing practice
+- ebc979a: Global chat: report a rejection from the model API for what it is,
+  with a status that says whose failure it is and a message written for the
+  person reading it, instead of relabelling it a tool execution error
+- d2b92ca: global_chat: raise the planner's tool-call budget to 20, and end a
+  run that spends it with a summary instead of stopping mid-narration. The
+  context trim threshold moves above the budget so the summary is not written
+  against a history that has just been cleared
+- 616e5c1: Replace a job body wherever it sits in the workflow, not only at the
+  top level, and stop three crashes on a shape the model did not expect
+- 6912d22: workflow_chat: teach the model about a webhook trigger's
+  `custom_path`, including that removing the key leaves a saved path in place
+  and only `custom_path: null` clears it. The prompt carries the rules the
+  server enforces and says not to invent a value, since uniqueness is per
+  project and Apollo never sees the project
+
+## 3.1.1
+
+### Patch Changes
+
+- 18e828b: Stop a service run when the client disconnects, so an abandoned
+  request no longer keeps calling the model
+- f19706b: Mask sensitive values on their way out of a service, rather than
+  relying on each one to remember: service loggers mask what they emit, echo
+  masks what it returns, and the error envelope masks the exception text. The
+  shared mask now covers every field the server may fill in, and no longer
+  matches ordinary hyphenated words
+- ea576f6: search_docsite: create the default OpenAIEmbeddings client lazily so
+  importing the module (e.g. via global chat's tool imports) no longer crashes
+  without OPENAI_API_KEY
+- a3719ae: Raise the server's socket idle timeout back to 255s so long-running
+  SSE streams are no longer cut off while a model is thinking
+- c4b957e: Send a periodic keepalive on streaming responses so a stream that is
+  working but quiet is no longer mistaken for a dead one
+- 93ef024: Report service failures with a real code and message instead of
+  "Unknown error", and stop a failed spawn from hanging the request
+
 ## 3.1.0
 
 ### Minor Changes

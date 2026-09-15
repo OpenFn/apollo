@@ -4,9 +4,12 @@ Shared utility functions for working with workflow YAML strings.
 Used by global_chat (router, planner, subagent caller) and by job_chat in
 subagent mode for job extraction, code stitching, and step inspection.
 """
-import re
 
 import yaml
+from name_rules import normalize_for_lookup
+from util import create_logger
+
+logger = create_logger("yaml_utils")
 
 
 def get_page_view(page: str | None) -> tuple[str | None, str | None]:
@@ -19,20 +22,24 @@ def get_page_view(page: str | None) -> tuple[str | None, str | None]:
       workflows/<workflow>        -> ("overview", None)     workflow canvas
       settings / absent / anything else -> (None, None)
 
-    Because a name may itself contain "/", the returned step name is a
-    best-effort candidate — the caller must validate it against the workflow
-    YAML rather than trust it.
+    A step name may itself contain "/", so everything after the workflow
+    segment is taken as the step name rather than just the third segment —
+    otherwise "workflows/wf/Import A/B" loses the step focus entirely. The
+    split between workflow and step is still a guess when the *workflow* name
+    contains a "/", so the returned step name is a best-effort candidate: the
+    caller must validate it against the workflow YAML rather than trust it.
     """
     if not page:
         return None, None
     parts = page.strip("/").split("/")
-    if parts[0] != "workflows":
+    if parts[0] != "workflows" or len(parts) < 2:
         return None, None
     if len(parts) == 2:
         return "overview", None
-    if len(parts) == 3 and parts[2] != "settings":
-        return "step", parts[2]
-    return None, None
+    step = "/".join(parts[2:])
+    if step == "settings":
+        return None, None
+    return "step", step
 
 
 def get_step_name_from_page(page: str | None) -> str | None:
@@ -50,44 +57,97 @@ def get_step_name_from_page(page: str | None) -> str | None:
 
 
 def normalize_name(name: str) -> str:
-    """Normalize a name for fuzzy matching: lowercase, non-alphanumeric chars become hyphens."""
-    return re.sub(r'[^a-z0-9]', '-', name.lower()).strip('-')
+    """Normalize a name for fuzzy matching: lowercase, non-alphanumeric chars become hyphens.
+
+    Unicode-aware — see ``name_rules.normalize_for_lookup``. "Alphanumeric"
+    means a letter, mark or digit in any script, so a non-Latin name folds to
+    itself rather than to the empty string.
+    """
+    return normalize_for_lookup(name)
 
 
 def find_job_in_yaml(yaml_str: str, step_name: str) -> tuple[str | None, dict | None]:
     """
     Find a job in the workflow YAML by step name.
 
-    Tries direct key match first, then normalized name comparison against
-    both the job key and the job's name field.
+    Resolution order, strictest first: an exact key, an exact name, then the
+    normalized fold — and the fold resolves only when it picks out exactly one
+    job. Anything ambiguous returns (None, None).
+
+    The order matters because the result is *written* to: `router` and
+    `planner` hand the key straight to `stitch_job_code`, which replaces that
+    step's body. Taking the first fold hit meant an earlier job's *key* fold
+    could beat a later job's *exact name* — steps keyed `upload-data`
+    ("Legacy uploader") and `upload-data-2` ("Upload Data"), a lookup for
+    "Upload Data", and the model's generated code landed on the legacy step.
+    A miss costs a retry; a wrong hit destroys work.
 
     Returns:
-        (job_key, job_data) or (None, None) if not found or on parse error
+        (job_key, job_data) or (None, None) if not found, ambiguous, or on
+        parse error
     """
     try:
         yaml_data = yaml.safe_load(yaml_str)
     except Exception:
         return None, None
 
-    if not yaml_data or "jobs" not in yaml_data:
+    if not isinstance(yaml_data, dict) or not isinstance(yaml_data.get("jobs"), dict):
         return None, None
 
     jobs = yaml_data["jobs"]
 
-    # Direct key match
     if step_name in jobs:
         return step_name, jobs[step_name]
 
-    # Normalized match: compare against job key and name field
-    normalized_step = normalize_name(step_name)
-    for job_key, job_data in jobs.items():
-        if normalize_name(job_key) == normalized_step:
-            return job_key, job_data
-        job_name = job_data.get("name", "")
-        if normalize_name(job_name) == normalized_step:
-            return job_key, job_data
+    exact_names = [
+        key for key, data in jobs.items() if (data or {}).get("name") == step_name
+    ]
+    if exact_names:
+        return _only_match(exact_names, jobs, step_name, "name")
 
+    # An empty normalization carries no information (the name was all
+    # punctuation), so never match on it.
+    normalized_step = normalize_name(step_name)
+    if not normalized_step:
+        return None, None
+
+    folded = [
+        key
+        for key, data in jobs.items()
+        if normalize_name(key) == normalized_step
+        or ((data or {}).get("name") and normalize_name(data["name"]) == normalized_step)
+    ]
+    return _only_match(folded, jobs, step_name, "folded name")
+
+
+def _only_match(
+    matches: list, jobs: dict, step_name: str, how: str,
+) -> tuple[str | None, dict | None]:
+    """Return the single match, or nothing when more than one job qualifies."""
+    if len(matches) == 1:
+        return matches[0], jobs[matches[0]]
+    logger.warning(
+        f"Step reference {step_name!r} matches the {how} of {len(matches)} jobs "
+        f"({', '.join(sorted(str(match) for match in matches))}); leaving it "
+        f"unresolved rather than guessing, because the caller writes to it",
+    )
     return None, None
+
+
+def job_keys_in_yaml(yaml_str: str | None) -> str:
+    """The workflow's job keys, comma separated, for an error the model reads.
+
+    Naming them is what lets it correct itself in the same turn; "use the exact
+    key" leaves it guessing at the thing it just got wrong.
+    """
+    try:
+        yaml_data = yaml.safe_load(yaml_str)
+        jobs = yaml_data.get("jobs") if isinstance(yaml_data, dict) else None
+        if not isinstance(jobs, dict) or not jobs:
+            return "none found"
+        return ", ".join(str(key) for key in jobs)
+    except Exception:
+        return "none found"
 
 
 EMPTY_JOB_BODY = "// Add operations here"
@@ -105,7 +165,7 @@ def workflow_has_job_code(yaml_str: str | None) -> bool:
         yaml_data = yaml.safe_load(yaml_str)
     except Exception:
         return False
-    if not yaml_data or "jobs" not in yaml_data:
+    if not isinstance(yaml_data, dict) or not isinstance(yaml_data.get("jobs"), dict):
         return False
     for job_data in yaml_data["jobs"].values():
         body = (job_data or {}).get("body")
@@ -114,36 +174,76 @@ def workflow_has_job_code(yaml_str: str | None) -> bool:
     return False
 
 
+#: What a job body is replaced with in the structural view.
+REDACTED_BODY = "# [use inspect_job_code to view]"
+
+
+def _redact_bodies(obj: object, seen: set | None = None) -> None:
+    """Replace every `body` string anywhere in the tree, not just jobs.*.body.
+
+    A project export nests its jobs under each workflow, so a walk that only
+    looks at the top level hands those bodies straight to the model.
+    """
+    if seen is None:
+        seen = set()
+    if id(obj) in seen:
+        return
+    if isinstance(obj, dict):
+        seen.add(id(obj))
+        for key, value in obj.items():
+            if key == "body" and isinstance(value, str):
+                obj[key] = REDACTED_BODY
+            else:
+                _redact_bodies(value, seen)
+    elif isinstance(obj, list):
+        seen.add(id(obj))
+        for item in obj:
+            _redact_bodies(item, seen)
+
+
 def redact_job_bodies(yaml_str: str) -> str:
     """Return workflow YAML with job bodies replaced by a placeholder and id
     fields removed.
 
     This is the read-only structural view shown to the planner and to job_chat
-    in subagent mode. It never round-trips back into a real workflow, so the
-    UUID ids are pure noise to the model — dropping them saves tokens.
+    in subagent mode. Bodies are deferred rather than hidden: the model reads
+    any of them with inspect_job_code, so this is about tokens, not secrecy.
+    The UUID ids never round-trip back into a real workflow, so dropping them
+    saves tokens too.
+
+    A document we cannot read is returned as it came. The model can say what is
+    wrong with it, which is more use than telling it there is no workflow.
     """
     try:
         yaml_data = yaml.safe_load(yaml_str)
-        if yaml_data and "jobs" in yaml_data:
-            _remove_ids(yaml_data)
-            for job_data in yaml_data["jobs"].values():
-                if "body" in job_data:
-                    job_data["body"] = "# [use inspect_job_code to view]"
-            return yaml.dump(yaml_data, sort_keys=False)
+        if not isinstance(yaml_data, dict):
+            return yaml_str
+        _remove_ids(yaml_data)
+        _redact_bodies(yaml_data)
+        return yaml.dump(yaml_data, sort_keys=False)
     except Exception:
-        pass
-    return yaml_str
+        return yaml_str
 
 
-def _remove_ids(obj: object) -> None:
-    """Recursively remove 'id' keys from a parsed YAML structure."""
+def _remove_ids(obj: object, seen: set | None = None) -> None:
+    """Recursively remove 'id' keys from a parsed YAML structure.
+
+    A YAML anchor can refer to its own container, and PyYAML builds that as a
+    real cycle, so the walk tracks what it has already entered.
+    """
+    if seen is None:
+        seen = set()
+    if id(obj) in seen:
+        return
     if isinstance(obj, dict):
+        seen.add(id(obj))
         obj.pop("id", None)
         for value in obj.values():
-            _remove_ids(value)
+            _remove_ids(value, seen)
     elif isinstance(obj, list):
+        seen.add(id(obj))
         for item in obj:
-            _remove_ids(item)
+            _remove_ids(item, seen)
 
 
 def stitch_job_code(yaml_str: str, job_key: str, new_code: str) -> str:

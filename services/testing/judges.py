@@ -9,16 +9,47 @@ Each judge is a `(role, rules)` pair defined in
     # rules
     - bullet rules that apply to every evaluation under this judge
 
+The token `{name_rule}` in either section is replaced at load time with the
+active step-name rule, so the judges never restate it as static prose.
+
 To add a new judge: drop a new markdown file in `services/testing/judges/`
 and reference its filename (without `.md`) in a spec's `judges:` frontmatter
 field. Default judge is `general`.
 """
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from name_rules import describe_rule_for_judge
 
 _JUDGES_DIR = Path(__file__).parent / "judges"
+
+#: A judge that restated the rule as static prose would go stale the moment
+#: APOLLO_UNICODE_STEP_NAMES moved, and would then either pass names the
+#: sanitizer mangles or fail names it correctly leaves alone.
+_NAME_RULE_TOKEN = "{name_rule}"
+
+#: A bare `{lower_snake_case}` run. Prose and code samples in these files use
+#: braces freely (`create({ name: $.x })`, `() => {}`), but never in this shape.
+_PLACEHOLDER = re.compile(r"\{[a-z_][a-z0-9_]*\}")
+
+
+def _reject_unsubstituted_placeholders(name: str, path: Path, text: str) -> None:
+    """Raise if any placeholder survived substitution.
+
+    Substitution is `str.replace`, which is a silent no-op when the token is
+    misspelled. A judge that meant to state the active naming rule and instead
+    stated nothing would grade every workflow name as acceptable, and nothing
+    would say so. Not every judge needs the rule — the code-quality one grades
+    job bodies — so a missing token is fine; a *mangled* one is not.
+    """
+    leftover = sorted(set(_PLACEHOLDER.findall(text)))
+    if leftover:
+        raise ValueError(
+            f"Judge '{name}' ({path}) has unsubstituted placeholders: {', '.join(leftover)}. "
+            f"The only one this loader fills is {_NAME_RULE_TOKEN}.",
+        )
 
 
 @dataclass
@@ -37,9 +68,10 @@ def load_judge(name: str) -> JudgeConfig:
     if not path.exists():
         available = sorted(p.stem for p in _JUDGES_DIR.glob("*.md"))
         raise FileNotFoundError(
-            f"Judge '{name}' not found at {path}. Available: {available}"
+            f"Judge '{name}' not found at {path}. Available: {available}",
         )
-    text = path.read_text()
+    text = path.read_text().replace(_NAME_RULE_TOKEN, describe_rule_for_judge())
+    _reject_unsubstituted_placeholders(name, path, text)
     return JudgeConfig(
         name=name,
         role=_extract_section(text, "role").strip(),

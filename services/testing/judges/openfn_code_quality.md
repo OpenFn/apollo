@@ -86,7 +86,7 @@ Returning a trimmed object is fine **only as the final cleanup step**, where dro
 ## Adaptor usage
 
 - Use the adaptor operations available in the named adaptor — `each`, `fn`, `fields`, `field`, `dataValue`, `lastReferenceValue`, `combine`, `cursor`, plus the adaptor-specific ones (`get`/`post`/`upsert`/`create`/`bulk`/etc.) — in preference to raw JS loops or hand-rolled HTTP calls, when an equivalent operation exists.
-- Do not invent adaptor functions. If the assistant calls a function that isn't part of the declared adaptor (and isn't a documented `language-common` helper), flag it as a hallucinated function.
+- Do not flag a function or signature as invented, hallucinated, or wrong unless adaptor documentation provided to you in this evaluation contradicts it. You do not have reliable knowledge of adaptor APIs, and such flags have proven wrong. Without docs, judge only what is checkable from the code itself (JS syntax, state chaining, the rules in this file).
 - `each('$.path[*]', op)` uses JSONPath strings with the leading `$.`. Flag malformed JSONPath (e.g. missing `$.`, mismatched brackets) when the assistant clearly intends a JSONPath.
 - `cursor(...)` requires `@openfn/language-common` ≥ 1.13.0 — don't flag version mismatches unless the version is visible and clearly lower; the assistant rarely controls this.
 

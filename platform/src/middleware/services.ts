@@ -6,59 +6,119 @@ import { run } from "../bridge";
 import describeModules, {
   type ModuleDescription,
 } from "../util/describe-modules";
-import { isApolloError } from "../util/errors";
-import type { InstanceAuth } from "../auth/instance-auth";
+import { isApolloError, toErrorPayload } from "../util/errors";
+import type { InstanceAuth, KeyResolution } from "../auth/instance-auth";
 
 const textEncoder = new TextEncoder();
+
+// The space after the colon is required: Lightning's SSE decoder matches
+// `": " <> comment` and has no catch-all clause, so ":ping" raises there.
+export const HEARTBEAT_FRAME = ": ping\n\n";
+
+// Inside the shortest silence any hop tolerates - our own socket, Lightning's
+// inter-chunk timeout, and the 60s read timeout typical of proxies.
+export const HEARTBEAT_INTERVAL_MS = 15_000;
+
+// Anything past this is a mistake rather than a choice, and setInterval turns
+// a delay over 2^31-1 into "every tick" - so the value someone reaches for to
+// mean "effectively never" would flood every open stream instead.
+const HEARTBEAT_MAX_MS = 120_000;
+
+// Read per request rather than at import, so it can be turned down without a
+// release if a hop turns out to be less patient than we thought. Out-of-range
+// values fall back rather than being passed to setInterval.
+export const heartbeatIntervalMs = (): number => {
+  const configured = Number(process.env.APOLLO_HEARTBEAT_INTERVAL_MS);
+
+  return Number.isFinite(configured) &&
+    configured > 0 &&
+    configured <= HEARTBEAT_MAX_MS
+    ? configured
+    : HEARTBEAT_INTERVAL_MS;
+};
+
+// Killing these mid-run corrupts shared state that other services read:
+// embed_docsite fills a fresh timestamped namespace that search_docsite treats
+// as live the moment it is newest, and load_adaptor_docs commits its delete
+// before its insert. They run to completion even when the caller has gone.
+const NON_CANCELLABLE = new Set(["embed_docsite", "load_adaptor_docs"]);
 
 const callService = (
   m: ModuleDescription,
   port: number,
   payload?: any,
   onLog?: (str: string) => void,
-  onEvent?: (evt: string, payload: any) => void
+  onEvent?: (evt: string, payload: any) => void,
+  signal?: AbortSignal
 ) => {
+  if (NON_CANCELLABLE.has(m.name)) {
+    signal = undefined;
+  }
+
   if (m.type === "py") {
-    return run(m.name, port, payload as any, onLog, onEvent);
+    return run(m.name, port, payload as any, onLog, onEvent, signal);
   } else {
     // TODO add event handling to ts services
+    // TODO ts services can't be cancelled - the handler signature has no signal
     return m.handler!(port, payload as any, onLog);
   }
 };
+
+/** Write the resolved key onto an outgoing payload.
+ *
+ *  Exported so a test can assert what lands on the payload without a service
+ *  reflecting it back: that was how this was covered before, and masking the
+ *  reflection took the proof with it.
+ *
+ *  The switch is explicit so the inbound-credential-never-forwarded invariant
+ *  is structural rather than positional: a known client's stored key is
+ *  swapped in (useKey), a request with no key of its own drops the field so
+ *  python falls back to the global one (useGlobal), and an internal
+ *  apollo() hop is forwarded exactly as received (passthrough).
+ */
+export const applyResolvedKey = (
+  payload: Record<string, any>,
+  resolution: KeyResolution
+): Record<string, any> => {
+  switch (resolution.kind) {
+    case "useKey":
+      payload.api_key = resolution.key;
+      break;
+    case "useGlobal":
+      delete payload.api_key;
+      break;
+    case "passthrough":
+      break;
+    default: {
+      // A new KeyResolution tag must be a compile error here, not a silent
+      // forward of the inbound credential.
+      const _exhaustive: never = resolution;
+      throw new Error(
+        `unhandled KeyResolution: ${(resolution as { kind: string }).kind}`
+      );
+    }
+  }
+
+  return payload;
+};
+
+// The in-flight run for each open websocket, so closing the socket can stop
+// it. Keyed on ws.data, NOT on ws: Elysia builds a fresh ElysiaWS wrapper for
+// every callback, so the object message() sees is never the object close()
+// sees and a map keyed on it can never hit. ws.data is the upgrade context,
+// created once per connection and carried on every wrapper. Deleted as soon
+// as the run settles, so a closed socket holds nothing.
+const wsRuns = new WeakMap<object, AbortController>();
 
 export default async (app: Elysia, port: number, auth: InstanceAuth) => {
   console.log("Loading routes:");
   const modules = await describeModules(path.resolve("./services"));
 
-  // Apply the resolved key to an outgoing payload with an explicit switch so the
-  // inbound-credential-never-forwarded invariant is structural, not positional: a
-  // known client's stored key is swapped in (useKey), a NULL stored key (or a request
-  // with no api_key) drops the field so Python uses the global key (useGlobal), and an
-  // internal apollo() hop forwards the body exactly as received (passthrough). `ctx` is
-  // the upgrade-time context that carries lightningClient/internalCall: on POST the
-  // route ctx, on WS the captured ws.data, never a fresh per-message one.
-  const applyKey = (payload: Record<string, any>, ctx: any) => {
-    const resolution = auth.resolveKey(ctx);
-    switch (resolution.kind) {
-      case "useKey":
-        payload.api_key = resolution.key;
-        break;
-      case "useGlobal":
-        delete payload.api_key;
-        break;
-      case "passthrough":
-        break;
-      default: {
-        // Exhaustiveness guard: a new KeyResolution tag must be a compile error
-        // here, not a silent forward of the inbound credential.
-        const _exhaustive: never = resolution;
-        throw new Error(
-          `unhandled KeyResolution: ${(resolution as { kind: string }).kind}`
-        );
-      }
-    }
-    return payload;
-  };
+  // `ctx` is the upgrade-time context carrying lightningClient/internalCall:
+  // on POST the route ctx, on WS the captured ws.data, never a fresh
+  // per-message one.
+  const applyKey = (payload: Record<string, any>, ctx: any) =>
+    applyResolvedKey(payload, auth.resolveKey(ctx));
 
   const buildPayload = (ctx: any) =>
     applyKey({ ...(ctx.body ?? {}), session_id: ctx.uuid }, ctx);
@@ -79,7 +139,29 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
       app.post(name, async (ctx) => {
         console.log(`POST /services/${name}: ${ctx.uuid}`);
         const payload = buildPayload(ctx);
-        const result = await callService(m, port, payload as any);
+
+        let result: any;
+        try {
+          // The signal matters here as much as on the stream: a client that
+          // gives up waiting for a plain POST leaves the model generating
+          // just the same.
+          result = await callService(
+            m,
+            port,
+            payload as any,
+            undefined,
+            undefined,
+            ctx.request?.signal
+          );
+        } catch (error) {
+          const payload = toErrorPayload(error);
+          return new Response(JSON.stringify(payload), {
+            status: payload.code,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          });
+        }
 
         if (isApolloError(result)) {
           return new Response(JSON.stringify(result), {
@@ -98,10 +180,21 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
         console.log(`STREAM START /services/${name}: ${ctx.uuid}`);
         const payload = buildPayload(ctx);
 
+        const abort = new AbortController();
+
+        // Hoisted so cancel() can reach what start() set up
+        let isClosed = false;
+        let heartbeat: ReturnType<typeof setInterval> | undefined;
+
+        const stopHeartbeat = () => {
+          if (heartbeat) {
+            clearInterval(heartbeat);
+            heartbeat = undefined;
+          }
+        };
+
         const stream = new ReadableStream({
           async start(controller) {
-            let isClosed = false;
-
             const sendSSE = (event: string, data: any) => {
               if (isClosed) {
                 return;
@@ -113,8 +206,11 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
                 //  console.log(message.trim());
                 controller.enqueue(textEncoder.encode(message));
               } catch (error) {
-                // Stream may have been closed
+                // Same as the heartbeat's catch: a throwing enqueue is a
+                // dropped connection the runtime has not told us about.
                 isClosed = true;
+                stopHeartbeat();
+                abort.abort();
               }
             };
 
@@ -126,13 +222,33 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
               sendSSE(type, payload);
             };
 
+            // Started before the service call so the window while Python boots
+            // is covered too
+            heartbeat = setInterval(() => {
+              if (isClosed) {
+                stopHeartbeat();
+                return;
+              }
+              try {
+                controller.enqueue(textEncoder.encode(HEARTBEAT_FRAME));
+              } catch (error) {
+                // The consumer went away between ticks. cancel() may never
+                // fire for this, so end the run here rather than leaving the
+                // child generating for nobody.
+                isClosed = true;
+                stopHeartbeat();
+                abort.abort();
+              }
+            }, heartbeatIntervalMs());
+
             try {
               const result = await callService(
                 m,
                 port,
                 payload as any,
                 onLog,
-                onEvent
+                onEvent,
+                abort.signal
               );
 
               if (isApolloError(result)) {
@@ -141,20 +257,40 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
                 sendSSE("complete", result);
               }
             } catch (error) {
-              sendSSE("error", {
-                message:
-                  error instanceof Error ? error.message : "Unknown error",
-              });
+              sendSSE("error", toErrorPayload(error));
             } finally {
+              stopHeartbeat();
               console.log(
                 `STREAM COMPLETE ${ctx.uuid} in ${
-                  (new Date() - ctx.start) / 1000
+                  (Date.now() - ctx.start) / 1000
                 }s`
               );
               isClosed = true;
-              controller.close();
+              try {
+                controller.close();
+              } catch (error) {
+                // already closed from the consumer's side
+              }
             }
           },
+
+          // Everything from here on is work nobody will read
+          cancel(reason) {
+            isClosed = true;
+            stopHeartbeat();
+            console.warn(
+              `STREAM CANCELLED ${ctx.uuid} after ${
+                (Date.now() - ctx.start) / 1000
+              }s`
+            );
+            abort.abort(reason);
+          },
+        });
+
+        // cancel() depends on the runtime noticing the dropped connection, so
+        // listen on the request's own signal too. abort() is idempotent.
+        ctx.request?.signal?.addEventListener("abort", () => abort.abort(), {
+          once: true,
         });
 
         return new Response(stream, {
@@ -179,6 +315,14 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
         open() {
           console.log(`Websocket connected  at /services/${name}`);
         },
+        // A websocket has no request signal, so cancellation needs its own
+        // controller and a close handler to fire it. Without this a WS caller
+        // going away leaves the child generating, which is the cost the whole
+        // change exists to stop.
+        close(ws) {
+          wsRuns.get(ws.data)?.abort();
+          wsRuns.delete(ws.data);
+        },
         message(ws, message) {
           try {
             if (message.event === "start") {
@@ -202,11 +346,48 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
               const base: Record<string, any> = { ...(message.data ?? {}) };
               const payload = applyKey(base, ws.data);
 
-              callService(m, port, payload as any, onLog, onEvent).then(
+              // A second start frame on the same socket would otherwise
+              // orphan the first run: its controller leaves the map, so the
+              // close handler could never reach it again.
+              wsRuns.get(ws.data)?.abort();
+
+              const abort = new AbortController();
+              wsRuns.set(ws.data, abort);
+
+              // Two arguments rather than a chained catch: a chain would also
+              // catch a throw from the success callback and report it to the
+              // client as a service failure.
+              //
+              // The failure handler matters as much as the success one - a run
+              // that rejects (spawn failure, empty output) would otherwise
+              // leave the client waiting on a frame that never comes, since
+              // the try around this only sees synchronous throws.
+              callService(
+                m,
+                port,
+                payload as any,
+                onLog,
+                onEvent,
+                abort.signal
+              ).then(
                 (result) => {
+                  // Only if it is still ours: a later start frame may have
+                  // replaced this run's controller with its own.
+                  if (wsRuns.get(ws.data) === abort) {
+                    wsRuns.delete(ws.data);
+                  }
                   ws.send({
                     event: "complete",
                     data: result,
+                  });
+                },
+                (error) => {
+                  if (wsRuns.get(ws.data) === abort) {
+                    wsRuns.delete(ws.data);
+                  }
+                  ws.send({
+                    event: "error",
+                    data: toErrorPayload(error),
                   });
                 }
               );

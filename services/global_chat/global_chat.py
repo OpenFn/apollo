@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
-from util import ApolloError, create_logger, APOLLO_VERSION
+from util import ApolloError, create_logger, check_attachment_size, APOLLO_VERSION
 from langfuse_util import should_track, build_tags, build_generation_diff
 from global_chat.config_loader import ConfigLoader
 from global_chat.router import RouterAgent
@@ -39,6 +39,11 @@ class Payload:
         """Validate and create Payload from dict."""
         if "content" not in data:
             raise ApolloError(400, "content is required")
+
+        # Fail here rather than three agents deep: an oversized attachment can't
+        # be answered by any route, so there is no point paying for the routing
+        # call first.
+        check_attachment_size(data.get("attachments"))
 
         return cls(
             content=data["content"],

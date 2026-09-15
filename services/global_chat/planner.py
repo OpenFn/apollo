@@ -7,6 +7,7 @@ from typing import List, Dict, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 import httpx
+import anthropic
 from anthropic import Anthropic
 import sentry_sdk
 
@@ -16,7 +17,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from langfuse import observe
-from util import create_logger, ApolloError, sum_usage
+from util import create_logger, ApolloError, sum_usage, mask_secrets, format_attachments
 from streaming_util import (
     StreamManager,
     STATUS_REVIEWING_WORKFLOW,
@@ -26,11 +27,181 @@ from streaming_util import (
 from global_chat.config_loader import ConfigLoader
 from models import resolve_model
 from global_chat.tools.tool_definitions import TOOL_DEFINITIONS
-from yaml_utils import stitch_job_code, redact_job_bodies, find_job_in_yaml, get_step_name_from_page, inspect_job_code
+from yaml_utils import stitch_job_code, redact_job_bodies, find_job_in_yaml, get_step_name_from_page, inspect_job_code, job_keys_in_yaml
 from tools.search_documentation.search_documentation import search_documentation_tool
 from global_chat.subagent_caller import call_workflow_agent, call_job_agent, format_subagent_result_for_llm
 
 logger = create_logger(__name__)
+
+# Shared by both calls so they cannot drift. The trigger sits above
+# max_tool_calls, so this is a backstop against a raised budget: at the budget
+# it could only fire on the wrap-up round, clearing what that round summarises.
+_CONTEXT_MANAGEMENT = {
+    "betas": ["context-management-2025-06-27"],
+    "context_management": {
+        "edits": [
+            {
+                "type": "clear_tool_uses_20250919",
+                "trigger": {"type": "tool_uses", "value": 40},
+                "keep": {"type": "tool_uses", "value": 20},
+                "exclude_tools": ["search_documentation"],
+                "clear_tool_inputs": True,
+            }
+        ]
+    },
+}
+
+_FINAL_ROUND_NOTICE = (
+    "Stop and reply to the user now. Say what you changed. Mention unfinished work "
+    "only if there is any, and then offer to continue next turn — otherwise don't "
+    "raise it at all."
+)
+
+
+def _api_error_message(error: Exception) -> str:
+    """The upstream sentence, for diagnostics rather than for a user.
+
+    str(e) and e.message are both the dict repr; the readable sentence is only
+    in the parsed body, and only when the body is Anthropic's shape. Every
+    other shape has an answer because raising here would escape the handler
+    that calls it.
+    """
+    body = getattr(error, "body", None)
+    if isinstance(body, dict):
+        detail = body.get("error")
+        if isinstance(detail, dict):
+            message = detail.get("message")
+            if isinstance(message, str) and message:
+                return message
+
+    if isinstance(error, (anthropic.APIConnectionError, httpx.RequestError)):
+        return str(error) or type(error).__name__
+
+    status = getattr(error, "status_code", None)
+    # A mid-stream failure carries the 200 that opened the stream.
+    if status is None or status < 400:
+        return type(error).__name__
+    return f"upstream returned {status}"
+
+
+# Fallback for a body with no readable type. Named directly so a missing SDK
+# class fails at import rather than inside the handler.
+_CLASS_KINDS = (
+    (anthropic.AuthenticationError, "authentication_error"),
+    (anthropic.PermissionDeniedError, "permission_error"),
+    (anthropic.NotFoundError, "not_found_error"),
+    (anthropic.RequestTooLargeError, "request_too_large"),
+    (anthropic.RateLimitError, "rate_limit_error"),
+    (anthropic.BadRequestError, "invalid_request_error"),
+    (anthropic.OverloadedError, "overloaded_error"),
+    (anthropic.InternalServerError, "overloaded_error"),
+)
+
+
+def _failure_kind(error: Exception) -> str:
+    """What went wrong, as one of Anthropic's error type names.
+
+    Body first, because a mid-stream failure is always a bare APIStatusError
+    whatever its cause: the SDK builds it from the 200 that opened the stream.
+    Global chat streams, so the class is the fallback, not the source.
+    """
+    body = getattr(error, "body", None)
+    if isinstance(body, dict):
+        detail = body.get("error")
+        if isinstance(detail, dict):
+            kind = detail.get("type")
+            if isinstance(kind, str) and kind:
+                return kind
+
+    for error_class, kind in _CLASS_KINDS:
+        if isinstance(error, error_class):
+            return kind
+    return ""
+
+
+# What a user is told, per kind. These reach the chat verbatim: Lightning
+# renders body["message"] and ignores the status and the type entirely
+# (ai_assistant.ex handle_error_response). The upstream sentence never
+# appears here; it goes to details and to Sentry, because it is written for
+# whoever is debugging us, not for whoever is using us.
+_OURS = "The AI service failed on our side, not yours. Please try again."
+
+_MESSAGES = {
+    "authentication_error": "The AI service is misconfigured on our side.",
+    "permission_error": "Our account cannot use the AI service right now.",
+    "billing_error": "Our account cannot use the AI service right now.",
+    "not_found_error": "The AI service is misconfigured on our side.",
+    "rate_limit_error": "The AI service is busy. Please try again shortly.",
+    "overloaded_error": "The AI service is busy. Please try again shortly.",
+    "prompt_too_long": (
+        "This conversation is too long for the AI service to read. "
+        "Start a new session to continue."
+    ),
+    "request_too_large": (
+        "This workflow is too large for the AI service to read. "
+        "Try again with a smaller workflow."
+    ),
+    "connection_error": "Unable to reach the AI service. Please try again.",
+}
+
+
+def _model_api_failure(error: Exception) -> tuple[int, str, str, dict]:
+    """How a model API failure reaches the caller: status, type, message, details.
+
+    The status says whose failure it is. A caller shapes only how much text
+    they send, so only those rejections keep their upstream status; the model,
+    the headers and the tool definitions are ours. Deliberately not job_chat's
+    mapping, which answers a caller 401 when our own key is rejected.
+    """
+    upstream = _api_error_message(error)
+    # details is serialised to the caller (errors.ts toErrorPayload), so it
+    # leaves the server and nothing upstream is trusted to be key-free.
+    details = {"upstream_message": mask_secrets(upstream)}
+
+    if isinstance(error, (anthropic.APIConnectionError, httpx.RequestError)):
+        cause = getattr(error, "__cause__", None)
+        if cause:
+            # A proxy error carries the proxy URL, credentials and all.
+            details["cause"] = mask_secrets(str(cause))
+        return 503, "CONNECTION_ERROR", _MESSAGES["connection_error"], details
+
+    kind = _failure_kind(error)
+
+    # Theirs: the two ways there can be too much of what they sent.
+    if kind == "invalid_request_error" and _is_context_overflow(upstream):
+        return 400, "PROMPT_TOO_LONG", _MESSAGES["prompt_too_long"], details
+    if kind == "request_too_large":
+        return 413, "REQUEST_TOO_LARGE", _MESSAGES["request_too_large"], details
+
+    if kind == "rate_limit_error":
+        response = getattr(error, "response", None)
+        # The header may legally be an HTTP date, and int() rejects some
+        # strings isdigit accepts, including runs over 4300 digits. Anything
+        # unusable falls back rather than raising inside this handler.
+        raw = response.headers.get("retry-after") if response is not None else None
+        usable = bool(raw) and raw.isascii() and raw.isdigit() and len(raw) <= 5
+        # Bounded because the value is someone else's.
+        details["retry_after"] = min(max(int(raw), 1), 300) if usable else 60
+        return 429, "RATE_LIMIT", _MESSAGES["rate_limit_error"], details
+
+    # 500 rather than the upstream 401: platform/src/auth/README.md reserves
+    # 401 for a caller who failed to authenticate.
+    if kind == "authentication_error":
+        return 500, "MODEL_API_ERROR", _MESSAGES["authentication_error"], details
+
+    return 502, "MODEL_API_ERROR", _MESSAGES.get(kind, _OURS), details
+
+
+def _is_context_overflow(message: str) -> bool:
+    """Whether a 400 is the conversation outgrowing the model's window.
+
+    The only 400 a caller can act on, and text is all there is to match on:
+    the type is plain invalid_request_error, same as a header we got wrong.
+    One phrase, the one the API actually sends. Any other wording falls to a
+    502 with the real sentence in details, rather than guessing which of our
+    own 400s to hand a user as theirs to fix.
+    """
+    return "prompt is too long" in message.lower()
 
 
 @dataclass
@@ -68,6 +239,7 @@ class PlannerAgent:
         self.current_yaml: Optional[str] = None
         self.subagent_results = []
         self._segments: List[Dict] = []
+        self._attachments: List[Dict] = []
 
         logger.info(f"PlannerAgent initialized with model: {self.model}")
 
@@ -79,6 +251,7 @@ class PlannerAgent:
         page: Optional[str],
         history: List[Dict],
         stream: bool,
+        attachments: Optional[List[Dict]] = None,
         user: Optional[Dict] = None,
         metrics_opt_in: Optional[bool] = None,
         stream_manager: Optional[StreamManager] = None,
@@ -92,6 +265,9 @@ class PlannerAgent:
             page: Current page URL (e.g. workflows/name/step-name)
             history: Conversation history
             stream: Whether to stream text via SSE events
+            attachments: Input attachments for this turn (logs, dataclips).
+                Shown to the planner in full; each subagent call forwards only
+                the ones the planner names for it.
             stream_manager: Optional shared stream manager from the router, so
                 a handed-over request continues on the same stream
 
@@ -108,6 +284,7 @@ class PlannerAgent:
 
         self.current_yaml = workflow_yaml
         self.yaml_modified = False
+        self._attachments = attachments or []
         self._user = user
         self._metrics_opt_in = metrics_opt_in
         self._segments: List[Dict] = []
@@ -134,9 +311,19 @@ class PlannerAgent:
         }
 
         try:
-            while tool_call_count < self.max_tool_calls:
+            # A run that spends its budget gets one more round with tools
+            # switched off, so it ends on an answer rather than mid-narration.
+            final_round = False
+            while not final_round:
+                final_round = tool_call_count >= self.max_tool_calls
                 try:
-                    response = self._call_api(system_prompt, messages, stream, stream_manager)
+                    response = self._call_api(
+                        system_prompt,
+                        messages,
+                        stream,
+                        stream_manager,
+                        tool_choice={"type": "none"} if final_round else None,
+                    )
 
                     for field in [
                         "input_tokens",
@@ -187,10 +374,12 @@ class PlannerAgent:
                                     {"type": "tool_use", "id": block.id, "name": block.name, "input": block.input}
                                 )
 
+                        tool_call_count += len(tool_use_blocks)
+                        if tool_call_count >= self.max_tool_calls:
+                            tool_results.append({"type": "text", "text": _FINAL_ROUND_NOTICE})
+
                         messages.append({"role": "assistant", "content": content_blocks})
                         messages.append({"role": "user", "content": tool_results})
-
-                        tool_call_count += len(tool_use_blocks)
 
                     else:
                         logger.warning(f"Unexpected stop_reason: {response.stop_reason}")
@@ -198,6 +387,42 @@ class PlannerAgent:
 
                 except ApolloError:
                     raise
+                except (anthropic.APIError, httpx.RequestError) as e:
+                    # A rejection from the model API is not a tool failure.
+                    #
+                    # httpx.RequestError as well as APIError: the SDK only
+                    # wraps httpx exceptions around the initial send, and on a
+                    # streaming request that returns once the headers arrive.
+                    # The body is read later, unwrapped, so a stream that dies
+                    # mid-generation raises a raw httpx error. Global chat
+                    # streams, so that is the common case here.
+                    status, error_type, message, details = _model_api_failure(e)
+                    # A mid-stream error carries the status of the response
+                    # that opened the stream, which was a 200, so recording it
+                    # would read as a call that succeeded.
+                    upstream = getattr(e, "status_code", None)
+                    if upstream is not None and upstream < 400:
+                        upstream = None
+
+                    # Tagged before the log call, not after. LoggingIntegration
+                    # is a Sentry default and captures at ERROR, so this line
+                    # sends the event that carries the SDK traceback; tags set
+                    # afterwards would land only on the later ApolloError event,
+                    # which is the one without it.
+                    if upstream is not None:
+                        sentry_sdk.set_tag("anthropic_status", upstream)
+                    # The status is null for every mid-stream failure, which is
+                    # the common path, so it is the type that makes overload,
+                    # a rate limit and a bad tool definition tell apart here.
+                    sentry_sdk.set_tag("anthropic_error", error_type)
+                    sentry_sdk.set_tag("planner_tool_calls", tool_call_count)
+                    logger.exception("Model API error in tool-calling loop")
+                    raise ApolloError(
+                        status,
+                        message,
+                        error_type,
+                        {**details, "upstream_status": upstream},
+                    ) from e
                 except Exception as e:
                     logger.exception("Error in tool-calling loop")
                     raise ApolloError(500, f"Tool execution error: {str(e)}")
@@ -219,12 +444,10 @@ class PlannerAgent:
 
         if not final_text:
             stop_reason = getattr(response, "stop_reason", None)
-            if tool_call_count >= self.max_tool_calls:
-                empty_reason = "max_tool_calls_hit"
-            elif stop_reason == "max_tokens":
+            if stop_reason == "max_tokens":
                 empty_reason = "max_tokens"
             elif stop_reason == "end_turn":
-                empty_reason = "no_text_blocks"
+                empty_reason = "empty_final_round" if final_round else "no_text_blocks"
             else:
                 empty_reason = f"unexpected_stop_reason:{stop_reason}"
             sentry_sdk.set_tag("stop_reason", stop_reason)
@@ -271,9 +494,19 @@ class PlannerAgent:
         )
 
     def _build_user_content(self, content: str, page: Optional[str]) -> str:
-        """Augment the user message with the step the user is viewing ("this step")
-        and the existing workflow structure (bodies redacted)."""
+        """Augment the user message with this turn's attachments, the step the
+        user is viewing ("this step"), and the existing workflow structure
+        (bodies redacted).
+
+        Everything added here is per-turn: run() records the raw `content` in
+        the returned history, so an attached log never becomes a permanent part
+        of the conversation.
+        """
         user_content = content
+
+        attachments = format_attachments(self._attachments)
+        if attachments:
+            user_content += f"\n\n{attachments}"
 
         if page:
             step_name = get_step_name_from_page(page)
@@ -291,7 +524,7 @@ class PlannerAgent:
 
         return user_content
 
-    def _call_api(self, system_prompt, messages, stream, stream_manager):
+    def _call_api(self, system_prompt, messages, stream, stream_manager, tool_choice=None):
         """Make Claude API call. When streaming, forwards text deltas live.
 
         All text blocks stream to the client as they generate — including the
@@ -305,8 +538,10 @@ class PlannerAgent:
         names and agent architecture. User-facing progress comes from the
         task-specific status messages sent before each tool execution.
         """
+        choice = {"tool_choice": tool_choice} if tool_choice else {}
+
         if stream:
-            with self.client.messages.stream(
+            with self.client.beta.messages.stream(
                 model=self.model,
                 max_tokens=self.max_tokens,
                 system=system_prompt,
@@ -314,6 +549,8 @@ class PlannerAgent:
                 tools=self.tools,
                 thinking={"type": "adaptive"},
                 output_config={"effort": "medium"},
+                **choice,
+                **_CONTEXT_MANAGEMENT,
             ) as stream_obj:
                 for event in stream_obj:
                     if event.type == "content_block_delta" and event.delta.type == "text_delta":
@@ -328,22 +565,12 @@ class PlannerAgent:
                 tools=self.tools,
                 thinking={"type": "adaptive"},
                 output_config={"effort": "medium"},
+                **choice,
                 # Per-request timeout (same values as the SDK default):
                 # required for non-streaming calls with max_tokens > ~21k,
                 # which the SDK otherwise rejects.
                 timeout=httpx.Timeout(600.0, connect=5.0),
-                betas=["context-management-2025-06-27"],
-                context_management={
-                    "edits": [
-                        {
-                            "type": "clear_tool_uses_20250919",
-                            "trigger": {"type": "tool_uses", "value": 20},
-                            "keep": {"type": "tool_uses", "value": 10},
-                            "exclude_tools": ["search_documentation"],
-                            "clear_tool_inputs": True,
-                        }
-                    ]
-                },
+                **_CONTEXT_MANAGEMENT,
             )
             return response
 
@@ -367,7 +594,13 @@ class PlannerAgent:
         """
         stream_manager.send_thinking(status)
 
-    def _send_settled(self, stream_manager, content: str | None) -> None:
+    def _send_settled(
+        self,
+        stream_manager,
+        content: str | None,
+        steps: list[dict] | None = None,
+        summary: str | None = None,
+    ) -> None:
         """Send a completed-action line ("Edited workflow structure") as a
         custom `status` event and record it in the transcript.
 
@@ -376,11 +609,24 @@ class PlannerAgent:
         are recorded in `response_segments` so a page reload re-renders the
         same view. None means the action left nothing worth showing (e.g. a
         consult that changed nothing) — nothing is sent or recorded.
+
+        `steps` carries which workflow steps this action touched, as data
+        rather than as names buried in `content`, so a client can attach
+        per-step detail without parsing the sentence. `summary` is the
+        shorter line such a client shows instead, so names are not printed
+        twice. Both are recorded alongside the segment so a reload has the
+        same information the live stream did.
         """
         if not content:
             return
-        stream_manager.send_status(content)
-        self._segments.append({"type": "status", "content": content})
+        stream_manager.send_status(content, steps=steps, summary=summary)
+
+        segment = {"type": "status", "content": content}
+        if steps:
+            segment["steps"] = steps
+        if summary:
+            segment["summary"] = summary
+        self._segments.append(segment)
 
     def _find_all_tool_uses(self, content):
         """Find all tool_use blocks in response content."""
@@ -398,6 +644,7 @@ class PlannerAgent:
                 subagent_result = call_workflow_agent(
                     tool_use_block.input,
                     workflow_yaml=self.current_yaml,
+                    attachments=self._attachments,
                     api_key=self.api_key,
                     user=self._user,
                     metrics_opt_in=self._metrics_opt_in,
@@ -431,64 +678,6 @@ class PlannerAgent:
                 tool_result += "\n\n[No workflow changes were made — no YAML was produced.]"
 
             tool_calls_meta.append({"tool": "call_workflow_agent", "input": tool_use_block.input})
-
-        elif tool_use_block.name == "call_job_code_agent":
-            job_key = tool_use_block.input.get("job_key")
-
-            # Guard: workflow must exist and contain the target job
-            if not self.current_yaml:
-                tool_result = "ERROR: No workflow exists yet. Call call_workflow_agent first to create the workflow, then call call_job_code_agent."
-                tool_calls_meta.append({"tool": "call_job_code_agent", "input": tool_use_block.input, "skipped": True})
-                return tool_result
-            matched_job_key = None
-            if job_key:
-                matched_job_key, job_data = find_job_in_yaml(self.current_yaml, job_key)
-                if not job_data:
-                    tool_result = f"ERROR: Job key '{job_key}' not found in workflow YAML. Create the workflow with this job first."
-                    tool_calls_meta.append(
-                        {"tool": "call_job_code_agent", "input": tool_use_block.input, "skipped": True}
-                    )
-                    return tool_result
-
-            try:
-                subagent_result = call_job_agent(
-                    tool_use_block.input,
-                    workflow_yaml=self.current_yaml,
-                    api_key=self.api_key,
-                    user=self._user,
-                    metrics_opt_in=self._metrics_opt_in,
-                )
-            except Exception as e:
-                logger.exception("call_job_code_agent failed")
-                tool_calls_meta.append({"tool": "call_job_code_agent", "input": tool_use_block.input, "error": str(e)})
-                return f"ERROR: The job code agent failed: {e}. No code was generated for this job."
-
-            if "usage" in subagent_result:
-                total_usage.update(sum_usage(total_usage, subagent_result["usage"]))
-
-            # Stitch code into live state immediately. Use the YAML key returned by
-            # find_job_in_yaml — `job_key` from the planner may be a fuzzy variant
-            # (case, hyphens vs underscores, or the job's name field), and
-            # stitch_job_code does an exact key match.
-            suggested_code = subagent_result.get("suggested_code")
-            stitched = False
-            if matched_job_key and suggested_code and self.current_yaml:
-                self.current_yaml = stitch_job_code(self.current_yaml, matched_job_key, suggested_code)
-                self.yaml_modified = True
-                stitched = True
-                self._send_yaml(stream_manager)
-                logger.info(f"Stitched code for job '{matched_job_key}' into current_yaml")
-
-            self.subagent_results.append(subagent_result)
-            tool_result = format_subagent_result_for_llm(subagent_result)
-            if stitched:
-                tool_result += "\n\n[Job code generated and stitched into the workflow.]"
-            elif suggested_code:
-                tool_result += "\n\n[Job code was generated but NOT added to the workflow — no job_key matched. Retry with the exact job key.]"
-            else:
-                tool_result += "\n\n[No job code was generated.]"
-
-            tool_calls_meta.append({"tool": "call_job_code_agent", "input": tool_use_block.input})
 
         elif tool_use_block.name == "inspect_job_code":
             # Accept job_keys (list); tolerate legacy single job_key
@@ -566,16 +755,23 @@ class PlannerAgent:
             if not self.current_yaml:
                 skipped[block.id] = "ERROR: No workflow exists yet. Call call_workflow_agent first to create the workflow, then call call_job_code_agent."
                 tool_calls_meta.append({"tool": "call_job_code_agent", "input": block.input, "skipped": True})
-            elif job_key:
+            elif not job_key:
+                skipped[block.id] = (
+                    "ERROR: job_key is required. Name the step to edit, one of: "
+                    f"{job_keys_in_yaml(self.current_yaml)}."
+                )
+                tool_calls_meta.append({"tool": "call_job_code_agent", "input": block.input, "skipped": True})
+            else:
                 matched_job_key, job_data = find_job_in_yaml(self.current_yaml, job_key)
-                if not job_data:
-                    skipped[block.id] = f"ERROR: Job key '{job_key}' not found in workflow YAML. Create the workflow with this job first."
+                if matched_job_key is None:
+                    skipped[block.id] = (
+                        f"ERROR: Job key '{job_key}' not found in workflow YAML. "
+                        f"The workflow's steps are: {job_keys_in_yaml(self.current_yaml)}."
+                    )
                     tool_calls_meta.append({"tool": "call_job_code_agent", "input": block.input, "skipped": True})
                 else:
                     matched_keys[block.id] = matched_job_key
                     to_run.append(block)
-            else:
-                to_run.append(block)
 
         # Run subagent API calls in parallel (the slow part)
         parallel_results = {}
@@ -585,10 +781,11 @@ class PlannerAgent:
                     executor.submit(
                         call_job_agent,
                         block.input,
-                        self.current_yaml,
-                        self.api_key,
-                        self._user,
-                        self._metrics_opt_in,
+                        workflow_yaml=self.current_yaml,
+                        attachments=self._attachments,
+                        api_key=self.api_key,
+                        user=self._user,
+                        metrics_opt_in=self._metrics_opt_in,
                     ): block
                     for block in to_run
                 }
@@ -604,10 +801,11 @@ class PlannerAgent:
             try:
                 parallel_results[block.id] = call_job_agent(
                     block.input,
-                    self.current_yaml,
-                    self.api_key,
-                    self._user,
-                    self._metrics_opt_in,
+                    workflow_yaml=self.current_yaml,
+                    attachments=self._attachments,
+                    api_key=self.api_key,
+                    user=self._user,
+                    metrics_opt_in=self._metrics_opt_in,
                 )
             except Exception as e:
                 logger.exception("call_job_code_agent failed")
@@ -615,7 +813,7 @@ class PlannerAgent:
 
         # Stitch results and update state sequentially
         tool_results = []
-        stitched_names = []
+        stitched_steps = []
         for block in blocks:
             if block.id in skipped:
                 tool_results.append(
@@ -632,26 +830,27 @@ class PlannerAgent:
                     "content": f"ERROR: The job code agent failed: {subagent_result['_error']}. No code was generated for this job.",
                 })
                 continue
-            matched_job_key = matched_keys.get(block.id)
+            matched_job_key = matched_keys[block.id]
 
             if "usage" in subagent_result:
                 total_usage.update(sum_usage(total_usage, subagent_result["usage"]))
 
             suggested_code = subagent_result.get("suggested_code")
-            stitched = False
-            if matched_job_key and suggested_code and self.current_yaml:
+            if suggested_code:
                 self.current_yaml = stitch_job_code(self.current_yaml, matched_job_key, suggested_code)
                 self.yaml_modified = True
-                stitched = True
-                stitched_names.append(self._display_name_for_job(matched_job_key))
+                stitched_steps.append(
+                    {
+                        "key": matched_job_key,
+                        "name": self._display_name_for_job(matched_job_key),
+                    },
+                )
                 logger.info(f"Stitched code for job '{matched_job_key}' into current_yaml")
 
             self.subagent_results.append(subagent_result)
             tool_result = format_subagent_result_for_llm(subagent_result)
-            if stitched:
+            if suggested_code:
                 tool_result += "\n\n[Job code generated and stitched into the workflow.]"
-            elif suggested_code:
-                tool_result += "\n\n[Job code was generated but NOT added to the workflow — no job_key matched. Retry with the exact job key.]"
             else:
                 tool_result += "\n\n[No job code was generated.]"
 
@@ -663,10 +862,18 @@ class PlannerAgent:
         # Settle the spinner with the steps that were actually applied (drop any
         # that failed to stitch); nothing sent if none applied. One YAML send
         # covers the whole batch, mirroring the one combined status.
-        if stitched_names:
+        if stitched_steps:
             self._send_yaml(stream_manager)
-            joined = ", ".join(f"\"{n}\"" for n in stitched_names)
-            self._send_settled(stream_manager, f"Wrote code for {joined}")
+            joined = ", ".join(f"\"{step['name']}\"" for step in stitched_steps)
+            count = len(stitched_steps)
+            self._send_settled(
+                stream_manager,
+                f"Wrote code for {joined}",
+                steps=stitched_steps,
+                # Clients that render a block per step get the count instead,
+                # so the names appear once, on the blocks.
+                summary=f"Wrote code for {count} step{'' if count == 1 else 's'}",
+            )
 
         return tool_results
 
@@ -738,8 +945,9 @@ class PlannerAgent:
     def _display_name_for_job(self, job_key: str | None) -> str | None:
         """Look up a human-readable display name for a job key.
 
-        Checks the workflow YAML for a name field first, then falls back
-        to title-casing the key (e.g. "fetch-patients" -> "Fetch Patients").
+        Returns the workflow YAML's own name for the job when it has one,
+        otherwise title-cases the key (e.g. "fetch-patients" -> "Fetch
+        Patients").
         """
         if not job_key:
             return None
@@ -747,7 +955,11 @@ class PlannerAgent:
         if self.current_yaml:
             _, job_data = find_job_in_yaml(self.current_yaml, job_key)
             if job_data and job_data.get("name"):
-                return self._format_display_name(job_data["name"])
+                # The user named this step; use it verbatim. Title-casing it
+                # renames "Transform data" to "Transform Data" in the prose,
+                # which then disagrees with the name shown everywhere else
+                # in the UI.
+                return job_data["name"]
 
         return self._format_display_name(job_key)
 

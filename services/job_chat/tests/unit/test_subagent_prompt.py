@@ -75,3 +75,15 @@ def test_subagent_prompt_grounds_focus_in_viewed_step():
     assert "Notify Admin" in text
     assert "'fetch-patients'" in text
     assert "likely what their request is about" in text
+
+
+def test_subagent_prompt_names_the_editable_step_without_a_view():
+    # The planner knows which step it asked for but not what the user has on
+    # screen, so it sends job_key and no viewing. The step is still named:
+    # without this the subagent is handed a redacted workflow and never told
+    # which step it is there to edit.
+    text = _subagent_text({"job_key": "fetch-patients"})
+    assert "The step you're editing is 'fetch-patients'." in text
+    # Nothing is claimed about what the user is looking at.
+    assert "code open" not in text
+    assert "workflow canvas" not in text

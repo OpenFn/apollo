@@ -28,6 +28,43 @@ jobs:
       - name: Run unit tests
         run: poetry run pytest services/*/tests/unit
 
+  unicode-parity:
+    name: Unicode parity with Elixir
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # `services/name_rules.py` carries tables generated from the Elixir that
+    # Lightning runs: grapheme break classes, Extended_Pictographic, combining
+    # classes, the trim set and OTP's NFC. If Elixir's or Python's Unicode
+    # version moves and nobody re-runs the harness, the tables silently stop
+    # matching and Apollo starts emitting step names Lightning rejects. This
+    # job is the only thing that would notice.
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.18.3"
+          otp-version: "27"
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Generate range edges from the tables
+        working-directory: tools/unicode_parity
+        run: python3 edges.py
+
+      - name: Probe Elixir
+        working-directory: tools/unicode_parity
+        run: elixir probe.exs
+
+      - name: Compare against name_rules
+        working-directory: tools/unicode_parity
+        run: python3 check.py
+
   bun:
     name: Bun unit tests
     runs-on: ubuntu-latest
