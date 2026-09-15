@@ -45,6 +45,9 @@ def make_planner() -> PlannerAgent:
     planner.api_key = "test-key"
     planner._user = None
     planner._metrics_opt_in = None
+    planner.web_tools = []
+    planner.web_search_enabled = False
+    planner.web_search_downgraded = False
     return planner
 
 
@@ -130,9 +133,6 @@ def make_run_planner(max_tool_calls: int = 10, max_pause_continuations: int = 5)
     planner.max_tool_calls = max_tool_calls
     planner.max_pause_continuations = max_pause_continuations
     planner.tools = []
-    planner.web_tools = []
-    planner.web_search_enabled = False
-    planner.web_search_downgraded = False
     return planner
 
 
@@ -405,7 +405,7 @@ def test_a_mixed_round_keeps_server_tool_blocks_in_history() -> None:
     ]
     seen = []
 
-    def record_and_reply(_system: object, messages: list, _stream: object, _manager: object) -> FakeResponse:
+    def record_and_reply(_system: object, messages: list, _stream: object, _manager: object, **_kwargs: object) -> FakeResponse:
         seen.append(list(messages))
         return responses.pop(0)
 
@@ -1201,6 +1201,7 @@ class FakeMessages:
 class FakeClient:
     def __init__(self, stream: FakeStream) -> None:
         self.messages = FakeMessages(stream)
+        self.beta = self
 
 
 def block_start(block_type: str) -> FakeEvent:
@@ -1260,7 +1261,9 @@ def test_a_blocked_fetch_is_not_reported_as_a_successful_lookup() -> None:
 
     planner._call_api([], [], True, manager)
 
-    assert manager.statuses == ["Skipped a page outside the allowed sources"]
+    assert manager.statuses == [
+        {"content": "Skipped a page outside the allowed sources", "steps": None, "summary": None},
+    ]
     assert planner._segments == [
         {"type": "status", "content": "Skipped a page outside the allowed sources"}
     ]
@@ -1278,7 +1281,9 @@ def test_a_failed_search_says_so_rather_than_claiming_a_result() -> None:
 
     planner._call_api([], [], True, manager)
 
-    assert manager.statuses == ["A web lookup did not return anything"]
+    assert manager.statuses == [
+        {"content": "A web lookup did not return anything", "steps": None, "summary": None},
+    ]
 
 
 def test_a_mixed_round_reports_both_outcomes_in_order() -> None:
@@ -1297,8 +1302,8 @@ def test_a_mixed_round_reports_both_outcomes_in_order() -> None:
     planner._call_api([], [], True, manager)
 
     assert manager.statuses == [
-        "Searched the web",
-        "Skipped a page outside the allowed sources",
+        {"content": "Searched the web", "steps": None, "summary": None},
+        {"content": "Skipped a page outside the allowed sources", "steps": None, "summary": None},
     ]
 
 
@@ -1331,7 +1336,9 @@ def test_a_successful_fetch_says_it_read_the_page() -> None:
 
     planner._call_api([], [], True, manager)
 
-    assert manager.statuses == ["Read a page from the web"]
+    assert manager.statuses == [
+        {"content": "Read a page from the web", "steps": None, "summary": None},
+    ]
 
 
 def test_the_spinner_uses_the_shared_web_status_pool() -> None:
@@ -1448,7 +1455,8 @@ def test_meta_omits_the_web_fields_when_web_search_is_off() -> None:
 
 def make_bad_request(message: str = "web search is not enabled for this account") -> BadRequestError:
     request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-    return BadRequestError(message, response=httpx.Response(400, request=request), body=None)
+    body = {"type": "error", "error": {"type": "invalid_request_error", "message": message}}
+    return BadRequestError(message, response=httpx.Response(400, request=request, json=body), body=body)
 
 
 def test_a_bad_request_with_web_tools_retries_without_them() -> None:
@@ -1459,7 +1467,7 @@ def test_a_bad_request_with_web_tools_retries_without_them() -> None:
     planner.config_loader = StubPromptLoader(planner_system_prompt="BASE PROMPT")
     tools_per_call = []
 
-    def fail_then_answer(_system: object, _messages: object, _stream: object, _manager: object) -> FakeResponse:
+    def fail_then_answer(_system: object, _messages: object, _stream: object, _manager: object, **_kwargs: object) -> FakeResponse:
         tools_per_call.append([t.get("name") for t in planner.tools])
         if len(tools_per_call) == 1:
             raise make_bad_request()
@@ -1490,7 +1498,7 @@ def test_the_downgrade_rebuilds_the_system_prompt_without_the_web_block() -> Non
     )
     systems = []
 
-    def fail_then_answer(system: list, _messages: object, _stream: object, _manager: object) -> FakeResponse:
+    def fail_then_answer(system: list, _messages: object, _stream: object, _manager: object, **_kwargs: object) -> FakeResponse:
         systems.append([block["text"] for block in system])
         if len(systems) == 1:
             raise make_bad_request()
@@ -1507,7 +1515,7 @@ def test_a_bad_request_without_web_tools_is_not_retried() -> None:
     planner = make_run_planner()
     calls = []
 
-    def always_fail(*_args: object) -> FakeResponse:
+    def always_fail(*_args: object, **_kwargs: object) -> FakeResponse:
         calls.append(1)
         raise make_bad_request("prompt is too long")
 
@@ -1527,16 +1535,17 @@ def test_an_unrelated_bad_request_is_not_blamed_on_web_search() -> None:
     planner.web_search_enabled = True
     planner.config_loader = StubPromptLoader(planner_system_prompt="BASE PROMPT")
 
-    def always_fail(*_args: object) -> FakeResponse:
+    def always_fail(*_args: object, **_kwargs: object) -> FakeResponse:
         raise make_bad_request("prompt is too long: 250000 tokens > 200000 maximum")
 
     with patch.object(PlannerAgent, "_call_api", side_effect=always_fail), \
          pytest.raises(ApolloError) as excinfo:
         planner.run("q", None, None, [], stream=False)
 
-    # The retry failed too, so the web tools were not the cause. The user gets
-    # the real error and nothing is recorded about web search.
-    assert "prompt is too long" in excinfo.value.message
+    # The retry failed too, so the web tools were not the cause. The real
+    # error reaches details (not the user-facing message) and nothing is
+    # recorded about web search.
+    assert "prompt is too long" in excinfo.value.details["upstream_message"]
     assert planner._segments == []
 
 
@@ -1548,7 +1557,7 @@ def test_the_web_search_status_is_only_sent_once_the_retry_has_earned_it() -> No
     planner.config_loader = StubPromptLoader(planner_system_prompt="BASE PROMPT")
     segments_at_each_call = []
 
-    def fail_then_answer(*_args: object) -> FakeResponse:
+    def fail_then_answer(*_args: object, **_kwargs: object) -> FakeResponse:
         # Snapshot before the retry runs: nothing may have been claimed yet.
         segments_at_each_call.append(list(planner._segments))
         if len(segments_at_each_call) == 1:
@@ -1571,7 +1580,7 @@ def test_a_second_bad_request_surfaces_the_original_error() -> None:
     planner.config_loader = StubPromptLoader(planner_system_prompt="BASE PROMPT")
     errors = [make_bad_request("web search is not enabled"), make_bad_request("something else")]
 
-    def always_fail(*_args: object) -> FakeResponse:
+    def always_fail(*_args: object, **_kwargs: object) -> FakeResponse:
         raise errors.pop(0)
 
     with patch.object(PlannerAgent, "_call_api", side_effect=always_fail), \
@@ -1579,7 +1588,7 @@ def test_a_second_bad_request_surfaces_the_original_error() -> None:
         planner.run("q", None, None, [], stream=False)
 
     assert errors == []
-    assert "web search is not enabled" in excinfo.value.message
-    assert "something else" not in excinfo.value.message
+    assert "web search is not enabled" in excinfo.value.details["upstream_message"]
+    assert "something else" not in excinfo.value.details["upstream_message"]
     # The retry failed, so nothing was claimed about web search.
     assert planner._segments == []
