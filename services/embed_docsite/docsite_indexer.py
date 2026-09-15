@@ -6,7 +6,7 @@ from pinecone import Pinecone, ServerlessSpec
 from langchain_pinecone import PineconeVectorStore
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.document_loaders import DataFrameLoader
-from util import create_logger, ApolloError
+from util import create_logger, ApolloError, is_docsite_collection
 
 logger = create_logger("DocsiteIndexer")
 
@@ -108,12 +108,13 @@ class DocsiteIndexer:
             index_stats = index.describe_index_stats()
             namespaces = index_stats.get('namespaces', {}).keys()
             valid_namespaces = sorted(
-                (ns for ns in namespaces if ns.startswith("docsite-") and ns[8:].isdigit() and len(ns) == 16),
+                (ns for ns in namespaces if is_docsite_collection(ns)),
                 reverse=False
             )
-            if len(valid_namespaces) > max_total_collections:
+            excess = len(valid_namespaces) - max_total_collections
+            if excess > 0:
                 logger.info(f"Deleting outdated docsite collections")
-                for old_collection in valid_namespaces[:max_total_collections]:
+                for old_collection in valid_namespaces[:excess]:
                     self.index.delete(delete_all=True, namespace=old_collection)
                     logger.info(f"Deleted collection {old_collection}")
 

@@ -65,6 +65,8 @@ bun dev
 
 To see an index of the available language services, head to `localhost:3000`.
 
+The chat services search a Pinecone index of the OpenFn documentation, which every environment populates itself. Run `bun py embed_docsite` to build yours — see [embed_docsite](services/embed_docsite/README.md).
+
 ## Python Setup
 
 This repo uses `poetry` to manage dependencies.

@@ -140,6 +140,27 @@ def test_get_most_recent_namespace_raises_when_none_valid():
     assert exc.value.code == 404
 
 
+def test_get_most_recent_namespace_accepts_date_time_format():
+    """DocsiteIndexer names collections docsite-YYYYMMDDHHMM; a fresh index
+    holds only that format, and rejecting it 404'd every search after a
+    successful embed."""
+    ds = make_search()
+    with _patch_pinecone(["docsite-202608131022"]):
+        assert ds._get_most_recent_namespace() == "docsite-202608131022"
+
+
+def test_get_most_recent_namespace_picks_latest_across_mixed_formats():
+    ds = make_search()
+    namespaces = [
+        "docsite-20250225",       # legacy date-only
+        "docsite-202608131022",   # current date+time
+        "docsite-20260813",       # date-only, same day as above
+        "docsite-2026081310",     # 10 digits: neither format
+    ]
+    with _patch_pinecone(namespaces):
+        assert ds._get_most_recent_namespace() == "docsite-202608131022"
+
+
 # --- lazy embeddings construction ----------------------------------------------
 
 def test_default_embeddings_built_on_construction_not_import():

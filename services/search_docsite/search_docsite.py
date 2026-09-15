@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from pinecone import Pinecone
 from langchain_pinecone import PineconeVectorStore
 from langchain_openai import OpenAIEmbeddings
-from util import create_logger, ApolloError
+from util import create_logger, ApolloError, is_docsite_collection
 from embeddings.embeddings import SearchResult
 logger = create_logger("DocsiteSearch")
 
@@ -113,7 +113,7 @@ class DocsiteSearch:
             namespaces = index_stats.get('namespaces', {}).keys()
 
             valid_namespaces = sorted(
-                (ns for ns in namespaces if ns.startswith("docsite-") and ns[8:].isdigit() and len(ns) == 16),
+                (ns for ns in namespaces if is_docsite_collection(ns)),
                 reverse=True
             )
 
