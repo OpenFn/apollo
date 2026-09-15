@@ -85,6 +85,7 @@ class RouterAgent:
         attachments: Optional[List[Dict]] = None,
         user: Optional[Dict] = None,
         metrics_opt_in: Optional[bool] = None,
+        web_search: bool = False,
     ) -> RouterResult:
         """
         Route request to appropriate handler and execute.
@@ -96,6 +97,8 @@ class RouterAgent:
             history: Conversation history
             stream: Streaming flag
             attachments: Optional input attachments (e.g. logs, dataclips)
+            web_search: Whether the caller opted into the planner's web
+                search/fetch tools for this request
 
         Returns:
             RouterResult with response, attachments, history, usage, meta
@@ -112,6 +115,7 @@ class RouterAgent:
         self._input_attachments = attachments or []
         self._user = user
         self._metrics_opt_in = metrics_opt_in
+        self._web_search = web_search
         # One stream manager shared by whichever agents serve this request, so
         # a handed-over request continues the same stream instead of starting
         # a second message lifecycle.
@@ -144,6 +148,9 @@ class RouterAgent:
             )
         else:
             result = self._route_to_planner(content, workflow_yaml, page, history, stream, decision.confidence)
+
+        if web_search:
+            result.meta["web_search_requested"] = True
 
         return result
 
@@ -481,7 +488,7 @@ class RouterAgent:
 
         clean_history = [{"role": t["role"], "content": t["content"]} for t in history]
 
-        planner = PlannerAgent(self.config_loader, self.api_key)
+        planner = PlannerAgent(self.config_loader, self.api_key, web_search=self._web_search)
         planner_result = planner.run(
             content=content,
             workflow_yaml=workflow_yaml,

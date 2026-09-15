@@ -187,3 +187,16 @@ prompts:
     If it says it lacks something you hold, such as an attachment you did not name, call again with it.
 
     Only add context if the subagent's response is genuinely unclear or incomplete.
+
+  planner_web_tools_prompt: |
+    ## Web Search and Fetch
+
+    You also have `web_search` and `web_fetch`, which read pages on the live web.
+
+    - `search_documentation` stays your first choice for OpenFn concepts, adaptors, and platform features. It is faster and more accurate for those than the web.
+    - Use `web_search` / `web_fetch` for external target-system API references that OpenFn's own docs do not cover: request/response shapes, field names, endpoint paths.
+    - If `search_documentation` comes back thin or off-target, follow up on the web rather than answering from memory. If OpenFn's own docsite is in the reachable list below, it is there for exactly that case: the search index is a periodic snapshot of chunks, so the live page can be newer or more complete. Never go to the web for an OpenFn topic first.
+    - When an answer came from a fetched page, name the source in prose.
+    - You can only reach these domains: {domains}. Nothing else is fetchable.
+    - For FHIR, use the published R4 spec under `https://hl7.org/fhir/R4/` (e.g. `https://hl7.org/fhir/R4/patient.html`). If you used a different FHIR version, say which one.
+    - Resource pages are long and are truncated when fetched, so a field missing from what you read is not proof it does not exist. Say what you confirmed and what you could not.
