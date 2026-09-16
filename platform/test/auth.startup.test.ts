@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 
+import setup from "../src/server";
+import { InstanceAuth } from "../src/auth/instance-auth";
+import { closeDb } from "../src/db";
+import * as sentry from "../src/util/sentry";
+
 // internal-token.ts captures the token provenance (env vs minted) once at module
 // load, and logInternalTokenProvenance() logs it. To exercise both branches we
 // re-import the module in a fresh registry per case with APOLLO_INTERNAL_TOKEN
@@ -73,4 +78,59 @@ describe("Internal-token startup provenance", () => {
     logInternalTokenProvenance(false);
     expect(warned()).not.toContain("reusePort");
   });
+});
+
+// A URL that is syntactically fine and refuses instantly, so both startup paths
+// take their failure branch without a database and without a timeout.
+const UNREACHABLE_DB = "postgres://apollo:apollo@127.0.0.1:1/nope";
+
+describe("Startup database failures reach Sentry", () => {
+  const saved = process.env.APOLLO_CLIENTS_DB_URL;
+  let error: ReturnType<typeof spyOn>;
+  let capture: ReturnType<typeof spyOn>;
+  let quiet: ReturnType<typeof spyOn>[];
+
+  beforeEach(() => {
+    process.env.APOLLO_CLIENTS_DB_URL = UNREACHABLE_DB;
+    error = spyOn(console, "error").mockImplementation(() => {});
+    quiet = [
+      spyOn(console, "log").mockImplementation(() => {}),
+      spyOn(console, "warn").mockImplementation(() => {}),
+    ];
+    capture = spyOn(sentry, "captureException");
+    capture.mockClear();
+  });
+
+  afterEach(async () => {
+    error.mockRestore();
+    for (const spy of quiet) spy.mockRestore();
+    capture.mockRestore();
+    // Drop the pool opened against the unreachable URL so a later getDb()
+    // reopens against whatever the next test configures.
+    await closeDb().catch(() => {});
+    if (saved === undefined) delete process.env.APOLLO_CLIENTS_DB_URL;
+    else process.env.APOLLO_CLIENTS_DB_URL = saved;
+  });
+
+  const logged = () => error.mock.calls.map(([m]) => String(m)).join("\n");
+  const capturedReasons = () =>
+    capture.mock.calls.map(([, extras]: any) => extras?.reason);
+
+  it("reports a migration run that could not reach the database", async () => {
+    // Boots far enough to run migrations against the unreachable URL; the
+    // throw is caught and the server still comes up.
+    const auth = new InstanceAuth({ lookup: () => null, hasGlobalKey: true });
+    await setup(9877, auth);
+
+    expect(logged()).toContain("Apollo migrations failed to run.");
+    expect(capturedReasons()).toContain("migrations-failed");
+  }, 30000);
+
+  it("reports a startup probe that could not reach the database", async () => {
+    const auth = new InstanceAuth();
+    await auth.init();
+
+    expect(logged()).toContain("the database could not be reached");
+    expect(capturedReasons()).toContain("db-unreachable");
+  }, 30000);
 });
