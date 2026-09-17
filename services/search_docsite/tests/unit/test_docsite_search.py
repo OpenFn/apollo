@@ -151,31 +151,41 @@ def test_hybrid_search_runs_rrf_query_and_returns_results():
     conn, cur = make_conn()
     cur.fetchall.return_value = [("a", "Doc A", "general_docs", 0.032)]
     ds = make_search()
-    with _patch_pinecone(["other", "docsite-bad", "docsite-2024"]):
-        with pytest.raises(ApolloError) as exc:
-            ds._get_most_recent_namespace()
-    assert exc.value.code == 404
+
+    results = ds._hybrid_search(conn, batch_id=1, query="webhook", top_k=5, doc_title=None, docs_type="general_docs")
+
+    assert len(results) == 1
+    sql = cur.execute.call_args[0][0]
+    assert "FULL OUTER JOIN" in sql
+    params = cur.execute.call_args[0][1]
+    assert params["candidate_k"] == 50
+    assert params["max_k"] == 5
 
 
-def test_get_most_recent_namespace_accepts_date_time_format():
-    """DocsiteIndexer names collections docsite-YYYYMMDDHHMM; a fresh index
-    holds only that format, and rejecting it 404'd every search after a
-    successful embed."""
+
+def test_hybrid_search_score_is_json_serializable_float():
+    """Postgres returns RRF as `numeric`, which psycopg2 hands back as Decimal.
+    Decimal is not JSON-serializable, and entry.py's json.dump sits outside its
+    try/except — so this would kill the process, not return a 500."""
+    conn, cur = make_conn()
+    cur.fetchall.return_value = [("a", "Doc A", "general_docs", Decimal("0.032"))]
     ds = make_search()
-    with _patch_pinecone(["docsite-202608131022"]):
-        assert ds._get_most_recent_namespace() == "docsite-202608131022"
 
+    results = ds._hybrid_search(conn, batch_id=1, query="webhook", top_k=5, doc_title=None, docs_type="general_docs")
 
-def test_get_most_recent_namespace_picks_latest_across_mixed_formats():
+    assert isinstance(results[0].score, float)
+    json.dumps(results[0].to_json())  # must not raise
+
+def test_hybrid_search_casts_rrf_to_float8_in_sql():
+    """Belt and braces: the SQL itself must not produce numeric in the first place."""
+    conn, cur = make_conn()
+    cur.fetchall.return_value = []
     ds = make_search()
-    namespaces = [
-        "docsite-20250225",       # legacy date-only
-        "docsite-202608131022",   # current date+time
-        "docsite-20260813",       # date-only, same day as above
-        "docsite-2026081310",     # 10 digits: neither format
-    ]
-    with _patch_pinecone(namespaces):
-        assert ds._get_most_recent_namespace() == "docsite-202608131022"
+
+    ds._hybrid_search(conn, batch_id=1, query="webhook", top_k=5, doc_title=None, docs_type=None)
+
+    sql = cur.execute.call_args[0][0]
+    assert "float8" in sql
 
 
 # --- lazy embeddings construction ----------------------------------------------
