@@ -162,7 +162,6 @@ def test_hybrid_search_runs_rrf_query_and_returns_results():
     assert params["max_k"] == 5
 
 
-
 def test_hybrid_search_score_is_json_serializable_float():
     """Postgres returns RRF as `numeric`, which psycopg2 hands back as Decimal.
     Decimal is not JSON-serializable, and entry.py's json.dump sits outside its
@@ -186,30 +185,6 @@ def test_hybrid_search_casts_rrf_to_float8_in_sql():
 
     sql = cur.execute.call_args[0][0]
     assert "float8" in sql
-
-
-# --- lazy embeddings construction ----------------------------------------------
-
-def test_default_embeddings_built_on_construction_not_import():
-    """`OpenAIEmbeddings()` validates credentials when constructed, so it must not
-    be a default argument — defaults are evaluated at import, which made merely
-    importing this module require OPENAI_API_KEY. Patching only takes effect if
-    the call happens in __init__, so a zero call count means it went back to
-    being a default arg."""
-    with patch.object(m, "OpenAIEmbeddings") as mock_embeddings, \
-         patch.object(m, "PineconeVectorStore", return_value=MagicMock()):
-        m.DocsiteSearch(collection_name="docsite-20240101")
-
-    mock_embeddings.assert_called_once_with()
-
-    results = ds._hybrid_search(conn, batch_id=1, query="webhook", top_k=5, doc_title=None, docs_type="general_docs")
-
-    assert len(results) == 1
-    sql = cur.execute.call_args[0][0]
-    assert "FULL OUTER JOIN" in sql
-    params = cur.execute.call_args[0][1]
-    assert params["candidate_k"] == 50
-    assert params["max_k"] == 5
 
 def test_hybrid_search_score_is_json_serializable_float():
     """Postgres returns RRF as `numeric`, which psycopg2 hands back as Decimal.

@@ -139,6 +139,21 @@ def test_get_most_recent_namespace_raises_when_none_valid():
     assert exc.value.code == 404
 
 
+# --- lazy embeddings construction ----------------------------------------------
+
+def test_default_embeddings_built_on_construction_not_import():
+    """`OpenAIEmbeddings()` validates credentials when constructed, so it must not
+    be a default argument — defaults are evaluated at import, which made merely
+    importing this module require OPENAI_API_KEY. Patching only takes effect if
+    the call happens in __init__, so a zero call count means it went back to
+    being a default arg."""
+    with patch.object(m, "OpenAIEmbeddings") as mock_embeddings, \
+         patch.object(m, "PineconeVectorStore", return_value=MagicMock()):
+        m.LegacyPineconeDocsiteSearch(collection_name="docsite-20240101")
+
+    mock_embeddings.assert_called_once_with()
+
+
 # --- strategy guard -------------------------------------------------------------
 
 @pytest.mark.parametrize("strategy", ["hybrid", "keyword", "nonsense"])
@@ -159,3 +174,4 @@ def test_legacy_search_still_dispatches_semantic():
     results = ds.search("query", strategy="semantic")
 
     assert [r.text for r in results] == ["a"]
+
