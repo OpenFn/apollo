@@ -1,0 +1,111 @@
+import os
+
+from embeddings.embeddings import SearchResult
+from langchain_openai import OpenAIEmbeddings
+from langchain_pinecone import PineconeVectorStore
+from pinecone import Pinecone
+from util import ApolloError, create_logger
+
+logger = create_logger("LegacyPineconeDocsiteSearch")
+
+
+class LegacyPineconeDocsiteSearch:
+    """
+    Legacy Pinecone-backed docsite search, still the default backend and the
+    rollback path for the Postgres migration. Selected via resolve_backend()
+    in services/search_docsite/search_docsite.py.
+
+    :param collection_name: Vectorstore collection name (namespace) to store documents
+    :param index_name: Vectorstore index name (default: docsite)
+    :param default_top_k: Default number of results to return (default: 5)
+    :param embeddings: LangChain embedding type (default: OpenAIEmbeddings())
+    """
+    def __init__(self, collection_name=None, index_name="docsite", default_top_k=5, embeddings=None):
+        self.index_client = index_name
+        self.default_top_k = default_top_k
+        self.embeddings = embeddings if embeddings is not None else OpenAIEmbeddings()
+
+        if collection_name is None:
+            logger.info("Collection name not provided; retrieving the most recent collection name.")
+            collection_name = self._get_most_recent_namespace()
+
+        self.collection_name = collection_name
+        self.vectorstore = PineconeVectorStore(index_name=index_name, namespace=collection_name, embedding=self.embeddings)
+
+    def search(self, query, top_k=None, threshold=None, strategy='semantic', doc_title=None, docs_type=None):
+        filters = self._build_filter(doc_title=doc_title, docs_type=docs_type)
+        logger.info("Metadata filters built")
+
+        if strategy != 'semantic':
+            raise ApolloError(
+                400,
+                f"The Pinecone backend only supports strategy='semantic', got '{strategy}'",
+                type="BAD_REQUEST",
+            )
+
+        return self._semantic_search(query=query, top_k=top_k, threshold=threshold, filters=filters)
+
+    def _semantic_search(self, query, top_k=None, threshold=None, filters=None):
+        if top_k is None and threshold is None:
+            top_k = self.default_top_k
+
+        max_k = top_k or 50
+
+        scored_docs = self.vectorstore.similarity_search_with_score(
+            query=query,
+            k=max_k,
+            filter=filters
+        )
+
+        logger.info(f"Similar documents retrieved: {len(scored_docs)}")
+
+        results = []
+        for doc, score in scored_docs:
+            if threshold is not None and score < threshold:
+                continue
+
+            if top_k is not None and len(results) >= top_k and threshold is None:
+                break
+
+            results.append(SearchResult(doc.page_content, doc.metadata, score))
+
+        logger.info(f"Filtered to {len(results)} results")
+        return results
+
+    def _build_filter(self, **kwargs):
+        conditions = []
+
+        if kwargs.get('doc_title'):
+            conditions.append({"doc_title": {"$eq": kwargs['doc_title']}})
+
+        if kwargs.get('docs_type'):
+            conditions.append({"docs_type": {"$eq": kwargs['docs_type']}})
+
+        if not conditions:
+            return None
+
+        if len(conditions) == 1:
+            return conditions[0]
+
+        return {"$and": conditions}
+
+    def _get_most_recent_namespace(self):
+        pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY"))
+        index = pc.Index("docsite")
+        index_stats = index.describe_index_stats()
+        namespaces = index_stats.get('namespaces', {}).keys()
+
+        # The indexer names namespaces docsite-%Y%m%d%H%M (20 chars); namespaces
+        # created by hand use docsite-%Y%m%d (16). Accept both, so a namespace the
+        # indexer just wrote is discoverable.
+        valid_namespaces = sorted(
+            (ns for ns in namespaces if ns.startswith("docsite-") and ns[8:].isdigit() and len(ns) in (16, 20)),
+            reverse=True
+        )
+
+        if not valid_namespaces:
+            raise ApolloError(404, "No valid namespaces found in the index", type="NOT_FOUND")
+
+        most_recent_namespace = valid_namespaces[0]
+        logger.info(f"Most recent docsite collection name found: {most_recent_namespace}")
+        return most_recent_namespace
