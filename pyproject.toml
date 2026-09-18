@@ -27,6 +27,7 @@ langfuse = "^4.15.2"
 opentelemetry-instrumentation-anthropic = "^0.62.3"
 opentelemetry-instrumentation-threading = "0.65b0"
 pandas = "^2.2"
+pgvector = "^0.5.0"
 
 [tool.poetry.group.dev]
 optional = false
