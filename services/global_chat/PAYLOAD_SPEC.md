@@ -39,6 +39,10 @@ This document defines the input and output payload structure for the Global Agen
     }
   ],
 
+  "skill": {                              // Skill invoked this turn (optional)
+    "name": "diagnose"                    //   Standard skill name: "diagnose" | "qa"
+  },
+
   "options": {                            // Runtime options (optional)
     "stream": false
   },
@@ -79,6 +83,11 @@ This document defines the input and output payload structure for the Global Agen
   The character limit below counts the rendered text.
 
   The `type` is passed to the model as a label, so an unrecognised type is delivered rather than dropped. See [Attachment handling](#attachment-handling) for how they travel and why they are not persisted.
+
+- **`skill`** (object, optional): A standard skill the user invoked by slash
+  command. `name` is the skill's name (`"diagnose"` or `"qa"`). An unknown name
+  is rejected with a `400` `UNKNOWN_SKILL`. See
+  [Skill invocation](#skill-invocation).
 
 - **`options`** (object, optional): Runtime options.
   - **`stream`** (boolean): Enable streaming response (default: false).
@@ -168,6 +177,53 @@ Each tool beat streams as: `thinking` spinner → `changes` (if the workflow was
   - **`tool_calls`** (array): List of `{tool, input}` objects for each tool the planner invoked (planner path only).
   - **`subagent_calls`** (array): Raw sub-agent result dicts including `_call_metadata`. On the planner path these are the full results, useful for debugging. On the router's direct job-code path it carries a single entry with just `_call_metadata` and `diff`, so a client can tell on either route whether a code edit actually landed (`diff.patches_applied`).
   - **`total_tool_calls`** (number): Total number of tool calls made by the planner (planner path only).
+  - **`skill`** (string): The skill invoked this turn (skill path only). `router_confidence` is absent on this path, because the router did not run.
+
+---
+
+## Skill invocation
+
+A skill is a reusable instruction set that augments the model's context for one
+turn when the user explicitly invokes it. Standard skills ship with Apollo, in
+`services/global_chat/skills/<name>/SKILL.md`; they are immutable and upgrade
+for everyone on deploy.
+
+The client recognises the command and names it in `skill` — **Apollo never
+parses commands out of `content`**. Follow standard slash-command semantics:
+recognise `/<name>` only at the start of the message, against the known list;
+the rest of the message is the request; one skill per message; the raw message
+stays in the client's visible transcript.
+
+Sending `skill` changes the turn in three ways:
+
+1. **The router is skipped.** A slash command states the intent the router
+   would otherwise guess, so the turn goes straight to the planner. `meta.skill`
+   names the skill; `meta.router_confidence` is absent.
+2. **The leading `/<name>` token is stripped** from `content` before the model
+   or the returned history sees it. The rest of the message is untouched.
+3. **The skill's instructions lead the user turn.**
+
+Skills travel per-turn, exactly like attachments: the instructions reach the
+model but are never written to `history`, so **the client must re-send `skill`
+on every turn it should apply to**. A follow-up turn sent without it is routed
+normally.
+
+### Example
+
+```json
+{
+  "content": "/diagnose why did the last run fail?",
+  "skill": { "name": "diagnose" },
+  "workflow_yaml": "name: My Workflow\njobs:\n  fetch-data:\n    ...\n",
+  "attachments": [
+    { "type": "log", "content": "ERROR: Request failed with status 500" }
+  ]
+}
+```
+
+The planner is asked `"why did the last run fail?"` with the `diagnose`
+instructions ahead of it, and `meta` comes back as
+`{"agents": ["planner"], "skill": "diagnose", ...}`.
 
 ---
 

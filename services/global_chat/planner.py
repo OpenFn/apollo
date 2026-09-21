@@ -25,6 +25,7 @@ from streaming_util import (
     STATUS_PLANNING,
 )
 from global_chat.config_loader import ConfigLoader
+from global_chat.skill_registry import Skill
 from models import resolve_model
 from global_chat.tools.tool_definitions import TOOL_DEFINITIONS
 from yaml_utils import stitch_job_code, redact_job_bodies, find_job_in_yaml, get_step_name_from_page, inspect_job_code, job_keys_in_yaml
@@ -240,6 +241,7 @@ class PlannerAgent:
         self.subagent_results = []
         self._segments: List[Dict] = []
         self._attachments: List[Dict] = []
+        self._skill: Optional[Skill] = None
 
         logger.info(f"PlannerAgent initialized with model: {self.model}")
 
@@ -255,6 +257,7 @@ class PlannerAgent:
         user: Optional[Dict] = None,
         metrics_opt_in: Optional[bool] = None,
         stream_manager: Optional[StreamManager] = None,
+        skill: Optional[Skill] = None,
     ) -> PlannerResult:
         """
         Run the planner agent with tool-calling loop.
@@ -270,6 +273,8 @@ class PlannerAgent:
                 the ones the planner names for it.
             stream_manager: Optional shared stream manager from the router, so
                 a handed-over request continues on the same stream
+            skill: A skill the user invoked this turn, whose instructions lead
+                the user message
 
         Returns:
             PlannerResult with response, attachments, history, usage, meta
@@ -288,6 +293,7 @@ class PlannerAgent:
         self._user = user
         self._metrics_opt_in = metrics_opt_in
         self._segments: List[Dict] = []
+        self._skill = skill
 
         stream_manager = StreamManager(model=self.model, stream=stream)
         if workflow_yaml:
@@ -494,15 +500,20 @@ class PlannerAgent:
         )
 
     def _build_user_content(self, content: str, page: Optional[str]) -> str:
-        """Augment the user message with this turn's attachments, the step the
-        user is viewing ("this step"), and the existing workflow structure
-        (bodies redacted).
+        """Augment the user message with an invoked skill's instructions, this
+        turn's attachments, the step the user is viewing ("this step"), and the
+        existing workflow structure (bodies redacted).
 
         Everything added here is per-turn: run() records the raw `content` in
         the returned history, so an attached log never becomes a permanent part
-        of the conversation.
+        of the conversation. A skill travels the same way, which is why the
+        client re-sends it on every turn it should apply to.
         """
         user_content = content
+
+        if self._skill:
+            preamble = self._skill.as_preamble()
+            user_content = f"{preamble}\n\n{user_content}" if user_content else preamble
 
         attachments = format_attachments(self._attachments)
         if attachments:

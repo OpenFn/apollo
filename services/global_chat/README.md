@@ -140,6 +140,18 @@ Request to build a new multi-step workflow from scratch:
 
 ## Implementation
 
+### Skills
+
+A `skill` field in the payload names a standard skill the user invoked by slash
+command (`/diagnose`, `/qa`). Standard skills live in `skills/<name>/SKILL.md`,
+in Anthropic's Agent Skills format, and are loaded by `skill_registry.py` at
+import.
+
+An invoked skill skips the router — a slash command states the intent the router
+would otherwise guess — and its instructions lead the planner's user turn. They
+are per-turn context, like attachments, so the client re-sends `skill` on every
+turn it should apply to. See [PAYLOAD_SPEC.md](PAYLOAD_SPEC.md#skill-invocation).
+
 ### Routing
 
 Every request first passes through the `RouterAgent` (Claude Haiku), which

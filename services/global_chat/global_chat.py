@@ -17,6 +17,7 @@ from util import ApolloError, create_logger, check_attachment_size, APOLLO_VERSI
 from langfuse_util import should_track, build_tags, build_generation_diff
 from global_chat.config_loader import ConfigLoader
 from global_chat.router import RouterAgent
+from global_chat.skill_registry import Skill, get_skill
 
 logger = create_logger(__name__)
 
@@ -33,6 +34,7 @@ class Payload:
     api_key: Optional[str] = None
     attachments: Optional[List[Dict]] = None
     metrics_opt_in: Optional[bool] = None
+    skill: Optional[Skill] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
@@ -55,7 +57,17 @@ class Payload:
             api_key=data.get("api_key"),
             attachments=data.get("attachments"),
             metrics_opt_in=data.get("metrics_opt_in"),
+            skill=cls._resolve_skill(data.get("skill")),
         )
+
+    @staticmethod
+    def _resolve_skill(raw: object) -> Optional[Skill]:
+        """Resolve an invoked skill to its instructions, or reject the request."""
+        if raw is None:
+            return None
+        if not isinstance(raw, dict) or not isinstance(raw.get("name"), str):
+            raise ApolloError(400, "skill must be an object with a name")
+        return get_skill(raw["name"])
 
     def get_stream(self) -> bool:
         """Extract stream flag from options."""
@@ -108,6 +120,7 @@ def main(data_dict: dict) -> dict:
                 attachments=data.attachments or [],
                 user=user_info,
                 metrics_opt_in=data.metrics_opt_in,
+                skill=data.skill,
             )
 
             if tracking:

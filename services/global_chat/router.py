@@ -21,6 +21,7 @@ from langfuse import observe, get_client as get_langfuse_client
 from util import create_logger, ApolloError, sum_usage, attachments_to_context
 from streaming_util import StreamManager
 from global_chat.config_loader import ConfigLoader
+from global_chat.skill_registry import Skill, strip_invocation
 from models import resolve_model
 from yaml_utils import get_step_name_from_page, get_page_view, find_job_in_yaml, stitch_job_code, workflow_has_job_code
 
@@ -85,6 +86,7 @@ class RouterAgent:
         attachments: Optional[List[Dict]] = None,
         user: Optional[Dict] = None,
         metrics_opt_in: Optional[bool] = None,
+        skill: Optional[Skill] = None,
     ) -> RouterResult:
         """
         Route request to appropriate handler and execute.
@@ -96,6 +98,7 @@ class RouterAgent:
             history: Conversation history
             stream: Streaming flag
             attachments: Optional input attachments (e.g. logs, dataclips)
+            skill: A skill the user invoked by name, which routes itself
 
         Returns:
             RouterResult with response, attachments, history, usage, meta
@@ -116,6 +119,9 @@ class RouterAgent:
         # a handed-over request continues the same stream instead of starting
         # a second message lifecycle.
         self._stream_manager = StreamManager(model=self.model, stream=stream)
+
+        if skill:
+            return self._route_to_skill(skill, content, workflow_yaml, page, history, stream)
 
         try:
             decision = self._make_routing_decision(content, workflow_yaml, page, history)
@@ -465,6 +471,36 @@ class RouterAgent:
         except Exception:
             logger.warning("Failed to record reroute metadata in Langfuse")
 
+    def _route_to_skill(
+        self,
+        skill: Skill,
+        content: str,
+        workflow_yaml: Optional[str],
+        page: Optional[str],
+        history: List[Dict],
+        stream: bool,
+    ) -> RouterResult:
+        """Hand an invoked skill straight to the planner, skipping the router.
+
+        The router guesses intent; a slash command states it, so there is
+        nothing to decide. Both standard skills are multi-step tasks, which is
+        what the planner is for.
+        """
+        logger.info(f"Skill '{skill.name}' invoked, bypassing router")
+
+        result = self._route_to_planner(
+            strip_invocation(content, skill.name),
+            workflow_yaml,
+            page,
+            history,
+            stream,
+            confidence=None,
+            skill=skill,
+        )
+        result.meta["agents"] = [a for a in result.meta["agents"] if a != "router"]
+        result.meta["skill"] = skill.name
+        return result
+
     def _route_to_planner(
         self,
         content: str,
@@ -472,7 +508,8 @@ class RouterAgent:
         page: Optional[str],
         history: List[Dict],
         stream: bool,
-        confidence: int,
+        confidence: Optional[int],
+        skill: Optional[Skill] = None,
     ) -> RouterResult:
         """Delegate to PlannerAgent for complex orchestration."""
         from global_chat.planner import PlannerAgent
@@ -492,12 +529,14 @@ class RouterAgent:
             user=self._user,
             metrics_opt_in=self._metrics_opt_in,
             stream_manager=self._stream_manager,
+            skill=skill,
         )
 
         total_usage = sum_usage(self.routing_usage, planner_result.usage)
 
         meta = planner_result.meta.copy()
-        meta["router_confidence"] = confidence
+        if confidence is not None:
+            meta["router_confidence"] = confidence
 
         return RouterResult(
             response=planner_result.response,

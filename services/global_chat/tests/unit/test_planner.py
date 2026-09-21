@@ -35,6 +35,7 @@ def make_planner() -> PlannerAgent:
     planner.subagent_results = []
     planner._segments = []
     planner._attachments = []
+    planner._skill = None
     planner.api_key = "test-key"
     planner._user = None
     planner._metrics_opt_in = None

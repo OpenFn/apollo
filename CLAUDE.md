@@ -169,7 +169,10 @@ SSE to clients.
 - `global_chat/` - Orchestrator service and single entry point for OpenFn AI
   chat. Routes requests via a RouterAgent (Haiku) to specialized subagents, or
   escalates to a PlannerAgent (Sonnet) that coordinates multi-step tasks using
-  tool calls. Depends on `job_chat`, `workflow_chat`, and `search_docsite`.
+  tool calls. A `skill` in the payload names a standard skill the user invoked by
+  slash command (`skills/<name>/SKILL.md`, loaded by `skill_registry.py`); it
+  bypasses the router and leads the planner's turn. Depends on `job_chat`,
+  `workflow_chat`, and `search_docsite`.
 - `job_chat/` - AI chat service for OpenFn job code assistance. Supports
   conversational help and a code suggestions mode with auto-patching. Uses RAG
   via `search_docsite` and injects adaptor API docs. Streams responses.
