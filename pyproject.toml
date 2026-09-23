@@ -21,9 +21,9 @@ langchain-openai = "^1.6"
 langchain-text-splitters = "^1.1"
 nltk = "^3.10.3"
 pytest = "^9.1.1"
-sentry-sdk = "^2.69.1"
+sentry-sdk = "^2.69.2"
 psycopg2-binary = "^2.9.13"
-langfuse = "^4.15.2"
+langfuse = "^4.15.4"
 opentelemetry-instrumentation-anthropic = "^0.62.3"
 opentelemetry-instrumentation-threading = "0.65b0"
 pandas = "^2.2"
@@ -34,7 +34,7 @@ optional = false
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.1.1"
-ruff = "^0.16.7"
+ruff = "^0.16.8"
 
 [build-system]
 requires = ["poetry-core"]
