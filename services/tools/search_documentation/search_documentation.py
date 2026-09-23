@@ -5,17 +5,16 @@ Can be called:
 1. As a standalone service via entry.py: bun py tools/search_documentation
 2. As a tool by supervisor via search_documentation_tool()
 """
-import os
 import sys
-from pathlib import Path
-from typing import Dict, List, Optional
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict
 
 # Import utilities from services directory
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from util import create_logger, ApolloError
-from search_docsite.search_docsite import DocsiteSearch
+from search_docsite.search_docsite import resolve_backend
+from util import ApolloError, create_logger
 
 logger = create_logger(__name__)
 
@@ -46,8 +45,10 @@ def _search_implementation(query: str, num_results: int) -> Dict:
     """
     logger.info(f"Searching documentation for: {query[:100]}...")
 
+    # Both backends use semantic search with the same cosine-similarity cutoff, so
+    # results are directly comparable.
     # Initialize docsite search
-    docsite_search = DocsiteSearch()
+    docsite_search = resolve_backend()()
 
     # Search with threshold for quality results
     search_results = docsite_search.search(
@@ -91,7 +92,7 @@ def main(data: Dict) -> Dict:
         raise
     except Exception as e:
         logger.exception("Error in search_documentation service")
-        raise ApolloError(500, f"Documentation search failed: {str(e)}")
+        raise ApolloError(500, f"Documentation search failed: {str(e)}") from e
 
 
 def search_documentation_tool(tool_input: Dict) -> str:
@@ -140,4 +141,4 @@ You can now synthesize this information into a helpful response."""
 
     except Exception as e:
         logger.exception("Error in search_documentation tool")
-        raise ApolloError(500, f"Documentation search failed: {str(e)}")
+        raise ApolloError(500, f"Documentation search failed: {str(e)}") from e
