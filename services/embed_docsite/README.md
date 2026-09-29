@@ -2,18 +2,34 @@
 
 This service embeds the OpenFn Documentation to a vector database. It downloads,
 chunks, processes metadata, embeds and uploads the documentation to a vector
-database (Pinecone).
+database. Two write targets are supported: Pinecone (the default) and Postgres
+with the `pgvector` extension.
 
 ## Setup
 
 Every environment maintains its own vector store, so there is no shared index to
 point at. Run this service to populate your own before using `search_docsite`.
 
+### Pinecone (default)
+
 1. Create an account on [Pinecone](https://www.pinecone.io/) and set up a free
    cluster.
 2. Add `PINECONE_API_KEY` and `OPENAI_API_KEY` to your `.env` file.
 
 The service creates the `docsite` index if it does not already exist.
+
+### Postgres (opt-in)
+
+1. Configure `POSTGRES_URL` in your `.env` file, pointing at a server with the
+   `vector` extension ([pgvector](https://github.com/pgvector/pgvector))
+   available.
+2. Pass `"target": "postgres"` in the payload (see Payload Reference below).
+
+The `docsite_batches` / `docsite_chunks` tables and the `vector` extension are
+created by a versioned migration that Apollo applies at startup (or run
+`bun run migrate` yourself); no manual `psql` step is needed. This service does
+not migrate, and returns a 503 if the schema is missing. See the main
+[README's Database section](../../README.md#database) for details.
 
 ## Usage - Embedding OpenFn Documentation
 

@@ -93,9 +93,10 @@ lands in shell history or `ps`; the client **name** is a positional argument.
    bun run migrate
    ```
 
-   This applies only the platform/auth schema (`lightning_clients`, `_migrations`).
-   The Python services own and self-initialise their own table
-   (`adaptor_function_docs`), so `bun run migrate` does not and should not touch it.
+   This applies every schema under `platform/migrations/`: the auth schema
+   (`lightning_clients`, `_migrations`) and the opt-in docsite tables (which need
+   pgvector on `POSTGRES_URL`). The Python `adaptor_function_docs` table is
+   self-initialised by its service, so it is not touched.
 
 2. Set a master encryption key in `.env` (once) — the CLI uses it to encrypt each
    client's Anthropic key at rest:

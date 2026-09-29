@@ -8,8 +8,8 @@ import logRequest from "./util/log-request";
 import { InstanceAuth } from "./auth/instance-auth";
 import { logInternalTokenProvenance } from "./auth/internal-token";
 import { captureException } from "./util/sentry";
-import { clientsDbUrl, closeDb } from "./db";
-import { runMigrations } from "./db/migrate";
+import { closeDb } from "./db";
+import { runAllMigrations } from "./db/migrate";
 import { randomUUID } from "node:crypto";
 import { readdir, rm } from "node:fs/promises";
 import path from "node:path";
@@ -79,17 +79,14 @@ export default async (
   await setupDir(app);
   await setupServices(app, +port, auth);
 
-  // Bring the schema up to date before auth probes it. Without a clients DB URL
-  // there is nothing to migrate; auth.init() then handles the fail-closed path on
-  // its own.
-  if (clientsDbUrl()) {
-    try {
-      const applied = await runMigrations();
-      console.log(
-        applied > 0 ? `${applied} migration(s) applied.` : "Schema up to date."
-      );
-    } catch (err) {
-      console.error("Apollo migrations failed to run.", err);
+  // Bring every schema up to date before auth probes it. A target without a DB URL
+  // is skipped (auth.init() handles the fail-closed path on its own), and one
+  // target failing doesn't stop the others.
+  for (const r of await runAllMigrations()) {
+    if (r.error) {
+      console.error(`Apollo ${r.target} migrations failed to run`, r.error);
+    } else if (r.applied) {
+      console.log(`${r.applied} ${r.target} migration(s) applied`);
     }
   }
 
