@@ -1,65 +1,157 @@
 import os
-import json
+
+from db_migrations import run_migrations
 from dotenv import load_dotenv
-import pandas as pd
-from util import create_logger, ApolloError
+from embed_docsite.docsite_indexer import (
+    ALL_DOCS_TYPES,
+    DocsiteIndexer,
+    register_vector_type,
+)
 from embed_docsite.docsite_processor import DocsiteProcessor
-from embed_docsite.docsite_indexer import DocsiteIndexer
+from embed_docsite.pinecone_legacy_indexer import LegacyPineconeDocsiteIndexer
+from util import ApolloError, create_logger, get_db_connection
 
 logger = create_logger("embed_docsite")
 
-def main(data):
+VALID_TARGETS = ("pinecone", "postgres")
+
+
+def _collect_documents(docs_to_upload, docs_to_ignore, chunk_target_length, chunk_min_length):
+    """Download and chunk every requested docs_type. Shared by both targets."""
+    documents = []
+    metadata_dict = {}
+    for docs_type in docs_to_upload:
+        processor = DocsiteProcessor(
+            docs_type=docs_type,
+            docs_to_ignore=docs_to_ignore,
+            target_length=chunk_target_length,
+            min_length=chunk_min_length,
+        )
+        type_documents, type_metadata = processor.get_preprocessed_docs()
+        documents.extend(type_documents)
+        metadata_dict.update(type_metadata)
+    return documents, metadata_dict
+
+
+def main(data: dict) -> dict:
     logger.info("Starting...")
 
-    # Get selection of doc types to upload, or default to all
-    docs_to_upload = data.get("docs_to_upload", ["adaptor_docs", "general_docs", "adaptor_functions"])
+    target = data.get("target", "pinecone")
+    docs_to_upload = data.get("docs_to_upload", ALL_DOCS_TYPES)
     docs_to_ignore = data.get("docs_to_ignore", ["job-examples.md", "release-notes.md"])
+    chunk_target_length = data.get("chunk_target_length", 1000)
+    chunk_min_length = data.get("chunk_min_length", 700)
+    keep_batches = data.get("keep_batches", 2)
 
-    # Get other fields
-    index_params = {}
-    index_param_options = ["collection_name", "index_name", "max_total_collections"]
+    if target not in VALID_TARGETS:
+        raise ApolloError(
+            400,
+            f"Unknown target '{target}'. Expected 'pinecone' or 'postgres'",
+            type="BAD_REQUEST",
+        )
 
-    for key in index_param_options:
-        if key in data:
-            index_params[key] = data[key]
-
-    # Set API keys
     load_dotenv(override=True)
 
-    if data.get("PINECONE_API_KEY", ""):
-        PINECONE_API_KEY = data["PINECONE_API_KEY"]
-    else:
-        PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
-    
-    if data.get("OPENAI_API_KEY", ""):
-        OPENAI_API_KEY = data["OPENAI_API_KEY"]
-    else:
-        OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-    
-    # Check for missing keys
-    missing_keys = []
-
-    if not OPENAI_API_KEY:
-        missing_keys.append("OPENAI_API_KEY") 
-    if not PINECONE_API_KEY:
-        missing_keys.append("PINECONE_API_KEY")
-
-    if missing_keys:
-        msg = f'Missing API keys: {", ".join(missing_keys)}'
+    openai_api_key = data.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    if not openai_api_key:
+        msg = "Missing API key: OPENAI_API_KEY"
         logger.error(msg)
-        raise ApolloError(500, f'Missing API keys: {", ".join(missing_keys)}. Add to payload or environment.', type="BAD_REQUEST")
+        raise ApolloError(500, f"{msg}. Add to payload or environment", type="BAD_REQUEST")
 
-    # Initialize indexer
-    docsite_indexer = DocsiteIndexer(**(index_params or {}))
+    documents, metadata_dict = _collect_documents(
+        docs_to_upload, docs_to_ignore, chunk_target_length, chunk_min_length,
+    )
 
-    # Add docs
-    for docs_type in docs_to_upload:
-        # Download and process
-        docsite_processor = DocsiteProcessor(docs_type=docs_type, docs_to_ignore=docs_to_ignore)
-        documents, metadata_dict = docsite_processor.get_preprocessed_docs()
+    if target == "pinecone":
+        return _upload_to_pinecone(data, documents, metadata_dict, docs_to_upload)
 
-        # Upload with metadata
-        idx = docsite_indexer.insert_documents(documents, metadata_dict)
+    return _upload_to_postgres(
+        documents, metadata_dict, docs_to_upload, chunk_target_length, chunk_min_length, keep_batches,
+    )
+
+
+def _upload_to_pinecone(data, documents, metadata_dict, docs_to_upload):
+    """Legacy write path to pinecone."""
+    pinecone_api_key = data.get("PINECONE_API_KEY") or os.environ.get("PINECONE_API_KEY")
+    if not pinecone_api_key:
+        msg = "Missing API key: PINECONE_API_KEY"
+        logger.error(msg)
+        raise ApolloError(500, f"{msg}. Add to payload or environment", type="BAD_REQUEST")
+
+    index_params = {
+        key: data[key]
+        for key in ("collection_name", "index_name", "max_total_collections")
+        if key in data
+    }
+    indexer = LegacyPineconeDocsiteIndexer(**index_params)
+    indexer.insert_documents(documents, metadata_dict)
+
+    return {
+        "target": "pinecone",
+        "collection_name": indexer.collection_name,
+        "docs_types": docs_to_upload,
+        "chunk_count": len(documents),
+    }
+
+
+def _mark_failed(indexer, conn, batch_id):
+    """Best-effort bookkeeping: never let it replace the error that caused it."""
+    try:
+        indexer.fail_batch(conn, batch_id)
+    except Exception as exc:
+        logger.error(f"Could not mark batch {batch_id} failed: {exc}")
+
+
+def _prune_old_batches(indexer, conn):
+    """Best-effort cleanup of older, unrelated batches. Runs after the new
+    batch is already promoted."""
+    try:
+        return indexer.prune_old_batches(conn)
+    except Exception as exc:
+        logger.error(f"Could not prune old batches: {exc}")
+        return []
+
+
+def _upload_to_postgres(documents, metadata_dict, docs_to_upload, chunk_target_length, chunk_min_length, keep_batches):
+    indexer = DocsiteIndexer(
+        chunk_target_length=chunk_target_length,
+        chunk_min_length=chunk_min_length,
+        keep_batches=keep_batches,
+    )
+
+    conn = get_db_connection()
+    try:
+        run_migrations(conn)
+        register_vector_type(conn)
+
+        batch_id = None
+        try:
+            batch_id = indexer.start_batch(conn, docs_to_upload)
+            chunk_count = indexer.insert_documents(conn, batch_id, documents, metadata_dict)
+            copied = indexer.copy_forward_missing_docs_types(conn, batch_id, docs_to_upload)
+            indexer.build_index(conn, batch_id)
+            indexer.promote_batch(conn, batch_id, chunk_count + copied)
+        except Exception:
+            if batch_id is not None:
+                _mark_failed(indexer, conn, batch_id)
+            raise
+
+        # The new batch is already promoted and visible to readers. Pruning
+        # only touches older, unrelated batches.
+        pruned = _prune_old_batches(indexer, conn)
+
+        return {
+            "target": "postgres",
+            "batch_id": batch_id,
+            "docs_types": docs_to_upload,
+            "chunk_count": chunk_count,
+            "copied_forward": copied,
+            "pruned_batches": pruned,
+            "promoted": True,
+        }
+    finally:
+        conn.close()
+
 
 if __name__ == "__main__":
-    main()
+    main({})

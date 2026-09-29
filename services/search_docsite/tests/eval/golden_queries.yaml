@@ -1,0 +1,109 @@
+# Representative job_chat/general-docs queries with expected doc titles.
+#
+# recall@k counts a query as a hit when ANY expected title appears in the top k,
+# so each entry lists every doc that would be a reasonable answer, not only the
+# single best one. Titles are docsite filenames without .md, matching
+# docsite_chunks.doc_title.
+#
+# category is 'conceptual' (natural-language questions) or 'keyword' (exact-term
+# lookups). run_eval reports recall per category, because hybrid search is
+# expected to help on keyword lookups and tie on conceptual ones — a blended
+# figure would hide exactly that effect.
+#
+# Labels were derived from the general_docs corpus via full-text search on each
+# query's key terms, deliberately not from vector-search output: labelling from
+# the thing under test would be circular.
+queries:
+  # --- conceptual -------------------------------------------------------------
+  - query: "how do I configure a webhook trigger"
+    category: conceptual
+    expected_doc_titles: ["triggers", "webhook-auth"]
+  - query: "how do I set up a cron trigger"
+    category: conceptual
+    expected_doc_titles: ["triggers"]
+  - query: "what is a run in OpenFn"
+    category: conceptual
+    expected_doc_titles: ["terminology", "glossary"]
+  - query: "how do I use collections to store state between runs"
+    category: conceptual
+    expected_doc_titles: ["collections", "state", "cli-collections"]
+  - query: "how do I configure a credential for an adaptor"
+    category: conceptual
+    expected_doc_titles: ["credentials", "manage-credentials"]
+  - query: "what is the difference between a job and a workflow"
+    category: conceptual
+    expected_doc_titles: ["terminology", "glossary", "workflows"]
+  - query: "how do I deploy a project using the CLI"
+    category: conceptual
+    expected_doc_titles: ["cli-sync", "portability"]
+  - query: "how do I debug a failed run"
+    category: conceptual
+    expected_doc_titles: ["troubleshooting", "rerunning-workflow", "inspect-runs"]
+  - query: "how do I write a data transform function"
+    category: conceptual
+    expected_doc_titles: ["data-transformation", "job-writing-guide", "operations"]
+  - query: "how do I control who can access a project"
+    category: conceptual
+    expected_doc_titles: ["collaboration", "user-roles-permissions"]
+  - query: "how do I set up a sandbox environment"
+    category: conceptual
+    expected_doc_titles: ["sandboxes"]
+  - query: "how long is my run data kept"
+    category: conceptual
+    expected_doc_titles: ["retention-periods", "io-data-storage", "security-for-devs"]
+  - query: "how do I get notified when a workflow fails"
+    category: conceptual
+    expected_doc_titles: ["notifications"]
+  - query: "how do I version control my project with GitHub"
+    category: conceptual
+    expected_doc_titles: ["link-to-gh", "cli-sync"]
+  - query: "what security measures does OpenFn have"
+    category: conceptual
+    expected_doc_titles: ["security", "security-compliance"]
+
+  # --- keyword ----------------------------------------------------------------
+  - query: "state.cursor"
+    category: keyword
+    expected_doc_titles: ["using-cursors"]
+  - query: "--force flag on project push"
+    category: keyword
+    expected_doc_titles: ["cli-sync"]
+  - query: "webhook auth method"
+    category: keyword
+    expected_doc_titles: ["webhook-auth"]
+  - query: "workflow snapshots"
+    category: keyword
+    expected_doc_titles: ["workflow-snapshots"]
+  - query: "lazy state operator"
+    category: keyword
+    expected_doc_titles: ["lazy-state-operator"]
+  - query: "dataValue"
+    category: keyword
+    expected_doc_titles: ["job-snippets"]
+  - query: "each operation"
+    category: keyword
+    expected_doc_titles: ["operations"]
+  - query: "rerun a workflow"
+    category: keyword
+    expected_doc_titles: ["rerunning-workflow"]
+  - query: "collections CLI commands"
+    category: keyword
+    expected_doc_titles: ["cli-collections"]
+  - query: "activity history"
+    category: keyword
+    expected_doc_titles: ["activity-history"]
+  - query: "project.yaml"
+    category: keyword
+    expected_doc_titles: ["portability-v3"]
+  - query: "step editor"
+    category: keyword
+    expected_doc_titles: ["step-editor"]
+  - query: "git branch"
+    category: keyword
+    expected_doc_titles: ["working-with-branches", "cli-sync"]
+  - query: "sandbox"
+    category: keyword
+    expected_doc_titles: ["sandboxes"]
+  - query: "security compliance"
+    category: keyword
+    expected_doc_titles: ["security-compliance"]

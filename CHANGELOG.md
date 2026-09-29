@@ -1,5 +1,18 @@
 # apollo
 
+## 3.3.0
+
+### Minor Changes
+
+- 543a358: Add postgres (with pgvector) for docsite search and embeddings
+
+### Patch Changes
+
+- 5f38c24: bump langchain, langfuse, sentry-sdk, psycopg2, aiohttp, nltk,
+  python-dotenv, opentelemetry-instrumentation-anthropic, ruff
+- a4f7d52: embed_docsite: improve the loading of the docsite corpus by loading
+  from a shallow git clone instead of HTTP
+
 ## 3.2.0
 
 ### Minor Changes
