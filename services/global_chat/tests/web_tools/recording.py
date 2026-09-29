@@ -3,6 +3,7 @@
 import hashlib
 import json
 import time
+from typing import Protocol
 
 from global_chat.config_loader import ConfigLoader
 from global_chat.planner import PlannerAgent
@@ -13,6 +14,14 @@ from .variants import INJECT_TEMPLATE, Variant
 
 WEB_PROMPT_KEY = "planner_web_tools_prompt"
 USAGE_FIELDS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+
+
+class PlayableScenario(Protocol):
+    """What run_scenario reads from a scenario; scenarios.Scenario satisfies it."""
+
+    turns: tuple[str, ...]
+    workflow_yaml: str | None
+    page: str | None
 
 
 class OverrideConfigLoader(ConfigLoader):
@@ -67,7 +76,7 @@ def fingerprint(variant: Variant) -> str:
     return hashlib.sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()[:10]
 
 
-def run_scenario(scenario: object, variant: Variant) -> list[TurnRecord]:
+def run_scenario(scenario: PlayableScenario, variant: Variant) -> list[TurnRecord]:
     """Play every turn of a scenario live, carrying history the way return_history does.
 
     A failure ends the scenario with a recorded error rather than raising, so
