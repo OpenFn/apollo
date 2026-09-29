@@ -8,14 +8,15 @@ import {
   spyOn,
 } from "bun:test";
 import { randomBytes } from "node:crypto";
-import { Elysia } from "elysia";
-import setup from "../src/server";
+import { Elysia, t } from "elysia";
+import setup, { errorStatus, isClientError } from "../src/server";
 import { captureException } from "../src/util/sentry";
 import * as sentry from "../src/util/sentry";
 import { InstanceAuth, type Client } from "../src/auth/instance-auth";
 import { hashToken } from "../src/auth/hash";
 import { internalAuthHeader } from "../src/auth/internal-token";
 import { encryptKey } from "../src/util/instance-key-crypto";
+import { ApolloThrowable } from "../src/util/errors";
 import pkg from "../../package.json";
 
 const port = 9865;
@@ -224,6 +225,94 @@ describe("Sentry", () => {
 
     expect(a.status).toBe(b.status);
     expect(await a.text()).toBe(await b.text());
+  });
+
+  // The guard decides from the onError context, and Elysia puts the status in a
+  // different place for each kind of error. Rather than hand-write the shapes,
+  // provoke each error for real and keep the context Elysia hands the hook, so
+  // the table below is Elysia's behaviour rather than our memory of it.
+  const contextFor = async (build: (app: Elysia) => Elysia, path: string) => {
+    let seen: any;
+    const app = build(new Elysia().onError((ctx) => {
+      seen = ctx;
+    }));
+    await app.handle(new Request(`http://localhost${path}`));
+    return seen;
+  };
+
+  it("reads the status off the context wherever Elysia put it", async () => {
+    const notFound = await contextFor((app) => app, "/no-such-route");
+    const thrown = await contextFor(
+      (app) =>
+        app.get("/boom", () => {
+          throw new Error("kaboom");
+        }),
+      "/boom"
+    );
+    const validation = await contextFor(
+      (app) =>
+        app.get("/v", ({ query }) => query.n, {
+          query: t.Object({ n: t.Number() }),
+        }),
+      "/v?n=banana"
+    );
+    const apolloThrowable = await contextFor(
+      (app) =>
+        app.get("/rate", () => {
+          throw new ApolloThrowable(429, "RATE_LIMIT", "slow down");
+        }),
+      "/rate"
+    );
+    const serverThrowable = await contextFor(
+      (app) =>
+        app.get("/broken", () => {
+          throw new ApolloThrowable(500, "BOOM", "it broke");
+        }),
+      "/broken"
+    );
+
+    // NOT_FOUND and VALIDATION carry `status` on the error itself; an
+    // ApolloThrowable arrives with its HTTP code as `code`; a bare throw has
+    // neither, and only `set.status` says 500.
+    expect(errorStatus(notFound)).toBe(404);
+    expect(errorStatus(validation)).toBe(422);
+    expect(errorStatus(apolloThrowable)).toBe(429);
+    expect(errorStatus(serverThrowable)).toBe(500);
+    expect(errorStatus(thrown)).toBe(500);
+
+    expect(isClientError(errorStatus(notFound))).toBe(true);
+    expect(isClientError(errorStatus(validation))).toBe(true);
+    expect(isClientError(errorStatus(apolloThrowable))).toBe(true);
+    expect(isClientError(errorStatus(serverThrowable))).toBe(false);
+    expect(isClientError(errorStatus(thrown))).toBe(false);
+  });
+
+  // An unreadable status is an error we did not anticipate, so it is reported
+  // rather than dropped. A `set.status` still on its 200 default is not a
+  // status, and neither is a string Elysia code.
+  it("reports an error whose status it cannot read", () => {
+    const unreadable = { error: new Error("x"), code: "UNKNOWN" };
+    expect(errorStatus(unreadable)).toBeUndefined();
+    expect(isClientError(undefined)).toBe(false);
+    expect(isClientError(errorStatus({ set: { status: "Not Found" } }))).toBe(
+      false
+    );
+    expect(isClientError(200)).toBe(false);
+  });
+
+  // Through the real server, not a stand-in: proves the hook actually consults
+  // the guard. Bots hitting /favicon.ico used to page us.
+  it("does not report a 404 raised by the real server", async () => {
+    const capture = spyOn(sentry, "captureException");
+    try {
+      capture.mockClear();
+      const res = await app.handle(get("favicon.ico"));
+
+      expect(res.status).toBe(404);
+      expect(capture).not.toHaveBeenCalled();
+    } finally {
+      capture.mockRestore();
+    }
   });
 });
 
@@ -948,6 +1037,34 @@ describe("Instance auth cache refresh", () => {
       expect(extras?.tokenHash).toBeDefined();
       // The capture must never carry the raw credential.
       expect(JSON.stringify(extras)).not.toContain(ALPHA);
+    } finally {
+      capture.mockRestore();
+      error.mockRestore();
+    }
+  });
+
+  // The 503 capture above says the store was unavailable but not why: it has
+  // the token hash, never the database's own error. Without this one the reason
+  // for the outage is only ever a console line.
+  it("captures the database error behind a failed cold read", async () => {
+    const dbError = new Error("connection reset by peer");
+    const auth = new InstanceAuth({
+      dbLookup: async () => {
+        throw dbError;
+      },
+    });
+    const error = spyOn(console, "error").mockImplementation(() => {});
+    const capture = spyOn(sentry, "captureException");
+    try {
+      await auth.authenticate(fakeCtx(ALPHA));
+
+      expect(capture.mock.calls.some(([err]) => err === dbError)).toBe(true);
+      const extras = capturedExtras(capture, "client-lookup-error");
+      expect(extras).toBeDefined();
+      // Still logged, as before — the capture is additive.
+      expect(error.mock.calls.map(([m]) => String(m)).join("\n")).toContain(
+        "client lookup failed against the database"
+      );
     } finally {
       capture.mockRestore();
       error.mockRestore();

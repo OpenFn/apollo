@@ -41,6 +41,26 @@ const sweepTempPayloads = async () => {
 };
 import pkg from "../../package.json";
 
+// Elysia reports an error's status in one of three places, depending on where
+// the error came from: its own errors carry `status` (NOT_FOUND 404, VALIDATION
+// 422, PARSE 400), an ApolloThrowable arrives with its HTTP code as `code`, and
+// a bare `throw` shows only the status Elysia has already put on `set`. Read
+// them in that order and take the first number; a `set.status` that is still
+// the 200 default, or a string Elysia code like "UNKNOWN", is not a status.
+export const errorStatus = (ctx: {
+  error?: unknown;
+  code?: unknown;
+  set?: { status?: unknown };
+}): number | undefined =>
+  [(ctx.error as { status?: unknown })?.status, ctx.code, ctx.set?.status].find(
+    (value): value is number => typeof value === "number"
+  );
+
+/** A status we can read and that blames the caller. Anything we cannot read is
+ *  unexpected, so it is reported rather than dropped. */
+export const isClientError = (status: number | undefined): boolean =>
+  status !== undefined && status >= 400 && status < 500;
+
 export default async (
   port: number | string = 3000,
   // One instance per process, shared by the auth hook and the key resolver. Tests
@@ -71,8 +91,11 @@ export default async (
 
   // Report unhandled throws to Sentry, then return nothing so Elysia produces
   // its normal error response (returning a value would replace the body/status).
-  app.onError(({ error }) => {
-    captureException(error);
+  // Routine 4xx - a bot hitting NOT_FOUND, a malformed body - is the caller's
+  // error, not ours, and reporting it buries the 5xx that matter.
+  app.onError((ctx) => {
+    if (isClientError(errorStatus(ctx))) return;
+    captureException(ctx.error);
   });
 
   await setupHealthcheck(app);
@@ -90,6 +113,7 @@ export default async (
       );
     } catch (err) {
       console.error("Apollo migrations failed to run.", err);
+      captureException(err, { reason: "migrations-failed" });
     }
   }
 

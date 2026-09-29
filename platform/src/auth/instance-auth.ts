@@ -166,6 +166,7 @@ export class InstanceAuth {
         "Apollo instance auth: the database could not be reached",
         err
       );
+      captureException(err, { reason: "db-unreachable" });
     }
   }
 
@@ -299,6 +300,9 @@ export class InstanceAuth {
         "Apollo instance auth: client lookup failed against the database",
         err
       );
+      // The 503 below is reported too, but with only the token hash - this is
+      // the one capture that carries why the database actually said no.
+      captureException(err, { reason: "client-lookup-error" });
       return { kind: "unavailable" };
     }
   }
