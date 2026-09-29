@@ -8,6 +8,10 @@ judges: [general, openfn_workflow_expert]
 
 Basic input test. The service handles a simple input without an existing YAML and either generates a workflow YAML or asks for more information.
 
+# quality_criteria
+
+- Adaptors specify version numbers, not `@latest`.
+
 # turn
 
 ## role

@@ -8,6 +8,10 @@ judges: [general, openfn_workflow_expert]
 
 Second conversation turn requesting a change to the YAML. The service should preserve every job from the original YAML while applying the requested addition (data deduplication before validation).
 
+# quality_criteria
+
+- New jobs' adaptors specify version numbers; existing jobs keep `@latest`.
+
 # settings
 
 ## existing_yaml
