@@ -6,10 +6,18 @@ The documentation is vectorized through the `embed_docsite` service.
 
 ## Setup
 
-Searching requires a populated `docsite` index. Every environment maintains its own, so there is no shared index to point at: run `embed_docsite` to create and fill yours before searching.
+Searching requires a populated `docsite` index or Postgres batch. Every environment maintains its own, so there is no shared index to point at: run `embed_docsite` to create and fill yours before searching.
+
+By default, search reads from Pinecone:
 
 1. Create an account on [Pinecone](https://www.pinecone.io/) and set up a free cluster.
 2. Add `PINECONE_API_KEY` and `OPENAI_API_KEY` to your `.env` file.
+
+To read from Postgres instead, set `DOCSITE_SEARCH_BACKEND=postgres` in your
+`.env` (or pass `"backend": "postgres"` per request) and make sure
+`embed_docsite` has written a batch there first with `"target": "postgres"`.
+This backend requires the Postgres `vector` extension (pgvector); see the main
+[README's Database section](../../README.md#database).
 
 ## Usage - Searching OpenFn Documentation
 
@@ -26,7 +34,7 @@ bun py search_docsite --input tmp/payload.json
 ```
 
 ## Implementation
-The service uses the DocsiteSearch class to query the database (Pinecone). It embeds semantic search queries using OpenAI. 
+The service dispatches to a backend-specific search class: `DocsiteSearch` for Postgres, `LegacyPineconeDocsiteSearch` for Pinecone. Both embed semantic search queries using OpenAI. 
 
 To compare backends on the same query, run the service twice with different
 `backend` values and diff the results. This replaces the shadow-mode comparison

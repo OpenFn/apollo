@@ -65,7 +65,7 @@ bun dev
 
 To see an index of the available language services, head to `localhost:3000`.
 
-The chat services search a Pinecone index of the OpenFn documentation, which every environment populates itself. Run `bun py embed_docsite` to build yours — see [embed_docsite](services/embed_docsite/README.md).
+The chat services search an index of the OpenFn documentation, which every environment populates itself. Two backends are supported: Pinecone (the default) and Postgres with the `pgvector` extension (opt-in, see [Database](#database)). Run `bun py embed_docsite` to build yours; see [embed_docsite](services/embed_docsite/README.md) for the write-target options and [search_docsite](services/search_docsite/README.md) for backend selection.
 
 ## Python Setup
 
@@ -305,11 +305,29 @@ them is safe:
     `load_adaptor_docs` runs, so applying it by hand is optional.
 - `lightning_clients` - created and kept current by the migration runner
   (`platform/src/db/migrate.ts`, migrations under
-  [`platform/migrations/`](platform/migrations/)). It is applied automatically
-  at Apollo startup when `POSTGRES_URL` is set; no manual `psql` step is needed.
+  [`migrations/clients/`](migrations/clients/)). It is applied
+  automatically at Apollo startup when a database URL is set; no manual `psql`
+  step is needed.
 
 First, make sure you've configured your desired `POSTGRES_URL` in your `.env`
 file.
+
+### Optional: Postgres backend for docsite search (pgvector)
+
+Docsite search (`embed_docsite` / `search_docsite`) defaults to Pinecone, but
+also supports Postgres as an opt-in backend, storing embeddings in
+`docsite_batches` and `docsite_chunks`. This backend requires the Postgres
+`vector` extension ([pgvector](https://github.com/pgvector/pgvector)) to be
+available on your `POSTGRES_URL` server.
+
+These tables are created by the same migration runner as `lightning_clients`
+(`platform/src/db/migrate.ts`), from
+[`migrations/services/`](migrations/services/), against `POSTGRES_URL`. It runs
+at Apollo startup and via `bun run migrate`. If your server has no pgvector the
+services migration fails and is logged, but it doesn't stop the clients
+migration or the server. See [embed_docsite](services/embed_docsite/README.md)
+and [search_docsite](services/search_docsite/README.md) for how to select the
+backend.
 
 ### Create the DB
 
