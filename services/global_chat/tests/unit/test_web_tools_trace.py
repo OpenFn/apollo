@@ -155,7 +155,6 @@ def test_format_trace_says_when_there_were_no_calls() -> None:
 
 
 def test_a_code_execution_result_is_paired_with_its_call() -> None:
-    """Dynamic filtering runs code_execution under web_*_20260209; its result is not missing."""
     trace = build_trace([response(
         use("c1", "code_execution", code="print(page[:100])"),
         result("c1", "code_execution_tool_result", Block(type="code_execution_result", stdout="ok")),

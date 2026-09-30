@@ -9,6 +9,8 @@ Run from the repo root:
     PYTHONUTF8=1 PYTHONPATH=services python -m poetry run python -m global_chat.tests.web_tools.calibrate
 """
 
+# ruff: noqa: T201 - a command-line report, where printing is its output
+
 import os
 import sys
 from pathlib import Path

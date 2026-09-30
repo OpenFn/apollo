@@ -36,11 +36,7 @@ class OverrideConfigLoader(ConfigLoader):
 
 
 class RecordingPlanner(PlannerAgent):
-    """PlannerAgent with web search on, recording each round's raw response.
-
-    Overrides private methods, so it is coupled to planner.py internals. Accepted
-    for a test helper.
-    """
+    """PlannerAgent with web search on, recording each round's raw response."""
 
     def __init__(self, config_loader: ConfigLoader, inject_urls: tuple[str, ...] = (), api_key: str | None = None) -> None:
         super().__init__(config_loader, api_key=api_key, web_search=True)
@@ -60,11 +56,7 @@ class RecordingPlanner(PlannerAgent):
 
 
 def fingerprint(variant: Variant) -> str:
-    """A short hash of everything that changes planner behaviour, used to key cached runs.
-
-    Changing prompts.yaml or config.yaml changes the fingerprint, so a cached run
-    from before the change is never reused.
-    """
+    """A short hash of everything that changes planner behaviour, used to key cached runs."""
     loader = OverrideConfigLoader(variant)
     material = {
         "model": loader.config["planner"].get("model"),
@@ -77,11 +69,7 @@ def fingerprint(variant: Variant) -> str:
 
 
 def run_scenario(scenario: PlayableScenario, variant: Variant) -> list[TurnRecord]:
-    """Play every turn of a scenario live, carrying history the way return_history does.
-
-    A failure ends the scenario with a recorded error rather than raising, so
-    one API hiccup never silently drops a run.
-    """
+    """Play every turn of a scenario live, carrying history the way return_history does."""
     loader = OverrideConfigLoader(variant)
     history: list[dict] = []
     turns: list[TurnRecord] = []
@@ -91,7 +79,7 @@ def run_scenario(scenario: PlayableScenario, variant: Variant) -> list[TurnRecor
         start = time.monotonic()
         try:
             result = planner.run(content, scenario.workflow_yaml, scenario.page, history, stream=False)
-        except Exception as error:  # recorded as a failed run, never dropped
+        except Exception as error:  # recorded as a failed run
             turns.append(TurnRecord(
                 answer="",
                 trace=build_trace(planner.responses),

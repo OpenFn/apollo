@@ -12,9 +12,9 @@ class Scenario:
     turns: tuple[str, ...]
     workflow_yaml: str | None = None
     page: str | None = None
-    # Ground truth: each string must be in the answer and in a fetched page.
+    # Ground truth, each string must be in the answer and in a fetched page.
     facts: tuple[str, ...] = ()
-    # A control must make no web calls at all.
+    # The control must make no web calls.
     control: bool = False
 
 
@@ -56,7 +56,7 @@ SCENARIOS = {s.id: s for s in (
         turns=("What does each() do in OpenFn job code, and when should I use it instead of fn()?",),
         control=True,
     ),
-    # FHIR vocabulary everywhere, but this is a pure JavaScript edit.
+    # FHIR vocabulary is found everywhere, but this is a pure JavaScript edit.
     Scenario(
         id="control_code_edit",
         turns=("In this step, rename the firstName field to given and wrap its value in an array.",),
@@ -64,8 +64,8 @@ SCENARIOS = {s.id: s for s in (
         page="workflows/commcare-to-fhir/map-patient",
         control=True,
     ),
-    # Plain positive case: the fact is inside what a 10k fetch returns.
-    # Calibrated: the pat-1 constraint text sits at char ~24.5k of the ~26k a 10k fetch returns.
+    # Positive case: the fact is inside what a 10k fetch returns.
+    # Calibrated, where the pat-1 constraint text sits at char ~24.5k of the ~26k a 10k fetch returns.
     Scenario(
         id="fhir_shallow",
         turns=("In FHIR R4, what rule applies to each entry in Patient.contact? What must it contain at minimum?",),
@@ -82,7 +82,7 @@ SCENARIOS = {s.id: s for s in (
         id="off_allowlist",
         turns=("What fields does the DHIS2 tracker API (/api/tracker) accept when creating an event?",),
     ),
-    # Turn 2 is answerable from turn 1's page; turn 3 barely needs it.
+    # Turn 2 is answerable from turn 1's page, and turn 3 barely needs it.
     Scenario(
         id="multi_turn",
         turns=(

@@ -6,7 +6,6 @@ Test helper only.
 from typing import Any
 
 WEB_TOOL_NAMES = {"web_search": "search", "web_fetch": "fetch"}
-# code_execution runs under web_*_20260209 (dynamic filtering) to trim fetched pages.
 RESULT_BLOCK_TYPES = ("web_search_tool_result", "web_fetch_tool_result", "code_execution_tool_result")
 
 
