@@ -79,16 +79,17 @@ export default async (
   await setupDir(app);
   await setupServices(app, +port, auth);
 
-  // Bring every schema up to date before auth probes it. A target without a DB URL
+  // Bring every schema up to date before auth probes it. A database without a URL
   // is skipped (auth.init() handles the fail-closed path on its own), and one
-  // target failing doesn't stop the others.
-  for (const r of await runAllMigrations()) {
+  // database failing doesn't stop the others.
+  const migrations = await runAllMigrations();
+  for (const r of migrations) {
     if (r.error) {
       console.error(`Apollo ${r.db} migrations failed to run`, r.error);
-    } else if (r.applied) {
-      console.log(`${r.applied} ${r.db} migration(s) applied`);
     }
   }
+  const applied = migrations.reduce((sum, r) => sum + (r.applied ?? 0), 0);
+  console.log(`${applied} migration(s) applied`);
 
   // Elysia's Bun adapter sets reusePort unconditionally, so the guard that
   // warns about a per-process token meeting a shared port is live, not
