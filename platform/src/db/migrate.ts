@@ -82,7 +82,8 @@ export type MigrationResult = {
  */
 export async function runAllMigrations(): Promise<MigrationResult[]> {
   const results: MigrationResult[] = [];
-  for (const db of Object.keys(dbs) as MigrationDb[]) {
+  for (const key in dbs) {
+    const db = key as MigrationDb;
     if (!dbs[db]()) {
       results.push({ db, skipped: "no database URL set" });
       continue;
