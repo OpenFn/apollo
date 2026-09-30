@@ -84,9 +84,9 @@ export default async (
   // target failing doesn't stop the others.
   for (const r of await runAllMigrations()) {
     if (r.error) {
-      console.error(`Apollo ${r.target} migrations failed to run`, r.error);
+      console.error(`Apollo ${r.db} migrations failed to run`, r.error);
     } else if (r.applied) {
-      console.log(`${r.applied} ${r.target} migration(s) applied`);
+      console.log(`${r.applied} ${r.db} migration(s) applied`);
     }
   }
 

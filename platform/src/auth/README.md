@@ -8,7 +8,7 @@ This is server-layer code: the runtime auth hook, the shared hash, and the inter
 token live here under `platform/src/auth/`; the operator tooling sits alongside in
 `platform/src/auth/client/` (the `client` CLI). The `lightning_clients` table is
 created and kept current by the migration runner (`platform/src/db/migrate.ts`,
-migrations under `platform/migrations/`).
+migrations under `migrations/clients/`).
 
 ## How it works
 
@@ -93,7 +93,7 @@ lands in shell history or `ps`; the client **name** is a positional argument.
    bun run migrate
    ```
 
-   This applies every schema under `platform/migrations/`: the auth schema
+   This applies every schema under `migrations/`: the auth schema
    (`lightning_clients`, `_migrations`) and the opt-in docsite tables (which need
    pgvector on `POSTGRES_URL`). The Python `adaptor_function_docs` table is
    self-initialised by its service, so it is not touched.

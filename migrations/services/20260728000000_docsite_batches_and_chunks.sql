@@ -1,5 +1,5 @@
 -- Docsite chunk storage (Postgres + pgvector).
--- Applied by platform/src/db/migrate.ts (docs target, POSTGRES_URL); recorded in _migrations.
+-- Applied by platform/src/db/migrate.ts (services database, POSTGRES_URL); recorded in _migrations.
 
 CREATE EXTENSION IF NOT EXISTS vector;
 

@@ -1,54 +1,42 @@
 import { SQL } from "bun";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { clientsDbUrl, closeDb, getDb } from "./index";
+import { clientsDbUrl } from "./index";
 
-// Canonical migrations location. Each subdirectory holds the .sql files for one
-// database, applied in lexical order; applied filenames are recorded in _migrations
-// so re-runs are a no-op (the version table is the source of truth, not IF NOT
-// EXISTS guards in the DDL). Python services never migrate: they expect this runner
-// to have run.
-const MIGRATIONS_DIR = join(import.meta.dir, "../../migrations");
+// List of supported connected databases as name:target
+// Each key here must have a matching folder in migrations/ holding that
+// database's .sql files.
+// Needed because auth may be configured to use a different database
+const dbs = {
+  clients: clientsDbUrl, // lightning_clients
+  services: () => process.env.POSTGRES_URL, // tables used by the Python services
+};
+
+export type MigrationDb = keyof typeof dbs;
+
+const MIGRATIONS_DIR = join(import.meta.dir, "../../../migrations");
 
 // Fixed key for the transaction advisory lock that serialises the runner. Every
 // instance uses the same key, so concurrent starters queue on it.
 const MIGRATION_LOCK_KEY = 8314_2025;
 
-export type MigrationTarget = "clients" | "docs";
+/**
+ * Apply any of a database's migrations not yet recorded. Returns the count applied.
+ * Applied filenames go in a _migrations table in that database, so re-runs are a
+ * no-op (the table is the source of truth, not IF NOT EXISTS guards in the DDL).
+ * Filenames are unique across folders, so two databases that are really one (local
+ * dev) can share the table.
+ */
+export async function runMigrations(db: MigrationDb): Promise<number> {
+  const url = dbs[db]();
+  if (!url) throw new Error(`No database URL is set for the ${db} migrations`);
 
-// Applied in this order. Filenames are unique across targets, so both can share a
-// _migrations table when APOLLO_CLIENTS_DB_URL falls back to POSTGRES_URL locally.
-export const MIGRATION_TARGETS: MigrationTarget[] = ["clients", "docs"];
-
-type Db = { sql: SQL; close: () => Promise<void> };
-
-// clients: lightning_clients, on APOLLO_CLIENTS_DB_URL (falling back to POSTGRES_URL).
-// docs: docsite tables and pgvector, on POSTGRES_URL.
-const TARGET_URLS: Record<MigrationTarget, () => string | undefined> = {
-  clients: clientsDbUrl,
-  docs: () => process.env.POSTGRES_URL,
-};
-
-function openDb(target: MigrationTarget): Db {
-  // The clients target uses the shared pool that the auth hook also holds.
-  if (target === "clients") return { sql: getDb(), close: async () => {} };
-  const sql = new SQL({ url: TARGET_URLS[target]()!, max: 1 });
-  return { sql, close: () => sql.close() };
-}
-
-/** Whether the target has a database URL configured. */
-export function hasTargetDb(target: MigrationTarget): boolean {
-  return !!TARGET_URLS[target]();
-}
-
-/** Apply any of a target's migrations not yet recorded. Returns the count applied. */
-export async function runMigrations(target: MigrationTarget): Promise<number> {
-  const dir = join(MIGRATIONS_DIR, target);
+  const dir = join(MIGRATIONS_DIR, db);
   const files = (await readdir(dir)).filter((f) => f.endsWith(".sql")).sort();
 
-  const db = openDb(target);
+  const sql = new SQL({ url, max: 1 });
   try {
-    return await db.sql.begin(async (tx) => {
+    return await sql.begin(async (tx) => {
       // Hold an advisory lock for the whole transaction: a racing instance waits
       // here, then sees the migrations already recorded rather than colliding on
       // CREATE TABLE. The lock releases automatically when the transaction ends.
@@ -76,43 +64,44 @@ export async function runMigrations(target: MigrationTarget): Promise<number> {
       return pending.length;
     });
   } finally {
-    await db.close();
+    await sql.close();
   }
 }
 
 export type MigrationResult = {
-  target: MigrationTarget;
+  db: MigrationDb;
   applied?: number;
   skipped?: string;
   error?: unknown;
 };
 
 /**
- * Run every target that has a database configured. A failure in one target is
- * reported rather than thrown, so it can't block the others: the docs target needs
- * pgvector, which many instances don't have and don't need.
+ * Migrate every configured database. A failure is reported rather than thrown, so
+ * one database can't block the others: the services one needs pgvector, which many
+ * instances don't have and don't need.
  */
 export async function runAllMigrations(): Promise<MigrationResult[]> {
   const results: MigrationResult[] = [];
-  for (const target of MIGRATION_TARGETS) {
-    if (!hasTargetDb(target)) {
-      results.push({ target, skipped: "no database URL set" });
+  for (const db of Object.keys(dbs) as MigrationDb[]) {
+    if (!dbs[db]()) {
+      results.push({ db, skipped: "no database URL set" });
       continue;
     }
     try {
-      results.push({ target, applied: await runMigrations(target) });
+      results.push({ db, applied: await runMigrations(db) });
     } catch (error) {
-      results.push({ target, error });
+      results.push({ db, error });
     }
   }
   return results;
 }
 
-// Standalone entrypoint: `bun run migrate` applies every schema (lightning_clients,
-// the docsite tables, and the _migrations tracking table) and exits. The server
-// startup call (server.ts) is unaffected: import.meta.main is false there.
+// Standalone entrypoint: `bun run migrate` migrates every configured database and
+// exits. The server startup call (server.ts) is unaffected: import.meta.main is
+// false there.
 if (import.meta.main) {
-  if (!clientsDbUrl() && !process.env.POSTGRES_URL) {
+  const results = await runAllMigrations();
+  if (results.every((r) => r.skipped)) {
     console.error(
       "No database URL is set; nothing to migrate against. Set APOLLO_CLIENTS_DB_URL and/or\n" +
         "POSTGRES_URL to the instance you're migrating, and run from the repo root so Bun\n" +
@@ -120,18 +109,17 @@ if (import.meta.main) {
     );
     process.exit(1);
   }
-  try {
-    for (const r of await runAllMigrations()) {
-      if (r.error) {
-        console.error(`Migration failed (${r.target}):`, (r.error as any)?.message ?? r.error);
-        process.exitCode = 1;
-      } else if (r.skipped) {
-        console.log(`Skipped ${r.target} migrations: ${r.skipped}`);
-      } else {
-        console.log(`Applied ${r.applied} ${r.target} migration(s)`);
-      }
+  for (const r of results) {
+    if (r.error) {
+      console.error(
+        `Migration failed (${r.db}):`,
+        (r.error as any)?.message ?? r.error
+      );
+      process.exitCode = 1;
+    } else if (r.skipped) {
+      console.log(`Skipped ${r.db} migrations: ${r.skipped}`);
+    } else {
+      console.log(`Applied ${r.applied} ${r.db} migration(s)`);
     }
-  } finally {
-    await closeDb();
   }
 }

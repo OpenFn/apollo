@@ -305,7 +305,7 @@ them is safe:
     `load_adaptor_docs` runs, so applying it by hand is optional.
 - `lightning_clients` - created and kept current by the migration runner
   (`platform/src/db/migrate.ts`, migrations under
-  [`platform/migrations/clients/`](platform/migrations/clients/)). It is applied
+  [`migrations/clients/`](migrations/clients/)). It is applied
   automatically at Apollo startup when a database URL is set; no manual `psql`
   step is needed.
 
@@ -322,10 +322,10 @@ available on your `POSTGRES_URL` server.
 
 These tables are created by the same migration runner as `lightning_clients`
 (`platform/src/db/migrate.ts`), from
-[`platform/migrations/docs/`](platform/migrations/docs/), against `POSTGRES_URL`.
-It runs at Apollo startup and via `bun run migrate`. If your server has no
-pgvector the docs migration fails and is logged, but it doesn't stop the other
-migrations or the server. See [embed_docsite](services/embed_docsite/README.md)
+[`migrations/services/`](migrations/services/), against `POSTGRES_URL`. It runs
+at Apollo startup and via `bun run migrate`. If your server has no pgvector the
+services migration fails and is logged, but it doesn't stop the clients
+migration or the server. See [embed_docsite](services/embed_docsite/README.md)
 and [search_docsite](services/search_docsite/README.md) for how to select the
 backend.
 

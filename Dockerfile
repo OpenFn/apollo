@@ -9,6 +9,7 @@ COPY ./tsconfig.json ./
 COPY ./path.config ./
 
 COPY ./platform/ ./platform
+COPY ./migrations/ ./migrations
 COPY ./services/ ./services
 
 RUN apt-get update && apt-get install -y git curl
