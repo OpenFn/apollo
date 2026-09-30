@@ -282,10 +282,6 @@ class PlannerAgent:
         logger.info("Planner.run() called")
 
         stream_manager = stream_manager or StreamManager(model=self.model, stream=stream)
-        if workflow_yaml:
-            stream_manager.send_thinking(STATUS_REVIEWING_WORKFLOW + STATUS_PLANNING)
-        else:
-            stream_manager.send_thinking(STATUS_NEW_WORKFLOW + STATUS_PLANNING)
 
         self.current_yaml = workflow_yaml
         self.yaml_modified = False
@@ -295,8 +291,9 @@ class PlannerAgent:
         self._segments: List[Dict] = []
         self._skill = skill
 
-        stream_manager = StreamManager(model=self.model, stream=stream)
-        if workflow_yaml:
+        if skill:
+            self._send_spinner(stream_manager, f"Running the /{skill.name} skill...")
+        elif workflow_yaml:
             self._send_spinner(stream_manager, STATUS_REVIEWING_WORKFLOW + STATUS_PLANNING)
         else:
             self._send_spinner(stream_manager, STATUS_NEW_WORKFLOW + STATUS_PLANNING)
@@ -435,6 +432,9 @@ class PlannerAgent:
 
             if response.stop_reason != "end_turn":
                 logger.warning(f"Loop exited without end_turn (reason: {response.stop_reason})")
+
+            if skill:
+                self._send_settled(stream_manager, f"Ran the /{skill.name} skill")
         finally:
             stream_manager.end_stream()
 

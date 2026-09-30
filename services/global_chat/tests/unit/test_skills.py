@@ -19,7 +19,15 @@ from global_chat.router import RouterAgent, RouterDecision, RouterResult
 from global_chat.skill_registry import SKILLS, get_skill, strip_invocation
 from util import ApolloError
 
-from .test_planner import FakeResponse, FakeText, empty_usage, make_planner
+from streaming_util import STATUS_NEW_WORKFLOW, STATUS_PLANNING
+
+from .test_planner import (
+    FakeResponse,
+    FakeText,
+    StubStreamManager,
+    empty_usage,
+    make_planner,
+)
 from .test_router import make_router
 
 
@@ -220,3 +228,48 @@ def test_the_skill_body_is_not_replayed_on_later_turns() -> None:
     body = get_skill("qa").body
     assert body in seen[0][-1]["content"]
     assert [turn["content"] for turn in result.history] == ["check this", "here is the review"]
+
+
+# --- telling the user a skill is running ----------------------------------
+
+
+def run_turn(skill_name: str | None) -> tuple[StubStreamManager, object]:
+    """One planner turn that answers immediately, on a recording stream."""
+    planner = make_planner()
+    planner.model = "test-model"
+    planner.max_tool_calls = 1
+    stream_manager = StubStreamManager()
+
+    with patch.object(planner, "_call_api", return_value=FakeResponse("end_turn", [FakeText("done")])), \
+         patch.object(planner, "_build_system_prompt", return_value="sys"):
+        result = planner.run(
+            content="check this",
+            workflow_yaml=None,
+            page=None,
+            history=[],
+            stream=False,
+            stream_manager=stream_manager,
+            skill=get_skill(skill_name) if skill_name else None,
+        )
+
+    return stream_manager, result
+
+
+def test_a_skill_turn_opens_by_naming_the_skill() -> None:
+    stream_manager, _ = run_turn("qa")
+
+    assert stream_manager.thinking == ["Running the /qa skill..."]
+
+
+def test_a_skill_turn_settles_in_the_transcript() -> None:
+    """Durable, so a reloaded turn still says why it was answered this way."""
+    _, result = run_turn("qa")
+
+    assert result.response_segments[-1] == {"type": "status", "content": "Ran the /qa skill"}
+
+
+def test_a_turn_without_a_skill_opens_and_settles_as_before() -> None:
+    stream_manager, result = run_turn(None)
+
+    assert stream_manager.thinking == [STATUS_NEW_WORKFLOW + STATUS_PLANNING]
+    assert [segment["type"] for segment in result.response_segments] == ["text"]

@@ -63,11 +63,15 @@ class FakeToolUse:
 class StubStreamManager:
     def __init__(self) -> None:
         self.statuses: list[dict] = []
+        self.thinking: list = []
 
-    def send_thinking(self, *_args: object, **_kwargs: object) -> None:
-        pass
+    def send_thinking(self, text: object = None, *_args: object, **_kwargs: object) -> None:
+        self.thinking.append(text)
 
     def send_changes(self, *_args: object, **_kwargs: object) -> None:
+        pass
+
+    def end_stream(self, *_args: object, **_kwargs: object) -> None:
         pass
 
     def send_status(
