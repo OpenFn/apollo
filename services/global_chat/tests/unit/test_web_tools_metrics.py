@@ -87,12 +87,30 @@ def test_summarise_with_no_valid_runs_reports_none() -> None:
     assert summary["web_calls_max"] is None
 
 
+VALUESET = "http://hl7.org/fhir/R4/valueset-link-type.html"
+
+
+def test_source_page_rate_counts_runs_that_fetched_the_named_page() -> None:
+    """fhir_deep's facts also live on a short value-set page, so which page was read matters."""
+    summary = summarise([
+        run(turn([fetch()]), index=0),
+        run(turn([{**fetch(), "target": VALUESET}]), index=1),
+        run(turn([fetch("url_not_in_prior_context")]), index=2),
+    ], ("0..1",), source_page="patient.html")
+
+    assert summary["source_page_rate"] == 1 / len(["patient", "valueset", "refused"])
+
+
+def test_source_page_rate_is_empty_without_a_source_page() -> None:
+    assert summarise([run(turn([fetch()]))], ("0..1",))["source_page_rate"] is None
+
+
 def row(**overrides: float) -> dict:
     base = {
         "n": 3, "valid": 3, "errors": 0, "downgraded": 0,
         "web_calls": 2.0, "web_calls_max": 2, "refused_prior": 0.0, "refused_allowlist": 0.0,
         "followup_fetches": 0.0, "input_tokens": 50000.0, "seconds": 30.0, "cost": 0.3,
-        "grounded_rate": 1.0, "fact_fetched_rate": 1.0,
+        "grounded_rate": 1.0, "fact_fetched_rate": 1.0, "source_page_rate": None,
     }
     base.update(overrides)
     return base
@@ -157,3 +175,10 @@ def test_format_table_has_one_row_per_variant_and_scenario() -> None:
 
     assert text.count("\n| base ") == len(["fhir", "control"])
     assert "refused prior" in text
+
+
+def test_format_table_shows_the_source_page_rate() -> None:
+    text = format_table({"base": {"fhir": row(source_page_rate=0.5)}})
+
+    assert "source page" in text
+    assert "| 0.50 |" in text

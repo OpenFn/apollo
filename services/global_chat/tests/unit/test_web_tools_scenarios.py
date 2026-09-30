@@ -33,3 +33,7 @@ def test_the_code_edit_control_points_at_a_real_step() -> None:
     assert scenario.workflow_yaml is not None
 
     assert scenario.page.rsplit("/", 1)[-1] in scenario.workflow_yaml
+
+
+def test_fhir_deep_names_the_page_whose_truncation_it_measures() -> None:
+    assert SCENARIOS["fhir_deep"].source_page == "hl7.org/fhir/R4/patient.html"

@@ -16,6 +16,7 @@ class Scenario:
     facts: tuple[str, ...] = ()
     # The control must make no web calls.
     control: bool = False
+    source_page: str | None = None
 
 
 FHIR_MAPPING_YAML = """\
@@ -71,11 +72,14 @@ SCENARIOS = {s.id: s for s in (
         turns=("In FHIR R4, what rule applies to each entry in Patient.contact? What must it contain at minimum?",),
         facts=("contact's details", "reference to an organization"),
     ),
-    # Calibrated: absent from a 10k fetch, present from 25k (char ~34.9k).
+    # Calibrated: absent from a 10k fetch of patient.html, present from 25k (char ~34.9k).
+    # The codes also sit near the top of the short valueset-link-type.html page, so a
+    # grounded answer does not by itself show truncation was avoided.
     Scenario(
         id="fhir_deep",
         turns=("In FHIR R4, what codes can Patient.link.type take, and what does each mean?",),
         facts=("replaced-by", "seealso"),
+        source_page="hl7.org/fhir/R4/patient.html",
     ),
     # The model knows docs.dhis2.org from training, but it is not on the allowlist.
     Scenario(

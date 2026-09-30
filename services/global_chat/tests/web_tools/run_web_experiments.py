@@ -59,7 +59,7 @@ def main() -> None:
         for scenario_id in scenario_ids:
             scenario = SCENARIOS[scenario_id]
             runs = [load_or_run(variant_name, scenario, i) for i in range(args.runs)]
-            table[variant_name][scenario_id] = summarise(runs, scenario.facts)
+            table[variant_name][scenario_id] = summarise(runs, scenario.facts, scenario.source_page)
             if args.scenario:
                 for run in runs:
                     print_run(run)

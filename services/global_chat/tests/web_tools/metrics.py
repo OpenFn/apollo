@@ -78,8 +78,8 @@ def run_metrics(run: RunRecord, facts: tuple[str, ...]) -> dict:
     }
 
 
-def summarise(runs: list[RunRecord], facts: tuple[str, ...]) -> dict:
-    """Mean metrics over the valid runs. Failed and downgraded runs are counted, never averaged."""
+def summarise(runs: list[RunRecord], facts: tuple[str, ...], source_page: str | None = None) -> dict:
+    """Mean metrics over the valid runs. Failed and downgraded runs are counted."""
     valid = [run for run in runs if not failed(run) and not downgraded(run)]
     rows = [run_metrics(run, facts) for run in valid]
     summary: dict = {
@@ -93,6 +93,9 @@ def summarise(runs: list[RunRecord], facts: tuple[str, ...]) -> dict:
     summary["web_calls_max"] = max(r["web_calls"] for r in rows) if rows else None
     summary["grounded_rate"] = mean(r["grounded"] for r in rows) if rows and facts else None
     summary["fact_fetched_rate"] = mean(r["fact_fetched"] for r in rows) if rows and facts else None
+    summary["source_page_rate"] = (
+        mean(fetched_source(run, source_page) for run in valid) if valid and source_page else None
+    )
     return summary
 
 
@@ -149,8 +152,8 @@ def pick_winner(
 def format_table(table: dict[str, dict[str, dict]]) -> str:
     header = (
         "| variant | scenario | valid/n | web calls | refused prior | refused allowlist "
-        "| grounded | fact fetched | follow-up fetches | input tok | sec | $ |\n"
-        "|---|---|---|---|---|---|---|---|---|---|---|---|"
+        "| grounded | fact fetched | source page | follow-up fetches | input tok | sec | $ |\n"
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|"
     )
     lines = [header]
     for variant, rows in table.items():
@@ -158,7 +161,7 @@ def format_table(table: dict[str, dict[str, dict]]) -> str:
             lines.append(
                 f"| {variant} | {scenario_id} | {s['valid']}/{s['n']} | {cell(s['web_calls'])} "
                 f"| {cell(s['refused_prior'])} | {cell(s['refused_allowlist'])} "
-                f"| {cell(s['grounded_rate'])} | {cell(s['fact_fetched_rate'])} "
+                f"| {cell(s['grounded_rate'])} | {cell(s['fact_fetched_rate'])} | {cell(s['source_page_rate'])} "
                 f"| {cell(s['followup_fetches'])} | {cell(s['input_tokens'], 0)} "
                 f"| {cell(s['seconds'], 1)} | {cell(s['cost'], 3)} |",
             )
@@ -171,6 +174,14 @@ def norm(text: str) -> str:
 
 def fetched_pages(trace: list[dict]) -> list[str]:
     return [norm(call["content"]) for call in trace if call.get("content")]
+
+
+def fetched_source(run: RunRecord, source_page: str) -> bool:
+    return any(
+        call["tool"] == "fetch" and call["result"] == "ok" and source_page in call["target"]
+        for turn in run.turns
+        for call in turn.trace
+    )
 
 
 def turn_cost(turn: TurnRecord) -> float:
