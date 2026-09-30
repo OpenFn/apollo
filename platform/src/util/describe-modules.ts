@@ -38,7 +38,7 @@ export default async (location: string): Promise<ModuleDescription[]> => {
         const mod = await import(`${location}/${srv.name}/${srv.name}.ts`);
         handler = mod.default;
       } else {
-        console.warn("WARNING: no index file found for ", srv.name);
+        //console.warn("WARNING: no index file found for ", srv.name);
         continue;
       }
     }
