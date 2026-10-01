@@ -1,6 +1,6 @@
 import os
 
-from db_migrations import run_migrations
+import psycopg2
 from dotenv import load_dotenv
 from embed_docsite.docsite_indexer import (
     ALL_DOCS_TYPES,
@@ -14,6 +14,11 @@ from util import ApolloError, create_logger, get_db_connection
 logger = create_logger("embed_docsite")
 
 VALID_TARGETS = ("pinecone", "postgres")
+
+SCHEMA_MISSING_MESSAGE = (
+    "The docsite schema (pgvector extension and docsite tables) is missing. "
+    "Run `bun run migrate`, or restart Apollo, to create it"
+)
 
 
 def _collect_documents(docs_to_upload, docs_to_ignore, chunk_target_length, chunk_min_length):
@@ -121,8 +126,12 @@ def _upload_to_postgres(documents, metadata_dict, docs_to_upload, chunk_target_l
 
     conn = get_db_connection()
     try:
-        run_migrations(conn)
-        register_vector_type(conn)
+        # The schema and pgvector extension come from `bun run migrate` (also run at
+        # server startup), not from this request
+        try:
+            register_vector_type(conn)
+        except psycopg2.ProgrammingError as exc:
+            raise ApolloError(503, SCHEMA_MISSING_MESSAGE, type="DATABASE_ERROR") from exc
 
         batch_id = None
         try:

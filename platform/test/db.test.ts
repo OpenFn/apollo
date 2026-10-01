@@ -25,7 +25,7 @@ describeDb("DB helper (real connection)", () => {
   });
 
   it("runMigrations() creates lightning_clients with the expected columns", async () => {
-    await runMigrations();
+    await runMigrations("clients");
 
     const cols = (await getDb()`
       SELECT column_name FROM information_schema.columns
@@ -40,7 +40,7 @@ describeDb("DB helper (real connection)", () => {
   });
 
   it("runMigrations() is idempotent against an already-provisioned database", async () => {
-    const applied = await runMigrations();
+    const applied = await runMigrations("clients");
     expect(applied).toBe(0);
   });
 });

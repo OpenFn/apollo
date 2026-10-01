@@ -1,5 +1,5 @@
 -- Docsite chunk storage (Postgres + pgvector).
--- Applied by services/db_migrations.py; recorded in _migrations_docs.
+-- Applied by platform/src/db/migrate.ts (services database, POSTGRES_URL); recorded in _migrations.
 
 CREATE EXTENSION IF NOT EXISTS vector;
 

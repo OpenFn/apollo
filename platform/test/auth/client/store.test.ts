@@ -22,7 +22,7 @@ if (!hasDb) {
 
 describeDb("client/store (live DB)", () => {
   beforeAll(async () => {
-    await runMigrations();
+    await runMigrations("clients");
   });
 
   afterAll(async () => {
