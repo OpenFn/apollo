@@ -1,5 +1,13 @@
 # apollo
 
+## 3.3.1
+
+### Patch Changes
+
+- 0add9ea: Consolidate db migrations
+- 4ff9126: workflow_chat: new steps use the adaptor's current version number
+  instead of `@latest`
+
 ## 3.3.0
 
 ### Minor Changes
