@@ -1,6 +1,7 @@
 import readline from "node:readline";
+import net from "node:net";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { chmod, rm } from "node:fs/promises";
 import { getInternalToken } from "./auth/internal-token";
 import {
@@ -16,6 +17,199 @@ import pkg from "../../package.json";
 // A line a service logged on purpose, as opposed to whatever else lands on a
 // stream. Only these are forwarded to the caller.
 const LOG_LINE = /^(INFO|DEBUG|ERROR|WARNING):/;
+
+const USE_FORK_SERVER = ["1", "true", "yes"].includes(
+  (process.env.APOLLO_FORK_SERVER ?? "").toLowerCase()
+);
+
+interface ForkMaster {
+  proc: ChildProcess;
+  socketPath: string;
+}
+let forkMaster: Promise<ForkMaster> | null = null;
+let forkMasterProc: ChildProcess | null = null;
+
+function startForkMaster(): Promise<ForkMaster> {
+  const socketPath = path.resolve(`tmp/fork_server-${process.pid}.sock`);
+  const proc = spawn(
+    "poetry",
+    ["run", "python", "services/fork_server.py", "--socket", socketPath],
+    {
+      env: {
+        ...process.env,
+        APOLLO_INTERNAL_TOKEN: getInternalToken(),
+        APOLLO_VERSION: pkg.version,
+        OBJC_DISABLE_INITIALIZE_FORK_SAFETY: "YES",
+      },
+    }
+  );
+  forkMasterProc = proc;
+
+  return new Promise<ForkMaster>((resolve, reject) => {
+    const timeout = setTimeout(
+      () => reject(subprocessSpawnFailed("fork_server", new Error("not READY in time"))),
+      60_000
+    );
+    readline.createInterface({ input: proc.stdout!, crlfDelay: Infinity }).on("line", (line) => {
+      console.log(`fork-server: ${line}`);
+      if (line.startsWith("READY")) {
+        clearTimeout(timeout);
+        resolve({ proc, socketPath });
+      }
+    });
+    readline
+      .createInterface({ input: proc.stderr!, crlfDelay: Infinity })
+      .on("line", (line) => console.error(`fork-server: ${line}`));
+
+    proc.on("error", (err) => {
+      clearTimeout(timeout);
+      reject(subprocessSpawnFailed("fork_server", err));
+    });
+    proc.on("exit", (code, sig) => {
+      clearTimeout(timeout);
+      console.error(`fork-server exited (code=${code} signal=${sig})`);
+      forkMaster = null; // next request starts a fresh master
+      forkMasterProc = null;
+      rm(socketPath).catch(() => {});
+    });
+  });
+}
+
+function getForkMaster(): Promise<ForkMaster> {
+  if (!forkMaster) {
+    forkMaster = startForkMaster().catch((err) => {
+      forkMaster = null;
+      throw err;
+    });
+  }
+  return forkMaster;
+}
+
+process.once("exit", () => forkMasterProc?.kill("SIGTERM"));
+
+function runForked(
+  scriptName: string,
+  port: number,
+  inputPath: string,
+  outputPath: string,
+  onLog?: (str: string) => void,
+  onEvent?: (type: string, payload: any) => void,
+  signal?: AbortSignal
+): Promise<JSON | null> {
+  return getForkMaster().then(
+    (master) =>
+      new Promise<JSON | null>((resolve, reject) => {
+        let childPid: number | null = null;
+        let exitCode: number | null = null;
+        let cancelled = false;
+        let hardKill: ReturnType<typeof setTimeout> | undefined;
+
+        const cleanupFiles = async () => {
+          try {
+            await rm(inputPath);
+            await rm(outputPath);
+          } catch (e) {
+            console.error("Error removing temporary files");
+            console.error(e);
+          }
+        };
+
+        const killChild = () => {
+          if (childPid == null) return; // killed once the PID: line arrives
+          try {
+            process.kill(childPid, "SIGTERM");
+          } catch {}
+          hardKill = setTimeout(() => {
+            try {
+              process.kill(childPid!, "SIGKILL");
+            } catch {}
+          }, 5_000);
+          hardKill.unref?.();
+        };
+
+        const onAbort = () => {
+          cancelled = true;
+          console.warn(`cancelling ${scriptName}: client went away`);
+          killChild();
+          conn.destroy();
+        };
+
+        const conn = net.createConnection({ path: master.socketPath });
+        conn.on("connect", () => {
+          conn.write(
+            JSON.stringify({ service: scriptName, input: inputPath, output: outputPath, port }) + "\n"
+          );
+        });
+
+        // The child's stream: the service's own stdout, wrapped in PID:/EXIT:.
+        const rl = readline.createInterface({ input: conn, crlfDelay: Infinity });
+        rl.on("line", (line) => {
+          if (line.startsWith("PID:")) {
+            childPid = Number(line.slice(4)) || null;
+            if (cancelled) killChild();
+          } else if (line.startsWith("EXIT:")) {
+            exitCode = Number(line.slice(5));
+          } else if (LOG_LINE.test(line)) {
+            console.log(line);
+            onLog?.(line);
+          } else if (/^(EVENT)\:/.test(line)) {
+            const [_prefix, type, ...payload] = line.split(":");
+            let processedPayload: any = payload.join(":");
+            try {
+              processedPayload = JSON.parse(processedPayload);
+            } catch (e) {
+              // No json, no problem
+            }
+            onEvent?.(type, processedPayload);
+          }
+        });
+
+        if (signal) {
+          if (signal.aborted) onAbort();
+          else signal.addEventListener("abort", onAbort, { once: true });
+        }
+
+        conn.on("error", async (err) => {
+          if (hardKill) clearTimeout(hardKill);
+          signal?.removeEventListener("abort", onAbort);
+          await cleanupFiles();
+          reject(subprocessSpawnFailed(scriptName, err));
+        });
+
+        conn.on("close", async () => {
+          rl.close();
+          if (hardKill) clearTimeout(hardKill);
+          signal?.removeEventListener("abort", onAbort);
+
+          const text = await Bun.file(outputPath)
+            .text()
+            .catch(() => "");
+          await cleanupFiles();
+
+          if (cancelled) return reject(subprocessCancelled(scriptName, "SIGTERM"));
+          if (exitCode && exitCode !== 0) return reject(subprocessFailed(scriptName, exitCode));
+          // No EXIT line => the child died mid-flight (crash/OOM/signal).
+          if (exitCode === null) return reject(subprocessKilled(scriptName, "UNKNOWN"));
+          if (text) {
+            try {
+              return resolve(JSON.parse(text));
+            } catch (e) {
+              console.error(`Unreadable output from ${scriptName}`);
+              console.error(e);
+              return reject(malformedResult(scriptName));
+            }
+          }
+          console.warn("No data returned from pythonland");
+          return reject(emptyResult(scriptName));
+        });
+      }),
+    async (err) => {
+      await rm(inputPath).catch(() => {});
+      await rm(outputPath).catch(() => {});
+      throw err;
+    }
+  );
+}
 
 /**
   Run a python script
@@ -59,6 +253,10 @@ export const run = async (
     await rm(inputPath).catch(() => {});
     await rm(outputPath).catch(() => {});
     throw subprocessSpawnFailed(scriptName, error);
+  }
+
+  if (USE_FORK_SERVER) {
+    return runForked(scriptName, port, inputPath, outputPath, onLog, onEvent, signal);
   }
 
   return new Promise<JSON | null>((resolve, reject) => {
