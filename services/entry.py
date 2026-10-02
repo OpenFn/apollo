@@ -9,16 +9,14 @@ from util import ApolloError, install_log_masking, set_apollo_port
 
 load_dotenv()
 
-# Langfuse: init after load_dotenv so env vars are available, before any Anthropic client is created
 from opentelemetry.instrumentation.anthropic import AnthropicInstrumentor
 from opentelemetry.instrumentation.threading import ThreadingInstrumentor
-
-AnthropicInstrumentor().instrument()
-ThreadingInstrumentor().instrument()
 
 from langfuse import Langfuse
 from langfuse.span_filter import is_default_export_span
 from langfuse_util import mask_secrets
+
+langfuse = None  # set by bootstrap()
 
 
 def _should_export_span(span):
@@ -28,20 +26,6 @@ def _should_export_span(span):
         return False
     return is_default_export_span(span)
 
-
-langfuse = Langfuse(
-    should_export_span=_should_export_span,
-    mask=mask_secrets,
-    release=os.getenv("APOLLO_VERSION", "unknown"),
-)
-
-env = os.getenv('ENVIRONMENT', 'unknown')
-trace_rates = {
-    'development': 1,
-    'staging': 0.05,
-    'production': 0.03,
-    'unknown': 0.0,
-    }
 
 def _scrub_event(event: dict, _hint: dict) -> dict:
     """Mask keys in what Sentry is about to send.
@@ -54,17 +38,41 @@ def _scrub_event(event: dict, _hint: dict) -> dict:
     return mask_secrets(event)
 
 
-sentry_sdk.init(
-    dsn=os.getenv('SENTRY_DSN'),
-    environment=env,
-    sample_rate=1.0,
-    traces_sample_rate=trace_rates.get(env, 0.0),
-    enable_tracing=True,
-    auto_enabling_integrations=False,
-    before_send=_scrub_event,
-    # before_send covers error events only, and tracing is on.
-    before_send_transaction=_scrub_event,
-)
+def bootstrap() -> None:
+    global langfuse
+
+    AnthropicInstrumentor().instrument()
+    ThreadingInstrumentor().instrument()
+
+    langfuse = Langfuse(
+        should_export_span=_should_export_span,
+        mask=mask_secrets,
+        release=os.getenv("APOLLO_VERSION", "unknown"),
+    )
+
+    env = os.getenv("ENVIRONMENT", "unknown")
+    trace_rates = {
+        "development": 1,
+        "staging": 0.05,
+        "production": 0.03,
+        "unknown": 0.0,
+    }
+
+    sentry_sdk.init(
+        dsn=os.getenv("SENTRY_DSN"),
+        environment=env,
+        sample_rate=1.0,
+        traces_sample_rate=trace_rates.get(env, 0.0),
+        enable_tracing=True,
+        auto_enabling_integrations=False,
+        before_send=_scrub_event,
+        # before_send covers error events only, and tracing is on.
+        before_send_transaction=_scrub_event,
+    )
+
+
+if os.environ.get("APOLLO_FORK_PRELOAD") != "1":
+    bootstrap()
 
 # At or above this the failure is ours; below it the caller sent something we
 # correctly refused.
@@ -156,7 +164,8 @@ def call(
             code=500, message=str(e), type="INTERNAL_ERROR",
         ).to_dict()
 
-    langfuse.flush()
+    if langfuse is not None:
+        langfuse.flush()
 
     return _finish(result, output_path)
 
