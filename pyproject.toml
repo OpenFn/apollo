@@ -10,7 +10,7 @@ requires-poetry = ">=2.3.2"
 
 [tool.poetry.dependencies]
 python = "3.11.*"
-openai = "^2.48"
+openai = "^3.20"
 python-dotenv = "^1.2.3"
 anthropic = "^0.119.0"
 
