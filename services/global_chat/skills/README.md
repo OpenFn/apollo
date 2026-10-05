@@ -9,5 +9,7 @@ Invoked by name via the `skill` payload field, which bypasses the router and
 hands the turn to the planner. The planner can also load a skill itself, through
 its `load_skill` tool, when a request matches the skill's description.
 
+Only `SKILL.md` is read. Add a file-read tool before bundling reference files.
+
 **The bodies here are placeholders.** They exercise the mechanism; they are not
 the real prompts. See https://github.com/OpenFn/apollo/issues/614.

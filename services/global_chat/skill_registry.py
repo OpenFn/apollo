@@ -32,7 +32,7 @@ class Skill:
         """The skill as it is injected ahead of the user's request."""
         return (
             f'<skill name="{self.name}">\n{self.body}\n</skill>\n\n'
-            f"The user invoked the /{self.name} skill. Follow its instructions for this turn."
+            f"The user invoked /{self.name}."
         )
 
 
