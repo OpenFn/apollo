@@ -21,7 +21,7 @@ from langfuse import observe, get_client as get_langfuse_client
 from util import create_logger, ApolloError, sum_usage, attachments_to_context
 from streaming_util import StreamManager
 from global_chat.config_loader import ConfigLoader
-from global_chat.skill_registry import Skill, strip_invocation
+from global_chat.skill_registry import Skill, has_skill, strip_invocation
 from models import resolve_model
 from yaml_utils import get_step_name_from_page, get_page_view, find_job_in_yaml, stitch_job_code, workflow_has_job_code
 
@@ -120,7 +120,9 @@ class RouterAgent:
         # a second message lifecycle.
         self._stream_manager = StreamManager(model=self.model, stream=stream)
 
-        if skill:
+        # A skill stays in the conversation once used, so its follow-ups stay
+        # with the planner rather than reaching an agent that never saw it.
+        if skill or has_skill(history):
             return self._route_to_skill(skill, content, workflow_yaml, page, history, stream)
 
         try:
@@ -473,23 +475,24 @@ class RouterAgent:
 
     def _route_to_skill(
         self,
-        skill: Skill,
+        skill: Optional[Skill],
         content: str,
         workflow_yaml: Optional[str],
         page: Optional[str],
         history: List[Dict],
         stream: bool,
     ) -> RouterResult:
-        """Hand an invoked skill straight to the planner, skipping the router.
+        """Hand a skill turn straight to the planner, skipping the router.
 
         The router guesses intent; a slash command states it, so there is
         nothing to decide. Both standard skills are multi-step tasks, which is
-        what the planner is for.
+        what the planner is for. `skill` is None on a follow-up to a skill
+        already in the history.
         """
-        logger.info(f"Skill '{skill.name}' invoked, bypassing router")
+        logger.info(f"Skill turn ({skill.name if skill else 'from history'}), bypassing router")
 
         result = self._route_to_planner(
-            strip_invocation(content, skill.name),
+            strip_invocation(content, skill.name) if skill else content,
             workflow_yaml,
             page,
             history,
@@ -498,7 +501,8 @@ class RouterAgent:
             skill=skill,
         )
         result.meta["agents"] = [a for a in result.meta["agents"] if a != "router"]
-        result.meta["skill"] = skill.name
+        if skill:
+            result.meta["skill"] = skill.name
         return result
 
     def _route_to_planner(

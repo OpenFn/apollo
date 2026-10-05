@@ -68,7 +68,7 @@ This document defines the input and output payload structure for the Global Agen
 
 - **`metrics_opt_in`** (boolean, optional): If `true`, enables Langfuse tracing for this session. The frontend is responsible for setting this; the backend tracks if and only if this flag is `true`.
 
-- **`history`** (array, optional): Conversation history. Each turn has `role` and `content`. History is managed and returned by each agent internally.
+- **`history`** (array, optional): Conversation history. Each turn has `role` and `content`. Send back the `history` from the previous response unchanged: Apollo owns its contents, which include `[pg:...]` page prefixes and any skill instructions in use.
 
 - **`attachments`** (array, optional): Input attachments providing additional context for the request. Each entry has a `type` and `content` field. Useful for passing logs, dataclips, run inputs/outputs, or other contextual data that the agent can use when processing the request. Currently supported types:
   - `log` — execution logs from a run
@@ -166,7 +166,7 @@ Each tool beat streams as: `thinking` spinner → `changes` (if the workflow was
 
 - **`attachments`** (array): Artifacts produced during this turn. Each entry has a `type` and `content` field. An empty list `[]` means no artifacts were produced (e.g. a purely informational response). The only supported type is `workflow_yaml`: the full workflow YAML with any job code changes stitched in. Job code edits are never returned separately — the YAML is the single source of truth, which allows multi-step changes in one response.
 
-- **`history`** (array): Updated conversation history including the latest exchange. Each entry has `content` as a string on every route. On the planner path the assistant entry contains only the final answer text — the pre-tool narration segments in `response` are not persisted to history.
+- **`history`** (array): Updated conversation history including the latest exchange, in the shape the next request takes as input. Each entry has `content` as a string on every route, and every user entry carries a `[pg:...]` prefix naming the page it was sent from. On the planner path the assistant entry contains only the final answer text — the pre-tool narration segments in `response` are not persisted to history.
 
 - **`usage`** (object): Token usage aggregated across all agents invoked (router + planner + sub-agents).
 
@@ -177,14 +177,14 @@ Each tool beat streams as: `thinking` spinner → `changes` (if the workflow was
   - **`tool_calls`** (array): List of `{tool, input}` objects for each tool the planner invoked (planner path only).
   - **`subagent_calls`** (array): Raw sub-agent result dicts including `_call_metadata`. On the planner path these are the full results, useful for debugging. On the router's direct job-code path it carries a single entry with just `_call_metadata` and `diff`, so a client can tell on either route whether a code edit actually landed (`diff.patches_applied`).
   - **`total_tool_calls`** (number): Total number of tool calls made by the planner (planner path only).
-  - **`skill`** (string): The skill invoked this turn (skill path only). `router_confidence` is absent on this path, because the router did not run.
+  - **`skill`** (string): The skill invoked this turn (skill path only). `router_confidence` is absent on this path, and on follow-ups to a skill, because the router did not run.
 
 ---
 
 ## Skill invocation
 
-A skill is a reusable instruction set that augments the model's context for one
-turn when the user explicitly invokes it. Standard skills ship with Apollo, in
+A skill is a reusable instruction set that augments the model's context from
+the turn the user invokes it. Standard skills ship with Apollo, in
 `services/global_chat/skills/<name>/SKILL.md`; they are immutable and upgrade
 for everyone on deploy. The planner can also load a skill itself, through its
 `load_skill` tool; that needs nothing from the client.
@@ -204,10 +204,12 @@ Sending `skill` changes the turn in three ways:
    or the returned history sees it. The rest of the message is untouched.
 3. **The skill's instructions lead the user turn.**
 
-Skills travel per-turn, exactly like attachments: the instructions reach the
-model but are never written to `history`, so **the client must re-send `skill`
-on every turn it should apply to**. A follow-up turn sent without it is routed
-normally.
+Unlike attachments, the instructions are written into that user turn in the
+returned `history`, as in a standard agent transcript, so they keep applying on
+later turns. **Send `skill` only on the turn that invokes it.** A skill the
+planner loads itself is kept the same way. While a skill is in the history,
+every turn goes to the planner without a routing call, since the direct agents
+never saw it.
 
 ### Example
 

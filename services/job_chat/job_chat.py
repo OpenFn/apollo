@@ -19,7 +19,7 @@ from anthropic import (
 import sentry_sdk
 from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
 from langfuse_util import should_track, build_tags, build_generation_diff, mask_secrets
-from util import ApolloError, create_logger, AdaptorSpecifier, add_page_prefix, APOLLO_VERSION
+from util import ApolloError, create_logger, add_page_prefix, job_code_page, APOLLO_VERSION
 from yaml_utils import INSPECT_JOB_CODE_TOOL, inspect_job_code
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
@@ -766,21 +766,7 @@ def main(data_dict: dict) -> dict:
         if data.context is None:
             data.context = {}
 
-        # Construct current_page from context
-        page_name = data.context.get("page_name")
-        adaptor_string = data.context.get("adaptor")
-
-        current_page = {
-            "type": "job_code",
-            "name": page_name
-        }
-
-        if adaptor_string:
-            try:
-                adaptor = AdaptorSpecifier(adaptor_string)
-                current_page["adaptor"] = f"{adaptor.short_name}@{adaptor.version}"
-            except Exception as e:
-                logger.warning(f"Failed to parse adaptor string '{adaptor_string}': {e}")
+        current_page = job_code_page(data.context.get("page_name"), data.context.get("adaptor"))
 
         # Extract rag_data from meta if present
         rag_data = input_meta.get("rag") if isinstance(input_meta, dict) else None

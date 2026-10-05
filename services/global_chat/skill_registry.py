@@ -28,12 +28,13 @@ class Skill:
     description: str
     body: str
 
+    def as_block(self) -> str:
+        """The instructions, tagged so a later turn can tell a skill is in use."""
+        return f'<skill name="{self.name}">\n{self.body}\n</skill>'
+
     def as_preamble(self) -> str:
-        """The skill as it is injected ahead of the user's request."""
-        return (
-            f'<skill name="{self.name}">\n{self.body}\n</skill>\n\n'
-            f"The user invoked /{self.name}."
-        )
+        """The skill as it is injected ahead of the request that invoked it."""
+        return f"{self.as_block()}\n\nThe user invoked /{self.name}."
 
 
 def _parse_skill_file(path: Path, folder: str) -> Skill:
@@ -82,6 +83,19 @@ def get_skill(name: str) -> Skill:
             {"available": sorted(SKILLS)},
         )
     return skill
+
+
+_SKILL_BLOCK = re.compile(r'<skill name="[^"]+">')
+
+
+def has_skill(history: list[dict]) -> bool:
+    """Whether a skill was invoked or loaded earlier in the conversation."""
+    return any(
+        turn.get("role") == "user"
+        and isinstance(turn.get("content"), str)
+        and _SKILL_BLOCK.search(turn["content"])
+        for turn in history
+    )
 
 
 def strip_invocation(content: str, name: str) -> str:

@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from langfuse import observe
-from util import create_logger, ApolloError, sum_usage, mask_secrets, format_attachments
+from util import create_logger, ApolloError, sum_usage, mask_secrets, format_attachments, add_page_prefix, job_code_page
 from streaming_util import (
     StreamManager,
     STATUS_REVIEWING_WORKFLOW,
@@ -242,6 +242,7 @@ class PlannerAgent:
         self._segments: List[Dict] = []
         self._attachments: List[Dict] = []
         self._skill: Optional[Skill] = None
+        self._loaded_skills: Dict[str, Skill] = {}
 
         logger.info(f"PlannerAgent initialized with model: {self.model}")
 
@@ -290,6 +291,7 @@ class PlannerAgent:
         self._metrics_opt_in = metrics_opt_in
         self._segments: List[Dict] = []
         self._skill = skill
+        self._loaded_skills = {}
 
         if skill:
             self._send_spinner(stream_manager, f"Running the /{skill.name} skill...")
@@ -477,9 +479,15 @@ class PlannerAgent:
             attachments.append({"type": "workflow_yaml", "content": self.current_yaml})
 
         # Return string-content history matching the direct routes, not the
-        # internal block-format messages used by the tool-calling loop.
+        # internal block-format messages used by the tool-calling loop. Skills
+        # used this turn are kept, so they still apply on later turns.
+        user_turn = "\n\n".join(
+            [self._with_skill(content), *(s.as_block() for s in self._loaded_skills.values())],
+        )
         return_history = (history.copy() if history else [])
-        return_history.append({"role": "user", "content": content})
+        return_history.append(
+            {"role": "user", "content": add_page_prefix(user_turn, self._page_context(page, workflow_yaml))},
+        )
         return_history.append({"role": "assistant", "content": final_text})
 
         return PlannerResult(
@@ -497,21 +505,33 @@ class PlannerAgent:
             },
         )
 
+    def _with_skill(self, content: str) -> str:
+        """The user's message with an invoked skill's instructions ahead of it."""
+        if not self._skill:
+            return content
+        preamble = self._skill.as_preamble()
+        return f"{preamble}\n\n{content}" if content else preamble
+
+    def _page_context(self, page: Optional[str], workflow_yaml: Optional[str]) -> Dict:
+        """The page as the direct routes record it, so a [pg:...] prefix reads
+        the same whichever agent served the turn."""
+        step_name = get_step_name_from_page(page)
+        if step_name and workflow_yaml:
+            _, job = find_job_in_yaml(workflow_yaml, step_name)
+            if job:
+                return job_code_page(job.get("name"), job.get("adaptor"))
+        return {"type": "workflow"}
+
     def _build_user_content(self, content: str, page: Optional[str]) -> str:
         """Augment the user message with an invoked skill's instructions, this
         turn's attachments, the step the user is viewing ("this step"), and the
         existing workflow structure (bodies redacted).
 
-        Everything added here is per-turn: run() records the raw `content` in
-        the returned history, so an attached log never becomes a permanent part
-        of the conversation. A skill travels the same way, which is why the
-        client re-sends it on every turn it should apply to.
+        Only the skill outlives this turn: run() records the message and skill
+        in the returned history, so an attached log never becomes a permanent
+        part of the conversation.
         """
-        user_content = content
-
-        if self._skill:
-            preamble = self._skill.as_preamble()
-            user_content = f"{preamble}\n\n{user_content}" if user_content else preamble
+        user_content = self._with_skill(content)
 
         attachments = format_attachments(self._attachments)
         if attachments:
@@ -702,6 +722,8 @@ class PlannerAgent:
         elif tool_use_block.name == "load_skill":
             skill = SKILLS.get(tool_use_block.input.get("name"))
             tool_result = skill.body if skill else f"Error: Unknown skill. Available skills: {sorted(SKILLS)}"
+            if skill and skill != self._skill:
+                self._loaded_skills[skill.name] = skill
 
             tool_calls_meta.append({"tool": "load_skill", "input": tool_use_block.input})
 

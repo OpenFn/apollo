@@ -149,8 +149,8 @@ import.
 
 An invoked skill skips the router — a slash command states the intent the router
 would otherwise guess — and its instructions lead the planner's user turn. They
-are per-turn context, like attachments, so the client re-sends `skill` on every
-turn it should apply to. See [PAYLOAD_SPEC.md](PAYLOAD_SPEC.md#skill-invocation).
+are kept in the returned history, so they keep applying on later turns, which
+also go to the planner. See [PAYLOAD_SPEC.md](PAYLOAD_SPEC.md#skill-invocation).
 
 ### Routing
 

@@ -2,8 +2,9 @@
 
 A slash command states the intent the router would otherwise guess, so an
 invoked skill skips the routing call and goes to the planner. The skill's
-instructions are per-turn context, like attachments: the model sees them, the
-returned history does not.
+instructions are kept in the returned history, as in a standard agent
+transcript, so they still apply on later turns, and those turns stay with the
+planner too.
 
 Apollo never parses commands out of free text — the client recognises the
 command and names it in the payload — so a message that merely mentions a
@@ -16,7 +17,7 @@ import pytest
 from global_chat.global_chat import Payload
 from global_chat.planner import PlannerResult
 from global_chat.router import RouterAgent, RouterDecision, RouterResult
-from global_chat.skill_registry import SKILLS, get_skill, strip_invocation
+from global_chat.skill_registry import SKILLS, get_skill, has_skill, strip_invocation
 from global_chat.tools.tool_definitions import LOAD_SKILL_TOOL
 from util import ApolloError
 
@@ -203,33 +204,79 @@ def test_a_bare_invocation_still_carries_the_instructions() -> None:
     assert get_skill("qa").body in planner._build_user_content("", None)
 
 
-def test_the_skill_body_is_not_replayed_on_later_turns() -> None:
-    """Like an attachment: the model sees it this turn, history keeps the words
-    the user typed. The client re-sends `skill` on each turn it applies to."""
+def run_planner(skill_name: str | None = None, tool_calls: list | None = None, **kwargs: object) -> object:
+    """One planner turn: the given tool calls, if any, then the answer."""
     planner = make_planner()
     planner.model = "test-model"
-    planner.max_tool_calls = 1
-    seen: list = []
+    planner.max_tool_calls = 5
+    responses = [FakeResponse("tool_use", [call]) for call in tool_calls or []]
+    responses.append(FakeResponse("end_turn", [FakeText("here is the review")]))
 
-    def fake_api(_system: object, messages: list, *_args: object, **_kwargs: object) -> FakeResponse:
-        # Copied: run() appends the reply to this same list afterwards.
-        seen.append(list(messages))
-        return FakeResponse("end_turn", [FakeText("here is the review")])
-
-    with patch.object(planner, "_call_api", side_effect=fake_api), \
+    with patch.object(planner, "_call_api", side_effect=responses), \
          patch.object(planner, "_build_system_prompt", return_value="sys"):
-        result = planner.run(
+        return planner.run(
             content="check this",
-            workflow_yaml=None,
-            page=None,
+            workflow_yaml=kwargs.get("workflow_yaml"),
+            page=kwargs.get("page"),
             history=[],
             stream=False,
-            skill=get_skill("qa"),
+            skill=get_skill(skill_name) if skill_name else None,
         )
 
-    body = get_skill("qa").body
-    assert body in seen[0][-1]["content"]
-    assert [turn["content"] for turn in result.history] == ["check this", "here is the review"]
+
+def test_an_invoked_skill_is_kept_in_history() -> None:
+    result = run_planner("qa")
+
+    user_turn = result.history[0]["content"]
+    assert user_turn == f"[pg:workflow] {get_skill('qa').as_preamble()}\n\ncheck this"
+    assert has_skill(result.history)
+
+
+def test_a_skill_the_planner_loaded_is_kept_in_history() -> None:
+    result = run_planner(tool_calls=[FakeToolUse("load_skill", {"name": "qa"})])
+
+    assert result.history[0]["content"] == f"[pg:workflow] check this\n\n{get_skill('qa').as_block()}"
+
+
+def test_a_turn_without_a_skill_keeps_only_the_message() -> None:
+    result = run_planner()
+
+    assert [turn["content"] for turn in result.history] == ["[pg:workflow] check this", "here is the review"]
+    assert not has_skill(result.history)
+
+
+def test_a_planner_turn_on_a_step_records_the_page_like_job_chat() -> None:
+    yaml = 'jobs:\n  fetch:\n    name: Fetch Data\n    adaptor: "@openfn/language-http@6.0.0"\n    body: ""\n'
+
+    result = run_planner(workflow_yaml=yaml, page="workflows/wf/fetch")
+
+    assert result.history[0]["content"] == "[pg:job_code/Fetch Data/http@6.0.0] check this"
+
+
+def test_a_follow_up_to_a_skill_stays_with_the_planner() -> None:
+    router = make_router()
+    router.config_loader = None
+    captured: dict = {}
+    history = [
+        {"role": "user", "content": f"{get_skill('qa').as_preamble()}\n\ncheck this"},
+        {"role": "assistant", "content": "which step?"},
+    ]
+
+    with patch("global_chat.planner.PlannerAgent", stub_planner(captured)), \
+         patch.object(RouterAgent, "_make_routing_decision") as decision:
+        result = router.route_and_execute(
+            content="/qa the first one",
+            workflow_yaml=None,
+            page=None,
+            history=history,
+            stream=False,
+        )
+
+    assert decision.call_count == 0
+    assert captured["skill"] is None
+    # Not an invocation, so nothing is stripped and no skill is reported.
+    assert captured["content"] == "/qa the first one"
+    assert "skill" not in result.meta
 
 
 # --- telling the user a skill is running ----------------------------------
