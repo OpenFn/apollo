@@ -261,11 +261,12 @@ def test_a_skill_turn_opens_by_naming_the_skill() -> None:
     assert stream_manager.thinking == ["Running the /qa skill..."]
 
 
-def test_a_skill_turn_settles_in_the_transcript() -> None:
-    """Durable, so a reloaded turn still says why it was answered this way."""
+def test_a_skill_turn_settles_where_it_was_announced() -> None:
+    """Durable, and first: the invocation happens at the top of the turn, so
+    the settled line stays above the answer rather than trailing it."""
     _, result = run_turn("qa")
 
-    assert result.response_segments[-1] == {"type": "status", "content": "Ran the /qa skill"}
+    assert result.response_segments[0] == {"type": "status", "content": "Ran the /qa skill"}
 
 
 def test_a_turn_without_a_skill_opens_and_settles_as_before() -> None:
