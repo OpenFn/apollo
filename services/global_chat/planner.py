@@ -25,7 +25,7 @@ from streaming_util import (
     STATUS_PLANNING,
 )
 from global_chat.config_loader import ConfigLoader
-from global_chat.skill_registry import Skill
+from global_chat.skill_registry import SKILLS, Skill
 from models import resolve_model
 from global_chat.tools.tool_definitions import TOOL_DEFINITIONS
 from yaml_utils import stitch_job_code, redact_job_bodies, find_job_in_yaml, get_step_name_from_page, inspect_job_code, job_keys_in_yaml
@@ -699,6 +699,12 @@ class PlannerAgent:
 
             tool_calls_meta.append({"tool": "inspect_job_code", "input": tool_use_block.input})
 
+        elif tool_use_block.name == "load_skill":
+            skill = SKILLS.get(tool_use_block.input.get("name"))
+            tool_result = skill.body if skill else f"Error: Unknown skill. Available skills: {sorted(SKILLS)}"
+
+            tool_calls_meta.append({"tool": "load_skill", "input": tool_use_block.input})
+
         else:
             logger.error(f"Unknown tool: {tool_use_block.name}")
             tool_result = f"Error: Unknown tool {tool_use_block.name}"
@@ -917,6 +923,9 @@ class PlannerAgent:
                 return f"Reading code for {joined}..."
             return "Reading job code..."
 
+        if name == "load_skill" and inputs.get("name") in SKILLS:
+            return f"Running the /{inputs['name']} skill..."
+
         return f"Running {name}..."
 
     def _settled_status_message(self, tool_use_block, yaml_before: str | None) -> str | None:
@@ -948,6 +957,9 @@ class PlannerAgent:
                 joined = ", ".join(f"\"{n}\"" for n in names)
                 return f"Read code for {joined}"
             return "Read code"
+
+        if name == "load_skill" and inputs.get("name") in SKILLS:
+            return f"Ran the /{inputs['name']} skill"
 
         return None
 

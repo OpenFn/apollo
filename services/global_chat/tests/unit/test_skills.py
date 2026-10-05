@@ -17,6 +17,7 @@ from global_chat.global_chat import Payload
 from global_chat.planner import PlannerResult
 from global_chat.router import RouterAgent, RouterDecision, RouterResult
 from global_chat.skill_registry import SKILLS, get_skill, strip_invocation
+from global_chat.tools.tool_definitions import LOAD_SKILL_TOOL
 from util import ApolloError
 
 from streaming_util import STATUS_NEW_WORKFLOW, STATUS_PLANNING
@@ -24,6 +25,7 @@ from streaming_util import STATUS_NEW_WORKFLOW, STATUS_PLANNING
 from .test_planner import (
     FakeResponse,
     FakeText,
+    FakeToolUse,
     StubStreamManager,
     empty_usage,
     make_planner,
@@ -274,3 +276,36 @@ def test_a_turn_without_a_skill_opens_and_settles_as_before() -> None:
 
     assert stream_manager.thinking == [STATUS_NEW_WORKFLOW + STATUS_PLANNING]
     assert [segment["type"] for segment in result.response_segments] == ["text"]
+
+
+# --- the planner loading a skill itself -----------------------------------
+
+
+def test_the_load_skill_tool_offers_every_registered_skill() -> None:
+    assert LOAD_SKILL_TOOL["input_schema"]["properties"]["name"]["enum"] == sorted(SKILLS)
+    for skill in SKILLS.values():
+        assert f"- {skill.name}: {skill.description}" in LOAD_SKILL_TOOL["description"]
+
+
+def test_loading_a_skill_returns_its_instructions() -> None:
+    planner = make_planner()
+    stream_manager = StubStreamManager()
+
+    results = planner._execute_tool_blocks(
+        [FakeToolUse("load_skill", {"name": "qa"})], stream_manager, empty_usage(), [],
+    )
+
+    assert results[0]["content"] == get_skill("qa").body
+    assert stream_manager.thinking == ["Running the /qa skill..."]
+    assert stream_manager.statuses[0]["content"] == "Ran the /qa skill"
+
+
+def test_loading_an_unknown_skill_names_the_real_ones() -> None:
+    planner = make_planner()
+
+    result = planner._execute_tool(
+        FakeToolUse("load_skill", {"name": "sudo"}), StubStreamManager(), empty_usage(), [],
+    )
+
+    assert result.startswith("Error: Unknown skill")
+    assert "diagnose" in result

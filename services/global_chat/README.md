@@ -180,13 +180,15 @@ For straightforward requests, the router calls subagents directly:
 ### Planner
 
 For complex requests, the `PlannerAgent` (Claude Opus) runs an agentic
-tool-calling loop with access to four tools:
+tool-calling loop with access to five tools:
 
 - **`call_workflow_agent`** — create or modify workflow YAML structure
 - **`call_job_code_agent`** — write or edit job code for a specific job
   (requires an existing workflow with that job defined)
 - **`search_documentation`** — semantic search over the OpenFn docsite
 - **`inspect_job_code`** — read-only inspection of a job's current code
+- **`load_skill`** — load a standard skill's instructions when a request
+  matches it
 
 The planner always calls `call_workflow_agent` first to establish the structure,
 then calls `call_job_code_agent` for each job that needs code. Job code is

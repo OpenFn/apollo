@@ -6,7 +6,8 @@ format matches what a user-defined skill will look like in v1, so a built-in
 and a custom skill are the same artifact.
 
 Invoked by name via the `skill` payload field, which bypasses the router and
-hands the turn to the planner.
+hands the turn to the planner. The planner can also load a skill itself, through
+its `load_skill` tool, when a request matches the skill's description.
 
 **The bodies here are placeholders.** They exercise the mechanism; they are not
 the real prompts. See https://github.com/OpenFn/apollo/issues/614.

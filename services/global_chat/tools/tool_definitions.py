@@ -4,6 +4,8 @@ Tool definitions for the supervisor agent.
 These are Claude API tool schemas that define what tools are available.
 """
 
+from global_chat.skill_registry import SKILLS
+
 # Tool 1: Search documentation
 SEARCH_DOCUMENTATION_TOOL = {
     "name": "search_documentation",
@@ -87,10 +89,32 @@ Describe the goal in plain language; the job code agent is the expert on adaptor
 # agents explore the workflow with the exact same tool
 from yaml_utils import INSPECT_JOB_CODE_TOOL  # noqa: E402
 
+# Tool 5: Load a skill — listed from the registry, so a new skill folder is
+# offered to the model without editing this file
+LOAD_SKILL_TOOL = {
+    "name": "load_skill",
+    "description": """Load a skill: instructions for a kind of task. When the user's request matches a skill below, load it first and follow its instructions for this turn.
+
+Available skills:
+""" + "\n".join(f"- {skill.name}: {skill.description}" for skill in SKILLS.values()),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "enum": sorted(SKILLS),
+                "description": "The skill to load",
+            },
+        },
+        "required": ["name"],
+    },
+}
+
 # Export all tool definitions
 TOOL_DEFINITIONS = [
     SEARCH_DOCUMENTATION_TOOL,
     CALL_WORKFLOW_AGENT_TOOL,
     CALL_JOB_CODE_AGENT_TOOL,
-    INSPECT_JOB_CODE_TOOL
+    INSPECT_JOB_CODE_TOOL,
+    LOAD_SKILL_TOOL,
 ]

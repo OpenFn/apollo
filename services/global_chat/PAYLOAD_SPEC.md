@@ -186,7 +186,8 @@ Each tool beat streams as: `thinking` spinner → `changes` (if the workflow was
 A skill is a reusable instruction set that augments the model's context for one
 turn when the user explicitly invokes it. Standard skills ship with Apollo, in
 `services/global_chat/skills/<name>/SKILL.md`; they are immutable and upgrade
-for everyone on deploy.
+for everyone on deploy. The planner can also load a skill itself, through its
+`load_skill` tool; that needs nothing from the client.
 
 The client recognises the command and names it in `skill` — **Apollo never
 parses commands out of `content`**. Follow standard slash-command semantics:
