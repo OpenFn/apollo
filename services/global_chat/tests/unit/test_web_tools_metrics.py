@@ -1,6 +1,7 @@
 """Unit tests for web-tools experiment metrics and winner selection."""
 
 from global_chat.tests.web_tools.metrics import (
+    RIGHT_SINGLE_QUOTE,
     RunRecord,
     TurnRecord,
     facts_fetched,
@@ -23,8 +24,16 @@ def fetch(result: str = "ok", content: str | None = PAGE) -> dict:
     return call
 
 
-def turn(trace: list[dict], answer: str = "gender is 0..1", **kwargs: object) -> TurnRecord:
-    return TurnRecord(answer=answer, trace=trace, usage=USAGE, seconds=2.0, rounds=1, **kwargs)
+def turn(
+    trace: list[dict],
+    answer: str = "gender is 0..1",
+    *,
+    downgraded: bool = False,
+    error: str | None = None,
+) -> TurnRecord:
+    return TurnRecord(
+        answer=answer, trace=trace, usage=USAGE, seconds=2.0, rounds=1, downgraded=downgraded, error=error,
+    )
 
 
 def run(*turns: TurnRecord, index: int = 0) -> RunRecord:
@@ -84,7 +93,7 @@ def test_summarise_with_no_valid_runs_reports_none() -> None:
 
     assert summary["valid"] == 0
     assert summary["web_calls"] is None
-    assert summary["web_calls_max"] is None
+    assert summary["web_calls_max"] == 0
 
 
 VALUESET = "http://hl7.org/fhir/R4/valueset-link-type.html"
@@ -105,7 +114,7 @@ def test_source_page_rate_is_empty_without_a_source_page() -> None:
     assert summarise([run(turn([fetch()]))], ("0..1",))["source_page_rate"] is None
 
 
-def row(**overrides: float) -> dict:
+def row(**overrides: float | None) -> dict:
     base = {
         "n": 3, "valid": 3, "errors": 0, "downgraded": 0,
         "web_calls": 2.0, "web_calls_max": 2, "refused_prior": 0.0, "refused_allowlist": 0.0,
@@ -182,3 +191,33 @@ def test_format_table_shows_the_source_page_rate() -> None:
 
     assert "source page" in text
     assert "| 0.50 |" in text
+
+
+def test_a_variant_with_no_valid_runs_cannot_win() -> None:
+    """All runs failed or downgraded leaves None metrics, which must not rank as the best score."""
+    empty = row(valid=0, refused_prior=None, input_tokens=None, seconds=None, web_calls_max=None)
+    table = {"base": {"fhir": row(refused_prior=2.0)}, "base+500k": {"fhir": empty}}
+
+    winner, reasons = pick_winner(1, table, [], {"base": 0, "base+500k": 1})
+
+    assert winner == "base"
+    assert any("base+500k" in r and "no valid runs" in r for r in reasons)
+
+
+def test_a_curly_apostrophe_still_grounds_the_fact() -> None:
+    page = "SHALL at least contain a contact's details or a reference to an organization"
+
+    answer = f"must hold a contact{RIGHT_SINGLE_QUOTE}s details"
+
+    assert is_grounded(answer, [fetch(content=page)], ("contact's details",))
+
+
+def test_a_control_that_used_the_web_before_failing_still_counts() -> None:
+    search = {"round": 1, "tool": "search", "target": "q", "result": "ok"}
+    summary = summarise([
+        run(turn([]), index=0),
+        run(turn([search], error="ApolloError: overloaded"), index=1),
+    ], ())
+
+    assert summary["web_calls"] == 0
+    assert summary["web_calls_max"] == 1

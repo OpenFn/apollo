@@ -14,6 +14,9 @@ PRICE_CACHE_READ = PRICE_INPUT * 0.1
 # Web search bills per search.
 PRICE_SEARCH = 10 / 1000
 
+# Straight apostrophe for matching.
+RIGHT_SINGLE_QUOTE = chr(0x2019)
+
 NUMERIC = (
     "web_calls", "refused_prior", "refused_allowlist", "followup_fetches",
     "input_tokens", "seconds", "cost",
@@ -90,7 +93,7 @@ def summarise(runs: list[RunRecord], facts: tuple[str, ...], source_page: str | 
     }
     for key in NUMERIC:
         summary[key] = mean(r[key] for r in rows) if rows else None
-    summary["web_calls_max"] = max(r["web_calls"] for r in rows) if rows else None
+    summary["web_calls_max"] = max(run_metrics(run, facts)["web_calls"] for run in runs) if runs else None
     summary["grounded_rate"] = mean(r["grounded"] for r in rows) if rows and facts else None
     summary["fact_fetched_rate"] = mean(r["fact_fetched"] for r in rows) if rows and facts else None
     summary["source_page_rate"] = (
@@ -119,6 +122,9 @@ def pick_winner(
 
     eligible = []
     for variant, rows in table.items():
+        if any(not s.get("valid") for s in rows.values()):
+            reasons.append(f"{variant}: disqualified, a scenario has no valid runs")
+            continue
         if any((rows[s].get("web_calls_max") or 0) > 0 for s in controls if s in rows):
             reasons.append(f"{variant}: disqualified, a control run used the web")
             continue
@@ -169,7 +175,7 @@ def format_table(table: dict[str, dict[str, dict]]) -> str:
 
 
 def norm(text: str) -> str:
-    return " ".join(text.lower().split())
+    return " ".join(text.replace(RIGHT_SINGLE_QUOTE, "'").lower().split())
 
 
 def fetched_pages(trace: list[dict]) -> list[str]:
