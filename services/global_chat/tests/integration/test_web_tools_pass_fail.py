@@ -21,6 +21,7 @@ from global_chat.tests.web_tools.variants import resolve_variant  # noqa: E402
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(bool(os.getenv("ANTHROPIC_BASE_URL")), reason="web tools need a direct api.anthropic.com key"),
+    pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="needs ANTHROPIC_API_KEY"),
 ]
 
 

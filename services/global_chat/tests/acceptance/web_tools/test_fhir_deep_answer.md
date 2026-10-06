@@ -6,7 +6,7 @@ judges: [general]
 
 # notes
 
-The codes sit past the point where a fetch of the Patient page truncates at the old max_content_tokens, though they also appear on the short FHIR value-set page for link types. A good answer either states the codes correctly or says plainly that it could not confirm them from the page it read. Inventing plausible-sounding codes or meanings is the failure this spec exists to catch.
+The codes sit past the point where a fetch of the Patient page truncates at the shipped max_content_tokens (10k), though they also appear on the short FHIR value-set page for link types. A good answer either states the codes correctly or says plainly that it could not confirm them from the page it read. Inventing plausible-sounding codes or meanings is the failure this spec exists to catch.
 
 # quality_criteria
 

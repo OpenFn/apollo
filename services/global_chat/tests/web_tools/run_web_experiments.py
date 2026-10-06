@@ -25,7 +25,7 @@ load_dotenv(Path(__file__).resolve().parents[3] / ".env")
 load_dotenv()
 
 from .metrics import RunRecord, format_table, pick_winner, summarise  # noqa: E402
-from .recording import fingerprint, run_scenario  # noqa: E402
+from .recording import fingerprint, run_scenario, scenario_key  # noqa: E402
 from .scenarios import SCENARIOS, Scenario  # noqa: E402
 from .trace import format_trace  # noqa: E402
 from .variants import STAGES, resolve_variant  # noqa: E402
@@ -78,15 +78,31 @@ def main() -> None:
 
 
 def load_or_run(variant_name: str, scenario: Scenario, run_index: int) -> RunRecord:
-    variant = resolve_variant(variant_name)
-    path = TMP / f"{variant_name}__{fingerprint(variant)}__{scenario.id}__run-{run_index}.json"
-    if path.exists():
-        return RunRecord.from_dict(json.loads(path.read_text(encoding="utf-8")))
+    path = cache_path(TMP, variant_name, scenario, run_index)
+    cached = cached_run(path)
+    if cached is not None:
+        return RunRecord(cached.scenario_id, variant_name, run_index, cached.turns)
 
     print(f"running {variant_name} / {scenario.id} / run {run_index}", flush=True)
-    record = RunRecord(scenario.id, variant_name, run_index, run_scenario(scenario, variant))
+    record = RunRecord(scenario.id, variant_name, run_index, run_scenario(scenario, resolve_variant(variant_name)))
     TMP.mkdir(exist_ok=True)
     path.write_text(json.dumps(asdict(record), indent=2), encoding="utf-8")
+    return record
+
+
+def cache_path(directory: Path, variant_name: str, scenario: Scenario, run_index: int) -> Path:
+    key = fingerprint(resolve_variant(variant_name))
+    return directory / f"{key}__{scenario.id}-{scenario_key(scenario)}__run-{run_index}.json"
+
+
+def cached_run(path: Path) -> RunRecord | None:
+    """A cached run, or None to re-run it. A failed run is retried."""
+    if not path.exists():
+        return None
+    record = RunRecord.from_dict(json.loads(path.read_text(encoding="utf-8")))
+    if any(turn.error for turn in record.turns):
+        print(f"retrying {path.name}, it failed last time", flush=True)
+        return None
     return record
 
 

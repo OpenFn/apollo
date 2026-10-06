@@ -136,3 +136,58 @@ def test_a_failed_turn_is_recorded_and_ends_the_scenario(monkeypatch: pytest.Mon
 
 def test_the_shipped_prompt_is_the_measured_1a_prompt() -> None:
     assert fingerprint(resolve_variant("base")) == fingerprint(resolve_variant("base+1a"))
+
+
+def test_a_shipped_suffix_is_not_repeated_when_composed_with_another() -> None:
+    prompt = OverrideConfigLoader(resolve_variant("base+1a+findings")).get_prompt("planner_web_tools_prompt")
+
+    assert prompt.count(SEARCH_FIRST) == 1
+    assert FINDINGS in prompt
+
+
+def test_the_fingerprint_covers_the_resolved_model_and_the_whole_planner_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    before = fingerprint(resolve_variant("base"))
+
+    monkeypatch.setitem(recording.CLAUDE_MODELS, "claude-opus", "claude-opus-next")
+    after_model = fingerprint(resolve_variant("base"))
+    monkeypatch.undo()
+
+    original_init = OverrideConfigLoader.__init__
+
+    def init_with_more_tool_calls(self: OverrideConfigLoader, variant: object) -> None:
+        original_init(self, variant)
+        self.config["planner"]["max_tool_calls"] = 99
+
+    monkeypatch.setattr(OverrideConfigLoader, "__init__", init_with_more_tool_calls)
+    after_config = fingerprint(resolve_variant("base"))
+
+    assert before != after_model
+    assert before != after_config
+
+
+def test_the_scenario_key_changes_when_the_scenario_content_changes() -> None:
+    class Edited:
+        turns = ("a different question",)
+        workflow_yaml = None
+        page = None
+
+    assert recording.scenario_key(Scenario()) != recording.scenario_key(Edited())
+    assert recording.scenario_key(Scenario()) == recording.scenario_key(Scenario())
+
+
+class UnbuildablePlanner:
+    """Stands in for RecordingPlanner when PlannerAgent itself refuses to build."""
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("ANTHROPIC_API_KEY not found")
+
+
+def test_a_planner_that_cannot_be_built_is_recorded_not_raised(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(recording, "RecordingPlanner", UnbuildablePlanner)
+
+    turns = recording.run_scenario(Scenario(), resolve_variant("base"))
+
+    assert len(turns) == 1
+    assert turns[0].error == "RuntimeError: ANTHROPIC_API_KEY not found"

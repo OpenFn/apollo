@@ -7,6 +7,7 @@ from typing import Protocol
 
 from global_chat.config_loader import ConfigLoader
 from global_chat.planner import PlannerAgent
+from models import CLAUDE_MODELS
 
 from .metrics import TurnRecord
 from .trace import build_trace
@@ -69,22 +70,30 @@ def apply_prompt_changes(prompts: dict, variant: Variant) -> None:
         if removal not in text:
             raise ValueError(f"{removal!r} not in {WEB_PROMPT_KEY}")
         text = text.replace(removal, "")
-    if variant.prompt_suffix and variant.prompt_suffix not in text:
-        text = text.rstrip("\n") + "\n" + variant.prompt_suffix + "\n"
+    for line in variant.prompt_suffix.split("\n") if variant.prompt_suffix else []:
+        if line not in text:
+            text = text.rstrip("\n") + "\n" + line + "\n"
     prompts[WEB_PROMPT_KEY] = text
 
 
 def fingerprint(variant: Variant) -> str:
     """A short hash of everything that changes planner behaviour, used to key cached runs."""
     loader = OverrideConfigLoader(variant)
+    planner_config = loader.config["planner"]
     material = {
-        "model": loader.config["planner"].get("model"),
-        "web_search": loader.config["planner"]["web_search"],
+        "model": CLAUDE_MODELS.get(planner_config.get("model"), planner_config.get("model")),
+        "planner": planner_config,
         "system": loader.get_prompt("planner_system_prompt"),
         "web_prompt": loader.get_prompt(WEB_PROMPT_KEY),
         "inject": list(variant.inject_urls),
     }
     return hashlib.sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()[:10]
+
+
+def scenario_key(scenario: PlayableScenario) -> str:
+    """A short hash of what a scenario sends, so editing its turns never reuses old answers."""
+    material = [list(scenario.turns), scenario.workflow_yaml, scenario.page]
+    return hashlib.sha256(json.dumps(material).encode()).hexdigest()[:6]
 
 
 def run_scenario(scenario: PlayableScenario, variant: Variant) -> list[TurnRecord]:
@@ -94,17 +103,19 @@ def run_scenario(scenario: PlayableScenario, variant: Variant) -> list[TurnRecor
     turns: list[TurnRecord] = []
 
     for content in scenario.turns:
-        planner = RecordingPlanner(loader, inject_urls=variant.inject_urls)
+        responses: list = []
         start = time.monotonic()
         try:
+            planner = RecordingPlanner(loader, inject_urls=variant.inject_urls)
+            responses = planner.responses
             result = planner.run(content, scenario.workflow_yaml, scenario.page, history, stream=False)
-        except Exception as error:  # recorded as a failed run
+        except Exception as error:  # recorded as a failed run, including a planner that cannot be built
             turns.append(TurnRecord(
                 answer="",
-                trace=build_trace(planner.responses),
-                usage=usage(planner.responses),
+                trace=build_trace(responses),
+                usage=usage(responses),
                 seconds=time.monotonic() - start,
-                rounds=len(planner.responses),
+                rounds=len(responses),
                 error=f"{type(error).__name__}: {error}",
             ))
             break

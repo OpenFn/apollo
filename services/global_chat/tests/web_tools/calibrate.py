@@ -21,7 +21,6 @@ load_dotenv(Path(__file__).resolve().parents[3] / ".env")
 load_dotenv()
 
 from anthropic import Anthropic  # noqa: E402
-
 from global_chat.config_loader import ConfigLoader  # noqa: E402
 from models import resolve_model  # noqa: E402
 
