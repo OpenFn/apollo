@@ -64,7 +64,7 @@ def apply_prompt_changes(prompts: dict, variant: Variant) -> None:
         if removal not in text:
             raise ValueError(f"{removal!r} not in {WEB_PROMPT_KEY}")
         text = text.replace(removal, "")
-    if variant.prompt_suffix:
+    if variant.prompt_suffix and variant.prompt_suffix not in text:
         text = text.rstrip("\n") + "\n" + variant.prompt_suffix + "\n"
     prompts[WEB_PROMPT_KEY] = text
 

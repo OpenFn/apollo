@@ -46,17 +46,24 @@ OVERRIDE_TOKENS = 40000
 
 
 def test_override_loader_applies_the_variant_without_touching_the_files() -> None:
-    loader = OverrideConfigLoader(resolve_variant("base+1a+40k"))
+    loader = OverrideConfigLoader(resolve_variant("base+findings+40k"))
     fresh = ConfigLoader()
 
     assert loader.config["planner"]["web_search"]["max_content_tokens"] == OVERRIDE_TOKENS
-    assert loader.get_prompt("planner_web_tools_prompt").rstrip().endswith(SEARCH_FIRST)
+    assert loader.get_prompt("planner_web_tools_prompt").rstrip().endswith(FINDINGS)
     assert fresh.config["planner"]["web_search"]["max_content_tokens"] != OVERRIDE_TOKENS
-    assert SEARCH_FIRST not in fresh.get_prompt("planner_web_tools_prompt")
+    assert FINDINGS not in fresh.get_prompt("planner_web_tools_prompt")
+
+
+def test_a_suffix_already_in_the_prompt_is_not_added_twice() -> None:
+    prompts = {"planner_web_tools_prompt": f"intro\n{SEARCH_FIRST}\n"}
+
+    recording.apply_prompt_changes(prompts, resolve_variant("base+1a"))
+
+    assert prompts["planner_web_tools_prompt"].count(SEARCH_FIRST) == 1
 
 
 def test_1d_drops_the_example_url_and_adds_the_search_first_line() -> None:
-    """The shipped prompt names patient.html as an example."""
     shipped = ConfigLoader().get_prompt("planner_web_tools_prompt")
     prompt = OverrideConfigLoader(resolve_variant("base+1d")).get_prompt("planner_web_tools_prompt")
 
