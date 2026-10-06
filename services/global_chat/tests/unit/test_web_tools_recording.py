@@ -102,9 +102,9 @@ def test_nothing_is_appended_without_injected_urls() -> None:
 
 
 def test_the_fingerprint_changes_with_anything_that_changes_behaviour() -> None:
-    prints = {fingerprint(resolve_variant(name)) for name in ("base", "base+1a", "base+1b", "base+25k")}
+    prints = {fingerprint(resolve_variant(name)) for name in ("base", "base+findings", "base+1b", "base+25k")}
 
-    assert len(prints) == len(["base", "base+1a", "base+1b", "base+25k"])
+    assert len(prints) == len(["base", "base+findings", "base+1b", "base+25k"])
     assert fingerprint(resolve_variant("base")) == fingerprint(resolve_variant("base"))
 
 
