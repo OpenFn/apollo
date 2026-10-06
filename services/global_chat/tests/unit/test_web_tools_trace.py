@@ -161,3 +161,17 @@ def test_a_code_execution_result_is_paired_with_its_call() -> None:
     )])
 
     assert (trace[0]["tool"], trace[0]["result"]) == ("code_execution", "ok")
+
+
+def test_other_code_execution_results_are_paired_too() -> None:
+    trace = build_trace([response(
+        use("b1", "bash_code_execution", command="ls"),
+        result("b1", "bash_code_execution_tool_result", Block(type="bash_code_execution_result", stdout="")),
+        use("t1", "text_editor_code_execution", command="view"),
+        result("t1", "text_editor_code_execution_tool_result", Block(type="text_editor_code_execution_view_result")),
+    )])
+
+    assert [(c["tool"], c["result"]) for c in trace] == [
+        ("bash_code_execution", "ok"),
+        ("text_editor_code_execution", "ok"),
+    ]

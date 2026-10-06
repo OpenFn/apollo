@@ -6,7 +6,7 @@ Test helper only.
 from typing import Any
 
 WEB_TOOL_NAMES = {"web_search": "search", "web_fetch": "fetch"}
-RESULT_BLOCK_TYPES = ("web_search_tool_result", "web_fetch_tool_result", "code_execution_tool_result")
+RESULT_BLOCK_SUFFIX = "_tool_result"
 
 
 def build_trace(responses: list) -> list[dict]:
@@ -32,7 +32,7 @@ def build_trace(responses: list) -> list[dict]:
                 }
                 calls.append(entry)
                 by_id[field(block, "id")] = entry
-            elif block_type in RESULT_BLOCK_TYPES:
+            elif str(block_type).endswith(RESULT_BLOCK_SUFFIX):
                 entry = by_id.get(field(block, "tool_use_id"))
                 if entry is None:
                     continue
