@@ -132,3 +132,7 @@ def test_a_failed_turn_is_recorded_and_ends_the_scenario(monkeypatch: pytest.Mon
     assert len(turns) == 1
     assert turns[0].error == "RuntimeError: overloaded"
     assert turns[0].answer == ""
+
+
+def test_the_shipped_prompt_is_the_measured_1a_prompt() -> None:
+    assert fingerprint(resolve_variant("base")) == fingerprint(resolve_variant("base+1a"))

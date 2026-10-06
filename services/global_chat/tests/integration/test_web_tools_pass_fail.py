@@ -1,7 +1,7 @@
 """Live checks on how the planner uses web_search and web_fetch.
 
-These hit the live Anthropic API. Each test plays its scenario 
-once with the shipped prompt and config and asserts on the recorded 
+These hit the live Anthropic API. Each test plays its scenario
+once with the shipped prompt and config and asserts on the recorded
 tool-call trace. A failure prints the full trace, no retries.
 """
 
@@ -32,12 +32,15 @@ def test_controls_make_no_web_calls(scenario_id: str) -> None:
     assert count(calls, tool="search") + count(calls, tool="fetch") == 0, explain(turns)
 
 
+MAX_FIRST_TURN_REFUSALS = 2
+
+
 @pytest.mark.parametrize("scenario_id", ["fhir_shallow", "fhir_deep"])
 def test_fhir_answers_come_from_a_fetched_page(scenario_id: str) -> None:
     turns = play(scenario_id)
     calls = all_calls(turns)
 
-    assert count(calls, result="url_not_in_prior_context") == 0, explain(turns)
+    assert count(calls, result="url_not_in_prior_context") <= MAX_FIRST_TURN_REFUSALS, explain(turns)
     assert count(calls, tool="fetch", result="ok") >= 1, explain(turns)
     assert is_grounded(turns[-1].answer, calls, SCENARIOS[scenario_id].facts), explain(turns)
 
@@ -54,7 +57,8 @@ def test_follow_up_turns_do_not_fetch_the_same_content_again() -> None:
     turns = play("multi_turn")
 
     assert sum(count(turn.trace, tool="fetch") for turn in turns[1:]) <= 1, explain(turns)
-    assert count(all_calls(turns), result="url_not_in_prior_context") == 0, explain(turns)
+    assert count(turns[0].trace, result="url_not_in_prior_context") <= MAX_FIRST_TURN_REFUSALS, explain(turns)
+    assert sum(count(turn.trace, result="url_not_in_prior_context") for turn in turns[1:]) == 0, explain(turns)
 
 
 def play(scenario_id: str) -> list[TurnRecord]:

@@ -19,9 +19,14 @@ USAGE_FIELDS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", 
 class PlayableScenario(Protocol):
     """What run_scenario reads from a scenario; scenarios.Scenario satisfies it."""
 
-    turns: tuple[str, ...]
-    workflow_yaml: str | None
-    page: str | None
+    @property
+    def turns(self) -> tuple[str, ...]: ...
+
+    @property
+    def workflow_yaml(self) -> str | None: ...
+
+    @property
+    def page(self) -> str | None: ...
 
 
 class OverrideConfigLoader(ConfigLoader):
