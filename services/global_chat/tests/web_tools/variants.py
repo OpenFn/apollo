@@ -15,6 +15,8 @@ FINDINGS = (
     "answer without fetching again."
 )
 
+EXAMPLE_URL = " (e.g. `https://hl7.org/fhir/R4/patient.html`)"
+
 # One entry page per allowed domain in config.yaml.
 ENTRY_URLS = ("https://hl7.org/fhir/R4/", "https://docs.openfn.org/")
 
@@ -26,6 +28,8 @@ class Variant:
     name: str
     web_search: dict = field(default_factory=dict)
     prompt_suffix: str = ""
+    # Text removed from the web prompt before the suffix is appended.
+    prompt_removals: tuple[str, ...] = ()
     inject_urls: tuple[str, ...] = ()
     # 0 = no change, 1 = prompt or config change, 2 = production code change.
     complexity: int = 0
@@ -36,6 +40,7 @@ PARTS = {
     "1a": Variant("1a", prompt_suffix=SEARCH_FIRST, complexity=1),
     "1b": Variant("1b", inject_urls=ENTRY_URLS, complexity=2),
     "1c": Variant("1c", prompt_suffix=SEARCH_FIRST, inject_urls=ENTRY_URLS, complexity=2),
+    "1d": Variant("1d", prompt_suffix=SEARCH_FIRST, prompt_removals=(EXAMPLE_URL,), complexity=1),
     "findings": Variant("findings", prompt_suffix=FINDINGS, complexity=1),
 }
 
@@ -56,15 +61,24 @@ def resolve_variant(name: str) -> Variant:
     """Compose 'base+1c+25k' into one Variant; later parts win on conflicting config keys."""
     web_search: dict = {}
     suffixes: list[str] = []
+    removals: list[str] = []
     inject: tuple[str, ...] = ()
     complexity = 0
     for part in (parse_part(p) for p in name.split("+")):
         web_search.update(part.web_search)
         if part.prompt_suffix and part.prompt_suffix not in suffixes:
             suffixes.append(part.prompt_suffix)
+        removals.extend(r for r in part.prompt_removals if r not in removals)
         inject = inject or part.inject_urls
         complexity = max(complexity, part.complexity)
-    return Variant(name, web_search, "\n".join(suffixes), inject, complexity)
+    return Variant(
+        name,
+        web_search=web_search,
+        prompt_suffix="\n".join(suffixes),
+        prompt_removals=tuple(removals),
+        inject_urls=inject,
+        complexity=complexity,
+    )
 
 
 def parse_part(name: str) -> Variant:

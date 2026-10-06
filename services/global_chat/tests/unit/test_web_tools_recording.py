@@ -6,6 +6,7 @@ from global_chat.tests.web_tools import recording
 from global_chat.tests.web_tools.recording import OverrideConfigLoader, RecordingPlanner, fingerprint
 from global_chat.tests.web_tools.variants import (
     ENTRY_URLS,
+    EXAMPLE_URL,
     FINDINGS,
     SEARCH_FIRST,
     STAGES,
@@ -52,6 +53,25 @@ def test_override_loader_applies_the_variant_without_touching_the_files() -> Non
     assert loader.get_prompt("planner_web_tools_prompt").rstrip().endswith(SEARCH_FIRST)
     assert fresh.config["planner"]["web_search"]["max_content_tokens"] != OVERRIDE_TOKENS
     assert SEARCH_FIRST not in fresh.get_prompt("planner_web_tools_prompt")
+
+
+def test_1d_drops_the_example_url_and_adds_the_search_first_line() -> None:
+    """The shipped prompt names patient.html as an example."""
+    shipped = ConfigLoader().get_prompt("planner_web_tools_prompt")
+    prompt = OverrideConfigLoader(resolve_variant("base+1d")).get_prompt("planner_web_tools_prompt")
+
+    assert EXAMPLE_URL in shipped
+    assert EXAMPLE_URL not in prompt
+    assert "https://hl7.org/fhir/R4/patient.html" not in prompt
+    assert "`https://hl7.org/fhir/R4/`" in prompt
+    assert prompt.rstrip().endswith(SEARCH_FIRST)
+
+
+def test_a_removal_that_matches_nothing_is_an_error() -> None:
+    prompts = {"planner_web_tools_prompt": "no example here"}
+
+    with pytest.raises(ValueError, match="not in"):
+        recording.apply_prompt_changes(prompts, resolve_variant("base+1d"))
 
 
 def make_recording_planner(inject_urls: tuple[str, ...]) -> RecordingPlanner:

@@ -30,9 +30,7 @@ class OverrideConfigLoader(ConfigLoader):
     def __init__(self, variant: Variant) -> None:
         super().__init__()
         self.config["planner"]["web_search"].update(variant.web_search)
-        if variant.prompt_suffix:
-            prompts = self.prompts["prompts"]
-            prompts[WEB_PROMPT_KEY] = prompts[WEB_PROMPT_KEY].rstrip("\n") + "\n" + variant.prompt_suffix + "\n"
+        apply_prompt_changes(self.prompts["prompts"], variant)
 
 
 class RecordingPlanner(PlannerAgent):
@@ -53,6 +51,22 @@ class RecordingPlanner(PlannerAgent):
         if self.inject_urls:
             user_content += "\n\n" + INJECT_TEMPLATE.format(urls=", ".join(self.inject_urls))
         return user_content
+
+
+def apply_prompt_changes(prompts: dict, variant: Variant) -> None:
+    """Remove the variant's exact text from the web prompt, then append its suffix.
+
+    A removal that matches nothing raises, so a prompts.yaml edit can never turn
+    a variant silently into a different one.
+    """
+    text = prompts[WEB_PROMPT_KEY]
+    for removal in variant.prompt_removals:
+        if removal not in text:
+            raise ValueError(f"{removal!r} not in {WEB_PROMPT_KEY}")
+        text = text.replace(removal, "")
+    if variant.prompt_suffix:
+        text = text.rstrip("\n") + "\n" + variant.prompt_suffix + "\n"
+    prompts[WEB_PROMPT_KEY] = text
 
 
 def fingerprint(variant: Variant) -> str:
