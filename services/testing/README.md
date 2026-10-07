@@ -62,6 +62,11 @@ Two rules of thumb:
   `-E <label>` / `--experiment=<label>` to append `__<label>` to every captured
   filename so runs with different settings or dates don't overwrite each other
   (e.g. `tmp/<spec_id>__sonnet-2026-06-29.txt`).
+
+  Each spec spends real money, so a run of more than 5 spec runs asks for
+  confirmation first (with the service and judge call counts), or refuses when
+  there's no terminal to ask. Pass `--max-specs=<n>` to raise the limit, e.g.
+  for a nightly job.
 - `apollo_client.py` — `ApolloClient` for dispatching to a chat service.
   Currently a subprocess-based stub; the integration tier will replace its
   internals with a real HTTP client (same `.call()` signature, no test changes).

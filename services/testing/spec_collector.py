@@ -14,6 +14,7 @@ Each item:
 """
 
 import re
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -28,6 +29,8 @@ from testing.spec_parser import Spec, parse_spec
 # Each entry is (spec_id, Verdict).
 _session_verdicts: list[tuple[str, judge.Verdict]] = []
 
+DEFAULT_MAX_SPECS = 5
+
 
 def pytest_addoption(parser):
     parser.addoption(
@@ -39,6 +42,47 @@ def pytest_addoption(parser):
         "in tmp/ (e.g. --experiment=sonnet-2026-06-29) so runs with different "
         "settings/dates don't overwrite each other.",
     )
+    parser.addoption(
+        "--max-specs",
+        action="store",
+        type=int,
+        default=DEFAULT_MAX_SPECS,
+        help="Run up to this many acceptance spec runs without confirmation "
+        f"(default {DEFAULT_MAX_SPECS}). Above it, pytest asks before spending "
+        "on live LLM calls, or refuses when there is no terminal to ask.",
+    )
+
+
+def pytest_collection_finish(session):
+    """Confirm before a large acceptance run, since each spec spends real money.
+
+    Runs after `-k`/`-m` deselection, so it counts only what will actually run.
+    """
+    specs = [item for item in session.items if isinstance(item, SpecItem)]
+    limit = session.config.getoption("max_specs")
+    if len(specs) <= limit:
+        return
+
+    judge_calls = sum(len(item.spec.judges) for item in specs)
+    summary = (
+        f"About to run {len(specs)} acceptance spec runs: {len(specs)} service "
+        f"calls (each fans out to several LLM calls) + {judge_calls} judge calls"
+    )
+    flag = f"--max-specs={len(specs)}"
+
+    # Capture redirects fd 0 to /dev/null, so the TTY check must come after suspending it.
+    capman = session.config.pluginmanager.getplugin("capturemanager")
+    capman.suspend_global_capture(in_=True)
+    try:
+        if not sys.stdin.isatty():
+            raise pytest.UsageError(f"{summary}, over the limit of {limit}; pass {flag} to allow it")
+        answer = input(f"\n{summary}. Continue? [y/N] ")
+    except EOFError:
+        answer = ""
+    finally:
+        capman.resume_global_capture()
+    if answer.strip().lower() not in ("y", "yes"):
+        pytest.exit(f"Acceptance run cancelled; pass {flag} to skip this prompt", returncode=0)
 
 
 def _experiment_suffix(config) -> str:
