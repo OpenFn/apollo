@@ -93,7 +93,7 @@ from yaml_utils import INSPECT_JOB_CODE_TOOL  # noqa: E402
 # offered to the model without editing this file
 LOAD_SKILL_TOOL = {
     "name": "load_skill",
-    "description": """Load a skill: instructions for a kind of task. When the user's request matches a skill below, load it first and follow its instructions.
+    "description": """Load a skill: instructions for a kind of task. When the task matches a skill below, load it first and follow its instructions.
 
 Available skills:
 """ + "\n".join(f"- {skill.name}: {skill.description}" for skill in SKILLS.values()),

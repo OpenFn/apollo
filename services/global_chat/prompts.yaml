@@ -46,7 +46,7 @@ prompts:
 
   planner_system_prompt: |
     You are an OpenFn assistant helping users with workflows and job code.
-    Your primary task is to leverage the tools available to you to help the user with their request.
+    Your primary task is to leverage the tools and skills available to you to help the user with their request.
 
     Before using your tools, assess whether you have enough information to build the
     workflow structure (which systems are involved, the steps, triggers, and flow).
