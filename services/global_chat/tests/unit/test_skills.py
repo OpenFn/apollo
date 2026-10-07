@@ -104,7 +104,7 @@ def stub_planner(captured: dict) -> type:
     """A PlannerAgent that records the call instead of making one."""
 
     class StubPlanner:
-        def __init__(self, *_args: object) -> None:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
             pass
 
         def run(self, **kwargs: object) -> PlannerResult:

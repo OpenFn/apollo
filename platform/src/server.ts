@@ -8,8 +8,8 @@ import logRequest from "./util/log-request";
 import { InstanceAuth } from "./auth/instance-auth";
 import { logInternalTokenProvenance } from "./auth/internal-token";
 import { captureException } from "./util/sentry";
-import { clientsDbUrl, closeDb } from "./db";
-import { runMigrations } from "./db/migrate";
+import { closeDb } from "./db";
+import { runAllMigrations } from "./db/migrate";
 import { randomUUID } from "node:crypto";
 import { readdir, rm } from "node:fs/promises";
 import path from "node:path";
@@ -79,19 +79,17 @@ export default async (
   await setupDir(app);
   await setupServices(app, +port, auth);
 
-  // Bring the schema up to date before auth probes it. Without a clients DB URL
-  // there is nothing to migrate; auth.init() then handles the fail-closed path on
-  // its own.
-  if (clientsDbUrl()) {
-    try {
-      const applied = await runMigrations();
-      console.log(
-        applied > 0 ? `${applied} migration(s) applied.` : "Schema up to date."
-      );
-    } catch (err) {
-      console.error("Apollo migrations failed to run.", err);
+  // Bring every schema up to date before auth probes it. A database without a URL
+  // is skipped (auth.init() handles the fail-closed path on its own), and one
+  // database failing doesn't stop the others.
+  const migrations = await runAllMigrations();
+  for (const r of migrations) {
+    if (r.error) {
+      console.error(`Apollo ${r.db} migrations failed to run`, r.error);
     }
   }
+  const applied = migrations.reduce((sum, r) => sum + (r.applied ?? 0), 0);
+  console.log(`${applied} migration(s) applied`);
 
   // Elysia's Bun adapter sets reusePort unconditionally, so the guard that
   // warns about a per-process token meeting a shared port is live, not

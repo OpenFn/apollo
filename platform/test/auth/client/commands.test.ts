@@ -153,7 +153,7 @@ if (!hasDb) {
 
 describeDb("client/commands end-to-end (live DB)", () => {
   beforeAll(async () => {
-    await runMigrations();
+    await runMigrations("clients");
   });
 
   afterAll(async () => {

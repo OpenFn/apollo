@@ -87,6 +87,7 @@ class RouterAgent:
         user: Optional[Dict] = None,
         metrics_opt_in: Optional[bool] = None,
         skill: Optional[Skill] = None,
+        web_search: bool = False,
     ) -> RouterResult:
         """
         Route request to appropriate handler and execute.
@@ -99,6 +100,8 @@ class RouterAgent:
             stream: Streaming flag
             attachments: Optional input attachments (e.g. logs, dataclips)
             skill: A skill the user invoked by name, which routes itself
+            web_search: Whether the caller opted into the planner's web
+                search/fetch tools for this request
 
         Returns:
             RouterResult with response, attachments, history, usage, meta
@@ -115,6 +118,7 @@ class RouterAgent:
         self._input_attachments = attachments or []
         self._user = user
         self._metrics_opt_in = metrics_opt_in
+        self._web_search = web_search
         # One stream manager shared by whichever agents serve this request, so
         # a handed-over request continues the same stream instead of starting
         # a second message lifecycle.
@@ -123,7 +127,10 @@ class RouterAgent:
         # A skill stays in the conversation once used, so its follow-ups stay
         # with the planner rather than reaching an agent that never saw it.
         if skill or has_skill(history):
-            return self._route_to_skill(skill, content, workflow_yaml, page, history, stream)
+            result = self._route_to_skill(skill, content, workflow_yaml, page, history, stream)
+            if web_search:
+                result.meta["web_search_requested"] = True
+            return result
 
         try:
             decision = self._make_routing_decision(content, workflow_yaml, page, history)
@@ -152,6 +159,9 @@ class RouterAgent:
             )
         else:
             result = self._route_to_planner(content, workflow_yaml, page, history, stream, decision.confidence)
+
+        if web_search:
+            result.meta["web_search_requested"] = True
 
         return result
 
@@ -522,7 +532,7 @@ class RouterAgent:
 
         clean_history = [{"role": t["role"], "content": t["content"]} for t in history]
 
-        planner = PlannerAgent(self.config_loader, self.api_key)
+        planner = PlannerAgent(self.config_loader, self.api_key, web_search=self._web_search)
         planner_result = planner.run(
             content=content,
             workflow_yaml=workflow_yaml,
