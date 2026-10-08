@@ -70,7 +70,6 @@ class RouterAgent:
         router_config = config_loader.config.get("router", {})
         self.model = resolve_model(router_config.get("model", "claude-haiku"))
         self.max_tokens = router_config.get("max_tokens", 500)
-        self.temperature = router_config.get("temperature", 0.0)
 
         logger.info(f"RouterAgent initialized with model: {self.model}")
 
@@ -174,7 +173,6 @@ class RouterAgent:
         response = self.client.messages.create(
             model=self.model,
             max_tokens=self.max_tokens,
-            temperature=self.temperature,
             system=[{"type": "text", "text": system_prompt}],
             messages=[
                 {"role": "user", "content": routing_message}
