@@ -6,7 +6,7 @@ import os
 from typing import List, Dict, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-import httpx
+import httpx2
 import anthropic
 from anthropic import Anthropic
 import sentry_sdk
@@ -74,7 +74,7 @@ def _api_error_message(error: Exception) -> str:
             if isinstance(message, str) and message:
                 return message
 
-    if isinstance(error, (anthropic.APIConnectionError, httpx.RequestError)):
+    if isinstance(error, (anthropic.APIConnectionError, httpx2.RequestError)):
         return str(error) or type(error).__name__
 
     status = getattr(error, "status_code", None)
@@ -158,7 +158,7 @@ def _model_api_failure(error: Exception) -> tuple[int, str, str, dict]:
     # leaves the server and nothing upstream is trusted to be key-free.
     details = {"upstream_message": mask_secrets(upstream)}
 
-    if isinstance(error, (anthropic.APIConnectionError, httpx.RequestError)):
+    if isinstance(error, (anthropic.APIConnectionError, httpx2.RequestError)):
         cause = getattr(error, "__cause__", None)
         if cause:
             # A proxy error carries the proxy URL, credentials and all.
@@ -387,10 +387,10 @@ class PlannerAgent:
 
                 except ApolloError:
                     raise
-                except (anthropic.APIError, httpx.RequestError) as e:
+                except (anthropic.APIError, httpx2.RequestError) as e:
                     # A rejection from the model API is not a tool failure.
                     #
-                    # httpx.RequestError as well as APIError: the SDK only
+                    # httpx2.RequestError as well as APIError: the SDK only
                     # wraps httpx exceptions around the initial send, and on a
                     # streaming request that returns once the headers arrive.
                     # The body is read later, unwrapped, so a stream that dies
@@ -569,7 +569,7 @@ class PlannerAgent:
                 # Per-request timeout (same values as the SDK default):
                 # required for non-streaming calls with max_tokens > ~21k,
                 # which the SDK otherwise rejects.
-                timeout=httpx.Timeout(600.0, connect=5.0),
+                timeout=httpx2.Timeout(600.0, connect=5.0),
                 **_CONTEXT_MANAGEMENT,
             )
             return response

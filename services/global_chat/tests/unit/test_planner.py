@@ -3,7 +3,7 @@
 from unittest.mock import patch
 
 import anthropic
-import httpx
+import httpx2
 import pytest
 
 from util import ApolloError
@@ -412,8 +412,8 @@ def test_model_api_error_is_not_reported_as_a_tool_failure() -> None:
 
     # Shaped like a real rejection: the SDK's own str() is the dict repr,
     # and the readable sentence is in the parsed body.
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-    response = httpx.Response(400, request=request, json={})
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    response = httpx2.Response(400, request=request, json={})
     api_error = anthropic.BadRequestError(
         "Error code: 400 - {'type': 'error', 'error': {...}}",
         response=response,
@@ -470,11 +470,11 @@ def _raise_from_planner(error: Exception) -> ApolloError:
 def test_a_rejected_key_does_not_describe_our_account_to_the_caller() -> None:
     """The upstream sentence for an auth failure is about our key, and every
     user of the instance would be shown it in chat."""
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     error = _raise_from_planner(
         anthropic.AuthenticationError(
             "Error code: 401 - {'type': 'error', 'error': {...}}",
-            response=httpx.Response(401, request=request, json={}),
+            response=httpx2.Response(401, request=request, json={}),
             body={
                 "type": "error",
                 "error": {
@@ -497,11 +497,11 @@ def test_our_own_request_shape_being_wrong_is_not_blamed_on_the_caller() -> None
     """The planner sends beta headers, thinking and context-management config
     and tool definitions the caller never touches. Anthropic rejects those
     with a 400, and answering the caller 400 would blame them for it."""
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     error = _raise_from_planner(
         anthropic.BadRequestError(
             "Error code: 400",
-            response=httpx.Response(400, request=request, json={}),
+            response=httpx2.Response(400, request=request, json={}),
             body={
                 "type": "error",
                 "error": {
@@ -527,11 +527,11 @@ def test_our_own_request_shape_being_wrong_is_not_blamed_on_the_caller() -> None
 def test_a_payload_over_the_size_limit_is_the_callers_to_act_on() -> None:
     """413 is the sibling of prompt-too-long: their workflow is too big, and a
     retry of the same payload can never succeed."""
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     error = _raise_from_planner(
         anthropic.RequestTooLargeError(
             "Error code: 413",
-            response=httpx.Response(413, request=request, json={}),
+            response=httpx2.Response(413, request=request, json={}),
             body={"type": "error", "error": {"type": "request_too_large",
                                              "message": "request body too large"}},
         ),
@@ -548,11 +548,11 @@ def test_a_payload_over_the_size_limit_is_the_callers_to_act_on() -> None:
 def test_a_stream_that_dies_mid_reply_does_not_record_the_opening_200() -> None:
     """The SDK builds a mid-stream error from the response that opened the
     stream, which succeeded, so its status would read as a call that worked."""
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     error = _raise_from_planner(
         anthropic.APIStatusError(
             "Overloaded",
-            response=httpx.Response(200, request=request, json={}),
+            response=httpx2.Response(200, request=request, json={}),
             body={"type": "error", "error": {"type": "overloaded_error",
                                              "message": "Overloaded"}},
         ),
@@ -567,13 +567,13 @@ def test_a_mid_stream_failure_is_classified_by_what_the_body_says() -> None:
     opened the stream, whatever actually went wrong, so the class says nothing
     and the body's type is the only thing left. Global chat streams, so this
     is the common path, not the corner."""
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
 
     def mid_stream(kind: str, message: str) -> ApolloError:
         return _raise_from_planner(
             anthropic.APIStatusError(
                 f"{{'type': 'error', 'error': {{'type': '{kind}'}}}}",
-                response=httpx.Response(200, request=request, json={}),
+                response=httpx2.Response(200, request=request, json={}),
                 body={"type": "error",
                       "error": {"type": kind, "message": message}},
             ),
@@ -609,11 +609,11 @@ def test_an_overload_with_no_readable_body_still_says_to_try_again() -> None:
     """A 529 is the response most likely to come back from an edge with an
     HTML body, and then there is no type to read. It is also the one kind
     whose advice differs, so falling back to the class matters here."""
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     error = _raise_from_planner(
         anthropic.OverloadedError(
             "Error code: 529",
-            response=httpx.Response(529, request=request, text="<html>busy</html>"),
+            response=httpx2.Response(529, request=request, text="<html>busy</html>"),
             body="<html>busy</html>",
         ),
     )
@@ -625,11 +625,11 @@ def test_an_overload_with_no_readable_body_still_says_to_try_again() -> None:
 def test_details_do_not_carry_key_shaped_values_off_the_server() -> None:
     """details is serialised to the caller (errors.ts toErrorPayload), so the
     upstream sentence leaves the server even though only message is rendered."""
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     error = _raise_from_planner(
         anthropic.BadRequestError(
             "Error code: 400",
-            response=httpx.Response(400, request=request, json={}),
+            response=httpx2.Response(400, request=request, json={}),
             body={
                 "type": "error",
                 "error": {
@@ -646,8 +646,8 @@ def test_details_do_not_carry_key_shaped_values_off_the_server() -> None:
 def test_the_cause_of_a_connection_failure_is_masked_too() -> None:
     """A proxy error carries the proxy URL, which is where credentials get
     written, and details is serialised to the caller."""
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-    dropped = httpx.ProxyError("proxy rejected")
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    dropped = httpx2.ProxyError("proxy rejected")
     dropped.__cause__ = Exception("http://user:sk-ant-api03-" + "b" * 95 + "@proxy:8080")
 
     error = _raise_from_planner(dropped)
@@ -658,9 +658,9 @@ def test_the_cause_of_a_connection_failure_is_masked_too() -> None:
 def test_a_dropped_connection_keeps_the_text_httpx_wrote() -> None:
     """The SDK only wraps httpx around the initial send, so a stream that dies
     while the body is being read raises a raw httpx error with no status."""
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     error = _raise_from_planner(
-        httpx.ReadError("peer closed connection", request=request),
+        httpx2.ReadError("peer closed connection", request=request),
     )
 
     assert error.code == 503
@@ -722,11 +722,11 @@ def test_api_error_message_never_names_a_success_status() -> None:
 def test_a_rate_limit_keeps_the_retry_after_the_bridge_contract_pins() -> None:
     """platform/test/server.test.ts asserts RATE_LIMIT carries retry_after, and
     dropping it would leave a caller with nothing to wait on."""
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     error = _raise_from_planner(
         anthropic.RateLimitError(
             "Error code: 429",
-            response=httpx.Response(
+            response=httpx2.Response(
                 429, request=request, json={}, headers={"retry-after": "30"},
             ),
             body={"type": "error", "error": {"type": "rate_limit_error",
@@ -740,11 +740,11 @@ def test_a_rate_limit_keeps_the_retry_after_the_bridge_contract_pins() -> None:
 
 
 def test_a_rate_limit_without_the_header_still_gives_something_to_wait_on() -> None:
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     error = _raise_from_planner(
         anthropic.RateLimitError(
             "Error code: 429",
-            response=httpx.Response(429, request=request, json={}),
+            response=httpx2.Response(429, request=request, json={}),
             body={},
         ),
     )
@@ -757,13 +757,13 @@ def test_a_broken_retry_after_header_does_not_raise_inside_the_handler() -> None
     header would raise from inside the except block and arrive as the generic
     500 this whole change exists to remove. And the value is someone else's,
     so a caller told to wait a century would wait forever."""
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
 
     def rate_limited(header: bytes) -> ApolloError:
         return _raise_from_planner(
             anthropic.RateLimitError(
                 "Error code: 429",
-                response=httpx.Response(
+                response=httpx2.Response(
                     429, request=request, json={},
                     headers=[(b"retry-after", header)],
                 ),
@@ -788,17 +788,17 @@ def test_our_account_failing_is_not_reported_as_the_caller_failing() -> None:
     """A 403 from the model API means our org cannot use it. Passing it
     through would answer the caller with a verdict we reached about
     ourselves, which is what the 401 rule exists to prevent."""
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     for sdk_error in (
         anthropic.PermissionDeniedError(
             "Error code: 403",
-            response=httpx.Response(403, request=request, json={}),
+            response=httpx2.Response(403, request=request, json={}),
             body={"type": "error", "error": {"type": "permission_error",
                                              "message": "not allowed"}},
         ),
         anthropic.NotFoundError(
             "Error code: 404",
-            response=httpx.Response(404, request=request, json={}),
+            response=httpx2.Response(404, request=request, json={}),
             body={"type": "error", "error": {"type": "not_found_error",
                                              "message": "model: nope"}},
         ),
@@ -815,7 +815,7 @@ def test_connection_failure_is_not_reported_as_a_tool_failure() -> None:
     planner.model = "test-model"
     planner.max_tool_calls = 5
 
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     api_error = anthropic.APIConnectionError(request=request)
 
     with (
@@ -843,7 +843,7 @@ def test_stream_dropping_midway_is_not_reported_as_a_tool_failure() -> None:
     planner.model = "test-model"
     planner.max_tool_calls = 5
 
-    dropped = httpx.RemoteProtocolError(
+    dropped = httpx2.RemoteProtocolError(
         "peer closed connection without sending complete message body"
     )
 
@@ -864,7 +864,7 @@ def test_connection_error_keeps_the_sdk_wording() -> None:
     """APIConnectionError's message is the SDK's own constant, not upstream
     text, so it is worth more to a reader than the class name."""
     error = anthropic.APIConnectionError(
-        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        request=httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     )
 
     assert _api_error_message(error) == "Connection error."
