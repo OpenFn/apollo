@@ -21,7 +21,7 @@ from langfuse import observe, get_client as get_langfuse_client
 from util import create_logger, ApolloError, sum_usage, attachments_to_context
 from streaming_util import StreamManager
 from global_chat.config_loader import ConfigLoader
-from global_chat.skill_registry import Skill, has_skill, strip_invocation
+from global_chat.skill_registry import Skill, has_skill, job_agent_skills, strip_invocation
 from models import resolve_model
 from yaml_utils import get_step_name_from_page, get_page_view, find_job_in_yaml, stitch_job_code, workflow_has_job_code
 
@@ -395,6 +395,7 @@ class RouterAgent:
             "metrics_opt_in": self._metrics_opt_in,
             "subagent": True,
             "workflow_yaml": workflow_yaml,
+            "skills": job_agent_skills(),
             "_stream_manager": self._stream_manager,
         }
 

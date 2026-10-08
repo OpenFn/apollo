@@ -122,9 +122,33 @@ _INSPECT_JOB_CODE_TOOL = {
     ),
 }
 
-# Max API rounds in one generate() call: enough for a couple of
-# inspect_job_code round-trips plus the final answer.
+# Max API rounds in one generate() call: enough for a skill load and an
+# inspect_job_code round-trip plus the final answer.
 _MAX_TOOL_ROUNDS = 4
+
+
+def _load_skill_tool(skills: List[Dict[str, str]]) -> Dict[str, Any]:
+    """The skills the caller gave this agent, offered the way the planner's are."""
+    listing = "\n".join(f"- {s['name']}: {s['description']}" for s in skills)
+    return {
+        "name": "load_skill",
+        "description": (
+            "Load a skill: instructions for a kind of task, holding OpenFn practice "
+            "you won't otherwise have. When the task matches a skill below, load it "
+            f"first and follow its instructions.\n\nAvailable skills:\n{listing}"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "enum": sorted(s["name"] for s in skills),
+                    "description": "The skill to load",
+                },
+            },
+            "required": ["name"],
+        },
+    }
 
 
 # Helper function for page navigation
@@ -165,6 +189,8 @@ class Payload:
     # inspect_job_code tool.
     workflow_yaml: Optional[str] = None
     subagent: Optional[bool] = False
+    # Skills the caller makes available to this agent: name, description, body
+    skills: Optional[List[Dict[str, str]]] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
@@ -186,6 +212,7 @@ class Payload:
             metrics_opt_in=data.get("metrics_opt_in"),
             workflow_yaml=data.get("workflow_yaml"),
             subagent=data.get("subagent", False),
+            skills=data.get("skills"),
         )
 
 
@@ -243,6 +270,7 @@ class AnthropicClient:
         workflow_yaml: Optional[str] = None,
         subagent: Optional[bool] = False,
         stream_manager: Optional[StreamManager] = None,
+        skills: Optional[List[Dict[str, str]]] = None,
     ) -> ChatResponse:
         """
         Generate a response using the Claude API with optional streaming.
@@ -275,7 +303,8 @@ class AnthropicClient:
                         download_adaptor_docs=download_adaptor_docs,
                         refresh_rag=refresh_rag,
                         workflow_yaml=workflow_yaml,
-                        subagent=subagent
+                        subagent=subagent,
+                        has_skills=bool(skills),
                     )
 
                 else:
@@ -300,11 +329,15 @@ class AnthropicClient:
                 tools.append(_EDIT_WORKFLOW_TOOL)
                 if workflow_yaml:
                     tools.append(_INSPECT_JOB_CODE_TOOL)
+            if skills:
+                tools.append(_load_skill_tool(skills))
+            skill_bodies = {s["name"]: s["body"] for s in skills or []}
             tool_kwargs = {"tools": tools, "tool_choice": {"type": "auto"}} if tools else {}
 
-            # Without the subagent tools this loop runs exactly once: edit_job
-            # is terminal (its input IS the output), so only inspect_job_code
-            # triggers another round and only handover exits early.
+            # Without the subagent tools or skills this loop runs exactly once:
+            # edit_job is terminal (its input IS the output), so only
+            # inspect_job_code and load_skill trigger another round and only
+            # handover exits early.
             messages = prompt
             handover_reason = None
             text_parts = []
@@ -394,11 +427,11 @@ class AnthropicClient:
                         handover_reason = (handover_block.input or {}).get("goal") or "handover requested"
                         break
 
-                    inspect_blocks = [b for b in tool_uses if b.name == "inspect_job_code"]
-                    if not inspect_blocks or round_index == _MAX_TOOL_ROUNDS - 1:
+                    reading_blocks = [b for b in tool_uses if b.name in ("inspect_job_code", "load_skill")]
+                    if not reading_blocks or round_index == _MAX_TOOL_ROUNDS - 1:
                         break
 
-                    # Answer the inspect calls and let the model continue. An
+                    # Answer the reading calls and let the model continue. An
                     # edit_job call made in the same round is deferred: the
                     # model must re-issue it with its final answer.
                     stream_manager.send_thinking(STATUS_REVIEWING_CODE)
@@ -408,6 +441,12 @@ class AnthropicClient:
                             job_keys = (block.input or {}).get("job_keys") or []
                             logger.info("job_chat inspect_job_code: reading %s", job_keys)
                             result_text = inspect_job_code(workflow_yaml, job_keys)
+                        elif block.name == "load_skill":
+                            skill_name = (block.input or {}).get("name")
+                            logger.info("job_chat load_skill: %s", skill_name)
+                            result_text = skill_bodies.get(
+                                skill_name, f"Error: Unknown skill. Available skills: {sorted(skill_bodies)}",
+                            )
                         else:
                             result_text = (
                                 "Not applied. Finish inspecting, then write your final reply "
@@ -800,6 +839,7 @@ def main(data_dict: dict) -> dict:
                 # In-process callers (global_chat) may inject a shared stream
                 # manager so a handed-over request continues the same stream
                 stream_manager=data_dict.get("_stream_manager"),
+                skills=data.skills,
             )
 
             # Tag the trace when code was generated, so we can filter for it.

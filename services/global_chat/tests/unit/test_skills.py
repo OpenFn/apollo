@@ -400,3 +400,23 @@ def test_an_unknown_subagent_skill_is_dropped_not_fatal() -> None:
         )
 
     assert mock_main.call_args[0][0]["content"] == "fix it"
+
+
+def test_the_job_agent_is_offered_its_skills_on_the_direct_route() -> None:
+    """A step question routed straight to the job agent can still use qa-code."""
+    with patch("job_chat.job_chat.main", return_value=job_chat_result()) as mock_main:
+        make_router()._route_to_job_chat(
+            "is this step ready to go live?", WORKFLOW_YAML, "workflows/wf/fetch-patients", [], False, 5,
+        )
+
+    assert [s["name"] for s in mock_main.call_args[0][0]["skills"]] == sorted(JOB_AGENT_SKILLS)
+
+
+def test_an_attached_skill_is_not_offered_again() -> None:
+    with patch("job_chat.job_chat.main", return_value=job_chat_result()) as mock_main:
+        call_job_agent(
+            {"message": "review", "job_key": "fetch-patients", "attachments": [], "skill": "qa-code"},
+            workflow_yaml=WORKFLOW_YAML,
+        )
+
+    assert "qa-code" not in [s["name"] for s in mock_main.call_args[0][0]["skills"]]

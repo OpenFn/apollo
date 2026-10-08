@@ -12,7 +12,7 @@ from typing import Dict, List, Optional
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from langfuse import observe
-from global_chat.skill_registry import JOB_AGENT_SKILLS
+from global_chat.skill_registry import JOB_AGENT_SKILLS, job_agent_skills
 from util import create_logger, ApolloError, attachments_to_context, select_attachments
 from yaml_utils import find_job_in_yaml
 
@@ -107,13 +107,11 @@ def call_job_agent(
     if not user_message:
         raise ApolloError(400, "message is required")
 
-    skill_name = tool_input.get("skill")
-    if skill_name:
-        skill = JOB_AGENT_SKILLS.get(skill_name)
-        if skill:
-            user_message = f"{skill.as_subagent_preamble()}\n\n{user_message}"
-        else:
-            logger.warning(f"job_agent: ignoring unknown skill '{skill_name}'")
+    skill = JOB_AGENT_SKILLS.get(tool_input.get("skill"))
+    if skill:
+        user_message = f"{skill.as_subagent_preamble()}\n\n{user_message}"
+    elif tool_input.get("skill"):
+        logger.warning(f"job_agent: ignoring unknown skill '{tool_input['skill']}'")
 
     job_context = {}
 
@@ -150,6 +148,7 @@ def call_job_agent(
         # the <workflow_structure> block and the inspect_job_code tool.
         "subagent": True,
         "workflow_yaml": workflow_yaml,
+        "skills": job_agent_skills(attached=skill.name if skill else None),
     }
 
     try:

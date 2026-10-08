@@ -89,6 +89,16 @@ SKILLS = {name: skill for name, skill in _ALL_SKILLS.items() if skill.agent is N
 JOB_AGENT_SKILLS = {name: skill for name, skill in _ALL_SKILLS.items() if skill.agent == "job_code"}
 
 
+def job_agent_skills(attached: str | None = None) -> list[dict]:
+    """The job agent's skills in job_chat's payload shape, leaving out one
+    already attached to the message so it isn't offered twice."""
+    return [
+        {"name": skill.name, "description": skill.description, "body": skill.body}
+        for skill in JOB_AGENT_SKILLS.values()
+        if skill.name != attached
+    ]
+
+
 def get_skill(name: str) -> Skill:
     """Resolve a skill name, or reject the request."""
     skill = SKILLS.get(name)

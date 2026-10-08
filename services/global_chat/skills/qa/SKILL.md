@@ -11,12 +11,10 @@ it implies but doesn't state.
 Work outwards in three stages.
 
 1. Each step on its own. Have the job code agent review and fix every step in
-   parallel with the `qa-code` skill, which covers each step's own
-   correctness: OpenFn conventions, adaptor use, state in loops, swallowed
-   errors, hardcoded values and misleading comments. Its message only needs
-   what this conversation adds, such as what the spec asks of that step or
-   limits the user has set, like leaving comments alone. Making the steps fit
-   together is the next stage's job.
+   parallel with the `qa-code` skill. Tell it the other steps are being
+   reviewed at the same time and you'll fit them together, so it leaves
+   mismatches between steps to you. Add only what this conversation requires,
+   such as what the spec asks of that step or limits the user has set.
 
 2. One run, end to end. Read every step's code yourself with
    `inspect_job_code` and follow the data from the trigger to the last step.
