@@ -15,16 +15,22 @@ Cover:
   operation arguments; async work done through operations, not `async`/`await`
   or promises;
 - what it passes on: only plain JSON leaves the step, so helpers are defined in
-  the step rather than stored on state; no leftover or intermediate keys; no
-  personal data left on the final state;
+  the step rather than stored on state; only what the next step needs, with no
+  leftover or intermediate keys; no personal data logged or left on the final
+  state, which OpenFn doesn't scrub;
+- what it takes in: incoming data validated before it's written, and a failing
+  system or malformed response handled rather than passed on;
 - structure: several small operations that each do one thing rather than one
   large `fn()`, and no `fn()` wrappers that add nothing;
 - its adaptor: the adaptor's own functions rather than raw HTTP, used
   correctly, and cursors set and advanced as intended;
 - loops: state overwritten inside them, items or shared objects mutated while
   iterating, `each()` used as intended;
-- errors swallowed or never surfaced, and per-record failures in batches;
-- values hardcoded that belong in configuration;
+- errors swallowed or never surfaced, and one bad record failing a whole batch
+  or disappearing silently, unless that's intended;
+- work that runs away: unbounded retries, loops or calls;
+- credentials written into code, values hardcoded that belong in
+  configuration, and anything left over from testing;
 - comments that contradict the code.
 
 Report cleanup (duplication, dead code, unclear names, magic numbers) rather
