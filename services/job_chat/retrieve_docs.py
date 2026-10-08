@@ -223,7 +223,7 @@ def call_llm(model, system_prompt, user_prompt, client, output_schema=None):
 
         kwargs = dict(
             model=model,
-            max_tokens=1024,
+            max_tokens=4096,
             system=system_prompt,
             messages=messages
         )
@@ -238,7 +238,7 @@ def call_llm(model, system_prompt, user_prompt, client, output_schema=None):
         if not message.content or len(message.content) == 0:
             raise ApolloError(500, "Empty response from AI service", type="EMPTY_LLM_RESPONSE")
 
-        response_text = message.content[0].text
+        response_text = "".join(block.text for block in message.content if block.type == "text")
         if not response_text:
             raise ApolloError(500, "Empty text in AI service response", type="EMPTY_LLM_RESPONSE")
 

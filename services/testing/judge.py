@@ -423,7 +423,7 @@ def evaluate(
         ],
     )
 
-    raw_text = response.content[0].text
+    raw_text = "".join(block.text for block in response.content if block.type == "text")
     usage = {
         "input_tokens": response.usage.input_tokens,
         "output_tokens": response.usage.output_tokens,

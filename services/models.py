@@ -4,9 +4,9 @@ Update values here to change models used across all services.
 """
 
 CLAUDE_MODELS: dict[str, str] = {
-    "claude-opus":   "claude-opus-4-8",
-    "claude-sonnet": "claude-sonnet-4-6",
-    "claude-haiku":  "claude-haiku-4-5-20251001",
+    "claude-opus":   "claude-opus-5-5",
+    "claude-sonnet": "claude-sonnet-5-5",
+    "claude-haiku":  "claude-haiku-5-5",
 }
 
 CLAUDE_OPUS:   str = CLAUDE_MODELS["claude-opus"]
