@@ -19,6 +19,9 @@ from util import ApolloError
 
 SKILLS_DIR = Path(__file__).parent / "skills"
 
+# Subagents a skill can be written for, via `metadata.agent` in its frontmatter
+SUBAGENTS = {"job_code"}
+
 
 @dataclass(frozen=True)
 class Skill:
@@ -27,6 +30,7 @@ class Skill:
     name: str
     description: str
     body: str
+    agent: str | None = None
 
     def as_block(self) -> str:
         """The instructions, tagged so a later turn can tell a skill is in use."""
@@ -35,6 +39,10 @@ class Skill:
     def as_preamble(self) -> str:
         """The skill as it is injected ahead of the request that invoked it."""
         return f"{self.as_block()}\n\nThe user invoked /{self.name}."
+
+    def as_subagent_preamble(self) -> str:
+        """The skill as it is injected ahead of the planner's message to a subagent."""
+        return f"{self.as_block()}\n\nThe request below overrides these instructions where they conflict."
 
 
 def _parse_skill_file(path: Path, folder: str) -> Skill:
@@ -58,7 +66,11 @@ def _parse_skill_file(path: Path, folder: str) -> Skill:
     if not body.strip():
         raise ValueError(f"{path} has no instructions")
 
-    return Skill(name=name, description=description, body=body.strip())
+    agent = (meta.get("metadata") or {}).get("agent")
+    if agent is not None and agent not in SUBAGENTS:
+        raise ValueError(f"{path} targets unknown agent '{agent}'")
+
+    return Skill(name=name, description=description, body=body.strip(), agent=agent)
 
 
 def _load_skills() -> dict[str, Skill]:
@@ -69,7 +81,12 @@ def _load_skills() -> dict[str, Skill]:
     }
 
 
-SKILLS = _load_skills()
+_ALL_SKILLS = _load_skills()
+
+# What users invoke and the planner loads. A skill written for a subagent is
+# only ever attached to that subagent's calls.
+SKILLS = {name: skill for name, skill in _ALL_SKILLS.items() if skill.agent is None}
+JOB_AGENT_SKILLS = {name: skill for name, skill in _ALL_SKILLS.items() if skill.agent == "job_code"}
 
 
 def get_skill(name: str) -> Skill:

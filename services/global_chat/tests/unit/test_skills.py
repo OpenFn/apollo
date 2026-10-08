@@ -17,13 +17,16 @@ import pytest
 from global_chat.global_chat import Payload
 from global_chat.planner import PlannerResult
 from global_chat.router import RouterAgent, RouterDecision, RouterResult
-from global_chat.skill_registry import SKILLS, get_skill, has_skill, strip_invocation
-from global_chat.tools.tool_definitions import LOAD_SKILL_TOOL
+from global_chat.skill_registry import JOB_AGENT_SKILLS, SKILLS, get_skill, has_skill, strip_invocation
+from global_chat.subagent_caller import call_job_agent
+from global_chat.tools.tool_definitions import CALL_JOB_CODE_AGENT_TOOL, LOAD_SKILL_TOOL
 from util import ApolloError
 
 from streaming_util import STATUS_NEW_WORKFLOW, STATUS_PLANNING
 
+from .test_attachments import job_chat_result
 from .test_planner import (
+    WORKFLOW_YAML,
     FakeResponse,
     FakeText,
     FakeToolUse,
@@ -356,3 +359,44 @@ def test_loading_an_unknown_skill_names_the_real_ones() -> None:
 
     assert result.startswith("Error: Unknown skill")
     assert "diagnose" in result
+
+
+# --- skills written for a subagent ----------------------------------------
+
+
+def test_a_subagent_skill_is_neither_invoked_nor_loaded_by_the_planner() -> None:
+    assert "qa-code" in JOB_AGENT_SKILLS
+    assert "qa-code" not in SKILLS
+    assert "qa-code" not in LOAD_SKILL_TOOL["input_schema"]["properties"]["name"]["enum"]
+    with pytest.raises(ApolloError):
+        get_skill("qa-code")
+
+
+def test_the_job_code_agent_tool_offers_every_job_agent_skill() -> None:
+    skill_param = CALL_JOB_CODE_AGENT_TOOL["input_schema"]["properties"]["skill"]
+    assert skill_param["enum"] == sorted(JOB_AGENT_SKILLS)
+
+
+def test_a_named_subagent_skill_leads_the_job_agents_message() -> None:
+    with patch("job_chat.job_chat.main", return_value=job_chat_result()) as mock_main:
+        call_job_agent(
+            {"message": "leave the comments alone", "job_key": "fetch-patients",
+             "attachments": [], "skill": "qa-code"},
+            workflow_yaml=WORKFLOW_YAML,
+        )
+
+    content = mock_main.call_args[0][0]["content"]
+    assert content.startswith(JOB_AGENT_SKILLS["qa-code"].as_block())
+    # The planner's message is what this conversation adds, so it wins
+    assert "overrides these instructions" in content
+    assert content.endswith("leave the comments alone")
+
+
+def test_an_unknown_subagent_skill_is_dropped_not_fatal() -> None:
+    with patch("job_chat.job_chat.main", return_value=job_chat_result()) as mock_main:
+        call_job_agent(
+            {"message": "fix it", "job_key": "fetch-patients", "attachments": [], "skill": "sudo"},
+            workflow_yaml=WORKFLOW_YAML,
+        )
+
+    assert mock_main.call_args[0][0]["content"] == "fix it"

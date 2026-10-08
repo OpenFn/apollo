@@ -4,7 +4,7 @@ Tool definitions for the supervisor agent.
 These are Claude API tool schemas that define what tools are available.
 """
 
-from global_chat.skill_registry import SKILLS
+from global_chat.skill_registry import JOB_AGENT_SKILLS, SKILLS
 
 # Tool 1: Search documentation
 SEARCH_DOCUMENTATION_TOOL = {
@@ -84,6 +84,13 @@ Describe the goal in plain language; the job code agent is the expert on adaptor
     },
     "cache_control": {"type": "ephemeral"}
 }
+
+if JOB_AGENT_SKILLS:
+    CALL_JOB_CODE_AGENT_TOOL["input_schema"]["properties"]["skill"] = {
+        "type": "string",
+        "enum": sorted(JOB_AGENT_SKILLS),
+        "description": "Instructions for this kind of work, attached to your message word for word. Name one when a skill you are following tells you to, and put only what this conversation adds in `message`.",
+    }
 
 # Tool 4: Inspect job code — shared with job_chat's subagent mode so both
 # agents explore the workflow with the exact same tool
