@@ -140,6 +140,18 @@ Request to build a new multi-step workflow from scratch:
 
 ## Implementation
 
+### Skills
+
+A `skill` field in the payload names a standard skill the user invoked by slash
+command (`/diagnose`, `/qa`). Standard skills live in `skills/<name>/SKILL.md`,
+in Anthropic's Agent Skills format, and are loaded by `skill_registry.py` at
+import.
+
+An invoked skill skips the router — a slash command states the intent the router
+would otherwise guess — and its instructions lead the planner's user turn. They
+are kept in the returned history, so they keep applying on later turns, which
+also go to the planner. See [PAYLOAD_SPEC.md](PAYLOAD_SPEC.md#skill-invocation).
+
 ### Routing
 
 Every request first passes through the `RouterAgent` (Claude Haiku), which
@@ -168,13 +180,15 @@ For straightforward requests, the router calls subagents directly:
 ### Planner
 
 For complex requests, the `PlannerAgent` (Claude Opus) runs an agentic
-tool-calling loop with access to four tools:
+tool-calling loop with access to five tools:
 
 - **`call_workflow_agent`** — create or modify workflow YAML structure
 - **`call_job_code_agent`** — write or edit job code for a specific job
   (requires an existing workflow with that job defined)
 - **`search_documentation`** — semantic search over the OpenFn docsite
 - **`inspect_job_code`** — read-only inspection of a job's current code
+- **`load_skill`** — load a standard skill's instructions when a request
+  matches it
 
 The planner always calls `call_workflow_agent` first to establish the structure,
 then calls `call_job_code_agent` for each job that needs code. Job code is

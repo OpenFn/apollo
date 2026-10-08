@@ -460,7 +460,7 @@ def format_search_results(search_results):
 
 @observe(name="job_chat_build_prompt")
 def build_prompt(content, history, context, rag=None, api_key=None, stream_manager=None, download_adaptor_docs=True, refresh_rag=False,
-                 workflow_yaml=None, subagent=False):
+                 workflow_yaml=None, subagent=False, has_skills=False):
     retrieved_knowledge = {
         "search_results": [],
         "search_results_sections": [],
@@ -510,6 +510,8 @@ def build_prompt(content, history, context, rag=None, api_key=None, stream_manag
             " If it needs changes beyond this step's code, call `edit_workflow` first;"
             " to merely read another step (to answer, or to edit this one), use `inspect_job_code`."
         )
+    if has_skills:
+        reminder += " If one of your skills fits the task, load it first."
     prompt.append({
         "role": "user",
         "content": f"{content}\n\n{reminder}",

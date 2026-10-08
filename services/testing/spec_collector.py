@@ -285,8 +285,12 @@ def _capture_response_text(
     if not isinstance(text, str) or not text.strip():
         return None
 
-    agent_path = _format_agent_path(response.get("meta", {}))
-    body = f"agents: {agent_path}\n\n{text}" if agent_path else text
+    meta = response.get("meta") or {}
+    agent_path = _format_agent_path(meta)
+    header = [f"agents: {agent_path}"] if agent_path else []
+    if meta.get("skills"):
+        header.append(f"skills: {', '.join(meta['skills'])}")
+    body = "\n".join(header) + f"\n\n{text}" if header else text
 
     output_dir.mkdir(parents=True, exist_ok=True)
     suffix = f"__run-{run_index}" if runs > 1 else ""
