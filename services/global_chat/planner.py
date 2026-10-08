@@ -550,6 +550,14 @@ class PlannerAgent:
             "total_tool_calls": tool_call_count,
         }
 
+        skills_used = [
+            *([self._skill.name] if self._skill else []),
+            *self._loaded_skills,
+            *(name for result in self.subagent_results for name in (result.get("meta") or {}).get("skills", [])),
+        ]
+        if skills_used:
+            meta["skills"] = list(dict.fromkeys(skills_used))
+
         if response.stop_reason == "pause_turn":
             meta["truncated"] = True
             meta["stop_reason"] = "pause_turn"

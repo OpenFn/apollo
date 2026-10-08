@@ -420,3 +420,34 @@ def test_an_attached_skill_is_not_offered_again() -> None:
         )
 
     assert "qa-code" not in [s["name"] for s in mock_main.call_args[0][0]["skills"]]
+
+
+# --- reporting the skills a turn used -------------------------------------
+
+
+def test_a_turn_reports_the_skill_the_planner_attached() -> None:
+    with patch("job_chat.job_chat.main", return_value=job_chat_result()):
+        result = call_job_agent(
+            {"message": "review", "job_key": "fetch-patients", "attachments": [], "skill": "qa-code"},
+            workflow_yaml=WORKFLOW_YAML,
+        )
+
+    assert result["meta"]["skills"] == ["qa-code"]
+
+
+def test_the_direct_route_reports_skills_the_job_agent_loaded() -> None:
+    loaded = {**job_chat_result(), "meta": {"skills": ["qa-code"]}}
+    with patch("job_chat.job_chat.main", return_value=loaded):
+        result = make_router()._route_to_job_chat(
+            "is this ready to go live?", WORKFLOW_YAML, "workflows/wf/fetch-patients", [], False, 5,
+        )
+
+    assert result.meta["skills"] == ["qa-code"]
+
+
+def test_a_planner_turn_reports_the_skill_it_ran() -> None:
+    _, result = run_turn("qa")
+    assert result.meta["skills"] == ["qa"]
+
+    _, result = run_turn(None)
+    assert "skills" not in result.meta

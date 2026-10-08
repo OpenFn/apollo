@@ -142,6 +142,12 @@ def main(data_dict: dict) -> dict:
                 if diff_meta:
                     langfuse.update_current_span(metadata=diff_meta)
 
+                # Tags, so traces can be filtered by the skills a turn used
+                skills_used = result.meta.get("skills")
+                if skills_used:
+                    with propagate_attributes(tags=[f"skill:{name}" for name in skills_used]):
+                        pass
+
             # 5. Return structured response
             return {
                 "response": result.response,

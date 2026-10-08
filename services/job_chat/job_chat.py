@@ -233,6 +233,7 @@ class ChatResponse:
     diff: Optional[Dict[str, Any]] = None
     # Subagent mode only: reason the request was handed back to the caller
     handover: Optional[str] = None
+    skills_loaded: Optional[List[str]] = None
 
 class AnthropicClient:
     def __init__(self, config: Optional[ChatConfig] = None):
@@ -332,6 +333,7 @@ class AnthropicClient:
             if skills:
                 tools.append(_load_skill_tool(skills))
             skill_bodies = {s["name"]: s["body"] for s in skills or []}
+            skills_loaded = []
             tool_kwargs = {"tools": tools, "tool_choice": {"type": "auto"}} if tools else {}
 
             # Without the subagent tools or skills this loop runs exactly once:
@@ -444,6 +446,8 @@ class AnthropicClient:
                         elif block.name == "load_skill":
                             skill_name = (block.input or {}).get("name")
                             logger.info("job_chat load_skill: %s", skill_name)
+                            if skill_name in skill_bodies and skill_name not in skills_loaded:
+                                skills_loaded.append(skill_name)
                             result_text = skill_bodies.get(
                                 skill_name, f"Error: Unknown skill. Available skills: {sorted(skill_bodies)}",
                             )
@@ -568,7 +572,8 @@ class AnthropicClient:
                 history=updated_history,
                 usage=usage,
                 rag=retrieved_knowledge,
-                diff=diff
+                diff=diff,
+                skills_loaded=skills_loaded,
             )
 
     def process_stream_event(
@@ -874,6 +879,9 @@ def main(data_dict: dict) -> dict:
 
             if result.handover:
                 response_dict["handover"] = result.handover
+
+            if result.skills_loaded:
+                response_dict["meta"]["skills"] = result.skills_loaded
 
             return response_dict
 

@@ -60,3 +60,15 @@ def test_loading_a_skill_returns_its_instructions_and_continues() -> None:
 
     tool_result = create.call_args.kwargs["messages"][-1]["content"][0]
     assert tool_result["content"] == "Check the loops."
+
+
+def test_a_loaded_skill_is_reported() -> None:
+    with patch("job_chat.job_chat.Anthropic"):
+        client = AnthropicClient(ChatConfig(api_key="test"))
+    client.client.messages.create.side_effect = [
+        message(tool_use("load_skill", {"name": "qa-code"})), message(text("Reviewed.")),
+    ]
+    with patch("job_chat.job_chat.build_prompt", return_value=("system", [{"role": "user", "content": "hi"}], {})):
+        result = client.generate(content="is this ready?", suggest_code=True, subagent=True, skills=SKILLS)
+
+    assert result.skills_loaded == ["qa-code"]

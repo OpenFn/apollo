@@ -160,6 +160,9 @@ def call_job_agent(
         logger.info(f"job_agent response: {response_preview}")
 
         result["_call_metadata"] = {"subagent": "job_agent", "job_key": job_key}
+        if skill:
+            meta = result.setdefault("meta", {})
+            meta["skills"] = [skill.name, *meta.get("skills", [])]
 
         return result
 

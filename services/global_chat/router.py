@@ -421,6 +421,8 @@ class RouterAgent:
                 logger.warning(dropped)
 
         meta = {"agents": ["router", "job_code_agent"], "router_confidence": confidence}
+        if (result.get("meta") or {}).get("skills"):
+            meta["skills"] = result["meta"]["skills"]
 
         # In the shape the planner reports, so a client has one place to look.
         # This route is the shortcut for a single-step edit, so it is the case
