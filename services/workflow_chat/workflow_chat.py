@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from models import resolve_model
 
 _dir = os.path.dirname(os.path.abspath(__file__))
-with open(os.path.join(_dir, "gen_project_config.yaml")) as _f:
+with open(os.path.join(_dir, "config.yaml")) as _f:
     _service_config = yaml.safe_load(_f)
 
 _MODEL = resolve_model(_service_config.get("model", "claude-sonnet"))
@@ -72,7 +72,7 @@ from name_rules import (
 )
 from util import ApolloError, create_logger, add_page_prefix, APOLLO_VERSION
 from yaml_utils import _remove_ids
-from .gen_project_prompt import build_prompt
+from .prompt import build_prompt
 from workflow_chat.available_adaptors import get_available_adaptors
 from streaming_util import (
     StreamManager,

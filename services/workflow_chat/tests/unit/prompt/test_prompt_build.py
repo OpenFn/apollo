@@ -1,6 +1,6 @@
 import pytest
 from name_rules import UNICODE_FLAG_ENV, describe_rule_for_prompt
-from workflow_chat.gen_project_prompt import build_prompt
+from workflow_chat.prompt import build_prompt
 
 
 def test_build_prompt_normal_mode():
@@ -58,7 +58,7 @@ def test_build_prompt_subagent_strips_inspector_instruction():
 
     # The go-elsewhere phrasing must not be in context at all, in any of the
     # prompt sections it appears in — if this fails, the sentence in
-    # gen_project_prompts.yaml and the replace() in build_prompt have drifted
+    # prompts.yaml and the replace() in build_prompt have drifted
     assert "navigate to the specific job's code page in the Inspector" not in system_msg
     assert "DECLINE" not in system_msg
     assert 'If the user asks for job code, set "handover"' in system_msg
@@ -143,16 +143,16 @@ def test_a_prompt_that_drops_the_name_rule_token_is_rejected_loudly(
     The prompt would then state no naming rule at all while the sanitizer
     carried on enforcing one, and the model would be left guessing.
     """
-    from workflow_chat import gen_project_prompt
+    from workflow_chat import prompt as prompt_module
 
     monkeypatch.setattr(
-        gen_project_prompt.config_loader,
+        prompt_module.config_loader,
         "get_prompt",
         lambda name: "no token here {adaptors}" if name == "general_knowledge" else "x",
     )
 
     with pytest.raises(ValueError, match="did not render the step-name rule"):
-        gen_project_prompt.build_prompt(content="Create a workflow")
+        prompt_module.build_prompt(content="Create a workflow")
 
 def test_build_prompt_describes_webhook_custom_path():
     system_msg, _ = build_prompt(
