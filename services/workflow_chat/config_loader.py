@@ -1,7 +1,7 @@
 import yaml
 
 class ConfigLoader:
-    def __init__(self, config_path="gen_project_config.yaml", prompts_path="gen_project_prompts.yaml"):
+    def __init__(self, config_path="config.yaml", prompts_path="prompts.yaml"):
         self.config = self.load_yaml(config_path)
         self.prompts = self.load_yaml(prompts_path)
 

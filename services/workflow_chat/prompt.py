@@ -7,8 +7,8 @@ from .available_adaptors import get_adaptors_string
 from .config_loader import ConfigLoader
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
-config_path = os.path.join(base_dir, "gen_project_config.yaml")
-prompts_path = os.path.join(base_dir, "gen_project_prompts.yaml")
+config_path = os.path.join(base_dir, "config.yaml")
+prompts_path = os.path.join(base_dir, "prompts.yaml")
 
 config_loader = ConfigLoader(config_path=config_path, prompts_path=prompts_path)
 config = config_loader.config

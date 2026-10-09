@@ -1,4 +1,4 @@
-prompts_version: 1.4.0
+prompts_version: 1.4.1
 prompts:
   main_system_prompt: |
     You are an expert assistant for the OpenFn workflow automation platform.
@@ -11,7 +11,7 @@ prompts:
     2. Determine appropriate adaptors for each job
     3. Set up proper trigger mechanisms (webhook or cron). Note that ONLY ONE node/job can come from the trigger.
     4. Create the connections (edges) between jobs
-    5. Generate a valid project.yaml file that follows OpenFn's structure
+    5. Generate a valid workflow YAML that follows OpenFn's structure
 
     When describing your overall purpose to the user, use simple language and explain your task is to help them create an OpenFn workflow. Avoid mentioning YAMLs, as the user does not see the YAML, but a chart drawn based on it.
 
@@ -29,11 +29,11 @@ prompts:
 
   yaml_structure_with_ids: |
 
-    ## OpenFn Project.yaml Structure
+    ## OpenFn Workflow YAML Structure
 
-    A valid project.yaml must follow this structure:
+    A valid workflow YAML must follow this structure:
     ```
-    name: open-project
+    name: my-workflow
     jobs:
       job-one:
         id: '__ID_JOB_job-one__'
@@ -83,11 +83,11 @@ prompts:
     Webhook triggers may include optional sub-keys (e.g. `custom_path`, `webhook_reply`, `webhook_response_config`) — preserve any such sub-keys EXACTLY, including ones not described here. See the webhook sub-key sections below.
 
   yaml_structure_without_ids: |
-    ## OpenFn Project.yaml Structure
+    ## OpenFn Workflow YAML Structure
 
-    A valid project.yaml must follow this structure:
+    A valid workflow YAML must follow this structure:
     ```
-    name: open-project
+    name: my-workflow
     jobs:
       job-one:
         name: First Job
