@@ -23,6 +23,8 @@ import socket
 import sys
 import traceback
 
+import sentry_sdk  # for the per-child service tag + flush (see run_child)
+
 # Warm entry.py's heavy deps so forked children inherit them (copy-on-write).
 # Mirrors entry.py's imports; a missing one is just imported per-child - slower,
 # never wrong.
@@ -57,11 +59,11 @@ def preload() -> int:
 
 def run_child(conn: socket.socket, req: dict) -> None:
     """In the forked child: stream through the socket, run one job, exit."""
-    # Route stdout/stderr to the socket so the service's logging reaches the bridge.
+    # Route stdout to the socket so the service's logging reaches the bridge.
+    # Leave stderr on fd 2 (the master's stderr pipe) so Python tracebacks still
+    # reach the server logs, the way the spawn path forwards them.
     os.dup2(conn.fileno(), 1)
-    os.dup2(conn.fileno(), 2)
     sys.stdout = os.fdopen(1, "w", buffering=1)
-    sys.stderr = os.fdopen(2, "w", buffering=1)
 
     print(f"PID:{os.getpid()}")  # first, so the bridge can cancel this child
 
@@ -69,6 +71,7 @@ def run_child(conn: socket.socket, req: dict) -> None:
     try:
         import entry  # post-fork: entry.py's init runs here (fork-safe), deps warm
 
+        sentry_sdk.set_tag("service", req["service"])  # entry.main() tags it; call() doesn't
         entry.call(
             service=req["service"],
             input_path=req.get("input"),
@@ -79,6 +82,16 @@ def run_child(conn: socket.socket, req: dict) -> None:
         traceback.print_exc()
         code = 1
     finally:
+        try:
+            sentry_sdk.flush(timeout=2)
+        except Exception:
+            pass
+        langfuse = getattr(sys.modules.get("entry"), "langfuse", None)
+        if langfuse is not None:
+            try:
+                langfuse.flush()
+            except Exception:
+                pass
         print(f"EXIT:{code}")
     os._exit(code)
 

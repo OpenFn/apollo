@@ -66,10 +66,10 @@ function startMaster(): Promise<Master> {
     });
     proc.on("error", fail);
     proc.on("exit", (code, sig) => {
-      clearTimeout(timer);
       console.error(`fork-server exited (code=${code} signal=${sig})`);
       master = masterProc = null; // next request starts a fresh one
       rm(socketPath).catch(() => {});
+      fail(new Error(`fork-server exited before ready (code=${code} signal=${sig})`));
     });
   });
 }
