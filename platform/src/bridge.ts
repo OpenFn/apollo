@@ -12,6 +12,7 @@ import {
   subprocessSpawnFailed,
 } from "./util/errors";
 import pkg from "../../package.json";
+import { USE_FORK_SERVER, runForked } from "./bridge.fork";
 
 // A line a service logged on purpose, as opposed to whatever else lands on a
 // stream. Only these are forwarded to the caller.
@@ -59,6 +60,10 @@ export const run = async (
     await rm(inputPath).catch(() => {});
     await rm(outputPath).catch(() => {});
     throw subprocessSpawnFailed(scriptName, error);
+  }
+
+  if (USE_FORK_SERVER) {
+    return runForked(scriptName, port, inputPath, outputPath, onLog, onEvent, signal);
   }
 
   return new Promise<JSON | null>((resolve, reject) => {
