@@ -22,28 +22,23 @@ import signal
 import socket
 import sys
 import traceback
+from pathlib import Path
 
 import sentry_sdk  # for the per-child service tag + flush (see run_child)
+import yaml
 
 # Warm entry.py's heavy deps so forked children inherit them (copy-on-write).
-# Mirrors entry.py's imports; a missing one is just imported per-child - slower,
-# never wrong.
-PRELOAD = (
-    "sentry_sdk",
-    "anthropic",
-    "langfuse",
-    "langfuse_util",
-    "util",
-    "opentelemetry.instrumentation.anthropic",
-    "opentelemetry.instrumentation.threading",
-)
+# See fork_preload.yaml for the list and why each module is there.
+PRELOAD_PATH = Path(__file__).parent / "fork_preload.yaml"
 
 
 def preload() -> int:
     """Warm the shared deps, plus any opt-in services. Services are opt-in
     (APOLLO_FORK_PRELOAD_SERVICES) because some do I/O at import and would hang
     the parent; the child imports the rest on demand."""
-    for module in PRELOAD:
+    with PRELOAD_PATH.open() as f:
+        modules = yaml.safe_load(f)["preload"]
+    for module in modules:
         importlib.import_module(module)
 
     names = [s.strip() for s in os.environ.get("APOLLO_FORK_PRELOAD_SERVICES", "").split(",") if s.strip()]
