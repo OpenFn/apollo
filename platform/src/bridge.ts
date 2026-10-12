@@ -13,10 +13,7 @@ import {
 } from "./util/errors";
 import pkg from "../../package.json";
 import { USE_FORK_SERVER, runForked } from "./bridge.fork";
-
-// A line a service logged on purpose, as opposed to whatever else lands on a
-// stream. Only these are forwarded to the caller.
-const LOG_LINE = /^(INFO|DEBUG|ERROR|WARNING):/;
+import { LOG_LINE } from "./util/log-line";
 
 /**
   Run a python script

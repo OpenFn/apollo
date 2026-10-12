@@ -12,10 +12,8 @@ import {
   subprocessKilled,
   subprocessSpawnFailed,
 } from "./util/errors";
+import { LOG_LINE } from "./util/log-line";
 import pkg from "../../package.json";
-
-// Only these lines are forwarded to the caller (mirrors bridge.ts).
-const LOG_LINE = /^(INFO|DEBUG|ERROR|WARNING):/;
 
 export const USE_FORK_SERVER =
   (process.env.APOLLO_FORK_SERVER ?? "").toLowerCase() === "true";
