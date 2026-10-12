@@ -1,0 +1,7 @@
+{
+  "context": {
+    "expression": "// Get data from external API\nget('https://api.example.com/data');\n\n// Process and transform data\nfn(state => {\n  const transformed = state.data.map(item => ({\n    id: item.id,\n    name: item.full_name,\n    status: item.active ? 'Active' : 'Inactive'\n  }));\n\n  return { ...state, transformed };\n});\n\n// Send transformed data to destination\npost('https://destination.org/upload', state => state.transformed);",
+    "adaptor": "@openfn/language-gmail@2.0.2"
+  },
+  "suggest_code": true
+}
