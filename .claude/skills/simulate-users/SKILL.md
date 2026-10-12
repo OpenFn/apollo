@@ -60,7 +60,7 @@ Biggest red flags:
 
 Trace which agents and tools ran, in what order (`meta.agents`, `meta.subagent_calls`). Flag a path that's wrong, wasteful or surprising for the ask.
 
-Also note: unrequested changes, wrong or invented adaptor functions, bad yaml.
+Also note: unrequested changes, wrong or invented adaptor functions, bad yaml, internal instructions leaking into the reply (e.g. "the user invoked /qa").
 
 Write brief `notes.md` in the run dir.
 

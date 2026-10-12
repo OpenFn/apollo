@@ -38,7 +38,7 @@ class Skill:
 
     def as_preamble(self) -> str:
         """The skill as it is injected ahead of the request that invoked it."""
-        return f"{self.as_block()}\n\nThe user invoked /{self.name}."
+        return f"{self.as_block()}\n\nFollow these instructions for the request below."
 
     def as_subagent_preamble(self) -> str:
         """The skill as it is injected ahead of the planner's message to a subagent."""
