@@ -56,7 +56,6 @@ function startMaster(): Promise<Master> {
     const timer = setTimeout(() => fail(new Error("not READY in time")), 60_000);
 
     onLines(proc.stdout!, (line) => {
-      console.log(`fork-server: ${line}`);
       if (line.startsWith("READY")) {
         clearTimeout(timer);
         resolve({ proc, socketPath });
