@@ -1454,9 +1454,9 @@ def test_meta_omits_the_web_fields_when_web_search_is_off() -> None:
 
 
 def make_bad_request(message: str = "web search is not enabled for this account") -> BadRequestError:
-    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     body = {"type": "error", "error": {"type": "invalid_request_error", "message": message}}
-    return BadRequestError(message, response=httpx.Response(400, request=request, json=body), body=body)
+    return BadRequestError(message, response=httpx2.Response(400, request=request, json=body), body=body)
 
 
 def test_a_bad_request_with_web_tools_retries_without_them() -> None:
