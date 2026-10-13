@@ -30,6 +30,24 @@ Two rules of thumb:
 - **A guard you have not seen fail is not a guard.** Break the code, watch the
   test go red, put it back.
 
+## Acceptance spec folders
+
+Run one folder's own specs with
+`poetry run pytest <folder>/*.md -s` (the bare folder also collects its
+subfolders). Paths are under `services/<service>/tests/acceptance/`.
+
+| Folder | What it tests |
+|---|---|
+| `workflow_chat/` | The workflow agent alone: generating and editing workflow YAML |
+| `job_chat/` | The job code agent alone: code for a single step |
+| `job_chat/quality_issues/` | Whether generated code avoids known code-quality mistakes |
+| `job_chat/bugs/` | Repros of real job_chat failures |
+| `global_chat/job_code/` | Questions and code changes about one step, through the router |
+| `global_chat/multi_step_changes/` | Edits to an existing workflow that the planner splits across agents |
+| `global_chat/one_shot_workflows/` | A whole workflow with job code from one request |
+| `global_chat/gold_workflows/` | Real-world workflow patterns, each phrased vaguely and verbosely |
+| `global_chat/bugs/` | Repros of real global_chat failures |
+
 ## Modules
 
 - `yaml_assertions.py` — pure-function YAML structural assertions, safe for
@@ -64,9 +82,9 @@ Two rules of thumb:
   (e.g. `tmp/<spec_id>__sonnet-2026-06-29.txt`).
 
   Each spec spends real money, so a run of more than 5 spec runs asks for
-  confirmation first (with the service and judge call counts), or refuses when
-  there's no terminal to ask. Pass `--max-specs=<n>` to raise the limit, e.g.
-  for a nightly job.
+  confirmation first (with the service and judge call counts, and a command per
+  spec folder to run a subset instead), or refuses when there's no terminal to
+  ask. Pass `--max-specs=<n>` to raise the limit, e.g. for a nightly job.
 
   Pass `--no-judge` to skip judging: the service is still called and its output
   captured, but nothing is graded and every spec passes.

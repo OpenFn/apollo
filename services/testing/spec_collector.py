@@ -77,20 +77,40 @@ def pytest_collection_finish(session):
         f"calls (each fans out to several LLM calls) + {judge_calls} judge calls"
     )
     flag = f"--max-specs={len(specs)}"
+    subsets = _subset_table(specs, session.config.rootpath)
 
     # Capture redirects fd 0 to /dev/null, so the TTY check must come after suspending it.
     capman = session.config.pluginmanager.getplugin("capturemanager")
     capman.suspend_global_capture(in_=True)
     try:
         if not sys.stdin.isatty():
-            raise pytest.UsageError(f"{summary}, over the limit of {limit}; pass {flag} to allow it")
-        answer = input(f"\n{summary}. Continue? [y/N] ")
+            raise pytest.UsageError(
+                f"{summary}, over the limit of {limit}; pass {flag} to allow it, "
+                f"or run a subset:\n{subsets}"
+            )
+        answer = input(f"\n{summary}. Run a subset instead?\n{subsets}\nContinue with all {len(specs)}? [y/N] ")
     except EOFError:
         answer = ""
     finally:
         capman.resume_global_capture()
     if answer.strip().lower() not in ("y", "yes"):
         pytest.exit(f"Acceptance run cancelled; pass {flag} to skip this prompt", returncode=0)
+
+
+def _subset_table(specs: list["SpecItem"], rootpath: Path) -> str:
+    """One row per spec folder: its spec-run count and the command to run only it."""
+    counts: dict[Path, int] = {}
+    for item in specs:
+        folder = item.path.parent.relative_to(rootpath)
+        counts[folder] = counts.get(folder, 0) + 1
+
+    # `*.md` rather than the folder, which would also collect its subfolders.
+    rows = [
+        f"  {count:>3}  poetry run pytest {folder}/*.md -s"
+        for folder, count in sorted(counts.items())
+    ]
+    rows.append("  What each folder tests: services/testing/README.md")
+    return "\n".join(rows)
 
 
 def _experiment_suffix(config) -> str:
