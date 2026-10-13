@@ -86,7 +86,7 @@ def pytest_collection_finish(session):
         if not sys.stdin.isatty():
             raise pytest.UsageError(
                 f"{summary}, over the limit of {limit}; pass {flag} to allow it, "
-                f"or run a subset:\n{subsets}"
+                f"or run a subset:\n{subsets}",
             )
         answer = input(f"\n{summary}. Run a subset instead?\n{subsets}\nContinue with all {len(specs)}? [y/N] ")
     except EOFError:
