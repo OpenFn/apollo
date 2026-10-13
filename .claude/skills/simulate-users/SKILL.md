@@ -76,6 +76,7 @@ Journeys: <one line each: user goal, turns, how it went (path: e.g. router → p
 ❓ <design question: works as coded but intended behaviour is unclear to a user>
 ...
 Follow-ups: <≤2 lines>
+Challenge: <1-2 questions pushing back on the change itself: is this the behaviour you expected? would X be better? would it break if the user did Y?>
 Skill: <≤2 lines: suggested addition to this skill, roles.md or fixtures/, or "none">
 ```
 
