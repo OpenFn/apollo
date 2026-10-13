@@ -42,6 +42,7 @@ bun py <service> -i <dir>/<name>.in.json -o <dir>/<name>.out.json > <dir>/<name>
 - Always set `"metrics_opt_in": false`.
 - Stock context (fixtures) comes from acceptance specs. Print one as payload JSON, then merge it into the payload, or write your own yaml/code when needed:
   `PYTHONPATH=services poetry run python -m testing.spec_context <spec.md>`
+  It prints context only (e.g. `page`, `workflow_yaml`, `attachments`); add your own `content`, `history` and `metrics_opt_in`.
   - `kobo-nutrition-dhis2`: `services/global_chat/tests/acceptance/multi_step_changes/test_change_current_step_using_other_steps.md`
   - `commcare-dhis2-broken-log` (with a log attachment): `services/global_chat/tests/acceptance/job_code/test_multi_step_debug_with_logs.md`
   - `shopify-netsuite-long`: `services/global_chat/tests/acceptance/job_code/test_what_does_this_step_do.md`
