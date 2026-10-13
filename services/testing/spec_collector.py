@@ -105,7 +105,7 @@ class SpecItem(pytest.Item):
             response, spec.id, self.run_index, spec.runs, tmp_dir, experiment
         )
         if yaml_path is not None:
-            print(f"  ✓ project YAML saved to {yaml_path}")
+            print(f"  ✓ workflow YAML saved to {yaml_path}")
 
         text_path = _capture_response_text(
             response, spec.id, self.run_index, spec.runs, tmp_dir, experiment
@@ -186,7 +186,7 @@ def _build_payload(spec: Spec) -> dict:
 
 
 def _extract_yaml_from_response(response: dict) -> str | None:
-    """Pull the full project YAML out of a service response, if any.
+    """Pull the full workflow YAML out of a service response, if any.
 
     Different services use different keys:
       - workflow_chat: `response_yaml`
@@ -222,7 +222,7 @@ def _capture_response_yaml(
     output_dir: Path,
     experiment: str = "",
 ) -> Path | None:
-    """Write the response's project YAML to `output_dir/<spec_id>.yaml`.
+    """Write the response's workflow YAML to `output_dir/<spec_id>.yaml`.
 
     For multi-run specs, appends `__run-N` to the filename so each run is
     preserved. `experiment` (already a `__<label>` suffix or '') is appended
