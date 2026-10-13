@@ -113,7 +113,6 @@ def needs_docs(content, client, user_context=""):
     
     response_text, usage = call_llm(
         model=resolve_model(config["llm_search_decision"]),
-        temperature=config["temperature"],
         system_prompt=config_loader.prompts["prompts"]["needs_docs_system_prompt"],
         user_prompt=formatted_user_prompt,
         client=client
@@ -148,7 +147,6 @@ def generate_queries(content, client, user_context=""):
 
     text, usage = call_llm(
         model=resolve_model(config["llm_retrieval"]),
-        temperature=config["temperature"],
         system_prompt=config_loader.prompts["prompts"]["search_docs_system_prompt"],
         user_prompt=formatted_user_prompt,
         client=client,
@@ -208,7 +206,7 @@ def format_context(adaptor, code, history):
     
     return formatted_text
 
-def call_llm(model, temperature, system_prompt, user_prompt, client, output_schema=None):
+def call_llm(model, system_prompt, user_prompt, client, output_schema=None):
     """Helper method to make LLM calls with error handling."""
     try:
         messages = [
@@ -226,7 +224,6 @@ def call_llm(model, temperature, system_prompt, user_prompt, client, output_sche
         kwargs = dict(
             model=model,
             max_tokens=1024,
-            temperature=temperature,
             system=system_prompt,
             messages=messages
         )
