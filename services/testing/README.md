@@ -50,7 +50,7 @@ Two rules of thumb:
   the service payload, calls the service via `ApolloClient`, and runs the judge.
   For inspection, three artifacts are written to a `tmp/` folder next to the
   spec file:
-  - `<spec_id>.yaml` — any project YAML in the response (`response_yaml`,
+  - `<spec_id>.yaml` — any workflow YAML in the response (`response_yaml`,
     `workflow_yaml`, `content_yaml`, or a `workflow_yaml` attachment).
   - `<spec_id>.txt` — the response text, prefixed with the agent path
     (e.g. `agents: router -> planner -> job_code_agent`).

@@ -84,6 +84,10 @@ STATUS_WRITING_CODE = [
     "Writing code...",
 ]
 
+STATUS_SEARCHING_WEB = [
+    "Searching the web...",
+]
+
 
 @dataclass
 class ContentBlock:

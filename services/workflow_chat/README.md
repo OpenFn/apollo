@@ -86,7 +86,7 @@ alternatively, the conversation history, given the error message in `errors`. It
 will return an answer whatever information is given, but it is best to give it
 the `existing_yaml` and conversation `history`.
 
-See the `fix_yaml_error_system_prompt` in `gen_project_prompts.yaml` to see the
+See the `fix_yaml_error_system_prompt` in `prompts.yaml` to see the
 exact instructions.
 
 ````json
