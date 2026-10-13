@@ -62,6 +62,9 @@ Two rules of thumb:
   `-E <label>` / `--experiment=<label>` to append `__<label>` to every captured
   filename so runs with different settings or dates don't overwrite each other
   (e.g. `tmp/<spec_id>__sonnet-2026-06-29.txt`).
+- `spec_context.py` — prints a spec's context (`# settings`) as payload JSON,
+  so the `simulate-users` skill can reuse spec setups without copying them:
+  `PYTHONPATH=services poetry run python -m testing.spec_context <spec.md>`.
 - `apollo_client.py` — `ApolloClient` for dispatching to a chat service.
   Currently a subprocess-based stub; the integration tier will replace its
   internals with a real HTTP client (same `.call()` signature, no test changes).

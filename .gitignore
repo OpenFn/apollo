@@ -82,5 +82,7 @@ services/embed_docsite/docsite_cache/
 
 # Claude Code personal settings
 .claude/settings.local.json
-.claude/skills/
+.claude/skills/*
+!.claude/skills/simulate-users/
+!.claude/skills/draft-assistant-skill/
 CLAUDE.local.md
