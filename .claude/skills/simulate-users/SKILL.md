@@ -40,7 +40,13 @@ bun py <service> -i <dir>/<name>.in.json -o <dir>/<name>.out.json > <dir>/<name>
 - Default service `global_chat` (the router). Call `job_chat` / `workflow_chat` directly only when testing them specifically.
 - Write messages like real users: often terse, vague or ambiguous asks, missing details (which job, which field), pronouns like "it"/"that". Keep at least one turn per run imperfect.
 - Always set `"metrics_opt_in": false`.
-- Stock context is in `fixtures/` (next to this file). Merge a fixture into the payload, or write your own yaml/code when needed.
+- Stock context (fixtures) comes from acceptance specs. Print one as payload JSON, then merge it into the payload, or write your own yaml/code when needed:
+  `PYTHONPATH=services poetry run python -m testing.spec_context <spec.md>`
+  - `kobo-nutrition-dhis2`: `services/global_chat/tests/acceptance/multi_step_changes/test_change_current_step_using_other_steps.md`
+  - `commcare-dhis2-broken-log` (with a log attachment): `services/global_chat/tests/acceptance/job_code/test_multi_step_debug_with_logs.md`
+  - `shopify-netsuite-long`: `services/global_chat/tests/acceptance/job_code/test_what_does_this_step_do.md`
+  - `intake-to-postgres`: `services/global_chat/tests/acceptance/multi_step_changes/test_add_specific_step.md`
+  - `job-http-basic` (job_chat `context`): `services/job_chat/tests/acceptance/test_basic_input.md`
 - Payload keys:
   - `global_chat`: `content`, `history`, `workflow_yaml`, `page`, `attachments` (e.g. `[{"type":"log","content":"..."}]`)
   - `job_chat`: `content`, `history`, `context` (`expression`, `adaptor`), `suggest_code`, `workflow_yaml`
@@ -77,7 +83,7 @@ Journeys: <one line each: user goal, turns, how it went (path: e.g. router → p
 ...
 Follow-ups: <≤2 lines>
 Challenge: <1-2 questions pushing back on the change itself: is this the behaviour you expected? would X be better? would it break if the user did Y?>
-Skill: <≤2 lines: suggested addition to this skill, roles.md or fixtures/, or "none">
+Skill: <≤2 lines: suggested addition to this skill, roles.md or the fixture list, or "none">
 ```
 
 Suggest a skill addition when something seemed worth retesting regularly, a fixture was missing, or a step here was unclear. Suggest, don't edit.
