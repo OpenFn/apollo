@@ -221,7 +221,7 @@ def build_focus_line(viewing, focused):
 
 
 def generate_system_message(context_dict, search_results, download_adaptor_docs=True, stream_manager=None,
-                            workflow_yaml=None, subagent=False):
+                            workflow_yaml=None, subagent=False, suggest_code=True):
     context = context_dict if isinstance(context_dict, Context) else Context(**(context_dict or {}))
 
     message = [subagent_system_role if subagent else system_role]
@@ -335,7 +335,10 @@ and system information. When debugging, analyze these logs carefully to identify
             )
 
     # Output contract goes LAST so it is the final, most prominent instruction.
-    message.append(output_format)
+    # It describes the `edit_job` tool, which is only offered when suggest_code
+    # is on; without it the model answers in text alone.
+    if suggest_code:
+        message.append(output_format)
 
     return list(map(lambda text: text if isinstance(text, dict) else {"type": "text", "text": text}, message))
 
@@ -347,7 +350,7 @@ def format_search_results(search_results):
 
 @observe(name="job_chat_build_prompt")
 def build_prompt(content, history, context, rag=None, api_key=None, stream_manager=None, download_adaptor_docs=True, refresh_rag=False,
-                 workflow_yaml=None, subagent=False):
+                 workflow_yaml=None, subagent=False, suggest_code=True):
     retrieved_knowledge = {
         "search_results": [],
         "search_results_sections": [],
@@ -382,7 +385,8 @@ def build_prompt(content, history, context, rag=None, api_key=None, stream_manag
         download_adaptor_docs=download_adaptor_docs,
         stream_manager=stream_manager,
         workflow_yaml=workflow_yaml,
-        subagent=subagent)
+        subagent=subagent,
+        suggest_code=suggest_code)
 
     prompt = []
     prompt.extend(history)
@@ -391,15 +395,19 @@ def build_prompt(content, history, context, rag=None, api_key=None, stream_manag
     # only remind the model to route an actual code change through `edit_job`.
     # Added only to the message sent to the model; the stored history (built in
     # generate() from the raw content) omits it, so it never accumulates.
-    reminder = "Reply in text. If this requires changing the job code, also call the `edit_job` tool to apply the change."
-    if subagent:
-        reminder += (
-            " If it needs changes beyond this step's code, call `edit_workflow` first;"
-            " to merely read another step (to answer, or to edit this one), use `inspect_job_code`."
-        )
+    # Without suggest_code there is no `edit_job` tool to remind about, so the
+    # user's message goes through as is.
+    if suggest_code:
+        reminder = "Reply in text. If this requires changing the job code, also call the `edit_job` tool to apply the change."
+        if subagent:
+            reminder += (
+                " If it needs changes beyond this step's code, call `edit_workflow` first;"
+                " to merely read another step (to answer, or to edit this one), use `inspect_job_code`."
+            )
+        content = f"{content}\n\n{reminder}"
     prompt.append({
         "role": "user",
-        "content": f"{content}\n\n{reminder}",
+        "content": content,
     })
 
     return (system_message, prompt, retrieved_knowledge)

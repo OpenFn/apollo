@@ -567,6 +567,128 @@ def test_rag_retriggered_on_navigation():
 
     print("\n✓ RAG retriggering test passed: Navigation detected (from history prefix) and RAG data updated")
 
+
+# Text-only mode (suggest_code false or omitted): no `edit_job` tool, so any code
+# change comes back as markdown inside the `response` text. These replaced the
+# old_prompt.py suite when that prompt was removed. NOTE: we don't know whether
+# any caller still reaches this code path. Lightning's job_chat_stream and
+# global_chat both always send suggest_code: true; only an older Lightning or a
+# direct API caller would omit it.
+
+def test_text_only_rename_variable():
+    print("==================TEST==================")
+    print("Description: Testing variable name change in text-only mode (suggest_code=False)")
+
+    history = []
+    content = "Could you rename the variable 'transformed' to 'processedData' in my code?"
+
+    context = {
+        "expression": '''// Get data from external API
+get('https://api.example.com/data');
+
+fn(state => {
+  const transformed = state.data.map(item => ({
+    id: item.id,
+    name: item.full_name,
+    status: item.active ? 'Active' : 'Inactive'
+  }));
+
+  return { ...state, transformed };
+});
+
+post('https://destination.org/upload', state => state.transformed);'''
+    }
+
+    expected_code = '''// Get data from external API
+get('https://api.example.com/data');
+
+fn(state => {
+  const processedData = state.data.map(item => ({
+    id: item.id,
+    name: item.full_name,
+    status: item.active ? 'Active' : 'Inactive'
+  }));
+
+  return { ...state, processedData };
+});
+
+post('https://destination.org/upload', state => state.processedData);'''
+
+    meta = {}
+    service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=False)
+    response = call_job_chat_service(service_input)
+    print_response_details(response, "text_only_rename_variable", content=content)
+
+    assert response is not None
+    assert response.get("suggested_code") is None, f"Text-only mode returned suggested_code: {response}"
+    assert "diff" not in response, f"Text-only mode returned a diff: {response}"
+    assert expected_code in response["response"], f"Variable rename did not produce expected result.\nExpected:\n{expected_code}\n\nActual:\n{response}"
+
+
+def test_text_only_convert_get_to_post():
+    print("==================TEST==================")
+    print("Description: Testing conversion of GET to POST request in text-only mode (suggest_code=False)")
+
+    history = []
+    content = "Change the GET request to a POST request"
+
+    context = {
+        "expression": '''
+get('https://api.example.com/users/profile');
+
+fn(state => {
+  const profile = state.data;
+  console.log('Retrieved profile for user:', profile.id);
+  return { ...state, profile };
+});
+
+// Save the data
+post('https://api.example.com/save', state => ({
+  user: state.profile,
+  timestamp: new Date().toISOString()
+}));'''
+    }
+
+    expected_code = '''
+post('https://api.example.com/users/profile', {});
+
+fn(state => {
+  const profile = state.data;
+  console.log('Retrieved profile for user:', profile.id);
+  return { ...state, profile };
+});
+
+// Save the data
+post('https://api.example.com/save', state => ({
+  user: state.profile,
+  timestamp: new Date().toISOString()
+}));'''
+
+    expected_code_alternative = '''
+post('https://api.example.com/users/profile');
+
+fn(state => {
+  const profile = state.data;
+  console.log('Retrieved profile for user:', profile.id);
+  return { ...state, profile };
+});
+
+// Save the data
+post('https://api.example.com/save', state => ({
+  user: state.profile,
+  timestamp: new Date().toISOString()
+}));'''
+
+    meta = {}
+    service_input = make_service_input(history=history, content=content, context=context, meta=meta, suggest_code=False)
+    response = call_job_chat_service(service_input)
+    print_response_details(response, "text_only_convert_get_to_post", content=content)
+
+    assert response is not None
+    assert response.get("suggested_code") is None, f"Text-only mode returned suggested_code: {response}"
+    assert "diff" not in response, f"Text-only mode returned a diff: {response}"
+    assert expected_code in response["response"] or expected_code_alternative in response["response"], f"GET to POST conversion did not produce expected result.\nExpected:\n{expected_code}\n\nActual:\n{response}"
+
 def test_adaptor_context_switching():
     print("==================TEST==================")
     print("Description: Test that the model pays attention to page prefix changes and provides adaptor-specific answers")
