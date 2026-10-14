@@ -1,5 +1,6 @@
 import os
 
+from guidelines import render_for_prompt
 from name_rules import describe_rule_for_prompt
 from util import format_attachments
 
@@ -18,27 +19,35 @@ NAME_RULE_TOKEN = "{name_rule}"
 
 
 def _general_knowledge():
-    """Render the general-knowledge prompt, with the active step-name rule in it.
+    """Render the general-knowledge prompt, with the workflow guidelines and the
+    active step-name rule in it.
 
-    `str.format` ignores a keyword the template does not use, so dropping the
-    token from the yaml would silently ship a prompt that states no naming rule
-    at all while the sanitizer carried on enforcing one. Check for it first.
+    The guidelines go in as a format *argument*, never into the template: rule
+    examples can contain braces that `str.format` would choke on. The step-name
+    rule reaches the prompt through the `{name_rule}` token in the job
+    identification guideline, which the guidelines loader renders.
+
+    `str.format` ignores a keyword the template does not use, so dropping
+    `{workflow_rules}` from the yaml, or the token from the guideline, would
+    silently ship a prompt that states no naming rule at all while the
+    sanitizer carried on enforcing one. Check for it first.
     """
     rule = describe_rule_for_prompt()
     rendered = config_loader.get_prompt("general_knowledge").format(
         adaptors=get_adaptors_string(),
-        name_rule=rule,
+        workflow_rules=render_for_prompt("workflow"),
     )
 
-    # Check the *rendered* text, not the template. A doubled `{{name_rule}}` is
-    # how `.format` escapes a literal brace: it contains the token as a
-    # substring, so a template-side check waves it through, and what reaches the
-    # model is the four words "{name_rule}" rather than any rule at all.
+    # Check the *rendered* text, not the template or the guideline file, so a
+    # token that was escaped, mangled or never substituted is caught wherever
+    # it went wrong: what reaches the model would otherwise be the four words
+    # "{name_rule}" rather than any rule at all.
     if NAME_RULE_TOKEN in rendered or rule not in rendered:
         raise ValueError(
             f"The general_knowledge prompt did not render the step-name rule. It must contain "
-            f"exactly {NAME_RULE_TOKEN}, unescaped and unduplicated — the rule stated to the "
-            f"model and the rule the sanitizer enforces have to come from the same place.",
+            f"{{workflow_rules}}, and the workflow guidelines must contain exactly {NAME_RULE_TOKEN} "
+            f"— the rule stated to the model and the rule the sanitizer enforces have to come "
+            f"from the same place.",
         )
     return rendered
 

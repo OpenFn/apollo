@@ -67,7 +67,6 @@ def _stub_prompt(*args, **kwargs):
 def test_max_tokens_raises_output_truncated():
     """stop_reason=max_tokens with empty content -> 502 OUTPUT_TRUNCATED."""
     with patch("job_chat.job_chat.Anthropic") as mock_anth, \
-         patch("job_chat.job_chat.build_old_prompt", side_effect=_stub_prompt), \
          patch("job_chat.job_chat.build_prompt", side_effect=_stub_prompt):
         mock_client = MagicMock()
         mock_anth.return_value = mock_client
@@ -83,7 +82,6 @@ def test_max_tokens_raises_output_truncated():
 def test_end_turn_empty_raises_empty_output():
     """stop_reason=end_turn with no text blocks -> 502 EMPTY_OUTPUT."""
     with patch("job_chat.job_chat.Anthropic") as mock_anth, \
-         patch("job_chat.job_chat.build_old_prompt", side_effect=_stub_prompt), \
          patch("job_chat.job_chat.build_prompt", side_effect=_stub_prompt):
         mock_client = MagicMock()
         mock_anth.return_value = mock_client

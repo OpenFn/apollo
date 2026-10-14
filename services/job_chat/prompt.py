@@ -3,6 +3,7 @@
 import json
 import sentry_sdk
 from langfuse import observe
+from guidelines import render_for_prompt
 from util import create_logger, ApolloError, AdaptorSpecifier, get_db_connection
 from yaml_utils import redact_job_bodies, normalize_name
 from .retrieve_docs import retrieve_knowledge
@@ -71,121 +72,7 @@ prefix showing the user's page context at that time.
 system_role = _role_before_scope + production_scope_instructions + _role_after_scope
 subagent_system_role = _role_before_scope + _role_after_scope
 
-job_writing_summary = """
-<credential management>
-When writing jobs, users will use their own credentials to access different
-backend systems. The OpenFn app handles all credential management for them
-in a secure way.
-
-For more help direct them to https://docs.openfn.org/documentation/build/credentials
-
-Users must never add credentials into job code directly. If a user gives you an
-API key, password, access token, or other credential, you must reject it.
-</credential management>
-<job writing guide>
-An OpenFn Job is written in a DSL which is very similar to Javascript.
-
-Job code does not use import statements or async/await.
-
-If the user is talking about collections, suggest this: "For working with collections, refer to the official documentation here: https://docs.openfn.org/adaptors/packages/collections-docs.".
-Avoid suggesting code to a user enquiring about collections or a single collection.
-
-Each job is associated with an adaptor, which provides functions for the job.
-All jobs have the fn() and each() function, which are very important.
-
-DO NOT use the `alterState()` function. Use `fn()` instead.
-
-The adaptor API may be attached.
-
-The functions provided by an adaptor are called Operations.
-Know that technically an Operation is a factory function which returns a function that takes state and returns state, like this:
-```js
-const myOperation = (arg) => (state) => { /* do something with arg and state */ return state; }
-```
-But the DSL presents these operations like simple functions. Users don't know it's a factory, they think it's a regular function.
-
-<execution model>
-A job runs in two phases:
-1. Load time: the file is compiled and evaluated top to bottom to collect the pipeline of operations. All operation arguments are evaluated immediately, before any data exists, but operations are not executed.
-2. Run time: the runtime calls each operation in order, passing each one the state returned by the previous.
-
-This means:
-- Operation execution order may differ from statement declaration order.
-- A bare state reference in `get(state.x)` in an operation's arguments is undefined at load time. Defer it with a function, `get(state => state.x)`, or the `$` lazy-state shorthand `get($.x)`, which means `get(state => state.x)`. Note that `$` is readonly and only valid inside an operation's arguments, nowhere else (no `const x = $.y`).
-- Never invoke an operation yourself: `post('/x', ...)(state)` bypasses the runtime execution order and is bad practice. It can be tempted to do this when nesting operations within callbacks for iteration. Usually this can be resolved by breaking nesting and moving the operation to the top level.
-- `fn()` and `.then()` callbacks must return state. When building a new object, spread the old one (`return { ...state, data: mapped }`) so keys like configuration survive.
-- Most operations overwrite `state.data` with its result: after your create/update/post, `state.data` is that call's response, not your input. Copy values you need later onto another state key first.
-</execution model>
-<examples>
-<example>
-Here's how we issue a GET request with the http adaptor:
-```
-get('/patients');
-```
-The first argument to get is the path to request from (the configuration will tell
-the adaptor what base url to use). In this case we're passing a static string,
-but we can also pass a value from state:
-```
-get(state => state.endpoint);
-```
-</example>
-<example>
-Example job code with the HTTP adaptor:
-```
-get('/patients');
-fn(state => {
-  const patients = state.data.map(p => {
-    return { ...p, enrolled: true }
-  });
-
-  return { ...state, data: { patients } };
-})
-post('/patients', dataValue('patients'));
-```
-</example>
-<example>
-Example job code with the Salesforce adaptor:
-```
-each(
-  '$.form.participants[*]',
-  upsert('Person__c', 'Participant_PID__c', state => ({
-    Participant_PID__c: state.pid,
-    First_Name__c: state.participant_first_name,
-    Surname__c: state.participant_surname,
-  }))
-);
-```
-</example>
-<example>
-Example job code with the ODK adaptor:
-```
-create(
-  'ODK_Submission__c',
-  fields(
-    field('Site_School_ID_Number__c', dataValue('school')),
-    field('Date_Completed__c', dataValue('date')),
-    field('comments__c', dataValue('comments')),
-    field('ODK_Key__c', dataValue('*meta-instance-id*'))
-  )
-);
-```
-</example>
-</examples>
-</job writing guide>
-<workflow guide>
-A job is just one step in a workflow (or pipeline). Workflows are used
-to automate processes and migrate data from system to system.
-
-In OpenFn, each step works with a single backend system, or adaptor. Data is shared
-between steps through the state object.
-
-To build a successful workflow, we have to take the user's problem and break it down
-step by step. Focus on one bit at a time. For example, when uploading from CommCare to Salesforce, we have to:
-1. Download our data from CommCare in one step
-2. Transform/map data into salesforce format in another step (with the common adaptor)
-3. Upload the transformed data into salesforce in the final step
-</workflow guide>
-"""
+job_writing_summary = f"\n{render_for_prompt('job')}\n"
 
 # Appended in subagent mode only (when job_chat is called from global_chat).
 subagent_mode_instructions = """
@@ -334,7 +221,7 @@ def build_focus_line(viewing, focused):
 
 
 def generate_system_message(context_dict, search_results, download_adaptor_docs=True, stream_manager=None,
-                            workflow_yaml=None, subagent=False):
+                            workflow_yaml=None, subagent=False, suggest_code=True):
     context = context_dict if isinstance(context_dict, Context) else Context(**(context_dict or {}))
 
     message = [subagent_system_role if subagent else system_role]
@@ -448,7 +335,10 @@ and system information. When debugging, analyze these logs carefully to identify
             )
 
     # Output contract goes LAST so it is the final, most prominent instruction.
-    message.append(output_format)
+    # It describes the `edit_job` tool, which is only offered when suggest_code
+    # is on; without it the model answers in text alone.
+    if suggest_code:
+        message.append(output_format)
 
     return list(map(lambda text: text if isinstance(text, dict) else {"type": "text", "text": text}, message))
 
@@ -460,7 +350,7 @@ def format_search_results(search_results):
 
 @observe(name="job_chat_build_prompt")
 def build_prompt(content, history, context, rag=None, api_key=None, stream_manager=None, download_adaptor_docs=True, refresh_rag=False,
-                 workflow_yaml=None, subagent=False):
+                 workflow_yaml=None, subagent=False, suggest_code=True):
     retrieved_knowledge = {
         "search_results": [],
         "search_results_sections": [],
@@ -495,7 +385,8 @@ def build_prompt(content, history, context, rag=None, api_key=None, stream_manag
         download_adaptor_docs=download_adaptor_docs,
         stream_manager=stream_manager,
         workflow_yaml=workflow_yaml,
-        subagent=subagent)
+        subagent=subagent,
+        suggest_code=suggest_code)
 
     prompt = []
     prompt.extend(history)
@@ -504,15 +395,19 @@ def build_prompt(content, history, context, rag=None, api_key=None, stream_manag
     # only remind the model to route an actual code change through `edit_job`.
     # Added only to the message sent to the model; the stored history (built in
     # generate() from the raw content) omits it, so it never accumulates.
-    reminder = "Reply in text. If this requires changing the job code, also call the `edit_job` tool to apply the change."
-    if subagent:
-        reminder += (
-            " If it needs changes beyond this step's code, call `edit_workflow` first;"
-            " to merely read another step (to answer, or to edit this one), use `inspect_job_code`."
-        )
+    # Without suggest_code there is no `edit_job` tool to remind about, so the
+    # user's message goes through as is.
+    if suggest_code:
+        reminder = "Reply in text. If this requires changing the job code, also call the `edit_job` tool to apply the change."
+        if subagent:
+            reminder += (
+                " If it needs changes beyond this step's code, call `edit_workflow` first;"
+                " to merely read another step (to answer, or to edit this one), use `inspect_job_code`."
+            )
+        content = f"{content}\n\n{reminder}"
     prompt.append({
         "role": "user",
-        "content": f"{content}\n\n{reminder}",
+        "content": content,
     })
 
     return (system_message, prompt, retrieved_knowledge)

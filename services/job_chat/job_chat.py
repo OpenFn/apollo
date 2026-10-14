@@ -22,7 +22,6 @@ from langfuse_util import should_track, build_tags, build_generation_diff, mask_
 from util import ApolloError, create_logger, AdaptorSpecifier, add_page_prefix, APOLLO_VERSION
 from yaml_utils import INSPECT_JOB_CODE_TOOL, inspect_job_code
 from .prompt import build_prompt, build_error_correction_prompt
-from .old_prompt import build_old_prompt
 from streaming_util import (
     StreamManager,
     STATUS_REVIEWING_CODE,
@@ -264,30 +263,19 @@ class AnthropicClient:
                 stream_manager.send_thinking(STATUS_NEW_CODE)
 
             with sentry_sdk.start_span(description="build_prompt"):
-                if suggest_code is True:
-                    system_message, prompt, retrieved_knowledge = build_prompt(
-                        content=content,
-                        history=history,
-                        context=context,
-                        rag=rag,
-                        api_key=self.api_key,
-                        stream_manager=stream_manager,
-                        download_adaptor_docs=download_adaptor_docs,
-                        refresh_rag=refresh_rag,
-                        workflow_yaml=workflow_yaml,
-                        subagent=subagent
-                    )
-
-                else:
-                    system_message, prompt, retrieved_knowledge = build_old_prompt(
-                        content=content,
-                        history=history,
-                        context=context,
-                        rag=rag,
-                        api_key=self.api_key,
-                        download_adaptor_docs=download_adaptor_docs,
-                        refresh_rag=refresh_rag
-                        )
+                system_message, prompt, retrieved_knowledge = build_prompt(
+                    content=content,
+                    history=history,
+                    context=context,
+                    rag=rag,
+                    api_key=self.api_key,
+                    stream_manager=stream_manager,
+                    download_adaptor_docs=download_adaptor_docs,
+                    refresh_rag=refresh_rag,
+                    workflow_yaml=workflow_yaml,
+                    subagent=subagent,
+                    suggest_code=suggest_code is True,
+                )
 
             # effort applies to all modes. For suggest_code we expose the `edit_job`
             # tool. tool_choice stays "auto": the model answers in text

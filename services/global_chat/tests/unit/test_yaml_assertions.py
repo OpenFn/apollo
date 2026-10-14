@@ -163,7 +163,7 @@ def test_judges_state_the_active_rule(monkeypatch: pytest.MonkeyPatch) -> None:
 
 #: Every judge on disk, not a hardcoded pair — a new rubric that restates the
 #: rule by hand would otherwise never be checked.
-ALL_JUDGES = sorted(p.stem for p in (Path(judges.__file__).parent / "judges").glob("*.md"))
+ALL_JUDGES = sorted(p.stem for p in judges._JUDGES_DIR.glob("*.md"))
 
 
 def test_the_judge_list_is_not_empty() -> None:
@@ -181,7 +181,7 @@ def test_no_judge_leaves_the_placeholder_unsubstituted(judge: str) -> None:
 @pytest.mark.parametrize("judge", ALL_JUDGES)
 def test_a_judge_that_uses_the_token_gets_the_active_rule(judge: str) -> None:
     """Not every judge needs it — the code-quality one grades job bodies, not names."""
-    raw = (Path(judges.__file__).parent / "judges" / f"{judge}.md").read_text()
+    raw = (judges._JUDGES_DIR / f"{judge}.md").read_text()
     if "{name_rule}" not in raw:
         pytest.skip(f"{judge} does not grade names")
 
@@ -191,7 +191,7 @@ def test_a_judge_that_uses_the_token_gets_the_active_rule(judge: str) -> None:
 @pytest.mark.parametrize("judge", ALL_JUDGES)
 def test_no_judge_hardcodes_a_naming_rule(judge: str) -> None:
     """A hand-written charset is the drift this whole indirection exists to stop."""
-    raw = (Path(judges.__file__).parent / "judges" / f"{judge}.md").read_text().lower()
+    raw = (judges._JUDGES_DIR / f"{judge}.md").read_text().lower()
 
     for phrase in (
         "letters, numbers, spaces",

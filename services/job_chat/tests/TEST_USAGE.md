@@ -16,12 +16,6 @@ This directory contains tests for the `job_chat` service, designed to help with 
 - **Examples:** Renaming variables, converting request types, handling duplicate sections, etc.
 - **Intended for:** Automated testing to ensure core context handling and code modification abilities aren't broken.
 
-### 3. Old Prompt Tests (`test_old_prompt.py` and `test_pass_fail_old_prompt.py`)
-
-- **Purpose:** Test the service using the legacy prompt format (where code is always embedded in the response text rather than in a separate field).
-- **How to use:** These tests verify backward compatibility with integrations that expect the original response format.
-- **Intended for:** Ensuring backward compatibility isn't broken when updating the service.
-
 ## Running the Tests
 
 You can run all tests or individual test files using `pytest`. The `-v` flag gives verbose output, and `-s` allows print statements to show in the console.
