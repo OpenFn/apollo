@@ -69,7 +69,7 @@ class RouterAgent:
 
         router_config = config_loader.config.get("router", {})
         self.model = resolve_model(router_config.get("model", "claude-haiku"))
-        self.max_tokens = router_config.get("max_tokens", 500)
+        self.max_tokens = router_config.get("max_tokens", 4096)
 
         logger.info(f"RouterAgent initialized with model: {self.model}")
 
@@ -194,7 +194,7 @@ class RouterAgent:
             "cache_read_input_tokens": getattr(response.usage, "cache_read_input_tokens", 0),
         }
 
-        response_text = response.content[0].text if response.content else "{}"
+        response_text = "".join(block.text for block in response.content if block.type == "text") or "{}"
 
         try:
             decision_data = json.loads(response_text)

@@ -38,7 +38,7 @@ class VocabMapper:
         """Helper method to make LLM calls."""
         message = self.client.messages.create(
             model=CLAUDE_SONNET,
-            max_tokens=500,
+            max_tokens=4096,
             system=system_prompt,
             messages=[
                 {
@@ -52,7 +52,7 @@ class VocabMapper:
                 }
             ]
         )
-        return message.content[0].text
+        return "".join(block.text for block in message.content if block.type == "text")
 
     def _call_llm_batch(self, system_prompt: str, user_prompts: List[str]) -> List[str]:
         """Process a batch of LLM inputs concurrently."""
