@@ -11,6 +11,7 @@ import {
   subprocessKilled,
   subprocessSpawnFailed,
 } from "./util/errors";
+import { acquireSlot, releaseSlot } from "./util/python-queue";
 import pkg from "../../package.json";
 import { USE_FORK_SERVER, runForked } from "./bridge.fork";
 import { LOG_LINE } from "./util/log-line";
@@ -38,6 +39,10 @@ export const run = async (
   const inputPath = tmpfile.replace("{}", "input");
   const outputPath = tmpfile.replace("{}", "output");
 
+  // Cleanup shared by every path below that never spawns.
+  const removeTmpFiles = () =>
+    Promise.all([rm(inputPath).catch(() => {}), rm(outputPath).catch(() => {})]);
+
   // Outside the promise, deliberately. The Promise constructor only catches a
   // synchronous throw from its executor, so an await that rejects in there -
   // a full disk, a read-only tmp - leaves the promise pending for ever and
@@ -52,18 +57,37 @@ export const run = async (
 
     await Bun.write(outputPath, "");
   } catch (error) {
-    // Removed rather than left behind by a half-finished setup, for the same
-    // reason it is 0600 above.
-    await rm(inputPath).catch(() => {});
-    await rm(outputPath).catch(() => {});
+    await removeTmpFiles();
     throw subprocessSpawnFailed(scriptName, error);
   }
 
+  // One cap for both paths below (see util/python-queue.ts): forking is cheap
+  // to start, but the work it does is just as heavy as a fresh interpreter.
+  try {
+    await acquireSlot(scriptName, signal);
+  } catch {
+    await removeTmpFiles();
+    throw subprocessCancelled(scriptName, "QUEUED");
+  }
+
   if (USE_FORK_SERVER) {
-    return runForked(scriptName, port, inputPath, outputPath, onLog, onEvent, signal);
+    try {
+      return await runForked(scriptName, port, inputPath, outputPath, onLog, onEvent, signal);
+    } finally {
+      releaseSlot();
+    }
   }
 
   return new Promise<JSON | null>((resolve, reject) => {
+    // "error" and "close" are mutually exclusive in practice; guarded anyway
+    // against a double release.
+    let slotOwed = true;
+    const releaseSlotOnce = () => {
+      if (!slotOwed) return;
+      slotOwed = false;
+      releaseSlot();
+    };
+
     const proc = spawn(
       "poetry",
       [
@@ -90,6 +114,7 @@ export const run = async (
     // Nothing was spawned, so no "close" is coming - without settling here the
     // request stays open until something upstream gives up
     proc.on("error", (err) => {
+      releaseSlotOnce();
       console.error("Failed to start python process", err);
       reject(subprocessSpawnFailed(scriptName, err));
     });
@@ -163,6 +188,8 @@ export const run = async (
     });
 
     proc.on("close", async (code, closeSignal) => {
+      releaseSlotOnce();
+
       // Clean up readline interfaces immediately to prevent race conditions
       rl.close();
       rl2.close();
