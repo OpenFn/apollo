@@ -4,7 +4,7 @@ Evaluates a chat service's response against a small list of natural-language
 criteria, returning a structured verdict.
 
 Each evaluation runs under a named judge (configured in
-`services/testing/judges/<name>.md` — see `services/testing/judges.py`).
+`guidelines/judges/<name>.md` — see `services/testing/judges.py`).
 Different judges have different role and rules, but share the same JSON output
 contract.
 
@@ -391,7 +391,7 @@ def evaluate(
             build_adaptor_docs) grounding claims about which functions exist.
         adaptor_names: Optional list of real adaptor packages (from
             build_adaptor_names) grounding claims about which packages exist.
-        judge: Name of the judge (file at services/testing/judges/<name>.md).
+        judge: Name of the judge (file at guidelines/judges/<name>.md).
             Defaults to "general".
         model: Model to use. Defaults to CLAUDE_SONNET from services/models.py.
         client: Optional Anthropic client. Constructed from env if not given.

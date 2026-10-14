@@ -37,9 +37,10 @@ Two rules of thumb:
 - `judge.py` — LLM-as-judge helper for acceptance tests. Evaluates chat-service
   responses against natural-language criteria under a named judge. Defaults to
   `CLAUDE_SONNET` from `services/models.py` and the `general` judge.
-- `judges.py` — registry that loads judge configs from `judges/<name>.md`.
-- `judges/` — one markdown file per named judge. Each has a `# role` section
-  (who the judge is and what it evaluates) and a `# rules` section (universal
+- `judges.py` — registry that loads judge configs from `guidelines/judges/<name>.md`.
+- `guidelines/judges/` (repo root) — one markdown file per named judge. Each
+  has a `# role` section (who the judge is and what it evaluates) and a
+  `# rules` section (universal
   bullets that apply to every evaluation under this judge). Today: `general`
   and `openfn_code_quality`. Specs select judges via the `judges:` frontmatter
   field; default is `[general]`.

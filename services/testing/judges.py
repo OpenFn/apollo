@@ -1,7 +1,7 @@
 """Registry of named acceptance-test judges.
 
 Each judge is a `(role, rules)` pair defined in
-`services/testing/judges/<name>.md`. The file uses two top-level sections:
+`guidelines/judges/<name>.md`. The file uses two top-level sections:
 
     # role
     <prose: who the judge is and what it evaluates>
@@ -12,7 +12,7 @@ Each judge is a `(role, rules)` pair defined in
 The token `{name_rule}` in either section is replaced at load time with the
 active step-name rule, so the judges never restate it as static prose.
 
-To add a new judge: drop a new markdown file in `services/testing/judges/`
+To add a new judge: drop a new markdown file in `guidelines/judges/`
 and reference its filename (without `.md`) in a spec's `judges:` frontmatter
 field. Default judge is `general`.
 """
@@ -23,7 +23,7 @@ from pathlib import Path
 
 from name_rules import describe_rule_for_judge
 
-_JUDGES_DIR = Path(__file__).parent / "judges"
+_JUDGES_DIR = Path(__file__).resolve().parents[2] / "guidelines" / "judges"
 
 #: A judge that restated the rule as static prose would go stale the moment
 #: APOLLO_UNICODE_STEP_NAMES moved, and would then either pass names the
@@ -60,7 +60,7 @@ class JudgeConfig:
 
 
 def load_judge(name: str) -> JudgeConfig:
-    """Load a judge config from `services/testing/judges/<name>.md`.
+    """Load a judge config from `guidelines/judges/<name>.md`.
 
     Raises FileNotFoundError if the file doesn't exist.
     """
