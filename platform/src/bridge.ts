@@ -39,8 +39,7 @@ export const run = async (
   const inputPath = tmpfile.replace("{}", "input");
   const outputPath = tmpfile.replace("{}", "output");
 
-  // Shared by every "we never got to spawn" failure below, so a half-finished
-  // setup never leaves its tmp files behind.
+  // Cleanup shared by every path below that never spawns.
   const removeTmpFiles = () =>
     Promise.all([rm(inputPath).catch(() => {}), rm(outputPath).catch(() => {})]);
 
@@ -62,13 +61,8 @@ export const run = async (
     throw subprocessSpawnFailed(scriptName, error);
   }
 
-  // Caps how many of these run at once (see util/python-queue.ts); past the
-  // cap, this waits right here instead of spawning, so a burst of requests
-  // queues rather than piling python interpreters on top of each other. A
-  // caller that gives up while still queued never spawns a process at all.
-  // Applies the same way whether this run forks from the warm master below
-  // or spawns a fresh interpreter further down - either way it's one python
-  // process doing a service's worth of real work.
+  // One cap for both paths below (see util/python-queue.ts): forking is cheap
+  // to start, but the work it does is just as heavy as a fresh interpreter.
   try {
     await acquireSlot(scriptName, signal);
   } catch {
@@ -85,11 +79,8 @@ export const run = async (
   }
 
   return new Promise<JSON | null>((resolve, reject) => {
-    // acquireSlot() above succeeded, so exactly one releaseSlot() is owed by
-    // the time this run ends - from whichever of "error" or "close" fires
-    // first below. They're mutually exclusive in practice, but this flag
-    // costs nothing and removes any doubt about a slot leaking or double-
-    // freeing.
+    // "error" and "close" are mutually exclusive in practice; guarded anyway
+    // against a double release.
     let slotOwed = true;
     const releaseSlotOnce = () => {
       if (!slotOwed) return;

@@ -1,3 +1,6 @@
+// FIFO semaphore capping how many python processes bridge.ts runs at once.
+// Requests past the cap wait here instead of spawning.
+
 const DEFAULT_MAX_CONCURRENT = 10;
 
 export const maxConcurrentPython = (): number => {
@@ -13,8 +16,8 @@ const queue: (() => void)[] = [];
 export const activeCount = (): number => active;
 export const queueDepth = (): number => queue.length;
 
-/** Resolves once a slot is free, in FIFO order. Rejects without consuming a
- *  slot if `signal` is already aborted, or aborts while still queued. */
+/** Resolves once a slot is free, FIFO. Rejects without consuming a slot if
+ *  `signal` is already aborted or aborts while still queued. */
 export const acquireSlot = (
   scriptName: string,
   signal?: AbortSignal
@@ -53,8 +56,8 @@ export const acquireSlot = (
   });
 };
 
-/** Frees the slot this call's acquireSlot() granted, handing it straight to
- *  the next waiter. Call exactly once per resolved acquireSlot(). */
+/** Releases a slot acquireSlot() granted, straight to the next waiter. Call
+ *  exactly once per resolved acquireSlot(). */
 export const releaseSlot = (): void => {
   active--;
   queue.shift()?.();
