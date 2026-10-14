@@ -51,7 +51,6 @@ def test_call_llm_returns_text_and_usage_on_success():
 
     text, usage = rd.call_llm(
         model="claude-haiku-4-5",
-        temperature=0,
         system_prompt="sys",
         user_prompt="usr",
         client=client,
@@ -68,7 +67,6 @@ def test_call_llm_wraps_unexpected_error_as_apollo_error():
     with pytest.raises(ApolloError) as exc:
         rd.call_llm(
             model="claude-haiku-4-5",
-            temperature=0,
             system_prompt="sys",
             user_prompt="usr",
             client=client,

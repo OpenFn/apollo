@@ -12,10 +12,8 @@ import {
   subprocessSpawnFailed,
 } from "./util/errors";
 import pkg from "../../package.json";
-
-// A line a service logged on purpose, as opposed to whatever else lands on a
-// stream. Only these are forwarded to the caller.
-const LOG_LINE = /^(INFO|DEBUG|ERROR|WARNING):/;
+import { USE_FORK_SERVER, runForked } from "./bridge.fork";
+import { LOG_LINE } from "./util/log-line";
 
 /**
   Run a python script
@@ -59,6 +57,10 @@ export const run = async (
     await rm(inputPath).catch(() => {});
     await rm(outputPath).catch(() => {});
     throw subprocessSpawnFailed(scriptName, error);
+  }
+
+  if (USE_FORK_SERVER) {
+    return runForked(scriptName, port, inputPath, outputPath, onLog, onEvent, signal);
   }
 
   return new Promise<JSON | null>((resolve, reject) => {
