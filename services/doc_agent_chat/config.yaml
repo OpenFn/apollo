@@ -1,6 +1,6 @@
 config_version: 1.0
 model: claude-sonnet
-max_tokens: 32768
+max_tokens: 16384
 temperature: 0
 max_tool_calls: 10
 search_top_k: 5

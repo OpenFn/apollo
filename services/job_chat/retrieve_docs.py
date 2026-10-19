@@ -14,7 +14,7 @@ from anthropic import (
     UnprocessableEntityError,
 )
 from langfuse import observe
-from models import resolve_model
+from models import resolve_model, NO_THINKING_SONNET
 from search_docsite.search_docsite import resolve_backend
 from util import ApolloError, create_logger
 
@@ -223,9 +223,10 @@ def call_llm(model, system_prompt, user_prompt, client, output_schema=None):
 
         kwargs = dict(
             model=model,
-            max_tokens=4096,
+            max_tokens=1024,
             system=system_prompt,
-            messages=messages
+            messages=messages,
+            thinking=NO_THINKING_SONNET,
         )
         if output_schema:
             kwargs["output_config"] = {

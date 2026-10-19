@@ -1,13 +1,12 @@
 import os
 from typing import List, Dict, Any, Optional
-import httpx2
 from anthropic import Anthropic
 from util import create_logger
 from doc_agent_chat.doc_search import DocSearch
 from doc_agent_chat.prompt import build_system_prompt
 from doc_agent_chat.tools import TOOL_DEFINITIONS, search_documents, format_search_results_as_documents
 from doc_agent_chat.config_loader import ConfigLoader
-from models import resolve_model
+from models import resolve_model, NO_THINKING_SONNET
 
 logger = create_logger("agent")
 
@@ -25,7 +24,7 @@ class Agent:
 
         self.client = Anthropic(api_key=self.api_key)
         self.model = resolve_model(config.get("model", "claude-sonnet"))
-        self.max_tokens = config.get("max_tokens", 32768)
+        self.max_tokens = config.get("max_tokens", 16384)
         self.max_tool_calls = config.get("max_tool_calls", 10)
         self.search_top_k = config.get("search_top_k", 5)
         self.search_threshold = config.get("search_threshold", 0.7)
@@ -65,9 +64,7 @@ class Agent:
                 system=system_prompt,
                 messages=messages,
                 tools=TOOL_DEFINITIONS,
-                # Required for non-streaming calls with max_tokens > ~21k, which
-                # the SDK otherwise rejects. Same values as the SDK default.
-                timeout=httpx2.Timeout(600.0, connect=5.0),
+                thinking=NO_THINKING_SONNET,
             )
 
             if hasattr(response, "usage"):

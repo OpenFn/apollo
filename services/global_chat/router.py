@@ -21,7 +21,7 @@ from langfuse import observe, get_client as get_langfuse_client
 from util import create_logger, ApolloError, sum_usage, attachments_to_context
 from streaming_util import StreamManager
 from global_chat.config_loader import ConfigLoader
-from models import resolve_model
+from models import resolve_model, NO_THINKING_HAIKU
 from yaml_utils import get_step_name_from_page, get_page_view, find_job_in_yaml, stitch_job_code, workflow_has_job_code
 
 logger = create_logger(__name__)
@@ -186,7 +186,7 @@ class RouterAgent:
             ],
             # Routing is meant to be fast: a request that needs reasoning is
             # one to send to the planner, not to think about here.
-            thinking={"type": "disabled"},
+            thinking=NO_THINKING_HAIKU,
             output_config={"format": {"type": "json_schema", "schema": routing_schema}}
         )
 
