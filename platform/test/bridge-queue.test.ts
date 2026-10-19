@@ -40,12 +40,12 @@ const waitForProbesToClear = async (limitMs = 15_000) => {
 };
 
 afterEach(() => {
-  delete process.env.APOLLO_MAX_CONCURRENT_PYTHON;
+  delete process.env.APOLLO_CONCURRENCY;
 });
 
 describe("queueing python runs", () => {
   it("holds a second run queued until the first (over the cap) finishes", async () => {
-    process.env.APOLLO_MAX_CONCURRENT_PYTHON = "1";
+    process.env.APOLLO_CONCURRENCY = "1";
 
     const firstProbe = started();
     const first = run(
@@ -71,7 +71,7 @@ describe("queueing python runs", () => {
   }, 30_000);
 
   it("rejects a queued run the moment its caller aborts, without ever spawning it", async () => {
-    process.env.APOLLO_MAX_CONCURRENT_PYTHON = "1";
+    process.env.APOLLO_CONCURRENCY = "1";
 
     const holderProbe = started();
     const holder = run(
@@ -104,6 +104,30 @@ describe("queueing python runs", () => {
     expect(await probeProcessCount()).toBe(1);
 
     await holder; // let it finish naturally (sleep_for: 3)
+    expect(await waitForProbesToClear()).toBe(true);
+  }, 30_000);
+
+  it("runs up to the cap concurrently and queues the rest, with a cap above 1", async () => {
+    process.env.APOLLO_CONCURRENCY = "2";
+
+    const probes = [started(), started(), started()];
+    const runs = probes.map((probe, i) =>
+      run(
+        "_cancel_probe",
+        PORT,
+        { sleep_for: i === 2 ? 0 : 1 },
+        undefined,
+        probe.onEvent
+      )
+    );
+
+    // Only the first two can have started - the third is still in line
+    // behind the cap of 2.
+    await Promise.all([probes[0].promise, probes[1].promise]);
+    await Bun.sleep(200);
+    expect(await probeProcessCount()).toBe(2);
+
+    await Promise.all(runs);
     expect(await waitForProbesToClear()).toBe(true);
   }, 30_000);
 });

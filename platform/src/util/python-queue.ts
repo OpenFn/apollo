@@ -1,64 +1,99 @@
-// FIFO semaphore capping how many python processes bridge.ts runs at once.
-// Requests past the cap wait here instead of spawning.
+// FIFO queue capping how many service calls bridge.ts runs at once.
+// Calls past the cap wait here instead of running immediately.
 
-const DEFAULT_MAX_CONCURRENT = 10;
+import { captureMessage } from "./sentry";
 
-export const maxConcurrentPython = (): number => {
-  const configured = Number(process.env.APOLLO_MAX_CONCURRENT_PYTHON);
-  return Number.isInteger(configured) && configured > 0
-    ? configured
-    : DEFAULT_MAX_CONCURRENT;
-};
+const DEFAULT_CONCURRENCY = 10;
+
+export const maxConcurrency = (): number =>
+  Number(process.env.APOLLO_CONCURRENCY) || DEFAULT_CONCURRENCY;
+
+const DEFAULT_QUEUE_TIMEOUT_MS = 5 * 60 * 1000;
+
+export const queueTimeoutMs = (): number =>
+  Number(process.env.APOLLO_QUEUE_TIMEOUT_MS) || DEFAULT_QUEUE_TIMEOUT_MS;
 
 let active = 0;
-const queue: (() => void)[] = [];
+const pending: Array<() => void> = [];
 
 export const activeCount = (): number => active;
-export const queueDepth = (): number => queue.length;
+export const queueDepth = (): number => pending.length;
 
-/** Resolves once a slot is free, FIFO. Rejects without consuming a slot if
- *  `signal` is already aborted or aborts while still queued. */
-export const acquireSlot = (
-  scriptName: string,
-  signal?: AbortSignal
-): Promise<void> => {
-  if (active < maxConcurrentPython()) {
-    active++;
-    return Promise.resolve();
+// Distinct from cancel()'s rejection, so a caller can tell "the server gave
+// up" apart from "the client went away".
+export class QueueTimeoutError extends Error {
+  constructor() {
+    super("timed out waiting in the queue");
+    this.name = "QueueTimeoutError";
   }
-  if (signal?.aborted) {
-    return Promise.reject(signal.reason);
-  }
+}
 
-  console.log(
-    `queueing ${scriptName}: ${active}/${maxConcurrentPython()} python processes running, ${
-      queue.length + 1
-    } waiting`
-  );
-
-  return new Promise<void>((resolve, reject) => {
-    const grant = () => {
-      active++;
-      resolve();
-    };
-    queue.push(grant);
-
-    signal?.addEventListener(
-      "abort",
-      () => {
-        const i = queue.indexOf(grant);
-        if (i === -1) return; // already granted - too late to cancel
-        queue.splice(i, 1);
-        reject(signal.reason);
-      },
-      { once: true }
-    );
-  });
+export type Enqueued<T> = {
+  promise: Promise<T>;
+  cancel: () => void;
 };
 
-/** Releases a slot acquireSlot() granted, straight to the next waiter. Call
- *  exactly once per resolved acquireSlot(). */
-export const releaseSlot = (): void => {
-  active--;
-  queue.shift()?.();
+// cancel() drops a still-queued task without ever running it; calling it
+// once the task has started is a no-op.
+export const enqueue = <T>(
+  scriptName: string,
+  task: () => Promise<T>
+): Enqueued<T> => {
+  let removeFromQueue: ((reason: Error) => void) | null = null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const promise = new Promise<T>((resolve, reject) => {
+    const run = () => {
+      if (timer) clearTimeout(timer);
+      active++;
+      task().then(
+        (value) => {
+          active--;
+          pending.shift()?.();
+          resolve(value);
+        },
+        (error) => {
+          active--;
+          pending.shift()?.();
+          reject(error);
+        }
+      );
+    };
+
+    if (active < maxConcurrency()) {
+      run();
+      return;
+    }
+
+    console.log(
+      `queueing ${scriptName}: ${active}/${maxConcurrency()} running, ${
+        pending.length + 1
+      } waiting`
+    );
+    captureMessage(`service call queued: ${scriptName}`, {
+      scriptName,
+      active,
+      queueDepth: pending.length + 1,
+    });
+
+    pending.push(run);
+    timer = setTimeout(
+      () => removeFromQueue?.(new QueueTimeoutError()),
+      queueTimeoutMs()
+    );
+    timer.unref?.();
+
+    removeFromQueue = (reason: Error) => {
+      const i = pending.indexOf(run);
+      if (i === -1) return; // already started - too late to cancel
+      pending.splice(i, 1);
+      if (timer) clearTimeout(timer);
+      reject(reason);
+    };
+  });
+
+  return {
+    promise,
+    cancel: () => removeFromQueue?.(new Error("queue wait cancelled")),
+  };
 };

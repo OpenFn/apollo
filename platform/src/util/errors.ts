@@ -94,6 +94,15 @@ export function subprocessCancelled(
   );
 }
 
+export function queueTimeout(service: string): ApolloThrowable {
+  return new ApolloThrowable(
+    503,
+    "QUEUE_TIMEOUT",
+    `Service "${service}" timed out waiting for a free slot`,
+    { service }
+  );
+}
+
 /** Something outside Apollo killed the service - most often the OOM killer.
  *  Distinct from a cancellation, which is us, and from a non-zero exit, which
  *  is the service deciding to stop. */

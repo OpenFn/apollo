@@ -6,14 +6,15 @@ import { getInternalToken } from "./auth/internal-token";
 import {
   emptyResult,
   malformedResult,
+  queueTimeout,
   subprocessCancelled,
   subprocessFailed,
   subprocessKilled,
   subprocessSpawnFailed,
 } from "./util/errors";
-import { acquireSlot, releaseSlot } from "./util/python-queue";
+import { enqueue, QueueTimeoutError } from "./util/python-queue";
 import pkg from "../../package.json";
-import { USE_FORK_SERVER, runForked } from "./bridge.fork";
+import { USE_FORK_SERVER, runForked as runWithFork } from "./bridge.fork";
 import { LOG_LINE } from "./util/log-line";
 
 /**
@@ -63,31 +64,43 @@ export const run = async (
 
   // One cap for both paths below (see util/python-queue.ts): forking is cheap
   // to start, but the work it does is just as heavy as a fresh interpreter.
+  const runFn = USE_FORK_SERVER ? runWithFork : runWithSpawn;
+
+  let started = false;
+  const { promise, cancel } = enqueue(scriptName, () => {
+    started = true;
+    return runFn(scriptName, port, inputPath, outputPath, onLog, onEvent, signal);
+  });
+
+  if (signal) {
+    if (signal.aborted) cancel();
+    else signal.addEventListener("abort", cancel, { once: true });
+  }
+
   try {
-    await acquireSlot(scriptName, signal);
-  } catch {
-    await removeTmpFiles();
-    throw subprocessCancelled(scriptName, "QUEUED");
-  }
-
-  if (USE_FORK_SERVER) {
-    try {
-      return await runForked(scriptName, port, inputPath, outputPath, onLog, onEvent, signal);
-    } finally {
-      releaseSlot();
+    return await promise;
+  } catch (error) {
+    if (!started) {
+      await removeTmpFiles();
+      if (error instanceof QueueTimeoutError) {
+        throw queueTimeout(scriptName);
+      }
+      throw subprocessCancelled(scriptName, "QUEUED");
     }
+    throw error;
   }
+};
 
+const runWithSpawn = (
+  scriptName: string,
+  port: number,
+  inputPath: string,
+  outputPath: string,
+  onLog?: (str: string) => void,
+  onEvent?: (type: string, payload: any) => void,
+  signal?: AbortSignal
+): Promise<JSON | null> => {
   return new Promise<JSON | null>((resolve, reject) => {
-    // "error" and "close" are mutually exclusive in practice; guarded anyway
-    // against a double release.
-    let slotOwed = true;
-    const releaseSlotOnce = () => {
-      if (!slotOwed) return;
-      slotOwed = false;
-      releaseSlot();
-    };
-
     const proc = spawn(
       "poetry",
       [
@@ -114,7 +127,6 @@ export const run = async (
     // Nothing was spawned, so no "close" is coming - without settling here the
     // request stays open until something upstream gives up
     proc.on("error", (err) => {
-      releaseSlotOnce();
       console.error("Failed to start python process", err);
       reject(subprocessSpawnFailed(scriptName, err));
     });
@@ -188,8 +200,6 @@ export const run = async (
     });
 
     proc.on("close", async (code, closeSignal) => {
-      releaseSlotOnce();
-
       // Clean up readline interfaces immediately to prevent race conditions
       rl.close();
       rl2.close();
