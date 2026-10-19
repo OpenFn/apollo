@@ -4,7 +4,6 @@
 router:
   model: "claude-haiku"
   max_tokens: 500
-  temperature: 0.0
 
 # Planner configuration (complex orchestration)
 planner:

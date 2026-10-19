@@ -4,7 +4,7 @@ import re
 import yaml
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
-import httpx
+import httpx2
 from anthropic import (
     Anthropic,
     APIConnectionError,
@@ -405,7 +405,7 @@ class AnthropicClient:
                             # Per-request timeout (same values as the SDK default):
                             # required for non-streaming calls with max_tokens > ~21k,
                             # which the SDK otherwise rejects.
-                            timeout=httpx.Timeout(600.0, connect=5.0),
+                            timeout=httpx2.Timeout(600.0, connect=5.0),
                             **tool_kwargs
                         )
                         message = self.client.messages.create(**create_kwargs)

@@ -1,5 +1,17 @@
 # apollo
 
+## 3.4.0
+
+### Minor Changes
+
+- 02eaf61: global_chat: opt-in web search and fetch for the planner
+
+### Patch Changes
+
+- 0347252: Update dependencies, including the Anthropic Python SDK to 1.x, the
+  OpenAI SDK to 3.x and pandas to 3.x
+- 8ff4d37: fork python processes to reduce startup time
+
 ## 3.3.1
 
 ### Patch Changes

@@ -14,6 +14,7 @@ Each item:
 """
 
 import re
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -28,6 +29,8 @@ from testing.spec_parser import Spec, parse_spec
 # Each entry is (spec_id, Verdict).
 _session_verdicts: list[tuple[str, judge.Verdict]] = []
 
+DEFAULT_MAX_SPECS = 5
+
 
 def pytest_addoption(parser):
     parser.addoption(
@@ -39,6 +42,75 @@ def pytest_addoption(parser):
         "in tmp/ (e.g. --experiment=sonnet-2026-06-29) so runs with different "
         "settings/dates don't overwrite each other.",
     )
+    parser.addoption(
+        "--max-specs",
+        action="store",
+        type=int,
+        default=DEFAULT_MAX_SPECS,
+        help="Run up to this many acceptance spec runs without confirmation "
+        f"(default {DEFAULT_MAX_SPECS}). Above it, pytest asks before spending "
+        "on live LLM calls, or refuses when there is no terminal to ask.",
+    )
+    parser.addoption(
+        "--no-judge",
+        action="store_true",
+        default=False,
+        help="Skip LLM judge evaluation: call the service and capture its "
+        "output, but don't grade it. Specs always pass. Useful for latency "
+        "profiling, where the judge adds tokens and wall-clock but no signal.",
+    )
+
+
+def pytest_collection_finish(session):
+    """Confirm before a large acceptance run, since each spec spends real money.
+
+    Runs after `-k`/`-m` deselection, so it counts only what will actually run.
+    """
+    specs = [item for item in session.items if isinstance(item, SpecItem)]
+    limit = session.config.getoption("max_specs")
+    if len(specs) <= limit:
+        return
+
+    judge_calls = 0 if session.config.getoption("no_judge") else sum(len(item.spec.judges) for item in specs)
+    summary = (
+        f"About to run {len(specs)} acceptance spec runs: {len(specs)} service "
+        f"calls (each fans out to several LLM calls) + {judge_calls} judge calls"
+    )
+    flag = f"--max-specs={len(specs)}"
+    subsets = _subset_table(specs, session.config.rootpath)
+
+    # Capture redirects fd 0 to /dev/null, so the TTY check must come after suspending it.
+    capman = session.config.pluginmanager.getplugin("capturemanager")
+    capman.suspend_global_capture(in_=True)
+    try:
+        if not sys.stdin.isatty():
+            raise pytest.UsageError(
+                f"{summary}, over the limit of {limit}; pass {flag} to allow it, "
+                f"or run a subset:\n{subsets}",
+            )
+        answer = input(f"\n{summary}. Run a subset instead?\n{subsets}\nContinue with all {len(specs)}? [y/N] ")
+    except EOFError:
+        answer = ""
+    finally:
+        capman.resume_global_capture()
+    if answer.strip().lower() not in ("y", "yes"):
+        pytest.exit(f"Acceptance run cancelled; pass {flag} to skip this prompt", returncode=0)
+
+
+def _subset_table(specs: list["SpecItem"], rootpath: Path) -> str:
+    """One row per spec folder: its spec-run count and the command to run only it."""
+    counts: dict[Path, int] = {}
+    for item in specs:
+        folder = item.path.parent.relative_to(rootpath)
+        counts[folder] = counts.get(folder, 0) + 1
+
+    # `*.md` rather than the folder, which would also collect its subfolders.
+    rows = [
+        f"  {count:>3}  poetry run pytest {folder}/*.md -s"
+        for folder, count in sorted(counts.items())
+    ]
+    rows.append("  What each folder tests: services/testing/README.md")
+    return "\n".join(rows)
 
 
 def _experiment_suffix(config) -> str:
@@ -105,13 +177,17 @@ class SpecItem(pytest.Item):
             response, spec.id, self.run_index, spec.runs, tmp_dir, experiment
         )
         if yaml_path is not None:
-            print(f"  ✓ project YAML saved to {yaml_path}")
+            print(f"  ✓ workflow YAML saved to {yaml_path}")
 
         text_path = _capture_response_text(
             response, spec.id, self.run_index, spec.runs, tmp_dir, experiment
         )
         if text_path is not None:
             print(f"  ✓ response text saved to {text_path}")
+
+        if self.config.getoption("no_judge"):
+            print("  (judges skipped: --no-judge)")
+            return
 
         # Fetched once per spec; all judges share it. None (no YAML / no DB /
         # no docs) simply omits the block and judges fall back to their
@@ -186,7 +262,7 @@ def _build_payload(spec: Spec) -> dict:
 
 
 def _extract_yaml_from_response(response: dict) -> str | None:
-    """Pull the full project YAML out of a service response, if any.
+    """Pull the full workflow YAML out of a service response, if any.
 
     Different services use different keys:
       - workflow_chat: `response_yaml`
@@ -222,7 +298,7 @@ def _capture_response_yaml(
     output_dir: Path,
     experiment: str = "",
 ) -> Path | None:
-    """Write the response's project YAML to `output_dir/<spec_id>.yaml`.
+    """Write the response's workflow YAML to `output_dir/<spec_id>.yaml`.
 
     For multi-run specs, appends `__run-N` to the filename so each run is
     preserved. `experiment` (already a `__<label>` suffix or '') is appended

@@ -1,0 +1,22 @@
+# Modules the fork master (entry.fork.py) imports once at startup, before
+# accepting any requests. A forked child inherits these via copy-on-write, so
+# the cost of importing them is paid once per server lifetime instead of once
+# per request. A module missing from this list isn't an error - the child
+# just imports it itself on demand, which is slower but never wrong.
+
+preload:
+  # Mirrors entry.py's own top-level imports (Sentry init, Langfuse, otel).
+  - sentry_sdk
+  - anthropic
+  - langfuse
+  - langfuse_util
+  - util
+  - opentelemetry.instrumentation.anthropic
+  - opentelemetry.instrumentation.threading
+
+  # global_chat is ~95% of fork traffic; warm its RAG path (search_docsite)
+  # so the common case doesn't pay for these on the first request.
+  - pinecone
+  - openai
+  - langchain_openai
+  - langchain_pinecone

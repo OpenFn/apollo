@@ -39,7 +39,6 @@ class VocabMapper:
         message = self.client.messages.create(
             model=CLAUDE_SONNET,
             max_tokens=500,
-            temperature=0,
             system=system_prompt,
             messages=[
                 {
