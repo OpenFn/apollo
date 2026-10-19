@@ -110,20 +110,21 @@ describe("queueing python runs", () => {
   it("runs up to the cap concurrently and queues the rest, with a cap above 1", async () => {
     process.env.APOLLO_CONCURRENCY = "2";
 
+    let startedCount = 0;
+    let resolveTwoStarted!: () => void;
+    const twoStarted = new Promise<void>((r) => (resolveTwoStarted = r));
+
     const probes = [started(), started(), started()];
-    const runs = probes.map((probe, i) =>
-      run(
-        "_cancel_probe",
-        PORT,
-        { sleep_for: i === 2 ? 0 : 1 },
-        undefined,
-        probe.onEvent
-      )
+    const runs = probes.map((probe) =>
+      run("_cancel_probe", PORT, { sleep_for: 1 }, undefined, (type) => {
+        probe.onEvent(type);
+        if (type === "probe_started" && ++startedCount === 2) {
+          resolveTwoStarted();
+        }
+      })
     );
 
-    // Only the first two can have started - the third is still in line
-    // behind the cap of 2.
-    await Promise.all([probes[0].promise, probes[1].promise]);
+    await twoStarted;
     await Bun.sleep(200);
     expect(await probeProcessCount()).toBe(2);
 
