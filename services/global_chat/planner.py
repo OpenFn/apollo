@@ -58,6 +58,10 @@ _THINKING = {"type": "adaptive", "display": "updates"}
 
 _BETAS = ["context-management-2025-06-27", "thinking-display-updates-2026-08-18"]
 
+# API puts a breakpoint on the last block of each request,
+# so each tool-loop round reads the rounds before it from cache.
+_HISTORY_CACHE = {"cache_control": {"type": "ephemeral"}}
+
 _FINAL_ROUND_NOTICE = (
     "Stop and reply to the user now. Say what you changed. Mention unfinished work "
     "only if there is any, and then offer to continue next turn — otherwise don't "
@@ -624,6 +628,7 @@ class PlannerAgent:
                 betas=_BETAS,
                 **choice,
                 **_CONTEXT_MANAGEMENT,
+                **_HISTORY_CACHE,
             ) as stream_obj:
                 for event in stream_obj:
                     if event.type == "content_block_delta":
@@ -658,6 +663,7 @@ class PlannerAgent:
                 # which the SDK otherwise rejects.
                 timeout=httpx2.Timeout(600.0, connect=5.0),
                 **_CONTEXT_MANAGEMENT,
+                **_HISTORY_CACHE,
             )
             return response
 
