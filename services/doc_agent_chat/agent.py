@@ -6,7 +6,7 @@ from doc_agent_chat.doc_search import DocSearch
 from doc_agent_chat.prompt import build_system_prompt
 from doc_agent_chat.tools import TOOL_DEFINITIONS, search_documents, format_search_results_as_documents
 from doc_agent_chat.config_loader import ConfigLoader
-from models import resolve_model
+from models import resolve_model, NO_THINKING_SONNET
 
 logger = create_logger("agent")
 
@@ -63,7 +63,8 @@ class Agent:
                 max_tokens=self.max_tokens,
                 system=system_prompt,
                 messages=messages,
-                tools=TOOL_DEFINITIONS
+                tools=TOOL_DEFINITIONS,
+                thinking=NO_THINKING_SONNET,
             )
 
             if hasattr(response, "usage"):

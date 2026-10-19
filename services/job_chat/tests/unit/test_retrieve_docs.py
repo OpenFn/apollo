@@ -44,7 +44,7 @@ def test_generate_queries_raises_apollo_error_on_invalid_json():
 
 def test_call_llm_returns_text_and_usage_on_success():
     message = MagicMock()
-    message.content = [MagicMock(text="hello")]
+    message.content = [MagicMock(type="text", text="hello")]
     message.usage.model_dump.return_value = {"input_tokens": 5, "output_tokens": 2}
     client = MagicMock()
     client.messages.create.return_value = message
