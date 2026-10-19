@@ -19,6 +19,7 @@ from global_chat.planner import (
     PlannerAgent,
     PlannerResult,
 )
+from global_chat.tests.web_tools.variants import SEARCH_FIRST
 from global_chat.tools.tool_definitions import TOOL_DEFINITIONS, build_web_tools
 from streaming_util import STATUS_SEARCHING_WEB
 
@@ -1147,6 +1148,14 @@ def test_the_web_tools_prompt_key_exists_in_prompts_yaml() -> None:
     prompts = yaml.safe_load(path.read_text(encoding="utf-8"))["prompts"]
 
     assert "{domains}" in prompts["planner_web_tools_prompt"]
+
+
+def test_the_web_tools_prompt_ships_the_measured_search_first_line() -> None:
+    """The line the web-tools experiment measured, verbatim."""
+    path = Path(planner_module.__file__).parent / "prompts.yaml"
+    prompts = yaml.safe_load(path.read_text(encoding="utf-8"))["prompts"]
+
+    assert SEARCH_FIRST in prompts["planner_web_tools_prompt"]
 
 
 def test_no_web_block_is_appended_when_the_prompt_is_missing() -> None:
