@@ -69,7 +69,7 @@ class RouterAgent:
 
         router_config = config_loader.config.get("router", {})
         self.model = resolve_model(router_config.get("model", "claude-haiku"))
-        self.max_tokens = router_config.get("max_tokens", 4096)
+        self.max_tokens = router_config.get("max_tokens", 500)
 
         logger.info(f"RouterAgent initialized with model: {self.model}")
 
@@ -184,6 +184,9 @@ class RouterAgent:
             messages=[
                 {"role": "user", "content": routing_message}
             ],
+            # Routing is meant to be fast: a request that needs reasoning is
+            # one to send to the planner, not to think about here.
+            thinking={"type": "disabled"},
             output_config={"format": {"type": "json_schema", "schema": routing_schema}}
         )
 
