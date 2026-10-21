@@ -143,7 +143,7 @@ Request to build a new multi-step workflow from scratch:
 ### Skills
 
 A `skill` field in the payload names a standard skill the user invoked by slash
-command (`/diagnose`, `/qa`). Standard skills live in `skills/<name>/SKILL.md`,
+command (`/design`, `/diagnose`, `/qa`). Standard skills live in `skills/<name>/SKILL.md`,
 in Anthropic's Agent Skills format, and are loaded by `skill_registry.py` at
 import.
 

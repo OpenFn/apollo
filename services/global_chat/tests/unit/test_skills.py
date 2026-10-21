@@ -19,7 +19,7 @@ from global_chat.planner import PlannerResult
 from global_chat.router import RouterAgent, RouterDecision, RouterResult
 from global_chat.skill_registry import JOB_AGENT_SKILLS, SKILLS, get_skill, has_skill, strip_invocation
 from global_chat.subagent_caller import call_job_agent
-from global_chat.tools.tool_definitions import CALL_JOB_CODE_AGENT_TOOL, LOAD_SKILL_TOOL
+from global_chat.tools.tool_definitions import CALL_JOB_CODE_AGENT_TOOL, LOAD_SKILL_TOOL, TOOL_DEFINITIONS
 from util import ApolloError
 
 from streaming_util import STATUS_NEW_WORKFLOW, STATUS_PLANNING
@@ -40,8 +40,8 @@ from .test_router import make_router
 # --- the registry ---------------------------------------------------------
 
 
-def test_the_two_standard_skills_are_loaded() -> None:
-    assert {"diagnose", "qa"} <= set(SKILLS)
+def test_the_standard_skills_are_loaded() -> None:
+    assert {"design", "diagnose", "qa"} <= set(SKILLS)
 
 
 def test_every_skill_declares_the_name_it_is_invoked_by() -> None:
@@ -332,6 +332,7 @@ def test_a_turn_without_a_skill_opens_and_settles_as_before() -> None:
 
 
 def test_the_load_skill_tool_offers_every_registered_skill() -> None:
+    assert LOAD_SKILL_TOOL in TOOL_DEFINITIONS
     assert LOAD_SKILL_TOOL["input_schema"]["properties"]["name"]["enum"] == sorted(SKILLS)
     for skill in SKILLS.values():
         assert f"- {skill.name}: {skill.description}" in LOAD_SKILL_TOOL["description"]
@@ -409,7 +410,10 @@ def test_the_job_agent_is_offered_its_skills_on_the_direct_route() -> None:
             "is this step ready to go live?", WORKFLOW_YAML, "workflows/wf/fetch-patients", [], False, 5,
         )
 
-    assert [s["name"] for s in mock_main.call_args[0][0]["skills"]] == sorted(JOB_AGENT_SKILLS)
+    skills = mock_main.call_args[0][0]["skills"]
+    assert [s["name"] for s in skills] == sorted(JOB_AGENT_SKILLS)
+    # job_chat reads each skill's body directly
+    assert all(s["body"] == JOB_AGENT_SKILLS[s["name"]].body for s in skills)
 
 
 def test_an_attached_skill_is_not_offered_again() -> None:
