@@ -1,12 +1,13 @@
 ---
 name: qa-code
-description: A thorough review of one step's code, fixing what's wrong within it. Use when the user considers the step done and hands it over for a full review, not for a quick check or one specific change.
+description: A thorough review of one step's code, reporting what should change within it, or fixing it when asked. Use when the user considers the step done and hands it over for a full review, not for a quick check or one specific change.
 metadata:
   agent: job_code
 ---
 
-Review this step's code and fix what's wrong within it. Hold it to the spec and
-the user, and check it against the steps it reads from and writes for.
+Review this step's code and report what's wrong within it, fixing it only if
+you're asked to make changes. Hold it to the spec and the user, and check it
+against the steps it reads from and writes for.
 
 Cover:
 - doing what the spec or user asks of this step;
@@ -34,4 +35,5 @@ Cover:
 - comments that contradict the code.
 
 Report cleanup (duplication, dead code, unclear names, magic numbers) rather
-than making it. Reply briefly with what you fixed and what should still change.
+than making it. Reply briefly with what you fixed, if anything, and what should
+still change.

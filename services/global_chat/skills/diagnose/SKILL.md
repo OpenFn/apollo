@@ -23,7 +23,6 @@ Look past the first failure too: read the later steps against the data they
 would receive. Mention what you only suspect as something to watch.
 
 Tell the user what failed, why, and what showed you. If you're not certain,
-give the likely causes and the one check that would tell them apart. When the
-fix is contained, make it, along with anything you know is wrong in the later
-steps. When it would change behaviour beyond the bug or needs the user's
-decision, propose it first.
+give the likely causes and the one check that would tell them apart. Propose
+the fix, along with anything you know is wrong in the later steps, and offer
+to make it unless the user has already asked you to.

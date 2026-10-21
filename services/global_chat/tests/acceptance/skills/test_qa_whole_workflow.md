@@ -6,20 +6,19 @@ judges: [general]
 
 # notes
 
-The user runs /qa on a two-step workflow and asks for its comments to be left
-alone. The upload step reads `$.patient_list`, but the fetch step writes
-`state.patients`, which is why the last run failed. Both steps use `@latest`;
-the run log shows the version they were tested on. The planner hands each step
-to the job code agent with its qa-code skill and fits the steps together
-itself. Judge the outcome: which side of the mismatch changes doesn't matter as
-long as the two steps agree, and the report can take any reasonable shape.
+The user runs /qa on a two-step workflow before it goes live. The upload step
+reads `$.patient_list`, but the fetch step writes `state.patients`, which is
+why the last run failed. Both steps use `@latest`; the run log shows the
+version they were tested on. /qa reviews and reports; it changes nothing until
+the user asks. Judge the outcome: which side of the mismatch the fix changes
+doesn't matter, and the report can take any reasonable shape.
 
 # quality_criteria
 
-- After the changes, the upload step reads the patient list from the same key the fetch step writes it to, so the crash is fixed.
-- The existing comment in the fetch step is still there and unchanged.
-- Each `@latest` adaptor is pinned to 7.0.0, the version the run log shows, or the reply recommends pinning it to the tested version.
-- The reply says what was fixed and what should still change, with the most serious problems first, and reminds the user to test the workflow again.
+- No job code or workflow YAML is changed; the reply proposes changes rather than making them.
+- The reply names the key mismatch between the two steps as the cause of the crash and shows the fix.
+- The reply recommends pinning each `@latest` adaptor to 7.0.0, the version the run log shows.
+- The most serious problems come first, and the reply ends by offering to make the changes, without dwelling on not having made them.
 
 # settings
 

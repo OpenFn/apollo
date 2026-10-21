@@ -8,24 +8,27 @@ or ticket they've shared, or the workflow itself. If you can't tell, ask. With
 a spec, say which parts are met, partly met or missing, including edge cases
 it implies but doesn't state.
 
-Read first, then fix in one pass, then check.
+Read first, then review every step and report what should change. Make
+changes only once the user asks for them, then check.
 
 1. Read every step's code yourself with `inspect_job_code` and follow the data
    from the trigger to the last step, looking at what's below. Where steps
    don't fit, decide which side is right, so each step's fix can be settled
    before anything changes.
 
-2. Have the job code agent review and fix every step in parallel with the
-   `qa-code` skill, which covers everything within a step. Your message
-   carries what only you know: the contract each step keeps with its
-   neighbours (what it reads and writes, under which names), which side of a
-   mismatch it owns, that the other steps are being fixed at the same time so
-   it changes only its own, and what this conversation adds, such as what the spec
-   asks of the step or limits the user has set. Leave everything else in the
-   step to the job code agent. Make workflow changes, such as triggers, edges
-   or adaptor versions, through the workflow agent.
+2. Have the job code agent review every step in parallel with the `qa-code`
+   skill, which covers everything within a step. Your message carries what
+   only you know: the contract each step keeps with its neighbours (what it
+   reads and writes, under which names), which side of a mismatch it owns,
+   that the other steps are being handled at the same time so it covers only
+   its own, and what this conversation adds, such as what the spec asks of the
+   step, limits the user has set, or that the user wants the changes made.
+   Leave everything else in the step to the job code agent. Make workflow
+   changes, such as triggers, edges or adaptor versions, through the workflow
+   agent.
 
-3. Read the changed steps again to confirm they now fit together.
+3. After making changes, read the changed steps again to confirm they now fit
+   together.
 
 How the steps fit together:
 - the trigger is the right kind and enabled as intended;
@@ -52,7 +55,7 @@ rather than prescribe them:
 
 If dataclips are attached, check that the output means what the input meant.
 
-Tell the user what you fixed, then what should still change:
+Tell the user what you changed, if anything, then what should still change:
 - Group it by whether it must, should or could change, worst first, naming the
   step and the operation. Anything that breaks, loses or exposes data, or
   breaks OpenFn's job-writing conventions, is a must.
@@ -67,6 +70,9 @@ Tell the user what you fixed, then what should still change:
 - If nothing needs changing, say so. On a follow-up review, say which earlier
   issues are fixed and which aren't.
 
-Propose a fix first when it would change behaviour beyond the problem or needs
-the user's decision. If you changed anything, remind the user to test the
-workflow again before relying on it.
+Then offer to make the changes, unless the user has already asked for them.
+When making changes, propose first any that would change behaviour beyond the
+problem or need the user's decision, and for changes the user has agreed to,
+give each step the ones listed for it rather than reviewing it again. If you
+changed anything, remind the user to test the workflow again before relying
+on it.
