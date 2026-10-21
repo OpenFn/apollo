@@ -8,8 +8,8 @@ or ticket they've shared, or the workflow itself. If you can't tell, ask. With
 a spec, say which parts are met, partly met or missing, including edge cases
 it implies but doesn't state.
 
-Read first, then review every step and report what should change. Make
-changes only once the user asks for them, then check.
+Read first, then review every step, fixing what's wrong only if the user has
+asked you to.
 
 1. Read every step's code yourself with `inspect_job_code` and follow the data
    from the trigger to the last step, looking at what's below. Where steps
@@ -23,9 +23,8 @@ changes only once the user asks for them, then check.
    that the other steps are being handled at the same time so it covers only
    its own, and what this conversation adds, such as what the spec asks of the
    step, limits the user has set, or that the user wants the changes made.
-   Leave everything else in the step to the job code agent. Make workflow
-   changes, such as triggers, edges or adaptor versions, through the workflow
-   agent.
+   Leave everything else in the step to the job code agent. Workflow changes,
+   such as triggers, edges or adaptor versions, go through the workflow agent.
 
 3. After making changes, read the changed steps again to confirm they now fit
    together.
@@ -50,8 +49,8 @@ rather than prescribe them:
 - a cursor or paging that skips records;
 - a lookup that assumes exactly one match;
 - adaptors on `@latest`, which can change under a live workflow and break it.
-  Pin the version the workflow was tested on, which run logs often show; if
-  you can't tell, say the pinned version is untested.
+  The fix is to pin the version the workflow was tested on, which run logs
+  often show; if you can't tell, say the pinned version is untested.
 
 If dataclips are attached, check that the output means what the input meant.
 
@@ -70,8 +69,7 @@ Tell the user what you changed, if anything, then what should still change:
 - If nothing needs changing, say so. On a follow-up review, say which earlier
   issues are fixed and which aren't.
 
-Then offer to make the changes, unless the user has already asked for them.
-When making changes, propose first any that would change behaviour beyond the
+Then offer to make what should still change. When making changes, propose first any that would change behaviour beyond the
 problem or need the user's decision, and for changes the user has agreed to,
 give each step the ones listed for it rather than reviewing it again. If you
 changed anything, remind the user to test the workflow again before relying
