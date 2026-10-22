@@ -109,8 +109,9 @@ asked you to.
    that the other steps are being handled at the same time so it covers only
    its own, and what this conversation adds, such as what the spec asks of the
    step, limits the user has set, or that the user wants the changes made.
-   Leave everything else in the step to the job code agent. Workflow changes,
-   such as triggers, edges or adaptor versions, go through the workflow agent.
+   Leave everything else in the step to the job code agent. Have the workflow
+   agent review the triggers, edges and adaptor choices too, telling it
+   whether the user wants the changes made. Workflow changes go through it.
 
 3. After making changes, read the changed steps again to confirm they now fit
    together.
