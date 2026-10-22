@@ -94,7 +94,12 @@ decision was made in the wrong place or too late:
   draw the flow as a diagram before choosing.
 - Invocation: by the user, by the model, or both. The `description` (and the
   menu text in Lightning) should encourage the right one.
-- Edits: fix proactively, propose first, or only report.
+- Edits: fix proactively, propose first, or only report. Unless the user has
+  said, ask them plainly rather than assume. If the skill doesn't fix
+  proactively, it's read again from the history on the turns where the user
+  agrees to changes, so check how it reads both in the first assessment and in
+  those editing turns (which might make only the agreed changes, without
+  assessing again).
 - Thoroughness: how nitpicky to be, and what to skip.
 - Ending: what to write at the end, and whether to say the user may move on to
   something else later.
