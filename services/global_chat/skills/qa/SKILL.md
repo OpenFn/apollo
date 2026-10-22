@@ -44,8 +44,7 @@ How the steps fit together:
 - names other workflows rely on, such as collections, match exactly.
 
 How it behaves live, over many runs. What fails quietly matters more than what
-fails loudly, and these usually need the user's decision, so propose fixes
-rather than prescribe them:
+fails loudly, and these usually need the user's decision:
 - a re-run that creates duplicates;
 - a cursor or paging that skips records;
 - a lookup that assumes exactly one match;
@@ -71,7 +70,7 @@ Tell the user what you changed, if anything, then what should still change:
   issues are fixed and which aren't.
 
 Then offer to make what should still change. When making changes, propose first any that would change behaviour beyond the
-problem or need the user's decision, and for changes the user has agreed to,
-give each step the ones listed for it rather than reviewing it again. If you
-changed anything, remind the user to test the workflow again before relying
-on it.
+problem or need the user's decision, and once the user agrees to changes,
+give each step the ones agreed for it, without the `qa-code` skill, rather
+than reviewing it again. If you changed anything, remind the user to test the
+workflow again before relying on it.
