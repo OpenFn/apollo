@@ -65,7 +65,12 @@ bun dev
 
 To see an index of the available language services, head to `localhost:3000`.
 
-The chat services search an index of the OpenFn documentation, which every environment populates itself. Two backends are supported: Pinecone (the default) and Postgres with the `pgvector` extension (opt-in, see [Database](#database)). Run `bun py embed_docsite` to build yours; see [embed_docsite](services/embed_docsite/README.md) for the write-target options and [search_docsite](services/search_docsite/README.md) for backend selection.
+The chat services search an index of the OpenFn documentation, which every
+environment populates itself. Two backends are supported: Pinecone (the default)
+and Postgres with the `pgvector` extension (opt-in, see [Database](#database)).
+Run `bun py embed_docsite` to build yours; see
+[embed_docsite](services/embed_docsite/README.md) for the write-target options
+and [search_docsite](services/search_docsite/README.md) for backend selection.
 
 ## Python Setup
 
@@ -155,10 +160,10 @@ Controls which characters a workflow step name may contain. Apollo sanitises
 step names on the way out and Lightning validates them on the way in, so the two
 rules have to agree. The default is `false`.
 
-| Value | Rule |
-| --- | --- |
-| `false` (default) | ASCII only. Letters, digits, spaces, hyphens, underscores. Accents are folded (`Café` becomes `Cafe`) and anything else is dropped. This is the rule Lightning enforces today. |
-| `true` | Anything except control characters. Letters and marks from any script, all punctuation and symbols, emoji, `/`, `:`, `>`, `&`, quotes and apostrophes. `Vérifier l'état` and `患者確認` survive exactly as typed. |
+| Value             | Rule                                                                                                                                                                                                              |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `false` (default) | ASCII only. Letters, digits, spaces, hyphens, underscores. Accents are folded (`Café` becomes `Cafe`) and anything else is dropped. This is the rule Lightning enforces today.                                    |
+| `true`            | Anything except control characters. Letters and marks from any script, all punctuation and symbols, emoji, `/`, `:`, `>`, `&`, quotes and apostrophes. `Vérifier l'état` and `患者確認` survive exactly as typed. |
 
 Leave it off until Lightning ships Unicode step names (Lightning#4577), then
 turn it on. Turning it on first means Apollo emits names Lightning rejects.
@@ -170,18 +175,18 @@ Lightning is the worse of the two failures: Lightning rejecting a name is loud
 and recoverable, whereas Apollo quietly renaming a valid name is the silent
 vandalism this flag exists to prevent.
 
-The rejected control set is the same in both modes: C0 (`U+0000`-`U+001F`,
-NUL included), DEL (`U+007F`), C1 (`U+0080`-`U+009F`), the noncharacters
-`U+FFFE` and `U+FFFF`, the surrogates `U+D800`-`U+DFFF`, and the line and
-paragraph separators `U+2028` and `U+2029`. A NUL byte in a name crashes the Postgres insert on
-Lightning's side. Names are NFC-normalised in both modes so that Apollo and
-Lightning agree on how to spell an accent, which is what step lookup matches
-on, and capped at 100 graphemes because that is what Ecto's `validate_length`
-counts.
+The rejected control set is the same in both modes: C0 (`U+0000`-`U+001F`, NUL
+included), DEL (`U+007F`), C1 (`U+0080`-`U+009F`), the noncharacters `U+FFFE`
+and `U+FFFF`, the surrogates `U+D800`-`U+DFFF`, and the line and paragraph
+separators `U+2028` and `U+2029`. A NUL byte in a name crashes the Postgres
+insert on Lightning's side. Names are NFC-normalised in both modes so that
+Apollo and Lightning agree on how to spell an accent, which is what step lookup
+matches on, and capped at 100 graphemes because that is what Ecto's
+`validate_length` counts.
 
 The rule lives in `services/name_rules.py`, and everything that states or
-enforces it is derived from there: the sanitiser, the workflow-generation
-prompt (`describe_rule_for_prompt`), the acceptance-test judges
+enforces it is derived from there: the sanitiser, the workflow-generation prompt
+(`describe_rule_for_prompt`), the acceptance-test judges
 (`describe_rule_for_judge`, substituted into the rubric markdown by
 `judges.load_judge`), and the `assert_no_special_chars` test assertion. Change
 the rule in that one file and all four follow.
@@ -195,15 +200,15 @@ an emoji ZWJ run at the joiner unless a pictograph follows) and the whole point
 is to agree with Elixir, not with the spec.
 
 `tools/unicode_parity` is the harness that checks it. Run `python3 edges.py`,
-then `elixir probe.exs`, then `python3 check.py` with the Elixir version Lightning runs; `--tables`
-prints the literals to paste back into `name_rules`. It checks five things:
-every codepoint's break class, the `Extended_Pictographic` set, the trim set,
-what a GB11 emoji run may be separated from its joiner by, and cluster
-boundaries over a generated corpus. Normalisation is not among them:
-`normalize_nfc` is the standard library's, so there is no table of ours to
-check against Elixir.
+then `elixir probe.exs`, then `python3 check.py` with the Elixir version
+Lightning runs; `--tables` prints the literals to paste back into `name_rules`.
+It checks five things: every codepoint's break class, the
+`Extended_Pictographic` set, the trim set, what a GB11 emoji run may be
+separated from its joiner by, and cluster boundaries over a generated corpus.
+Normalisation is not among them: `normalize_nfc` is the standard library's, so
+there is no table of ours to check against Elixir.
 
-`Extended_Pictographic` needs its own check because it is *not* a break class,
+`Extended_Pictographic` needs its own check because it is _not_ a break class,
 so a per-codepoint sweep cannot see it — an over-broad set there silently
 changes clustering either side of a ZWJ and nothing else notices. That is
 exactly how a hand-written table with 531 wrong codepoints survived two rounds
@@ -252,17 +257,26 @@ curl http://localhost:3000/services/status
 
 ### Capacity testing
 
-`tools/capacity-test.js` fires 100 parallel requests at the `echo` service of a
+`tools/capacity-test.js` fires parallel requests at the `echo` service of a
 running server and logs each request's number, duration and response code,
-followed by the total time:
+followed by the total time and the count and percentage of requests that
+succeeded (a 2xx response). It sends 100 requests by default; pass a number as
+the first argument to change that:
 
 ```bash
 bun run test:capacity
+bun run test:capacity 500
 ```
 
 It reads `APOLLO_ENDPOINT` (default `http://localhost:3000`) and sends
 `AI_ASSISTANT_API_KEY` as the `api_key` in each payload. Requests are not
 throttled, and log lines appear in completion order rather than request order.
+
+To restrict memory usage locally, launch with Docker:
+
+```
+docker run --memory=512m --memory-swap=512m -p 3000:3000 --network host --env-file .env apollo
+```
 
 ## Troubleshooting
 
@@ -319,9 +333,8 @@ them is safe:
     `load_adaptor_docs` runs, so applying it by hand is optional.
 - `lightning_clients` - created and kept current by the migration runner
   (`platform/src/db/migrate.ts`, migrations under
-  [`migrations/clients/`](migrations/clients/)). It is applied
-  automatically at Apollo startup when a database URL is set; no manual `psql`
-  step is needed.
+  [`migrations/clients/`](migrations/clients/)). It is applied automatically at
+  Apollo startup when a database URL is set; no manual `psql` step is needed.
 
 First, make sure you've configured your desired `POSTGRES_URL` in your `.env`
 file.
