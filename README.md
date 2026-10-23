@@ -250,6 +250,20 @@ service:
 curl http://localhost:3000/services/status
 ```
 
+### Capacity testing
+
+`tools/capacity-test.js` fires 100 parallel requests at the `echo` service of a
+running server and logs each request's number, duration and response code,
+followed by the total time:
+
+```bash
+bun run test:capacity
+```
+
+It reads `APOLLO_ENDPOINT` (default `http://localhost:3000`) and sends
+`AI_ASSISTANT_API_KEY` as the `api_key` in each payload. Requests are not
+throttled, and log lines appear in completion order rather than request order.
+
 ## Troubleshooting
 
 If you get errors like `poetry: command not found` (error code 127), and poetry
