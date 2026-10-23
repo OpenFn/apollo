@@ -10,31 +10,31 @@ requires-poetry = ">=2.3.2"
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.12"
-openai = "^3.20"
+openai = "^3.35"
 python-dotenv = "^1.2.4"
-anthropic = "^1.9.0"
+anthropic = "^1.15.0"
 
 langchain-pinecone = "^0.2.13"
 langchain-core = "^1.6"
 langchain-community = "^0.4.2"
-langchain-openai = "^1.6"
+langchain-openai = "^1.7"
 langchain-text-splitters = "^1.1"
 nltk = "^3.10.3"
 pytest = "^9.1.1"
-sentry-sdk = "^2.71.0"
+sentry-sdk = "^2.72.0"
 psycopg2-binary = "^2.9.13"
 langfuse = "^4.15.6"
 opentelemetry-instrumentation-anthropic = "^0.62.4"
 opentelemetry-instrumentation-threading = "0.66b0"
 pandas = "^3.0"
-pgvector = "^0.5.0"
+pgvector = "^0.5.1"
 
 [tool.poetry.group.dev]
 optional = false
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.1.1"
-ruff = "^0.16.10"
+ruff = "^0.17.1"
 
 [build-system]
 requires = ["poetry-core"]
