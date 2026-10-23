@@ -46,3 +46,13 @@ export const captureException = (
   if (!enabled) return;
   Sentry.captureException(err, extras ? { extra: extras } : undefined);
 };
+
+// Same no-op-when-disabled contract as captureException, for events that
+// aren't an error.
+export const captureMessage = (
+  message: string,
+  extras?: Record<string, unknown>
+): void => {
+  if (!enabled) return;
+  Sentry.captureMessage(message, extras ? { extra: extras } : undefined);
+};
