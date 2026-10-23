@@ -313,6 +313,18 @@ def add_page_prefix(content: str, page: dict | None) -> str:
     return f"{prefix} {content}"
 
 
+def job_code_page(name: str | None, adaptor: str | None) -> dict:
+    """The page dict for a step's code page, shared so every route records it alike."""
+    page = {"type": "job_code", "name": name}
+    if adaptor:
+        try:
+            spec = AdaptorSpecifier(adaptor)
+            page["adaptor"] = f"{spec.short_name}@{spec.version}"
+        except Exception as e:
+            create_logger("util").warning(f"Failed to parse adaptor string '{adaptor}': {e}")
+    return page
+
+
 def is_docsite_collection(name: str) -> bool:
     """
     True for docsite collection (namespace) names created by embed_docsite:

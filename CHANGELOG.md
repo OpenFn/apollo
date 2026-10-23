@@ -1,5 +1,22 @@
 # apollo
 
+## 3.5.0
+
+### Minor Changes
+
+- e08ba09: global_chat: accept a `skill` field naming a standard skill the user
+  invoked by slash command. `/design`, `/diagnose` and `/qa` ship with the
+  agent; an invoked skill skips the router and leads the planner's turn. Skill
+  instructions are kept in the returned history, so the client sends `skill`
+  only on the turn that invokes it
+
+### Patch Changes
+
+- e08ba09: global_chat: planner turns now record the `[pg:...]` page prefix in
+  the returned history, like the direct routes, so every route returns history
+  in the same shape
+- 299580e: global_chat: cache the planner's history across tool-loop rounds
+
 ## 3.4.0
 
 ### Minor Changes
