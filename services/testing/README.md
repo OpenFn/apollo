@@ -88,6 +88,9 @@ subfolders). Paths are under `services/<service>/tests/acceptance/`.
 
   Pass `--no-judge` to skip judging: the service is still called and its output
   captured, but nothing is graded and every spec passes.
+- `spec_context.py` — prints a spec's context (`# settings`) as payload JSON,
+  so the `simulate-users` skill can reuse spec setups without copying them:
+  `PYTHONPATH=services poetry run python -m testing.spec_context <spec.md>`.
 - `apollo_client.py` — `ApolloClient` for dispatching to a chat service.
   Currently a subprocess-based stub; the integration tier will replace its
   internals with a real HTTP client (same `.call()` signature, no test changes).

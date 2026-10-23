@@ -42,6 +42,8 @@ def make_planner() -> PlannerAgent:
     planner.subagent_results = []
     planner._segments = []
     planner._attachments = []
+    planner._skill = None
+    planner._loaded_skills = {}
     planner.api_key = "test-key"
     planner._user = None
     planner._metrics_opt_in = None
@@ -79,6 +81,9 @@ class StubStreamManager:
         self.thinking.append(status)
 
     def send_changes(self, *_args: object, **_kwargs: object) -> None:
+        pass
+
+    def end_stream(self, *_args: object, **_kwargs: object) -> None:
         pass
 
     def send_status(

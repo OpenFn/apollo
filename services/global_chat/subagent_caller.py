@@ -12,6 +12,7 @@ from typing import Dict, List, Optional
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from langfuse import observe
+from global_chat.skill_registry import JOB_AGENT_SKILLS, job_agent_skills
 from util import create_logger, ApolloError, attachments_to_context, select_attachments
 from yaml_utils import find_job_in_yaml
 
@@ -106,6 +107,12 @@ def call_job_agent(
     if not user_message:
         raise ApolloError(400, "message is required")
 
+    skill = JOB_AGENT_SKILLS.get(tool_input.get("skill"))
+    if skill:
+        user_message = f"{skill.as_subagent_preamble()}\n\n{user_message}"
+    elif tool_input.get("skill"):
+        logger.warning(f"job_agent: ignoring unknown skill '{tool_input['skill']}'")
+
     job_context = {}
 
     job_key = tool_input.get("job_key")
@@ -141,6 +148,7 @@ def call_job_agent(
         # the <workflow_structure> block and the inspect_job_code tool.
         "subagent": True,
         "workflow_yaml": workflow_yaml,
+        "skills": job_agent_skills(attached=skill.name if skill else None),
     }
 
     try:
@@ -152,6 +160,9 @@ def call_job_agent(
         logger.info(f"job_agent response: {response_preview}")
 
         result["_call_metadata"] = {"subagent": "job_agent", "job_key": job_key}
+        if skill:
+            meta = result.setdefault("meta", {})
+            meta["skills"] = [skill.name, *meta.get("skills", [])]
 
         return result
 
