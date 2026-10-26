@@ -1,5 +1,11 @@
 # apollo
 
+## 3.5.1
+
+### Patch Changes
+
+- 3b1e2ed: Security update: bump dependencies
+
 ## 3.5.0
 
 ### Minor Changes
