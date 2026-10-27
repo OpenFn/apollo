@@ -1,5 +1,12 @@
 # apollo
 
+## 3.5.2
+
+### Patch Changes
+
+- 26a82bc: Queue requests to the python process
+- 8e2f773: Update bun runtime to 1.4.4 and nodejs to 26.x
+
 ## 3.5.1
 
 ### Patch Changes
