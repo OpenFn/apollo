@@ -14,6 +14,9 @@ COPY ./services/ ./services
 
 RUN apt-get update && apt-get install -y git curl
 RUN apt-get install -y --only-upgrade ca-certificates
+
+RUN curl -fsSL https://deb.nodesource.com/setup_26.x | bash - \
+    && apt-get install -y nodejs
 RUN git clone --depth 1 https://github.com/OpenFn/docs.git /app/docs
 
 RUN python -m pip install --user pipx
