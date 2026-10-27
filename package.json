@@ -8,6 +8,7 @@
     "dev": "bun  --watch platform/src/index.ts",
     "build": "bun build platform/src/index.ts",
     "test": "bun test platform/test ",
+    "test:capacity": "bun tools/capacity-test.js",
     "client": "bun platform/src/auth/client/cli.ts",
     "migrate": "bun platform/src/db/migrate.ts",
     "py": "poetry run python services/entry.py "
