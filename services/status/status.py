@@ -5,7 +5,7 @@ from pinecone import Pinecone
 from anthropic import Anthropic
 import psycopg2
 from util import create_logger
-from models import CLAUDE_HAIKU
+from models import CLAUDE_HAIKU, NO_THINKING_HAIKU
 
 logger = create_logger("status")
 
@@ -29,6 +29,7 @@ def test_anthropic_key(api_key):
         client.messages.create(
             model=CLAUDE_HAIKU,
             max_tokens=1,
+            thinking=NO_THINKING_HAIKU,
             messages=[{"role": "user", "content": "test"}]
         )
         return True

@@ -127,7 +127,7 @@ prompts:
   general_knowledge: |
     ## Adaptor Knowledge
 
-    Below are the available OpenFn adaptors and their current versions. For new jobs, specify this version number. Never change the version of an existing job (even if it is `@latest`):
+    Below are the available OpenFn adaptors and their current versions. For new jobs, specify this version number. Never change the version of an existing job (even if it is `@latest`) unless asked to:
     {adaptors}
 
     ## Trigger Types

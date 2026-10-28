@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from langfuse import observe
-from util import create_logger, ApolloError, sum_usage, mask_secrets, format_attachments, add_page_prefix, job_code_page
+from util import create_logger, ApolloError, sum_usage, mask_secrets, format_attachments, add_page_prefix, job_code_page, refusal_error
 from streaming_util import (
     StreamManager,
     STATUS_REVIEWING_WORKFLOW,
@@ -40,7 +40,6 @@ logger = create_logger(__name__)
 # max_tool_calls, so this is a backstop against a raised budget: at the budget
 # it could only fire on the wrap-up round, clearing what that round summarises.
 _CONTEXT_MANAGEMENT = {
-    "betas": ["context-management-2025-06-27"],
     "context_management": {
         "edits": [
             {
@@ -54,7 +53,13 @@ _CONTEXT_MANAGEMENT = {
     },
 }
 
-# API puts a breakpoint on the last block of each request, 
+# The model writes its notes between tool calls into thinking blocks, which
+# come back empty unless display is "updates". Those notes are the narration.
+_THINKING = {"type": "adaptive", "display": "updates"}
+
+_BETAS = ["context-management-2025-06-27", "thinking-display-updates-2026-08-18"]
+
+# API puts a breakpoint on the last block of each request,
 # so each tool-loop round reads the rounds before it from cache.
 _HISTORY_CACHE = {"cache_control": {"type": "ephemeral"}}
 
@@ -252,7 +257,7 @@ class PlannerAgent:
 
         planner_config = config_loader.config.get("planner", {})
         self.model = resolve_model(planner_config.get("model", "claude-opus"))
-        self.max_tokens = planner_config.get("max_tokens", 24576)
+        self.max_tokens = planner_config.get("max_tokens", 32768)
         self.max_tool_calls = planner_config.get("max_tool_calls", 20)
         self.max_pause_continuations = planner_config.get("max_pause_continuations", 5)
 
@@ -396,6 +401,10 @@ class PlannerAgent:
                             web_usage["web_domains"].append(host)
 
                     logger.info(f"Claude API call {tool_call_count + 1}: stop_reason={response.stop_reason}")
+
+                    refusal = refusal_error(response)
+                    if refusal:
+                        raise refusal
 
                     # Text from every round is part of the answer the user saw
                     # (tool rounds may narrate before calling tools).
@@ -636,10 +645,10 @@ class PlannerAgent:
         rounds close the open text block), so the client can weave text and
         status events with its own formatting.
 
-        Adaptive thinking is enabled for better reasoning but thinking content
-        is not streamed to the client — it exposes internal details like tool
-        names and agent architecture. User-facing progress comes from the
-        task-specific status messages sent before each tool execution.
+        Reasoning is never streamed — it exposes internal details like tool
+        names and agent architecture — and under display "updates" it comes
+        back empty. The only thinking text is the model's progress notes
+        between tool calls, which stream as narration.
         """
         choice = {"tool_choice": tool_choice} if tool_choice else {}
 
@@ -651,15 +660,19 @@ class PlannerAgent:
                 system=system_prompt,
                 messages=messages,
                 tools=self.tools,
-                thinking={"type": "adaptive"},
+                thinking=_THINKING,
                 output_config={"effort": "medium"},
+                betas=_BETAS,
                 **choice,
                 **_CONTEXT_MANAGEMENT,
                 **_HISTORY_CACHE,
             ) as stream_obj:
                 for event in stream_obj:
-                    if event.type == "content_block_delta" and event.delta.type == "text_delta":
-                        stream_manager.send_text(event.delta.text)
+                    if event.type == "content_block_delta":
+                        if event.delta.type == "text_delta":
+                            stream_manager.send_text(event.delta.text)
+                        elif event.delta.type == "thinking_delta" and event.delta.thinking:
+                            stream_manager.send_text(event.delta.thinking)
                     elif event.type == "content_block_start":
                         if event.content_block.type == "server_tool_use":
                             self._send_spinner(stream_manager, STATUS_SEARCHING_WEB)
@@ -678,8 +691,9 @@ class PlannerAgent:
                 system=system_prompt,
                 messages=messages,
                 tools=self.tools,
-                thinking={"type": "adaptive"},
+                thinking=_THINKING,
                 output_config={"effort": "medium"},
+                betas=_BETAS,
                 **choice,
                 # Per-request timeout (same values as the SDK default):
                 # required for non-streaming calls with max_tokens > ~21k,
@@ -1099,8 +1113,12 @@ class PlannerAgent:
         return name.replace("-", " ").replace("_", " ").title()
 
     def _extract_text(self, response):
-        """Extract text from response content, concatenated as it was streamed."""
-        return "".join(block.text for block in response.content if block.type == "text")
+        """Extract text and progress notes, concatenated as they were streamed."""
+        return "".join(
+            block.text if block.type == "text" else block.thinking
+            for block in response.content
+            if block.type == "text" or (block.type == "thinking" and block.thinking)
+        )
 
     @staticmethod
     def _count_server_tool_uses(response) -> dict:

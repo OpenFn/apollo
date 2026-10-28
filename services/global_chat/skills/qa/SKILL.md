@@ -72,5 +72,6 @@ Tell the user what you changed, if anything, then what should still change:
 Then offer to make what should still change. When making changes, propose first any that would change behaviour beyond the
 problem or need the user's decision, and once the user agrees to changes,
 give each step the ones agreed for it, without the `qa-code` skill, rather
-than reviewing it again. If you changed anything, remind the user to test the
+than reviewing it again, then report only what changed and any open issue that
+could stop it working. If you changed anything, remind the user to test the
 workflow again before relying on it.

@@ -616,6 +616,48 @@ def test_model_api_error_is_not_reported_as_a_tool_failure() -> None:
     )
 
 
+class FakeThinking:
+    type = "thinking"
+    signature = "sig"
+
+    def __init__(self, thinking: str) -> None:
+        self.thinking = thinking
+
+
+def test_a_refusal_is_reported_as_one_not_as_an_empty_answer() -> None:
+    """A decline is a 200 with no text, which otherwise surfaces as our own
+    EMPTY_OUTPUT failure."""
+    planner = make_planner()
+    planner.model = "test-model"
+    planner.max_tool_calls = 5
+    refused = FakeResponse("refusal", [])
+    refused.stop_details = type("StopDetails", (), {"category": "cyber"})()
+
+    with (
+        patch.object(planner, "_call_api", return_value=refused),
+        patch.object(planner, "_build_system_prompt", return_value="sys"),
+        pytest.raises(ApolloError) as raised,
+    ):
+        planner.run(content="x", workflow_yaml=None, page=None, history=[], stream=False)
+
+    assert raised.value.code == 422
+    assert raised.value.type == "MODEL_REFUSAL"
+    assert raised.value.details == {"category": "cyber"}
+
+
+def test_progress_notes_count_as_narration_and_hidden_reasoning_does_not() -> None:
+    """Notes written before a tool call arrive as thinking blocks; reasoning
+    arrives as thinking blocks too, but empty."""
+    response = FakeResponse("tool_use", [
+        FakeThinking(""),
+        FakeThinking("Checking the fetch step first."),
+        FakeText(" Then the mapping."),
+        FakeToolUse("inspect_job_code", {"job_keys": ["a"]}, "tu_1"),
+    ])
+
+    assert make_planner()._extract_text(response) == "Checking the fetch step first. Then the mapping."
+
+
 def _raise_from_planner(error: Exception) -> ApolloError:
     planner = make_planner()
     planner.model = "test-model"

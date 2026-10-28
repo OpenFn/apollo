@@ -19,7 +19,7 @@ from anthropic import (
 import sentry_sdk
 from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
 from langfuse_util import should_track, build_tags, build_generation_diff, mask_secrets
-from util import ApolloError, create_logger, add_page_prefix, job_code_page, APOLLO_VERSION
+from util import ApolloError, create_logger, add_page_prefix, job_code_page, refusal_error, APOLLO_VERSION
 from yaml_utils import INSPECT_JOB_CODE_TOOL, inspect_job_code
 from .prompt import build_prompt, build_error_correction_prompt
 from .old_prompt import build_old_prompt
@@ -219,7 +219,7 @@ class Payload:
 @dataclass
 class ChatConfig:
     model: str = _MODEL
-    max_tokens: int = 24576
+    max_tokens: int = 32768
     api_key: Optional[str] = None
 
 
@@ -412,6 +412,11 @@ class AnthropicClient:
 
                     if hasattr(message, "usage"):
                         usage_events.append(message.usage.model_dump())
+
+                    refusal = refusal_error(message)
+                    if refusal:
+                        stream_manager.end_stream()
+                        raise refusal
 
                     for content_block in message.content:
                         if getattr(content_block, "type", None) == "text" and content_block.text:
