@@ -409,6 +409,24 @@ def check_attachment_size(attachments: list[dict] | None) -> None:
     )
 
 
+def refusal_error(message: Any) -> ApolloError | None:  # noqa: ANN401
+    """The typed error for a safety decline, or None if the model answered.
+
+    A decline is an HTTP 200 with stop_reason "refusal", so nothing upstream
+    raises; left alone it reads as an empty or unparseable answer and gets
+    retried or reported as our failure.
+    """
+    if getattr(message, "stop_reason", None) != "refusal":
+        return None
+    category = getattr(getattr(message, "stop_details", None), "category", None)
+    return ApolloError(
+        422,
+        "The AI service declined to answer this request. Try rephrasing it.",
+        type="MODEL_REFUSAL",
+        details={"category": category},
+    )
+
+
 # Payload attachment type -> the job_chat context field that already renders it.
 # job_chat has had typed <run_logs>/<input>/<output> blocks all along; attachments
 # arriving from global_chat reuse them rather than adding a second channel.

@@ -14,7 +14,7 @@ from anthropic import (
     UnprocessableEntityError,
 )
 from langfuse import observe
-from models import resolve_model
+from models import resolve_model, NO_THINKING_SONNET
 from search_docsite.search_docsite import resolve_backend
 from util import ApolloError, create_logger
 
@@ -225,7 +225,8 @@ def call_llm(model, system_prompt, user_prompt, client, output_schema=None):
             model=model,
             max_tokens=1024,
             system=system_prompt,
-            messages=messages
+            messages=messages,
+            thinking=NO_THINKING_SONNET,
         )
         if output_schema:
             kwargs["output_config"] = {
@@ -238,7 +239,7 @@ def call_llm(model, system_prompt, user_prompt, client, output_schema=None):
         if not message.content or len(message.content) == 0:
             raise ApolloError(500, "Empty response from AI service", type="EMPTY_LLM_RESPONSE")
 
-        response_text = message.content[0].text
+        response_text = "".join(block.text for block in message.content if block.type == "text")
         if not response_text:
             raise ApolloError(500, "Empty text in AI service response", type="EMPTY_LLM_RESPONSE")
 

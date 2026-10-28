@@ -34,7 +34,7 @@ from typing import Optional
 
 import yaml
 from anthropic import Anthropic
-from models import CLAUDE_SONNET
+from models import CLAUDE_SONNET, NO_THINKING_SONNET
 from testing.judges import load_judge
 
 DEFAULT_MODEL = CLAUDE_SONNET
@@ -417,13 +417,14 @@ def evaluate(
     response = client.messages.create(
         model=model,
         max_tokens=16384,
+        thinking=NO_THINKING_SONNET,
         system=system_prompt,
         messages=[
             {"role": "user", "content": user_prompt},
         ],
     )
 
-    raw_text = response.content[0].text
+    raw_text = "".join(block.text for block in response.content if block.type == "text")
     usage = {
         "input_tokens": response.usage.input_tokens,
         "output_tokens": response.usage.output_tokens,

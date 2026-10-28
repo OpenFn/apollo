@@ -3,6 +3,7 @@ import os
 import re
 import uuid
 from typing import List, Optional, Dict, Any
+import httpx2
 import yaml
 from dataclasses import dataclass
 from models import resolve_model
@@ -70,7 +71,7 @@ from name_rules import (
     truncate_graphemes,
     unicode_names_enabled,
 )
-from util import ApolloError, create_logger, add_page_prefix, APOLLO_VERSION
+from util import ApolloError, create_logger, add_page_prefix, refusal_error, APOLLO_VERSION
 from yaml_utils import _remove_ids
 from .prompt import build_prompt
 from workflow_chat.available_adaptors import get_available_adaptors
@@ -150,7 +151,7 @@ class Payload:
 @dataclass
 class ChatConfig:
     model: str = _MODEL
-    max_tokens: int = 16384
+    max_tokens: int = 32768
     api_key: Optional[str] = None
 
 
@@ -304,7 +305,11 @@ class AnthropicClient:
                         message = self.client.messages.create(
                             max_tokens=self.config.max_tokens, messages=prompt, model=self.config.model, system=system_message,
                             output_config=output_config,
-                            thinking={"type": "adaptive"}
+                            thinking={"type": "adaptive"},
+                            # Per-request timeout (same values as the SDK default):
+                            # required for non-streaming calls with max_tokens > ~21k,
+                            # which the SDK otherwise rejects.
+                            timeout=httpx2.Timeout(600.0, connect=5.0),
                         )
 
                 # Track usage from this attempt
@@ -313,6 +318,13 @@ class AnthropicClient:
                     for key in accumulated_usage:
                         if key in usage:
                             accumulated_usage[key] += usage[key]
+
+                # Before parsing: a decline carries no JSON, so it would read
+                # as a parse failure and be retried.
+                refusal = refusal_error(message)
+                if refusal:
+                    stream_manager.end_stream()
+                    raise refusal
 
                 response_parts = []
                 for content_block in message.content:

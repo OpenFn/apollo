@@ -9,7 +9,7 @@ import pandas as pd
 from vocab_mapper.prompts import *
 from vocab_mapper.dataset_tools import format_google_sheets_input, format_google_sheets_output
 from util import create_logger, ApolloError
-from models import CLAUDE_SONNET
+from models import CLAUDE_SONNET, NO_THINKING_SONNET
 
 logger = create_logger("vocab_mapper")
 logging.getLogger('pinecone_plugin_interface.logging').setLevel(logging.WARNING)
@@ -39,6 +39,7 @@ class VocabMapper:
         message = self.client.messages.create(
             model=CLAUDE_SONNET,
             max_tokens=500,
+            thinking=NO_THINKING_SONNET,
             system=system_prompt,
             messages=[
                 {
@@ -52,7 +53,7 @@ class VocabMapper:
                 }
             ]
         )
-        return message.content[0].text
+        return "".join(block.text for block in message.content if block.type == "text")
 
     def _call_llm_batch(self, system_prompt: str, user_prompts: List[str]) -> List[str]:
         """Process a batch of LLM inputs concurrently."""
