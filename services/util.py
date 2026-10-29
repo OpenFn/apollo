@@ -419,6 +419,7 @@ _ATTACHMENT_CONTEXT_FIELDS = {
     "run_input": "input",
     "output_dataclip": "output",
     "run_output": "output",
+    "run_index": "run_index",
 }
 
 

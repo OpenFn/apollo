@@ -91,6 +91,11 @@ prompts:
     as sending it. Name whatever a call's work depends on; leave out only what belongs to a
     different step or a different problem.
 
+    `run_index` lists the workflow's recent runs, with ids shortened as the user sees them;
+    `selected` marks the run whose logs and data are attached, if any. If answering depends on a
+    run whose logs or data you don't have, name it (id and start time) and ask the user to select
+    it in the run history, instead of guessing. Don't ask for a run the request doesn't need.
+
     NEVER ask the user to share what is already available:
 
     ❌ "Please share your workflow YAML so I can modify it"

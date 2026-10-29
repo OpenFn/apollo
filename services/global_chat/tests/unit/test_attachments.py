@@ -17,6 +17,7 @@ from global_chat.subagent_caller import (
     call_workflow_agent,
     format_subagent_result_for_llm,
 )
+from job_chat.prompt import generate_system_message
 from util import (
     ATTACHMENT_TOTAL_CHAR_LIMIT,
     ApolloError,
@@ -49,6 +50,18 @@ def test_types_map_onto_the_fields_job_chat_already_renders() -> None:
     ])
 
     assert context == {"log": LOG, "input": INPUT, "output": "out"}
+
+
+def test_the_run_index_reaches_job_chat_as_its_own_block() -> None:
+    context = attachments_to_context([
+        {"type": "run_index", "content": [{"run": "7f3a9c21", "selected": True}]},
+    ])
+
+    system = generate_system_message(context, None, download_adaptor_docs=False)
+    text = "".join(block["text"] for block in system)
+
+    assert "<recent_runs>" in text
+    assert '"run": "7f3a9c21"' in text
 
 
 def test_a_field_with_one_source_is_not_labelled() -> None:

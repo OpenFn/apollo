@@ -426,6 +426,14 @@ and system information. When debugging, analyze these logs carefully to identify
 ```{context.log}```
 </run_logs>""")
 
+    if context.has("run_index"):
+        message.append(f"""<recent_runs>
+The workflow's recent runs, newest first, with ids shortened as the user sees them. `selected` marks the run whose logs and data are attached, if any.
+If answering depends on a run whose logs or data you don't have, name it (id and start time) and ask the user to select it in the run history, instead of guessing. Don't ask for a run the question doesn't need.
+
+```{context.run_index}```
+</recent_runs>""")
+
     if subagent:
         message.append(subagent_mode_instructions)
         if workflow_yaml:
