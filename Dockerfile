@@ -1,4 +1,4 @@
-ARG NODE_VERSION=26.12.0
+ARG NODE_VERSION=26.13.0
 
 FROM node:${NODE_VERSION}-bookworm-slim AS node
 
@@ -23,6 +23,16 @@ COPY ./services/ ./services
 
 RUN apt-get update && apt-get install -y git curl
 RUN test "v$(awk '/^nodejs / {print $2}' .tool-versions)" = "$(node -v)"
+
+# Mozilla distrusted emSign C1 and C3 (eMudhra intermediates with weak keys).
+# This fails once Debian's ca-certificates drops them, so the step can go.
+RUN for cert in emSign_Root_CA_-_C1 emSign_ECC_Root_CA_-_C3; do \
+      grep -qx "mozilla/${cert}.crt" /etc/ca-certificates.conf \
+        || { echo "${cert} is no longer shipped; remove this step" >&2; exit 1; }; \
+      sed -i "s|^mozilla/${cert}.crt\$|!mozilla/${cert}.crt|" /etc/ca-certificates.conf; \
+    done \
+  && update-ca-certificates --fresh
+
 RUN git clone --depth 1 https://github.com/OpenFn/docs.git /app/docs
 
 RUN python -m pip install --user pipx
@@ -35,9 +45,6 @@ RUN BUN_VERSION="$(awk '/^bun / {print $2}' .tool-versions)" \
 ENV PATH="${PATH}:/root/.bun/bin/"
 
 RUN bun install
-
-# RUN --mount=type=secret,id=_env,dst=/.env cat /.env \
-#     && poetry run python services/search/generate_docs_embeddings.py docs openfn_docs
 
 EXPOSE 3000
 

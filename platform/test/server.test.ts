@@ -106,12 +106,13 @@ describe("Python Services", () => {
       expect(await response.text()).toBe("");
     });
 
+    // The first Python spawn in the run is cold, and can outlast bun's 5s default
     it("returns a 200", async () => {
       const json = { x: 1 };
       const response = await app.handle(post("services/echo", json));
 
       expect(response.status).toBe(200);
-    });
+    }, 30_000);
 
     it("echoes back an object with a session id", async () => {
       const json = { x: 1 };

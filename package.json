@@ -1,13 +1,14 @@
 {
   "name": "apollo",
   "module": "platform/index.ts",
-  "version": "3.4.0",
+  "version": "3.5.2",
   "type": "module",
   "scripts": {
     "start": "NODE_ENV=production bun platform/src/index.ts",
     "dev": "bun  --watch platform/src/index.ts",
     "build": "bun build platform/src/index.ts",
     "test": "bun test platform/test ",
+    "test:capacity": "bun tools/capacity-test.js",
     "client": "bun platform/src/auth/client/cli.ts",
     "migrate": "bun platform/src/db/migrate.ts",
     "py": "poetry run python services/entry.py "
