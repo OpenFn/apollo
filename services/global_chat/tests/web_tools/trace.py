@@ -1,4 +1,5 @@
-"""Turn the planner's raw API responses into an ordered record of web tool calls.
+"""Turn the planner's raw API responses into an ordered record of web tool calls,
+and check an answer against the pages it fetched.
 
 Test helper only.
 """
@@ -7,6 +8,7 @@ from typing import Any
 
 WEB_TOOL_NAMES = {"web_search": "search", "web_fetch": "fetch"}
 RESULT_BLOCK_SUFFIX = "_tool_result"
+RIGHT_SINGLE_QUOTE = chr(0x2019)
 
 
 def build_trace(responses: list) -> list[dict]:
@@ -39,9 +41,7 @@ def build_trace(responses: list) -> list[dict]:
                 content = field(block, "content")
                 entry["result"] = result_code(content)
                 if entry["tool"] == "fetch" and entry["result"] == "ok":
-                    text = fetched_text(content)
-                    entry["content"] = text
-                    entry["content_chars"] = len(text) if text is not None else None
+                    entry["content"] = fetched_text(content)
 
     return calls
 
@@ -55,13 +55,24 @@ def count(trace: list[dict], tool: str | None = None, result: str | None = None)
     )
 
 
+def is_grounded(answer: str, trace: list[dict], facts: tuple[str, ...]) -> bool:
+    """Every fact is in the answer and in a fetched page, so it was read, not remembered."""
+    pages = [norm(call["content"]) for call in trace if call.get("content")]
+    return all(norm(fact) in norm(answer) and any(norm(fact) in page for page in pages) for fact in facts)
+
+
+def norm(text: str) -> str:
+    """Lowercase, collapse whitespace and straighten curly apostrophes, for matching."""
+    return " ".join(text.replace(RIGHT_SINGLE_QUOTE, "'").lower().split())
+
+
 def format_trace(trace: list[dict]) -> str:
-    """One readable line per call, for failure messages and the runner's output."""
+    """One readable line per call, for failure messages."""
     if not trace:
         return "(no web calls)"
     lines = []
     for call in trace:
-        size = f"  {call['content_chars']} chars" if call.get("content_chars") is not None else ""
+        size = f"  {len(call['content'])} chars" if call.get("content") is not None else ""
         lines.append(f"r{call['round']}  {call['tool']:<7} {call['result']:<26} {call['target']}{size}")
     return "\n".join(lines)
 

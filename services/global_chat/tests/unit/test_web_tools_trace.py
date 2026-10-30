@@ -3,7 +3,7 @@
 from types import SimpleNamespace as Block
 
 import pytest
-from global_chat.tests.web_tools.trace import build_trace, count, format_trace
+from global_chat.tests.web_tools.trace import build_trace, count, format_trace, is_grounded
 
 PATIENT = "https://hl7.org/fhir/R4/patient.html"
 
@@ -57,7 +57,7 @@ def test_calls_are_recorded_in_order_across_rounds() -> None:
 def test_a_successful_fetch_keeps_the_page_text() -> None:
     trace = build_trace([response(use("f1", "web_fetch", url=PATIENT), result("f1", "web_fetch_tool_result", fetched("abc")))])
 
-    assert (trace[0]["content"], trace[0]["content_chars"]) == ("abc", len("abc"))
+    assert trace[0]["content"] == "abc"
 
 
 def test_results_are_paired_by_id_not_position() -> None:
@@ -98,7 +98,6 @@ def test_a_non_text_fetch_has_no_content() -> None:
 
     assert trace[0]["result"] == "ok"
     assert trace[0]["content"] is None
-    assert trace[0]["content_chars"] is None
 
 
 def test_other_server_tools_keep_their_own_name() -> None:
@@ -142,7 +141,7 @@ def test_count_filters_by_tool_and_result() -> None:
 def test_format_trace_lists_one_line_per_call() -> None:
     refused, read = format_trace([
         {"round": 1, "tool": "fetch", "target": PATIENT, "result": "url_not_in_prior_context"},
-        {"round": 2, "tool": "fetch", "target": PATIENT, "result": "ok", "content": "x" * 10, "content_chars": 10},
+        {"round": 2, "tool": "fetch", "target": PATIENT, "result": "ok", "content": "x" * 10},
     ]).splitlines()
 
     assert "url_not_in_prior_context" in refused
@@ -152,6 +151,37 @@ def test_format_trace_lists_one_line_per_call() -> None:
 
 def test_format_trace_says_when_there_were_no_calls() -> None:
     assert format_trace([]) == "(no web calls)"
+
+
+def page(content: str) -> dict:
+    return {"round": 1, "tool": "fetch", "target": PATIENT, "result": "ok", "content": content}
+
+
+GENDER_PAGE = page("Patient.gender   0..1   male | female | other | unknown")
+
+
+def test_grounded_needs_the_fact_in_the_answer_and_in_a_fetched_page() -> None:
+    assert is_grounded("Gender  is 0..1", [GENDER_PAGE], ("0..1",))
+    assert not is_grounded("gender is 0..1", [], ("0..1",))
+    assert not is_grounded("gender is optional", [GENDER_PAGE], ("0..1",))
+
+
+def test_every_fact_must_be_grounded() -> None:
+    assert not is_grounded("gender is 0..1", [GENDER_PAGE], ("0..1", "male"))
+    assert not is_grounded("gender is 0..1 and can be deceased", [GENDER_PAGE], ("0..1", "deceased"))
+
+
+def test_a_page_cut_off_before_the_fact_does_not_ground_it() -> None:
+    refused = {"round": 1, "tool": "fetch", "target": PATIENT, "result": "url_not_allowed"}
+
+    assert not is_grounded("male | female", [page("cut off before the table")], ("male | female",))
+    assert not is_grounded("male | female", [refused], ("male | female",))
+
+
+def test_a_curly_apostrophe_still_grounds_the_fact() -> None:
+    contact = page("SHALL at least contain a contact's details or a reference to an organization")
+
+    assert is_grounded(f"must hold a contact{chr(0x2019)}s details", [contact], ("contact's details",))
 
 
 def test_a_code_execution_result_is_paired_with_its_call() -> None:
