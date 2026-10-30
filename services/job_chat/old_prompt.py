@@ -1,6 +1,7 @@
 import time
 import sentry_sdk
 from util import create_logger, ApolloError, AdaptorSpecifier, get_db_connection
+from .prompt import render_user_code
 from .retrieve_docs import retrieve_knowledge
 from search_adaptor_docs.search_adaptor_docs import fetch_signatures
 
@@ -227,7 +228,7 @@ def generate_system_message(context_dict, search_results, download_adaptor_docs=
     message.append({"type": "text", "text": ".", "cache_control": {"type": "ephemeral"}})
 
     if context.has("expression"):
-        message.append(f"<user_code>{context.expression}</user_code>")
+        message.append(render_user_code(context.expression))
 
     if context.has("input"):
         message.append(f"<input>The user's input data is :\n\n```{context.input}```</input>")

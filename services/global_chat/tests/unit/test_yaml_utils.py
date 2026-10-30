@@ -59,6 +59,12 @@ def test_inspect_returns_requested_bodies() -> None:
     assert "post('/data', $.data);" in result
 
 
+def test_inspect_numbers_lines() -> None:
+    workflow = "jobs:\n  fetch:\n    body: |-\n      get('/a');\n      fn(s => s);\n"
+    result = inspect_job_code(workflow, ["fetch"])
+    assert "     1\tget('/a');\n     2\tfn(s => s);" in result
+
+
 def test_inspect_matches_fuzzy_names() -> None:
     result = inspect_job_code(WORKFLOW_YAML, ["Fetch Patients"])
     assert "get('/patients');" in result

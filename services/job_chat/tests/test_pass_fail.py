@@ -31,6 +31,26 @@ def test_context_fields_access():
     assert "antarctica" in response_text, f"LLM failed to access log data, 'antarctica' not found in response"
 
 
+def test_line_reference():
+    print("==================TEST==================")
+    print("Description: Testing that the LLM answers about the line number the user names")
+
+    # Near-identical lines, so the answer can't come from counting by eye
+    content = "What value does line 33 set?"
+    context = {
+        "expression": "\n".join(f"fn(state => ({{ ...state, field{i}: 'value{i}' }}));" for i in range(1, 41)),
+        "adaptor": "@openfn/language-common@latest",
+    }
+
+    service_input = make_service_input(history=[], content=content, context=context, meta={}, suggest_code=True)
+    response = call_job_chat_service(service_input)
+    print_response_details(response, "line_reference", content=content)
+
+    response_text = response["response"]
+    assert "value33" in response_text, f"Expected line 33's value, got: {response_text}"
+    assert "value32" not in response_text and "value34" not in response_text
+
+
 def test_rename_variable():
     print("==================TEST==================")
     print("Description: Testing variable name change in fn function")

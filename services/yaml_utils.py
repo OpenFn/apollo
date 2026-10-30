@@ -7,7 +7,7 @@ subagent mode for job extraction, code stitching, and step inspection.
 
 import yaml
 from name_rules import normalize_for_lookup
-from util import create_logger
+from util import add_line_numbers, create_logger
 
 logger = create_logger("yaml_utils")
 
@@ -270,7 +270,9 @@ INSPECT_JOB_CODE_TOOL = {
     "name": "inspect_job_code",
     "description": """Read the current code body of one or more jobs in the workflow (read-only).
 
-Use this to inspect existing step code before editing — e.g. to find which steps a change applies to before editing only those, or to base one step on another. Pass all the job keys you need in a single call rather than calling once per job.""",
+Use this to inspect existing step code before editing — e.g. to find which steps a change applies to before editing only those, or to base one step on another. Pass all the job keys you need in a single call rather than calling once per job.
+
+Code comes back with display-only cat -n line numbers, for precise line references.""",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -296,7 +298,10 @@ def inspect_job_code(yaml_str: str | None, job_keys: list[str]) -> str:
     for job_key in job_keys:
         _, job_data = find_job_in_yaml(yaml_str, job_key)
         if job_data and job_data.get("body"):
-            parts.append(f"Job code for '{job_key}':\n\n{job_data['body']}")
+            parts.append(
+                f"Job code for '{job_key}' (cat -n line numbers, display-only):\n\n"
+                f"{add_line_numbers(job_data['body'])}",
+            )
         else:
             parts.append(f"No code found for job '{job_key}'.")
     return "\n\n".join(parts)

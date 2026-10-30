@@ -279,6 +279,15 @@ class AdaptorSpecifier:
         return self.name.split("/")[-1].replace("language-", "")
 
 
+def add_line_numbers(code: str) -> str:
+    """Render code in `cat -n` format so a model can cite the editor's line numbers.
+
+    Prompt scaffolding only, never stored. splitlines() keeps a trailing newline
+    from producing a phantom numbered line.
+    """
+    return "\n".join(f"{i:6}\t{line}" for i, line in enumerate(code.splitlines(), 1))
+
+
 def add_page_prefix(content: str, page: dict | None) -> str:
     """
     Add [pg:...] prefix to message for page navigation tracking.

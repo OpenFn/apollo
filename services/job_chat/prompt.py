@@ -3,7 +3,7 @@
 import json
 import sentry_sdk
 from langfuse import observe
-from util import create_logger, ApolloError, AdaptorSpecifier, get_db_connection
+from util import create_logger, ApolloError, AdaptorSpecifier, get_db_connection, add_line_numbers
 from yaml_utils import redact_job_bodies, normalize_name
 from .retrieve_docs import retrieve_knowledge
 from search_adaptor_docs.search_adaptor_docs import fetch_signatures
@@ -50,6 +50,7 @@ Users can Flag any answers that are not helpful, which will help us build a bett
 The system will provide you with various pieces of context about the user's job using XML tags:
 
 - <user_code>: The current job code the user is working on. This is the code they want help with.
+  It is shown with cat -n line numbers matching the user's editor, so you can refer to exact lines.
 - <adaptor>: Documentation for the adaptor (library) the user is using. Reference this when suggesting functions.
 - <input>: Sample input data the user is testing with. Shows what data structure enters the job.
 - <output>: The output data from a previous run. Shows what the job produced.
@@ -232,6 +233,8 @@ with the complete code. There is nothing to "replace" in an empty job, so a
 
 <code editing rules>
 - old_code must match the user's code EXACTLY, including all whitespace and indentation.
+- <user_code> line numbers are display-only; the real code has none. Never include the
+  number + tab prefix in old_code or new_code — it will not match.
 - Edits apply sequentially — later edits work on the already-modified code.
 - If old_code isn't found exactly, the edit fails safely rather than corrupting the file.
 - To insert, replace an anchor with itself plus the new code.
@@ -301,6 +304,18 @@ class Context:
 
     def has(self, key):
         return hasattr(self, key) and getattr(self, key) is not None
+
+
+def render_user_code(expression: str) -> str:
+    """The user's code, numbered so the model cites the lines the editor shows.
+
+    Presentation only: the raw expression is what gets edited and stored.
+    """
+    return (
+        "<user_code>Shown with cat -n line numbers (number + tab) matching the user's editor. "
+        "The numbers are display-only, not part of the code.\n"
+        f"{add_line_numbers(expression)}</user_code>"
+    )
 
 
 def build_focus_line(viewing, focused):
@@ -405,7 +420,7 @@ def generate_system_message(context_dict, search_results, download_adaptor_docs=
     message.append({"type": "text", "text": ".", "cache_control": {"type": "ephemeral"}})
 
     if context.has("expression"):
-        message.append(f"<user_code>{context.expression}</user_code>")
+        message.append(render_user_code(context.expression))
 
     if context.has("input"):
         message.append(f"<input>The user's input data is :\n\n```{context.input}```</input>")

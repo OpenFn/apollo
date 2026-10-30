@@ -156,7 +156,8 @@ prompts:
       like (structure, layout, function choices); the job code agent owns all code decisions.
       Anything the user explicitly specified (functions, options, field mappings) is a
       requirement — relay it verbatim.
-      Include relevant code only if you used `inspect_job_code` to read existing code.
+      Include relevant code only if you used `inspect_job_code` to read existing code, without
+      its line numbers.
 
     ### Artifacts
     When tools return artifacts (workflow YAML or job code), they are attached separately for the user.
