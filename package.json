@@ -1,13 +1,14 @@
 {
   "name": "apollo",
   "module": "platform/index.ts",
-  "version": "3.3.1",
+  "version": "3.5.2",
   "type": "module",
   "scripts": {
     "start": "NODE_ENV=production bun platform/src/index.ts",
     "dev": "bun  --watch platform/src/index.ts",
     "build": "bun build platform/src/index.ts",
     "test": "bun test platform/test ",
+    "test:capacity": "bun tools/capacity-test.js",
     "client": "bun platform/src/auth/client/cli.ts",
     "migrate": "bun platform/src/db/migrate.ts",
     "py": "poetry run python services/entry.py "
@@ -23,7 +24,7 @@
     "@elysiajs/html": "^1.4.0",
     "@openfn/adaptor-apis": "^0.3.0",
     "@sentry/bun": "^10.60.0",
-    "elysia": "1.4.27",
+    "elysia": "1.4.29",
     "jsdoc-babel": "^0.5.0"
   },
   "nodemonConfig": {

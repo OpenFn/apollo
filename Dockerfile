@@ -13,8 +13,10 @@ COPY ./migrations/ ./migrations
 COPY ./services/ ./services
 
 RUN apt-get update && apt-get install -y git curl
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-RUN apt-get install -y nodejs
+RUN apt-get install -y --only-upgrade ca-certificates
+
+RUN curl -fsSL https://deb.nodesource.com/setup_26.x | bash - \
+    && apt-get install -y nodejs
 RUN git clone --depth 1 https://github.com/OpenFn/docs.git /app/docs
 
 RUN python -m pip install --user pipx
@@ -27,9 +29,6 @@ RUN BUN_VERSION="$(awk '/^bun / {print $2}' .tool-versions)" \
 ENV PATH="${PATH}:/root/.bun/bin/"
 
 RUN bun install
-
-# RUN --mount=type=secret,id=_env,dst=/.env cat /.env \
-#     && poetry run python services/search/generate_docs_embeddings.py docs openfn_docs
 
 EXPOSE 3000
 

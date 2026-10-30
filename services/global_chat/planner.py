@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 from typing import List, Dict, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-import httpx
+import httpx2
 import anthropic
 from anthropic import Anthropic, BadRequestError
 import sentry_sdk
@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from langfuse import observe
-from util import create_logger, ApolloError, sum_usage, mask_secrets, format_attachments
+from util import create_logger, ApolloError, sum_usage, mask_secrets, format_attachments, add_page_prefix, job_code_page
 from streaming_util import (
     StreamManager,
     STATUS_REVIEWING_WORKFLOW,
@@ -27,6 +27,7 @@ from streaming_util import (
     STATUS_SEARCHING_WEB,
 )
 from global_chat.config_loader import ConfigLoader
+from global_chat.skill_registry import SKILLS, Skill
 from models import resolve_model
 from global_chat.tools.tool_definitions import TOOL_DEFINITIONS, build_web_tools
 from yaml_utils import stitch_job_code, redact_job_bodies, find_job_in_yaml, get_step_name_from_page, inspect_job_code, job_keys_in_yaml
@@ -53,6 +54,10 @@ _CONTEXT_MANAGEMENT = {
     },
 }
 
+# API puts a breakpoint on the last block of each request, 
+# so each tool-loop round reads the rounds before it from cache.
+_HISTORY_CACHE = {"cache_control": {"type": "ephemeral"}}
+
 _FINAL_ROUND_NOTICE = (
     "Stop and reply to the user now. Say what you changed. Mention unfinished work "
     "only if there is any, and then offer to continue next turn — otherwise don't "
@@ -76,7 +81,7 @@ def _api_error_message(error: Exception) -> str:
             if isinstance(message, str) and message:
                 return message
 
-    if isinstance(error, (anthropic.APIConnectionError, httpx.RequestError)):
+    if isinstance(error, (anthropic.APIConnectionError, httpx2.RequestError)):
         return str(error) or type(error).__name__
 
     status = getattr(error, "status_code", None)
@@ -160,7 +165,7 @@ def _model_api_failure(error: Exception) -> tuple[int, str, str, dict]:
     # leaves the server and nothing upstream is trusted to be key-free.
     details = {"upstream_message": mask_secrets(upstream)}
 
-    if isinstance(error, (anthropic.APIConnectionError, httpx.RequestError)):
+    if isinstance(error, (anthropic.APIConnectionError, httpx2.RequestError)):
         cause = getattr(error, "__cause__", None)
         if cause:
             # A proxy error carries the proxy URL, credentials and all.
@@ -255,6 +260,8 @@ class PlannerAgent:
         self.subagent_results = []
         self._segments: List[Dict] = []
         self._attachments: List[Dict] = []
+        self._skill: Optional[Skill] = None
+        self._loaded_skills: Dict[str, Skill] = {}
 
         logger.info(f"PlannerAgent initialized with model: {self.model}")
 
@@ -270,6 +277,7 @@ class PlannerAgent:
         user: Optional[Dict] = None,
         metrics_opt_in: Optional[bool] = None,
         stream_manager: Optional[StreamManager] = None,
+        skill: Optional[Skill] = None,
     ) -> PlannerResult:
         """
         Run the planner agent with tool-calling loop.
@@ -285,6 +293,8 @@ class PlannerAgent:
                 the ones the planner names for it.
             stream_manager: Optional shared stream manager from the router, so
                 a handed-over request continues on the same stream
+            skill: A skill the user invoked this turn, whose instructions lead
+                the user message
 
         Returns:
             PlannerResult with response, attachments, history, usage, meta
@@ -292,10 +302,6 @@ class PlannerAgent:
         logger.info("Planner.run() called")
 
         stream_manager = stream_manager or StreamManager(model=self.model, stream=stream)
-        if workflow_yaml:
-            stream_manager.send_thinking(STATUS_REVIEWING_WORKFLOW + STATUS_PLANNING)
-        else:
-            stream_manager.send_thinking(STATUS_NEW_WORKFLOW + STATUS_PLANNING)
 
         self.current_yaml = workflow_yaml
         self.yaml_modified = False
@@ -303,9 +309,13 @@ class PlannerAgent:
         self._user = user
         self._metrics_opt_in = metrics_opt_in
         self._segments: List[Dict] = []
+        self._skill = skill
+        self._loaded_skills = {}
 
-        stream_manager = StreamManager(model=self.model, stream=stream)
-        if workflow_yaml:
+        if skill:
+            self._send_spinner(stream_manager, f"Running the /{skill.name} skill...")
+            self._send_settled(stream_manager, f"Ran the /{skill.name} skill")
+        elif workflow_yaml:
             self._send_spinner(stream_manager, STATUS_REVIEWING_WORKFLOW + STATUS_PLANNING)
         else:
             self._send_spinner(stream_manager, STATUS_NEW_WORKFLOW + STATUS_PLANNING)
@@ -437,10 +447,10 @@ class PlannerAgent:
 
                 except ApolloError:
                     raise
-                except (anthropic.APIError, httpx.RequestError) as e:
+                except (anthropic.APIError, httpx2.RequestError) as e:
                     # A rejection from the model API is not a tool failure.
                     #
-                    # httpx.RequestError as well as APIError: the SDK only
+                    # httpx2.RequestError as well as APIError: the SDK only
                     # wraps httpx exceptions around the initial send, and on a
                     # streaming request that returns once the headers arrive.
                     # The body is read later, unwrapped, so a stream that dies
@@ -525,9 +535,15 @@ class PlannerAgent:
             attachments.append({"type": "workflow_yaml", "content": self.current_yaml})
 
         # Return string-content history matching the direct routes, not the
-        # internal block-format messages used by the tool-calling loop.
+        # internal block-format messages used by the tool-calling loop. Skills
+        # used this turn are kept, so they still apply on later turns.
+        user_turn = "\n\n".join(
+            [self._with_skill(content), *(s.as_block() for s in self._loaded_skills.values())],
+        )
         return_history = (history.copy() if history else [])
-        return_history.append({"role": "user", "content": content})
+        return_history.append(
+            {"role": "user", "content": add_page_prefix(user_turn, self._page_context(page, workflow_yaml))},
+        )
         return_history.append({"role": "assistant", "content": final_text})
 
         meta = {
@@ -537,6 +553,14 @@ class PlannerAgent:
             "subagent_calls": self.subagent_results,
             "total_tool_calls": tool_call_count,
         }
+
+        skills_used = [
+            *([self._skill.name] if self._skill else []),
+            *self._loaded_skills,
+            *(name for result in self.subagent_results for name in (result.get("meta") or {}).get("skills", [])),
+        ]
+        if skills_used:
+            meta["skills"] = list(dict.fromkeys(skills_used))
 
         if response.stop_reason == "pause_turn":
             meta["truncated"] = True
@@ -555,16 +579,33 @@ class PlannerAgent:
             meta=meta,
         )
 
-    def _build_user_content(self, content: str, page: Optional[str]) -> str:
-        """Augment the user message with this turn's attachments, the step the
-        user is viewing ("this step"), and the existing workflow structure
-        (bodies redacted).
+    def _with_skill(self, content: str) -> str:
+        """The user's message with an invoked skill's instructions ahead of it."""
+        if not self._skill:
+            return content
+        preamble = self._skill.as_preamble()
+        return f"{preamble}\n\n{content}" if content else preamble
 
-        Everything added here is per-turn: run() records the raw `content` in
-        the returned history, so an attached log never becomes a permanent part
-        of the conversation.
+    def _page_context(self, page: Optional[str], workflow_yaml: Optional[str]) -> Dict:
+        """The page as the direct routes record it, so a [pg:...] prefix reads
+        the same whichever agent served the turn."""
+        step_name = get_step_name_from_page(page)
+        if step_name and workflow_yaml:
+            _, job = find_job_in_yaml(workflow_yaml, step_name)
+            if job:
+                return job_code_page(job.get("name"), job.get("adaptor"))
+        return {"type": "workflow"}
+
+    def _build_user_content(self, content: str, page: Optional[str]) -> str:
+        """Augment the user message with an invoked skill's instructions, this
+        turn's attachments, the step the user is viewing ("this step"), and the
+        existing workflow structure (bodies redacted).
+
+        Only the skill outlives this turn: run() records the message and skill
+        in the returned history, so an attached log never becomes a permanent
+        part of the conversation.
         """
-        user_content = content
+        user_content = self._with_skill(content)
 
         attachments = format_attachments(self._attachments)
         if attachments:
@@ -614,6 +655,7 @@ class PlannerAgent:
                 output_config={"effort": "medium"},
                 **choice,
                 **_CONTEXT_MANAGEMENT,
+                **_HISTORY_CACHE,
             ) as stream_obj:
                 for event in stream_obj:
                     if event.type == "content_block_delta" and event.delta.type == "text_delta":
@@ -642,8 +684,9 @@ class PlannerAgent:
                 # Per-request timeout (same values as the SDK default):
                 # required for non-streaming calls with max_tokens > ~21k,
                 # which the SDK otherwise rejects.
-                timeout=httpx.Timeout(600.0, connect=5.0),
+                timeout=httpx2.Timeout(600.0, connect=5.0),
                 **_CONTEXT_MANAGEMENT,
+                **_HISTORY_CACHE,
             )
             return response
 
@@ -762,6 +805,14 @@ class PlannerAgent:
             tool_result = inspect_job_code(self.current_yaml, job_keys)
 
             tool_calls_meta.append({"tool": "inspect_job_code", "input": tool_use_block.input})
+
+        elif tool_use_block.name == "load_skill":
+            skill = SKILLS.get(tool_use_block.input.get("name"))
+            tool_result = skill.body if skill else f"Error: Unknown skill. Available skills: {sorted(SKILLS)}"
+            if skill and skill != self._skill:
+                self._loaded_skills[skill.name] = skill
+
+            tool_calls_meta.append({"tool": "load_skill", "input": tool_use_block.input})
 
         else:
             logger.error(f"Unknown tool: {tool_use_block.name}")
@@ -981,6 +1032,9 @@ class PlannerAgent:
                 return f"Reading code for {joined}..."
             return "Reading job code..."
 
+        if name == "load_skill" and inputs.get("name") in SKILLS:
+            return f"Running the /{inputs['name']} skill..."
+
         return f"Running {name}..."
 
     def _settled_status_message(self, tool_use_block, yaml_before: str | None) -> str | None:
@@ -1012,6 +1066,9 @@ class PlannerAgent:
                 joined = ", ".join(f"\"{n}\"" for n in names)
                 return f"Read code for {joined}"
             return "Read code"
+
+        if name == "load_skill" and inputs.get("name") in SKILLS:
+            return f"Ran the /{inputs['name']} skill"
 
         return None
 

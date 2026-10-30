@@ -1,5 +1,47 @@
 # apollo
 
+## 3.5.2
+
+### Patch Changes
+
+- 26a82bc: Queue requests to the python process
+- 8e2f773: Update bun runtime to 1.4.4 and nodejs to 26.x
+
+## 3.5.1
+
+### Patch Changes
+
+- 3b1e2ed: Security update: bump dependencies
+
+## 3.5.0
+
+### Minor Changes
+
+- e08ba09: global_chat: accept a `skill` field naming a standard skill the user
+  invoked by slash command. `/design`, `/diagnose` and `/qa` ship with the
+  agent; an invoked skill skips the router and leads the planner's turn. Skill
+  instructions are kept in the returned history, so the client sends `skill`
+  only on the turn that invokes it
+
+### Patch Changes
+
+- e08ba09: global_chat: planner turns now record the `[pg:...]` page prefix in
+  the returned history, like the direct routes, so every route returns history
+  in the same shape
+- 299580e: global_chat: cache the planner's history across tool-loop rounds
+
+## 3.4.0
+
+### Minor Changes
+
+- 02eaf61: global_chat: opt-in web search and fetch for the planner
+
+### Patch Changes
+
+- 0347252: Update dependencies, including the Anthropic Python SDK to 1.x, the
+  OpenAI SDK to 3.x and pandas to 3.x
+- 8ff4d37: fork python processes to reduce startup time
+
 ## 3.3.1
 
 ### Patch Changes

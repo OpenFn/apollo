@@ -6,16 +6,16 @@ import { getInternalToken } from "./auth/internal-token";
 import {
   emptyResult,
   malformedResult,
+  queueTimeout,
   subprocessCancelled,
   subprocessFailed,
   subprocessKilled,
   subprocessSpawnFailed,
 } from "./util/errors";
+import { enqueue, QueueTimeoutError } from "./util/python-queue";
 import pkg from "../../package.json";
-
-// A line a service logged on purpose, as opposed to whatever else lands on a
-// stream. Only these are forwarded to the caller.
-const LOG_LINE = /^(INFO|DEBUG|ERROR|WARNING):/;
+import { USE_FORK_SERVER, runForked as runWithFork } from "./bridge.fork";
+import { LOG_LINE } from "./util/log-line";
 
 /**
   Run a python script
@@ -40,6 +40,10 @@ export const run = async (
   const inputPath = tmpfile.replace("{}", "input");
   const outputPath = tmpfile.replace("{}", "output");
 
+  // Cleanup shared by every path below that never spawns.
+  const removeTmpFiles = () =>
+    Promise.all([rm(inputPath).catch(() => {}), rm(outputPath).catch(() => {})]);
+
   // Outside the promise, deliberately. The Promise constructor only catches a
   // synchronous throw from its executor, so an await that rejects in there -
   // a full disk, a read-only tmp - leaves the promise pending for ever and
@@ -54,13 +58,48 @@ export const run = async (
 
     await Bun.write(outputPath, "");
   } catch (error) {
-    // Removed rather than left behind by a half-finished setup, for the same
-    // reason it is 0600 above.
-    await rm(inputPath).catch(() => {});
-    await rm(outputPath).catch(() => {});
+    await removeTmpFiles();
     throw subprocessSpawnFailed(scriptName, error);
   }
 
+  // One cap for both paths below (see util/python-queue.ts): forking is cheap
+  // to start, but the work it does is just as heavy as a fresh interpreter.
+  const runFn = USE_FORK_SERVER ? runWithFork : runWithSpawn;
+
+  let started = false;
+  const { promise, cancel } = enqueue(scriptName, () => {
+    started = true;
+    return runFn(scriptName, port, inputPath, outputPath, onLog, onEvent, signal);
+  });
+
+  if (signal) {
+    if (signal.aborted) cancel();
+    else signal.addEventListener("abort", cancel, { once: true });
+  }
+
+  try {
+    return await promise;
+  } catch (error) {
+    if (!started) {
+      await removeTmpFiles();
+      if (error instanceof QueueTimeoutError) {
+        throw queueTimeout(scriptName);
+      }
+      throw subprocessCancelled(scriptName, "QUEUED");
+    }
+    throw error;
+  }
+};
+
+const runWithSpawn = (
+  scriptName: string,
+  port: number,
+  inputPath: string,
+  outputPath: string,
+  onLog?: (str: string) => void,
+  onEvent?: (type: string, payload: any) => void,
+  signal?: AbortSignal
+): Promise<JSON | null> => {
   return new Promise<JSON | null>((resolve, reject) => {
     const proc = spawn(
       "poetry",
