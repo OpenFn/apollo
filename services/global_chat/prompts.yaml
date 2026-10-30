@@ -200,3 +200,4 @@ prompts:
     - You can only reach these domains: {domains}. Nothing else is fetchable.
     - For FHIR, use the published R4 spec under `https://hl7.org/fhir/R4/` (e.g. `https://hl7.org/fhir/R4/patient.html`). If you used a different FHIR version, say which one.
     - Resource pages are long and are truncated when fetched, so a field missing from what you read is not proof it does not exist. Say what you confirmed and what you could not.
+    - `web_fetch` can only open a URL that already appears in this conversation: in the user's message, or in an earlier search or fetch result. URLs you remember, and URLs in these instructions, are refused. Search first, then fetch a URL from the results.
