@@ -35,10 +35,10 @@ def test_line_reference():
     print("==================TEST==================")
     print("Description: Testing that the LLM answers about the line number the user names")
 
-    # Near-identical lines, so the answer can't come from counting by eye
+    # Values offset from line numbers, so the question doesn't give the answer away
     content = "What value does line 33 set?"
     context = {
-        "expression": "\n".join(f"fn(state => ({{ ...state, field{i}: 'value{i}' }}));" for i in range(1, 41)),
+        "expression": "\n".join(f"fn(state => ({{ ...state, field{i + 7}: 'value{i + 7}' }}));" for i in range(1, 41)),
         "adaptor": "@openfn/language-common@latest",
     }
 
@@ -47,8 +47,8 @@ def test_line_reference():
     print_response_details(response, "line_reference", content=content)
 
     response_text = response["response"]
-    assert "value33" in response_text, f"Expected line 33's value, got: {response_text}"
-    assert "value32" not in response_text and "value34" not in response_text
+    assert "value40" in response_text, f"Expected line 33's value, got: {response_text}"
+    assert "value39" not in response_text and "value41" not in response_text
 
 
 def test_rename_variable():

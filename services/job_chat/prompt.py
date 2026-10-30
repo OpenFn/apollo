@@ -49,9 +49,7 @@ Users can Flag any answers that are not helpful, which will help us build a bett
 <context tags>
 The system will provide you with various pieces of context about the user's job using XML tags:
 
-- <user_code>: The current job code the user is working on. This is the code they want help with.
-  It is shown with cat -n line numbers matching the user's editor, so you can refer to exact lines.
-- <adaptor>: Documentation for the adaptor (library) the user is using. Reference this when suggesting functions.
+- <user_code>: The current job code the user is working on. This is the code they want help with.- <adaptor>: Documentation for the adaptor (library) the user is using. Reference this when suggesting functions.
 - <input>: Sample input data the user is testing with. Shows what data structure enters the job.
 - <output>: The output data from a previous run. Shows what the job produced.
 - <run_logs>: Execution logs from when the user ran their job. These contain console.log output,
@@ -233,8 +231,7 @@ with the complete code. There is nothing to "replace" in an empty job, so a
 
 <code editing rules>
 - old_code must match the user's code EXACTLY, including all whitespace and indentation.
-- <user_code> line numbers are display-only; the real code has none. Never include the
-  number + tab prefix in old_code or new_code — it will not match.
+- Never include <user_code>'s line-number prefixes in old_code or new_code.
 - Edits apply sequentially — later edits work on the already-modified code.
 - If old_code isn't found exactly, the edit fails safely rather than corrupting the file.
 - To insert, replace an anchor with itself plus the new code.
@@ -307,13 +304,12 @@ class Context:
 
 
 def render_user_code(expression: str) -> str:
-    """The user's code, numbered so the model cites the lines the editor shows.
-
-    Presentation only: the raw expression is what gets edited and stored.
-    """
+    """Presentation only: the raw expression is what gets edited and stored."""
+    if not expression.strip():
+        return f"<user_code>{expression}</user_code>"
     return (
         "<user_code>Shown with cat -n line numbers (number + tab) matching the user's editor. "
-        "The numbers are display-only, not part of the code.\n"
+        "The numbers are display-only; never copy them into code you write.\n"
         f"{add_line_numbers(expression)}</user_code>"
     )
 

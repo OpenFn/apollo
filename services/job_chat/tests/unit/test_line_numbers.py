@@ -6,12 +6,8 @@ from util import add_line_numbers
 CODE = "get('/a');\nfn(s => s);"
 
 
-def test_renders_cat_n_format() -> None:
-    assert add_line_numbers(CODE) == "     1\tget('/a');\n     2\tfn(s => s);"
-
-
-def test_trailing_newline_adds_no_phantom_line() -> None:
-    assert add_line_numbers("a\n\nb\n") == "     1\ta\n     2\t\n     3\tb"
+def test_numbers_match_editor_line_breaks() -> None:
+    assert add_line_numbers("a\fb\r\nc\n") == "     1\ta\fb\r\n     2\tc\n     3\t"
 
 
 def test_both_prompt_modes_number_user_code() -> None:

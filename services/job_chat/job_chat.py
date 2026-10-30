@@ -118,8 +118,7 @@ _INSPECT_JOB_CODE_TOOL = {
         "Use it when seeing another step's code helps you answer a question or "
         "edit the focused step — e.g. to match its pattern, or to see the state "
         "shape it produces. To change another step's code, call edit_workflow "
-        "instead. Pass all the job keys you need in a single call. Code comes back "
-        "with display-only cat -n line numbers."
+        "instead. Pass all the job keys you need in a single call."
     ),
 }
 

@@ -270,9 +270,7 @@ INSPECT_JOB_CODE_TOOL = {
     "name": "inspect_job_code",
     "description": """Read the current code body of one or more jobs in the workflow (read-only).
 
-Use this to inspect existing step code before editing — e.g. to find which steps a change applies to before editing only those, or to base one step on another. Pass all the job keys you need in a single call rather than calling once per job.
-
-Code comes back with display-only cat -n line numbers, for precise line references.""",
+Use this to inspect existing step code before editing — e.g. to find which steps a change applies to before editing only those, or to base one step on another. Pass all the job keys you need in a single call rather than calling once per job.""",
     "input_schema": {
         "type": "object",
         "properties": {
