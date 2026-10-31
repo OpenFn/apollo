@@ -11,28 +11,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-      - name: Manipulate tag for docker
-        id: branch_name
+      - name: Read version from tag
+        id: extract
         run: |
-          SOURCE_TAG=${GITHUB_REF#refs/tags/}
-          echo Source Tag: $SOURCE_TAG
+          GIT_TAG=${GITHUB_REF#refs/tags/}
+          echo Git Tag: $GIT_TAG
 
-          VERSION_TAG=${SOURCE_TAG#@openfn/apollo}
-          echo Version Tag: $VERSION_TAG
+          VERSION=${GIT_TAG#@openfn/apollo@}
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::Can't read a version from tag $GIT_TAG"
+            exit 1
+          fi
+          echo Version: $VERSION
 
-          DOCKER_TAG=${VERSION_TAG#@}
-          echo Docker Tag: $DOCKER_TAG
-
-          echo "DOCKER_TAG=$DOCKER_TAG" >> $GITHUB_ENV
-
-          # Only move :latest for final releases. A version with a hyphen
-          # (e.g. 1.4.0-pre.0) is a pre-release and must not repoint latest.
-          {
-            echo "DOCKER_TAGS<<EOF"
-            echo "openfn/apollo:v${DOCKER_TAG}"
-            [[ "$DOCKER_TAG" != *-* ]] && echo "openfn/apollo:latest"
-            echo "EOF"
-          } >> $GITHUB_ENV
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
       - name: Set up Docker Buildx
@@ -42,9 +34,20 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+      # type=semver gives the bare version tag (no "v") and the standard OCI
+      # labels. It only moves :latest for a final release, so a pre-release
+      # (e.g. 1.4.0-pre.0) never repoints latest.
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: openfn/apollo
+          tags: |
+            type=semver,pattern={{version}},value=${{ steps.extract.outputs.version }}
       - name: Build and push
         uses: docker/build-push-action@v7
         with:
           context: .
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ env.DOCKER_TAGS }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
