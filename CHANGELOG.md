@@ -1,5 +1,20 @@
 # apollo
 
+## 3.5.3
+
+### Patch Changes
+
+- b9f4339: Run on the official Node 26.13.0 binary instead of NodeSource's
+  unpinned Node 26, and distrust the emSign C1 and C3 roots
+- 213a1b7: Docker images are now tagged with the bare version, for example
+  `openfn/apollo:3.6.0` instead of `openfn/apollo:v3.6.0`. If you pin Apollo
+  images by tag, drop the `v` from future versions. Tags that were already
+  published (`v3.5.2` and earlier) don't change, and `:latest` still only moves
+  for final releases.
+
+  Images also now carry the standard `org.opencontainers.image.version` label,
+  so you can read the version from an image with `docker inspect`
+
 ## 3.5.2
 
 ### Patch Changes
