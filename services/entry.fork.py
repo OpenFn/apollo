@@ -10,8 +10,12 @@ macOS: set OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES in your env (see .env.example
 or a forked child that touches an Objective-C framework aborts. No-op on Linux.
 
 Protocol (NDJSON over a unix socket, one connection per request):
-  bridge -> master : {"service","input","output","port"}
-  child  -> bridge : PID:<pid>  then the service's stdout  then EXIT:<code>
+  bridge -> master : {"service","payload","port"}
+  child  -> bridge : PID:<pid>  then the service's stdout  then RESULT:<json>
+                     then EXIT:<code>
+
+The payload rides in on the request and the result rides back as a RESULT line,
+so this path touches no tmp/data files at all (the spawn path still does).
 """
 
 import argparse
@@ -67,12 +71,13 @@ def run_child(conn: socket.socket, req: dict) -> None:
         import entry  # post-fork: entry.py's init runs here (fork-safe), deps warm
 
         sentry_sdk.set_tag("service", req["service"])  # entry.main() tags it; call() doesn't
-        entry.call(
+        result = entry.call(
             service=req["service"],
-            input_path=req.get("input"),
-            output_path=req.get("output"),
+            data=req.get("payload") or {},
             apollo_port=req.get("port"),
         )
+        # json.dumps escapes newlines inside strings, so this is always one line
+        print("RESULT:" + json.dumps(result))
     except Exception:
         traceback.print_exc()
         code = 1

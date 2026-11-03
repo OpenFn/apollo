@@ -33,6 +33,14 @@ export const run = async (
   // Aborted when the client goes away
   signal?: AbortSignal
 ) => {
+  // Fork path: the payload rides the fork server's socket and the result comes
+  // back the same way, so there are no temp files to create or clean up.
+  if (USE_FORK_SERVER) {
+    return runQueued(scriptName, signal, () =>
+      runWithFork(scriptName, port, args, onLog, onEvent, signal)
+    );
+  }
+
   const id = crypto.randomUUID();
 
   const tmpfile = path.resolve(`tmp/data/${id}-{}.json`);
@@ -62,14 +70,27 @@ export const run = async (
     throw subprocessSpawnFailed(scriptName, error);
   }
 
-  // One cap for both paths below (see util/python-queue.ts): forking is cheap
-  // to start, but the work it does is just as heavy as a fresh interpreter.
-  const runFn = USE_FORK_SERVER ? runWithFork : runWithSpawn;
+  return runQueued(
+    scriptName,
+    signal,
+    () => runWithSpawn(scriptName, port, inputPath, outputPath, onLog, onEvent, signal),
+    removeTmpFiles
+  );
+};
 
+// One cap for both paths (see util/python-queue.ts): forking is cheap to
+// start, but the work it does is just as heavy as a fresh interpreter.
+const runQueued = async (
+  scriptName: string,
+  signal: AbortSignal | undefined,
+  task: () => Promise<JSON | null>,
+  // Only called when the run never started; a started run owns its own cleanup
+  onNeverStarted?: () => Promise<unknown>
+) => {
   let started = false;
   const { promise, cancel } = enqueue(scriptName, () => {
     started = true;
-    return runFn(scriptName, port, inputPath, outputPath, onLog, onEvent, signal);
+    return task();
   });
 
   if (signal) {
@@ -81,7 +102,7 @@ export const run = async (
     return await promise;
   } catch (error) {
     if (!started) {
-      await removeTmpFiles();
+      await onNeverStarted?.();
       if (error instanceof QueueTimeoutError) {
         throw queueTimeout(scriptName);
       }
