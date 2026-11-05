@@ -44,7 +44,11 @@ TypeScript) service modules.
 - **Entry**: `platform/src/index.ts` → `platform/src/server.ts`
 - **Framework**: Elysia on Bun runtime
 - **Bridge**: `platform/src/bridge.ts` - Spawns Python as child processes,
-  manages temp files in `tmp/data/`, captures stdout for log/event routing
+  manages temp files in `tmp/data/`, captures stdout for log/event routing.
+  With `APOLLO_FORK_SERVER=true` (`bridge.fork.ts` + `services/entry.fork.py`)
+  a warm Python master forks a child per request instead, and the payload and
+  result travel over its unix socket (NDJSON request in, `RESULT:` line out) —
+  no temp files on that path
 - **Service discovery**: `platform/src/util/describe-modules.ts` - Auto-mounts
   any `services/<name>/` directory not starting with `_`. Detects service type
   by checking for `<name>.py` (Python) or `<name>.ts` (TypeScript) index file.

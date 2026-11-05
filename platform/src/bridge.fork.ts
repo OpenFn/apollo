@@ -79,27 +79,20 @@ process.once("exit", () => masterProc?.kill("SIGTERM"));
 export async function runForked(
   scriptName: string,
   port: number,
-  inputPath: string,
-  outputPath: string,
+  args: any = {},
   onLog?: (str: string) => void,
   onEvent?: (type: string, payload: any) => void,
   signal?: AbortSignal
 ): Promise<JSON | null> {
-  const cleanup = () =>
-    Promise.all([rm(inputPath).catch(() => {}), rm(outputPath).catch(() => {})]);
-
-  let active: Master;
-  try {
-    active = await forkMaster();
-  } catch (err) {
-    await cleanup();
-    throw err;
-  }
+  const active = await forkMaster();
 
   return new Promise<JSON | null>((resolve, reject) => {
     const conn = net.createConnection({ path: active.socketPath });
     let childPid: number | null = null;
     let exitCode: number | null = null;
+    // The last RESULT: line wins, so a service print that happens to start
+    // with the prefix is overwritten by the real one entry.fork emits at the end.
+    let resultText: string | null = null;
     let cancelled = false;
     let hardKill: ReturnType<typeof setTimeout> | undefined;
 
@@ -128,14 +121,17 @@ export async function runForked(
     }
 
     conn.on("connect", () =>
-      conn.write(JSON.stringify({ service: scriptName, input: inputPath, output: outputPath, port }) + "\n")
+      conn.write(JSON.stringify({ service: scriptName, payload: args, port }) + "\n")
     );
 
-    // The child's stream: PID:/EXIT: control lines around the service's own stdout.
+    // The child's stream: PID:/RESULT:/EXIT: control lines around the service's
+    // own stdout.
     onLines(conn, (line) => {
       if (line.startsWith("PID:")) {
         childPid = Number(line.slice(4)) || null;
         if (cancelled) killChild();
+      } else if (line.startsWith("RESULT:")) {
+        resultText = line.slice(7);
       } else if (line.startsWith("EXIT:")) {
         exitCode = Number(line.slice(5));
       } else if (LOG_LINE.test(line)) {
@@ -153,10 +149,9 @@ export async function runForked(
       }
     });
 
-    const settle = async (finish: () => void) => {
+    const settle = (finish: () => void) => {
       if (hardKill) clearTimeout(hardKill);
       signal?.removeEventListener("abort", onAbort);
-      await cleanup();
       finish();
     };
 
@@ -164,16 +159,17 @@ export async function runForked(
       settle(() => reject(subprocessSpawnFailed(scriptName, err)))
     );
 
-    conn.on("close", async () => {
-      const text = await Bun.file(outputPath).text().catch(() => "");
-      await settle(() => {
+    conn.on("close", () => {
+      settle(() => {
         if (cancelled) return reject(subprocessCancelled(scriptName, "SIGTERM"));
         // No EXIT line => the child died mid-flight (crash/OOM/signal).
         if (exitCode === null) return reject(subprocessKilled(scriptName, "UNKNOWN"));
         if (exitCode !== 0) return reject(subprocessFailed(scriptName, exitCode));
-        if (!text) return reject(emptyResult(scriptName));
+        // entry.fork prints RESULT on every path that completes, so a clean
+        // exit with no RESULT line means the run died without reporting
+        if (resultText === null) return reject(emptyResult(scriptName));
         try {
-          resolve(JSON.parse(text));
+          resolve(JSON.parse(resultText));
         } catch {
           reject(malformedResult(scriptName));
         }

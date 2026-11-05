@@ -97,8 +97,8 @@ describe.skipIf(!USE_FORK_SERVER)("queueing python runs (fork path)", () => {
       undefined,
       abort.signal
     );
-    // run() awaits writing its tmp files before it ever reaches
-    // acquireSlot() - give that a tick before checking it actually queued.
+    // Give run() a tick to reach acquireSlot() before checking it actually
+    // queued.
     await Bun.sleep(50);
     expect(queueDepth()).toBe(1);
 

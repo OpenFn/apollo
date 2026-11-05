@@ -93,12 +93,14 @@ def _capture_apollo_error(e: ApolloError) -> None:
 
 
 def call(
-    service: str, *, input_path: str | None = None, output_path: str | None = None, apollo_port: int | None = None,
+    service: str, *, data: dict | None = None, input_path: str | None = None,
+    output_path: str | None = None, apollo_port: int | None = None,
 ) -> dict:
     """
     Dynamically imports a module and invokes its main function with input data.
 
     :param service: The name of the service/module to invoke
+    :param data: Optional input payload, already parsed (takes precedence over input_path)
     :param input_path: Optional path to the input JSON file
     :param output_path: Optional path to write the output JSON file
     :param apollo_port: Optional port number for Apollo server
@@ -109,29 +111,30 @@ def call(
 
     module_name = f"{service}.{service}"
 
-    data = {}
-    if input_path:
-        try:
-            with open(input_path) as f:
-                data = json.load(f)
-        except FileNotFoundError as e:
-            # The path is the server's own, so it is for the log, not the
-            # caller.
-            sentry_sdk.capture_exception(e)
-            return _finish(
-                ApolloError(
-                    code=500, message="Input file not found", type="INTERNAL_ERROR"
-                ).to_dict(),
-                output_path,
-            )
-        except json.JSONDecodeError as e:
-            sentry_sdk.capture_exception(e)
-            return _finish(
-                ApolloError(
-                    code=500, message="Invalid JSON input", type="INTERNAL_ERROR"
-                ).to_dict(),
-                output_path,
-            )
+    if data is None:
+        data = {}
+        if input_path:
+            try:
+                with open(input_path) as f:
+                    data = json.load(f)
+            except FileNotFoundError as e:
+                # The path is the server's own, so it is for the log, not the
+                # caller.
+                sentry_sdk.capture_exception(e)
+                return _finish(
+                    ApolloError(
+                        code=500, message="Input file not found", type="INTERNAL_ERROR"
+                    ).to_dict(),
+                    output_path,
+                )
+            except json.JSONDecodeError as e:
+                sentry_sdk.capture_exception(e)
+                return _finish(
+                    ApolloError(
+                        code=500, message="Invalid JSON input", type="INTERNAL_ERROR"
+                    ).to_dict(),
+                    output_path,
+                )
 
     try:
         m = __import__(module_name, fromlist=["main"])
