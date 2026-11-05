@@ -2,7 +2,7 @@ import readline from "node:readline";
 import net from "node:net";
 import path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
-import { rm } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { getInternalToken } from "./auth/internal-token";
 import {
   emptyResult,
@@ -19,7 +19,9 @@ export const USE_FORK_SERVER =
   (process.env.APOLLO_FORK_SERVER ?? "").toLowerCase() === "true";
 
 const onLines = (stream: NodeJS.ReadableStream, fn: (line: string) => void) =>
-  readline.createInterface({ input: stream, crlfDelay: Infinity }).on("line", fn);
+  readline
+    .createInterface({ input: stream, crlfDelay: Infinity })
+    .on("line", fn);
 
 // --- the warm master: spawned once, forks a child per request ----------------
 
@@ -35,8 +37,9 @@ function forkMaster(): Promise<Master> {
   }));
 }
 
-function startMaster(): Promise<Master> {
+async function startMaster(): Promise<Master> {
   const socketPath = path.resolve(`tmp/fork_server-${process.pid}.sock`);
+  await mkdir(path.dirname(socketPath), { recursive: true });
   const proc = spawn(
     "poetry",
     ["run", "python", "services/entry.fork.py", "--socket", socketPath],
@@ -52,8 +55,13 @@ function startMaster(): Promise<Master> {
   onLines(proc.stderr!, (line) => console.error(`fork-server: ${line}`));
 
   return new Promise<Master>((resolve, reject) => {
-    const fail = (err: Error) => (clearTimeout(timer), reject(subprocessSpawnFailed("fork_server", err)));
-    const timer = setTimeout(() => fail(new Error("not READY in time")), 60_000);
+    const fail = (err: Error) => (
+      clearTimeout(timer), reject(subprocessSpawnFailed("fork_server", err))
+    );
+    const timer = setTimeout(
+      () => fail(new Error("not READY in time")),
+      60_000
+    );
 
     onLines(proc.stdout!, (line) => {
       if (line.startsWith("READY")) {
@@ -66,7 +74,11 @@ function startMaster(): Promise<Master> {
       console.error(`fork-server exited (code=${code} signal=${sig})`);
       master = masterProc = null; // next request starts a fresh one
       rm(socketPath).catch(() => {});
-      fail(new Error(`fork-server exited before ready (code=${code} signal=${sig})`));
+      fail(
+        new Error(
+          `fork-server exited before ready (code=${code} signal=${sig})`
+        )
+      );
     });
   });
 }
@@ -121,7 +133,9 @@ export async function runForked(
     }
 
     conn.on("connect", () =>
-      conn.write(JSON.stringify({ service: scriptName, payload: args, port }) + "\n")
+      conn.write(
+        JSON.stringify({ service: scriptName, payload: args, port }) + "\n"
+      )
     );
 
     // The child's stream: PID:/RESULT:/EXIT: control lines around the service's
@@ -161,10 +175,13 @@ export async function runForked(
 
     conn.on("close", () => {
       settle(() => {
-        if (cancelled) return reject(subprocessCancelled(scriptName, "SIGTERM"));
+        if (cancelled)
+          return reject(subprocessCancelled(scriptName, "SIGTERM"));
         // No EXIT line => the child died mid-flight (crash/OOM/signal).
-        if (exitCode === null) return reject(subprocessKilled(scriptName, "UNKNOWN"));
-        if (exitCode !== 0) return reject(subprocessFailed(scriptName, exitCode));
+        if (exitCode === null)
+          return reject(subprocessKilled(scriptName, "UNKNOWN"));
+        if (exitCode !== 0)
+          return reject(subprocessFailed(scriptName, exitCode));
         // entry.fork prints RESULT on every path that completes, so a clean
         // exit with no RESULT line means the run died without reporting
         if (resultText === null) return reject(emptyResult(scriptName));
