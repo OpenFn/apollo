@@ -126,13 +126,10 @@ def serve(sock_path: str) -> None:
             conn, _ = server.accept()
         except InterruptedError:
             continue
-        # Fork before reading: the request now carries the whole payload, so
-        # reading it here would let one slow or stalled client hold up every
-        # other request. The child reads its own, and the master only accepts
-        # and forks.
         if os.fork() == 0:
             server.close()  # the child must not hold the listening socket
             try:
+                # Read the request payload (which may be large) inside the fork
                 req = read_request(conn)
             except OSError:  # peer reset mid-read; same as no usable request
                 req = None
