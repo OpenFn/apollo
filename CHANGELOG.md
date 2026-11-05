@@ -1,5 +1,12 @@
 # apollo
 
+## 3.5.4
+
+### Patch Changes
+
+- Adjust payload processing on forked processes
+- Security updates
+
 ## 3.5.3
 
 ### Patch Changes
