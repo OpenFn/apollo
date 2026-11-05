@@ -126,12 +126,16 @@ def serve(sock_path: str) -> None:
             conn, _ = server.accept()
         except InterruptedError:
             continue
-        req = read_request(conn)
-        if req is None:
-            conn.close()
-            continue
         if os.fork() == 0:
             server.close()  # the child must not hold the listening socket
+            try:
+                # Read the request payload (which may be large) inside the fork
+                req = read_request(conn)
+            except OSError:  # peer reset mid-read; same as no usable request
+                req = None
+            if req is None:
+                conn.close()
+                os._exit(0)
             run_child(conn, req)  # never returns
         conn.close()  # parent drops its copy; the child owns the reply
 
