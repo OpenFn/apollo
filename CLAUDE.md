@@ -44,16 +44,21 @@ TypeScript) service modules.
 - **Entry**: `platform/src/index.ts` → `platform/src/server.ts`
 - **Framework**: Elysia on Bun runtime
 - **Bridge**: `platform/src/bridge.ts` - Spawns Python as child processes,
-  manages temp files in `tmp/data/`, captures stdout for log/event routing
+  manages temp files in `tmp/data/`, captures stdout for log/event routing.
+  With `APOLLO_FORK_SERVER=true` (`bridge.fork.ts` + `services/entry.fork.py`)
+  a warm Python master forks a child per request instead. On that path an
+  `apollo()` self-call rides the request socket: the child emits
+  `CALL:<id>:<json>` on stdout and blocks until the bridge, having run the
+  named service in-process (the `onCall` handler in `services.ts`), writes
+  `REPLY:<id>:<json>` back — no second HTTP hop
 - **Service discovery**: `platform/src/util/describe-modules.ts` - Auto-mounts
   any `services/<name>/` directory not starting with `_`. Detects service type
   by checking for `<name>.py` (Python) or `<name>.ts` (TypeScript) index file.
 - **Instance auth** (`platform/src/auth/`): `/services/*` uses a
   known-client-only auth hook that is always active (no flag). The auth surface
-  is split into three named concerns: the client-credential authenticate hook and Anthropic-key
-  resolver on the injectable `InstanceAuth` class (`instance-auth.ts`), the
-  internal-call exemption (`internal-token.ts`), and the shared `hashToken`
-  (`hash.ts`). The credential
+  is split into two named concerns: the client-credential authenticate hook and Anthropic-key
+  resolver on the injectable `InstanceAuth` class (`instance-auth.ts`), and the
+  shared `hashToken` (`hash.ts`). The credential
   is the `api_key` the caller (Lightning) already sends in the request body —
   there is no bearer token and no Lightning-side change. Its SHA-256 is looked up
   in the `lightning_clients` table via `APOLLO_CLIENTS_DB_URL` (falling back to
@@ -72,7 +77,7 @@ TypeScript) service modules.
   global `ANTHROPIC_API_KEY` when one is configured (the field is dropped); with no
   global key to serve it, the keyless request is rejected with `401`. The resolver
   (`InstanceAuth.resolveKey`) returns a
-  tagged `KeyResolution` (`useKey`/`useGlobal`/`passthrough`) dispatched
+  tagged `KeyResolution` (`useKey`/`useGlobal`) dispatched
   by a named switch in `services.ts`. The stored
   `anthropic_api_key` may be plaintext or AES-256-GCM-encrypted (`enc:v1:`
   values, decrypted with `APOLLO_ENC_KEY`; see
@@ -86,11 +91,11 @@ TypeScript) service modules.
   reached, known-client swaps don't resolve and a caller with an `api_key` gets a
   retryable `503` (we can't verify them). The auth hook is scoped to
   `/services/*`, so health/root endpoints outside that group are unaffected.
-  Internal Apollo-to-Apollo `apollo()` calls are exempt via a per-process
-  internal token (`APOLLO_INTERNAL_TOKEN`, minted at startup; `bridge.ts` injects
-  it into each spawned Python child's env via `getInternalToken()`, and
-  `services/util.py` echoes it back). This replaces the old loopback exemption so a
-  co-located Lightning is still required to authenticate. The authenticate hook and resolver
+  Internal Apollo-to-Apollo `apollo()` calls on the fork path never reach HTTP:
+  they ride the fork socket as `CALL`/`REPLY` lines and run in-process (see the
+  Bridge bullet above), so no auth exemption exists. On the spawn path
+  `apollo()` falls back to a credential-less HTTP self-call, served by the
+  global `ANTHROPIC_API_KEY`. The authenticate hook and resolver
   live on a single `InstanceAuth` instance constructed in `server.ts`; tests build
   their own configured instance rather than poking module globals. Provisioning
   lives in `platform/src/auth/`.

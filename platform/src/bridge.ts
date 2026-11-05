@@ -2,7 +2,6 @@ import readline from "node:readline";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { chmod, rm } from "node:fs/promises";
-import { getInternalToken } from "./auth/internal-token";
 import {
   emptyResult,
   malformedResult,
@@ -14,7 +13,11 @@ import {
 } from "./util/errors";
 import { enqueue, QueueTimeoutError } from "./util/python-queue";
 import pkg from "../../package.json";
-import { USE_FORK_SERVER, runForked as runWithFork } from "./bridge.fork";
+import {
+  USE_FORK_SERVER,
+  runForked as runWithFork,
+  type OnCall,
+} from "./bridge.fork";
 import { LOG_LINE } from "./util/log-line";
 
 /**
@@ -31,7 +34,9 @@ export const run = async (
   onLog?: (str: string) => void,
   onEvent?: (type: string, payload: any /* string or json tbh */) => void,
   // Aborted when the client goes away
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  // Handles an in-flight service's apollo() self-call over the fork socket
+  onCall?: OnCall
 ) => {
   const id = crypto.randomUUID();
 
@@ -64,12 +69,14 @@ export const run = async (
 
   // One cap for both paths below (see util/python-queue.ts): forking is cheap
   // to start, but the work it does is just as heavy as a fresh interpreter.
-  const runFn = USE_FORK_SERVER ? runWithFork : runWithSpawn;
-
+  // Only the fork path carries onCall - apollo() self-calls on the spawn path
+  // still go over HTTP.
   let started = false;
   const { promise, cancel } = enqueue(scriptName, () => {
     started = true;
-    return runFn(scriptName, port, inputPath, outputPath, onLog, onEvent, signal);
+    return USE_FORK_SERVER
+      ? runWithFork(scriptName, port, inputPath, outputPath, onLog, onEvent, signal, onCall)
+      : runWithSpawn(scriptName, port, inputPath, outputPath, onLog, onEvent, signal);
   });
 
   if (signal) {
@@ -112,13 +119,9 @@ const runWithSpawn = (
         ...(outputPath ? ["--output", outputPath] : []),
         ...(port ? ["--port", `${port}`] : []),
       ],
-      // Hand the internal token to the child explicitly so its apollo() self-calls
-      // are recognised by the auth hook. Spawned from here (the honest owner) rather than
-      // written back onto this process's env.
       {
         env: {
           ...process.env,
-          APOLLO_INTERNAL_TOKEN: getInternalToken(),
           APOLLO_VERSION: pkg.version,
         },
       }

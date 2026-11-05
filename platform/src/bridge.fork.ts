@@ -3,7 +3,6 @@ import net from "node:net";
 import path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import { rm } from "node:fs/promises";
-import { getInternalToken } from "./auth/internal-token";
 import {
   emptyResult,
   malformedResult,
@@ -43,7 +42,6 @@ function startMaster(): Promise<Master> {
     {
       env: {
         ...process.env,
-        APOLLO_INTERNAL_TOKEN: getInternalToken(),
         APOLLO_VERSION: pkg.version,
       },
     }
@@ -76,6 +74,11 @@ process.once("exit", () => masterProc?.kill("SIGTERM"));
 
 // --- per-request: ask the master to fork a child, stream it back -------------
 
+// Handles an in-flight service's apollo() self-call: resolve `service` with
+// `payload` and return its result. Supplied by the middleware, which runs the
+// target service in this same process (no HTTP hop).
+export type OnCall = (service: string, payload: any) => Promise<any>;
+
 export async function runForked(
   scriptName: string,
   port: number,
@@ -83,7 +86,8 @@ export async function runForked(
   outputPath: string,
   onLog?: (str: string) => void,
   onEvent?: (type: string, payload: any) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onCall?: OnCall
 ): Promise<JSON | null> {
   const cleanup = () =>
     Promise.all([rm(inputPath).catch(() => {}), rm(outputPath).catch(() => {})]);
@@ -150,8 +154,42 @@ export async function runForked(
           // not json, forward the raw string
         }
         onEvent?.(type, payload);
+      } else if (line.startsWith("CALL:")) {
+        // apollo() self-call: CALL:<id>:<json {service,payload}>. The child
+        // blocks until we write REPLY:<id>:<json result> back down the socket.
+        const sep = line.indexOf(":", 5);
+        const id = line.slice(5, sep);
+        handleCall(id, line.slice(sep + 1));
       }
     });
+
+    // Runs the requested service in-process and replies on the same socket the
+    // child reads. Always answers (even on error) so a child never hangs
+    // waiting on a REPLY that will not come.
+    const handleCall = async (id: string, body: string) => {
+      let reply: any;
+      try {
+        const { service, payload } = JSON.parse(body);
+        reply = onCall
+          ? await onCall(service, payload)
+          : {
+              type: "SERVICE_ERROR",
+              code: 500,
+              message: "no call handler configured",
+            };
+      } catch (err) {
+        reply = {
+          type: "SERVICE_ERROR",
+          code: 500,
+          message: err instanceof Error ? err.message : String(err),
+        };
+      }
+      try {
+        conn.write(`REPLY:${id}:${JSON.stringify(reply)}\n`);
+      } catch {
+        // socket already gone; the child is being torn down anyway
+      }
+    };
 
     const settle = async (finish: () => void) => {
       if (hardKill) clearTimeout(hardKill);

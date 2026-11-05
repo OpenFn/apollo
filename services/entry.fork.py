@@ -12,11 +12,20 @@ or a forked child that touches an Objective-C framework aborts. No-op on Linux.
 Protocol (NDJSON over a unix socket, one connection per request):
   bridge -> master : {"service","input","output","port"}
   child  -> bridge : PID:<pid>  then the service's stdout  then EXIT:<code>
+
+A service that calls apollo() mid-run talks to the bridge over the same socket:
+  child  -> bridge : CALL:<id>:{"service","payload"}   (blocks the child)
+  bridge -> child  : REPLY:<id>:<json result>
+
+so a self-call runs in the bridge process with no second HTTP hop.
 """
 
 import argparse
 import importlib
+import itertools
 import json
+from collections.abc import Callable
+from typing import TextIO
 import os
 import signal
 import socket
@@ -52,6 +61,29 @@ def preload() -> int:
     return loaded
 
 
+_call_ids = itertools.count(1)
+
+
+def _make_fork_call(reader: TextIO) -> Callable[[str, dict], dict]:
+    """Build the apollo() transport for one child: send a CALL line, block on
+    its REPLY. One request/reply at a time, which matches apollo()'s blocking
+    HTTP contract, so a plain line scan is enough - no id demultiplexing."""
+
+    def fork_call(service: str, payload: dict) -> dict:
+        call_id = next(_call_ids)
+        # CALL rides stdout (fd 1 = the socket) exactly like a log or EXIT line
+        print("CALL:" + str(call_id) + ":" + json.dumps({"service": service, "payload": payload}))
+        prefix = "REPLY:" + str(call_id) + ":"
+        for raw in reader:
+            line = raw.rstrip("\n")
+            if line.startswith(prefix):
+                return json.loads(line[len(prefix):])
+            # any other inbound line is unexpected on this half of the socket
+        raise RuntimeError("apollo(" + service + "): socket closed before REPLY")
+
+    return fork_call
+
+
 def run_child(conn: socket.socket, req: dict) -> None:
     """In the forked child: stream through the socket, run one job, exit."""
     # Route stdout to the socket so the service's logging reaches the bridge.
@@ -59,6 +91,14 @@ def run_child(conn: socket.socket, req: dict) -> None:
     # reach the server logs, the way the spawn path forwards them.
     os.dup2(conn.fileno(), 1)
     sys.stdout = os.fdopen(1, "w", buffering=1)
+
+    # apollo() rides this same socket: a CALL line goes out on stdout and the
+    # bridge writes a REPLY line back, which we read here. conn (the original
+    # fd, still open alongside the dup) is the inbound half.
+    import util
+
+    reader = conn.makefile("r", encoding="utf-8")
+    util.set_fork_call(_make_fork_call(reader))
 
     print(f"PID:{os.getpid()}")  # first, so the bridge can cancel this child
 

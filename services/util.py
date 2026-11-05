@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -155,22 +156,38 @@ def set_apollo_port(p: int) -> None:
     apollo_port = p
 
 
+# Fork-IPC transport. entry.fork installs this in each forked child so an
+# in-flight service's apollo() rides the existing request socket (a CALL line
+# out on stdout, a REPLY line back), handled by the bridge in-process, instead
+# of opening a second HTTP hop back into the server. None when running
+# standalone or on the spawn path, where apollo() falls back to a plain HTTP
+# self-call.
+_fork_call: "Callable[[str, dict], dict] | None" = None
+
+
+def set_fork_call(fn: "Callable[[str, dict], dict] | None") -> None:
+    """Install (or clear) the fork-IPC transport apollo() uses."""
+    global _fork_call  # noqa: PLW0603
+    _fork_call = fn
+
+
 def apollo(name: str, payload: dict) -> dict:
     """
-    Call out to an Apollo service through HTTP.
+    Call another Apollo service.
+
+    In a forked child this rides the request socket (a CALL line out, a REPLY
+    line back) and the bridge runs the service in-process. Otherwise it falls
+    back to a plain HTTP self-call.
+
     :param name: Name of the service.
-    :param payload: Payload to send in the POST request.
+    :param payload: Payload to send.
     :return: JSON response.
     """
+    if _fork_call is not None:
+        return _fork_call(name, payload)
+
     url = f"http://127.0.0.1:{apollo_port}/services/{name}"
-    # Mark internal Apollo-to-Apollo calls so they bypass instance auth (see
-    # platform/src/auth/). The bridge injects the token into this child's env when
-    # spawning it; absent (e.g. run standalone) the header is omitted.
-    headers = {}
-    internal_token = os.environ.get("APOLLO_INTERNAL_TOKEN")
-    if internal_token:
-        headers["X-Apollo-Internal"] = internal_token
-    r = requests.post(url, json=payload, headers=headers)
+    r = requests.post(url, json=payload)
     return r.json()
 
 

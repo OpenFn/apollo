@@ -5,7 +5,7 @@ from pathlib import Path
 from entry import call, main
 import argparse
 from unittest.mock import patch
-from util import apollo
+from util import apollo, set_fork_call
 
 
 def setup_module():
@@ -50,17 +50,43 @@ def test_auto_generated_output():
         assert len(files) > 0
 
 
-def test_port_setting():
-    """Test that port is properly set when provided"""
+def test_apollo_http_fallback_uses_port():
+    """With no fork transport installed, apollo() falls back to an HTTP
+    self-call at the configured port (the spawn/standalone path)."""
     test_args = argparse.Namespace(service="echo", input=None, output=None, port=5000)
 
     with patch("argparse.ArgumentParser.parse_args", return_value=test_args):
-        main()
+        main()  # sets the apollo port to 5000
 
+        set_fork_call(None)  # ensure the HTTP path is taken
         with patch("requests.post") as mock_post:
             mock_post.return_value.json.return_value = {"test": "data"}
-            apollo("test", {})
-            mock_post.assert_called_with("http://127.0.0.1:5000/services/test", {})
+            result = apollo("test", {"a": 1})
+            # no internal auth header is sent any more
+            mock_post.assert_called_with(
+                "http://127.0.0.1:5000/services/test", json={"a": 1}
+            )
+            assert result == {"test": "data"}
+
+
+def test_apollo_routes_through_fork_transport():
+    """When entry.fork has installed a transport, apollo() rides it (the
+    CALL/REPLY socket path) instead of making any HTTP call."""
+    calls = []
+
+    def fake_transport(service: str, payload: dict) -> dict:
+        calls.append((service, payload))
+        return {"docs": {"@openfn/language-http@3.1.11": "..."}, "errors": []}
+
+    set_fork_call(fake_transport)
+    try:
+        with patch("requests.post") as mock_post:
+            result = apollo("adaptor_apis", {"adaptors": ["http@3.1.11"]})
+            mock_post.assert_not_called()  # no second HTTP hop
+        assert calls == [("adaptor_apis", {"adaptors": ["http@3.1.11"]})]
+        assert result["docs"]["@openfn/language-http@3.1.11"] == "..."
+    finally:
+        set_fork_call(None)
 
 
 def test_invalid_service():

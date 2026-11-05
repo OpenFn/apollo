@@ -385,26 +385,16 @@ to a known Lightning client or it is **rejected**. Clients are looked up in the
 To enable it and provision clients, see
 [`platform/src/auth/`](platform/src/auth/README.md).
 
-#### Deploying: pin `APOLLO_INTERNAL_TOKEN` in production
+#### Internal `apollo()` self-calls
 
-`APOLLO_INTERNAL_TOKEN` is the mechanism that lets internal `apollo()`
-self-calls through the auth hook: a self-call carries it in the
-`x-apollo-internal` header and the hook matches it. Because the global
-`ANTHROPIC_API_KEY` is dev-only, a token that fails to match is a dead end (a
-`401`), not a soft fallback to the global key - so the match has to work in
-every topology.
+With the fork server (`APOLLO_FORK_SERVER=true`), internal `apollo()`
+self-calls never leave the process: the forked child emits a `CALL` line over
+its request socket, the bridge runs the named service in-process and writes a
+`REPLY` line back. No HTTP hop, so no auth exemption is needed.
 
-- **Always set `APOLLO_INTERNAL_TOKEN` to a shared value across the deployment
-  in production.** When it is set, the per-process minting path never runs.
-- The per-process random mint is a **dev-only convenience**. Apollo assumes one
-  Bun process per host; the `apollo()` self-call relies on loopback calls
-  landing on the same process, so a minted token only works
-  single-process-per-host.
-- If `reusePort` clustering is ever enabled, a shared `APOLLO_INTERNAL_TOKEN` is
-  **required**, not optional: a self-call can otherwise be routed to a sibling
-  process that minted a different token and will `401`. Startup logs the token's
-  provenance (env vs minted) and warns when this dangerous combination is
-  detected; a mismatch at the hook is logged as a distinct, greppable warning.
+On the spawn path, `apollo()` still falls back to a plain HTTP self-call with
+no credential, which is served by the global `ANTHROPIC_API_KEY` when one is
+configured.
 
 ## Websockets
 

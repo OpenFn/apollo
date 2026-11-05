@@ -50,16 +50,6 @@ describe("applyResolvedKey", () => {
     expect(payload.x).toBe(1);
   });
 
-  it("leaves an internal hop's body exactly as received", () => {
-    const forwarded = "sk-ant-forwarded-by-an-internal-call";
-    const payload = applyResolvedKey(
-      { api_key: forwarded },
-      { kind: "passthrough" }
-    );
-
-    expect(payload.api_key).toBe(forwarded);
-  });
-
   // The default branch is an exhaustiveness guard: a new resolution kind must
   // fail loudly rather than fall through and forward the inbound credential.
   it("refuses a resolution it does not recognise", () => {

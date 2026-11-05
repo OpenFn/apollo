@@ -116,3 +116,59 @@ describe.skipIf(!USE_FORK_SERVER)("queueing python runs (fork path)", () => {
     expect(activeCount()).toBe(0);
   }, 30_000);
 });
+
+// The apollo() fork-IPC round-trip: a forked service emits CALL:<id>:<json>,
+// the bridge runs the named service through onCall and writes REPLY:<id>:<json>
+// back down the socket, and the child returns the reply. _apollo_probe calls
+// apollo() and echoes what it got, so asserting on its result proves the whole
+// loop without a second HTTP hop.
+describe.skipIf(!USE_FORK_SERVER)("apollo() over the fork socket", () => {
+  it("round-trips a CALL through onCall and back as REPLY", async () => {
+    const seen: Array<{ service: string; payload: any }> = [];
+    const onCall = async (service: string, payload: any) => {
+      seen.push({ service, payload });
+      return { echoed: payload, by: service };
+    };
+
+    const result = (await run(
+      "_apollo_probe",
+      PORT,
+      { service: "adaptor_apis", payload: { adaptors: ["http@3.1.11"] } },
+      undefined,
+      undefined,
+      undefined,
+      onCall
+    )) as any;
+
+    // onCall saw exactly the service + payload the probe passed to apollo()
+    expect(seen).toEqual([
+      { service: "adaptor_apis", payload: { adaptors: ["http@3.1.11"] } },
+    ]);
+    // and the probe received onCall's return value as apollo()'s result
+    expect(result.got).toEqual({
+      echoed: { adaptors: ["http@3.1.11"] },
+      by: "adaptor_apis",
+    });
+  }, 30_000);
+
+  it("surfaces an onCall rejection to the caller without hanging", async () => {
+    const onCall = async () => {
+      throw new Error("upstream boom");
+    };
+
+    // the bridge still writes a REPLY (a SERVICE_ERROR envelope), so the probe
+    // gets a value back rather than blocking forever on a missing reply
+    const result = (await run(
+      "_apollo_probe",
+      PORT,
+      { service: "echo", payload: { x: 1 } },
+      undefined,
+      undefined,
+      undefined,
+      onCall
+    )) as any;
+
+    expect(result.got.type).toBe("SERVICE_ERROR");
+    expect(result.got.message).toContain("upstream boom");
+  }, 30_000);
+});

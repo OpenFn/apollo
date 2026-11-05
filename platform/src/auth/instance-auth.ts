@@ -11,7 +11,6 @@ import {
 } from "../util/instance-key-crypto";
 import { clientsDbUrl, getDb } from "../db";
 import { hashToken } from "./hash";
-import { checkInternalHeader } from "./internal-token";
 import { captureException } from "../util/sentry";
 
 export type Client = { name: string; anthropicKey: string | null };
@@ -41,9 +40,7 @@ export type KeyResolution =
   // known client: swap in its stored Anthropic key
   | { kind: "useKey"; key: string }
   // drop field -> global key: a request with no api_key at all
-  | { kind: "useGlobal" }
-  // internal apollo() hop: leave body exactly as received
-  | { kind: "passthrough" };
+  | { kind: "useGlobal" };
 
 const CACHE_TTL_MS = 60_000;
 // Longest a stale entry survives a broken DB before eviction. Scales with
@@ -60,7 +57,6 @@ interface AuthCtx {
   query?: { api_key?: unknown };
   request?: { url?: unknown };
   set?: { status?: number };
-  internalCall?: boolean;
   lightningClient?: Client;
 }
 
@@ -318,21 +314,6 @@ export class InstanceAuth {
   }
 
   authenticate = async (ctx: any): Promise<ApolloError | void> => {
-    const internal = checkInternalHeader(ctx);
-    if (internal.kind === "match") {
-      ctx.internalCall = true;
-      return;
-    }
-    if (internal.kind === "mismatch") {
-      // A wrong internal header is rejected outright, never retried as an
-      // external api_key caller, so it can't ride in on a valid body
-      // credential.
-      console.warn(
-        "Apollo internal token MISMATCH: x-apollo-internal present but does not match; likely a sibling process without a shared APOLLO_INTERNAL_TOKEN, or a forged header. Rejecting with 401"
-      );
-      return unauthorized(ctx);
-    }
-
     const apiKey = this.extractApiKey(ctx);
     if (!apiKey) {
       return this.globalKeyConfigured() ? undefined : unauthorized(ctx);
@@ -372,7 +353,6 @@ export class InstanceAuth {
   };
 
   resolveKey = (ctx: AuthCtx): KeyResolution => {
-    if (ctx?.internalCall) return { kind: "passthrough" };
     const client = ctx?.lightningClient as Client | undefined;
     // A null-key client never reaches here: authenticate() rejects it with
     // 500 and never sets ctx.lightningClient, so any client present here has

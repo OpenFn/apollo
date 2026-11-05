@@ -4,8 +4,8 @@ Restricts Apollo's `/services/*` endpoints so that only known Lightning instance
 can call them, and makes Apollo use **its own per-client Anthropic API key** for each
 request rather than trusting anything the caller sends.
 
-This is server-layer code: the runtime auth hook, the shared hash, and the internal-call
-token live here under `platform/src/auth/`; the operator tooling sits alongside in
+This is server-layer code: the runtime auth hook and the shared hash
+live here under `platform/src/auth/`; the operator tooling sits alongside in
 `platform/src/auth/client/` (the `client` CLI). The `lightning_clients` table is
 created and kept current by the migration runner (`platform/src/db/migrate.ts`,
 migrations under `migrations/clients/`).
@@ -49,8 +49,10 @@ migrations under `migrations/clients/`).
   no global key is configured there is nothing to serve it, so it is rejected with
   **`401`**.
 - The health endpoints (`/livez`, `/status`, `/`) sit outside `/services/*` and
-  are never subject to the auth hook. Internal Apollo-to-Apollo `apollo()` calls are exempt via a
-  per-process internal token (`APOLLO_INTERNAL_TOKEN`), not by network position.
+  are never subject to the auth hook. Internal Apollo-to-Apollo `apollo()` calls on
+  the fork path never reach HTTP at all: they ride the fork server's request
+  socket (`CALL`/`REPLY` lines, see `platform/src/bridge.fork.ts`) and run
+  in-process, so there is nothing to exempt.
 
 ## Where the clients table lives
 

@@ -10,9 +10,9 @@ import { randomBytes } from "node:crypto";
 // hits on `add`; a duplicate hash is effectively impossible (random 32 bytes).
 export const UNIQUE_VIOLATION = "23505";
 
-/** Mint a client api_key credential: 32 random bytes, base64url. Same randomBytes
- *  source as internal-token.ts; base64url (not hex) is the established credential
- *  encoding the hash contract in hash.ts is computed over. */
+/** Mint a client api_key credential: 32 random bytes, base64url. base64url
+ *  (not hex) is the established credential encoding the hash contract in
+ *  hash.ts is computed over. */
 export function mintApiKey(): string {
   return randomBytes(32).toString("base64url");
 }

@@ -14,7 +14,6 @@ import { captureException } from "../src/util/sentry";
 import * as sentry from "../src/util/sentry";
 import { InstanceAuth, type Client } from "../src/auth/instance-auth";
 import { hashToken } from "../src/auth/hash";
-import { internalAuthHeader } from "../src/auth/internal-token";
 import { encryptKey } from "../src/util/instance-key-crypto";
 import pkg from "../../package.json";
 
@@ -364,138 +363,6 @@ describe("Instance authentication", () => {
     expect(res.status).toBe(200);
   });
 
-  // Row 5
-  it("exempts internal apollo() self-calls carrying the internal token", async () => {
-    const warn = spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      const req = new Request(`${baseUrl}/services/echo`, {
-        method: "POST",
-        body: JSON.stringify({ x: 9 }),
-        headers: {
-          "Content-Type": "application/json",
-          ...internalAuthHeader(),
-        },
-      });
-      const res = await app.handle(req);
-      expect(res.status).toBe(200);
-      // Correct token: the mismatch warn must not fire.
-      expect(
-        warn.mock.calls.some(([m]) =>
-          String(m).includes("internal token MISMATCH")
-        )
-      ).toBe(false);
-    } finally {
-      warn.mockRestore();
-    }
-  });
-
-  it("rejects a bogus internal token with 401 and a distinct mismatch warn", async () => {
-    const warn = spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      const req = new Request(`${baseUrl}/services/echo`, {
-        method: "POST",
-        body: JSON.stringify({ x: 9 }),
-        headers: {
-          "Content-Type": "application/json",
-          "x-apollo-internal": "nope",
-        },
-      });
-      const res = await app.handle(req);
-      expect(res.status).toBe(401);
-      const warned = warn.mock.calls.map(([m]) => String(m)).join("\n");
-      expect(warned).toContain("internal token MISMATCH");
-      // Names both likely causes.
-      expect(warned).toContain("APOLLO_INTERNAL_TOKEN");
-      expect(warned.toLowerCase()).toContain("forged");
-    } finally {
-      warn.mockRestore();
-    }
-  });
-
-  it("rejects an internal-token mismatch with 401 without reporting to Sentry", async () => {
-    const warn = spyOn(console, "warn").mockImplementation(() => {});
-    const capture = spyOn(sentry, "captureException");
-    try {
-      const req = new Request(`${baseUrl}/services/echo`, {
-        method: "POST",
-        body: JSON.stringify({ x: 9 }),
-        headers: {
-          "Content-Type": "application/json",
-          "x-apollo-internal": "nope",
-        },
-      });
-      const res = await app.handle(req);
-      // A forged or stale internal header still rejects...
-      expect(res.status).toBe(401);
-      // ...but a mismatch is a config/forgery signal, not a code bug, so it
-      // stays out of Sentry (the warn covers it). Don't make Sentry noisy.
-      expect(capturedExtras(capture, "internal-token-mismatch")).toBeUndefined();
-    } finally {
-      capture.mockRestore();
-      warn.mockRestore();
-    }
-  });
-
-  it("rejects a wrong internal header even with a valid body api_key (no fall-through)", async () => {
-    const warn = spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      const req = new Request(`${baseUrl}/services/echo`, {
-        method: "POST",
-        // ALPHA is a known, otherwise-valid credential; the wrong internal
-        // header must still reject it rather than authenticate via api_key.
-        body: JSON.stringify({ x: 9, api_key: ALPHA }),
-        headers: {
-          "Content-Type": "application/json",
-          "x-apollo-internal": "nope",
-        },
-      });
-      const res = await app.handle(req);
-      expect(res.status).toBe(401);
-      expect(
-        warn.mock.calls.some(([m]) =>
-          String(m).includes("internal token MISMATCH")
-        )
-      ).toBe(true);
-    } finally {
-      warn.mockRestore();
-    }
-  });
-
-  it("does not emit the mismatch warn on the normal external path (no internal header)", async () => {
-    const warn = spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      // An unknown key takes the explicit-fail path (no internal header).
-      const res = await app.handle(
-        postKey("services/echo", { x: 1 }, "lightning-cred-unknown")
-      );
-      expect(res.status).toBe(401);
-      expect(
-        warn.mock.calls.some(([m]) =>
-          String(m).includes("internal token MISMATCH")
-        )
-      ).toBe(false);
-    } finally {
-      warn.mockRestore();
-    }
-  });
-
-  // Row 5 — a per-client key resolved at the outer boundary must survive the hop.
-  it("passes a forwarded api_key through on internal self-calls untouched", async () => {
-    // Already authenticated upstream, so a forwarded api_key must survive into
-    // the payload rather than being stripped to the global key.
-    const req = new Request(`${baseUrl}/services/echo`, {
-      method: "POST",
-      body: JSON.stringify({ x: 9, api_key: "sk-ant-internal-hop" }),
-      headers: { "Content-Type": "application/json", ...internalAuthHeader() },
-    });
-    const res = await app.handle(req);
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    // Masked on the way out like anything else. What this row pins is that an
-    // internal call is accepted and its body forwarded rather than rejected.
-    expect(body.api_key).toBe("[REDACTED]");
-  });
-
   // WS upgrade auth decision via app.handle(): a bare upgrade carries no api_key, so
   // it takes the global-key path and is not rejected. app.handle() never performs a
   // real socket upgrade (Bun upgrades only through the listening server), so this
@@ -565,41 +432,6 @@ describe("Instance authentication", () => {
   // are unaffected (see the swap test above); an unknown key is rejected whatever its shape.
   it("rejects an unknown token on a WS upgrade", async () => {
     await expect(wsRoundTrip(`?api_key=sk-ant-ws-unknown`)).rejects.toBeDefined();
-  });
-
-  // Internal exemption holds on WS: the upgrade GET carries the internal header, so
-  // a forwarded per-client api_key passes through untouched (not stripped/swapped).
-  it("honours the internal token on a WS upgrade (passthrough)", async () => {
-    const socket = new WebSocket(`ws://localhost:${port}/services/echo`, {
-      headers: internalAuthHeader(),
-    });
-    const body = await new Promise<any>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        socket.close();
-        reject(new Error("ws round-trip timed out"));
-      }, 8000);
-      socket.addEventListener("error", (e) => {
-        clearTimeout(timer);
-        reject(e);
-      });
-      socket.addEventListener("message", ({ data }) => {
-        const evt = JSON.parse(data as string);
-        if (evt.event === "complete") {
-          clearTimeout(timer);
-          socket.close();
-          resolve(evt.data);
-        }
-      });
-      socket.addEventListener("open", () => {
-        socket.send(
-          JSON.stringify({
-            event: "start",
-            data: { api_key: "sk-ant-internal-fwd" },
-          })
-        );
-      });
-    });
-    expect(body.api_key).toBe("[REDACTED]");
   });
 });
 

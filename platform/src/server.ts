@@ -6,7 +6,6 @@ import setupServices from "./middleware/services";
 import { html } from "@elysiajs/html";
 import logRequest from "./util/log-request";
 import { InstanceAuth } from "./auth/instance-auth";
-import { logInternalTokenProvenance } from "./auth/internal-token";
 import { captureException } from "./util/sentry";
 import { closeDb } from "./db";
 import { runAllMigrations } from "./db/migrate";
@@ -91,10 +90,6 @@ export default async (
   const applied = migrations.reduce((sum, r) => sum + (r.applied ?? 0), 0);
   console.log(`${applied} migration(s) applied`);
 
-  // Elysia's Bun adapter sets reusePort unconditionally, so the guard that
-  // warns about a per-process token meeting a shared port is live, not
-  // hypothetical. It stays quiet once APOLLO_INTERNAL_TOKEN is set.
-  logInternalTokenProvenance(true);
   await sweepTempPayloads();
   await auth.init();
 

@@ -43,20 +43,25 @@ export const heartbeatIntervalMs = (): number => {
 // before its insert. They run to completion even when the caller has gone.
 const NON_CANCELLABLE = new Set(["embed_docsite", "load_adaptor_docs"]);
 
+// Handles an in-flight python service's apollo() self-call: run `service` with
+// `payload` in this process and return its result, instead of a second HTTP hop.
+type OnCall = (service: string, payload: any) => Promise<any>;
+
 const callService = (
   m: ModuleDescription,
   port: number,
   payload?: any,
   onLog?: (str: string) => void,
   onEvent?: (evt: string, payload: any) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onCall?: OnCall
 ) => {
   if (NON_CANCELLABLE.has(m.name)) {
     signal = undefined;
   }
 
   if (m.type === "py") {
-    return run(m.name, port, payload as any, onLog, onEvent, signal);
+    return run(m.name, port, payload as any, onLog, onEvent, signal, onCall);
   } else {
     // TODO add event handling to ts services
     // TODO ts services can't be cancelled - the handler signature has no signal
@@ -72,9 +77,8 @@ const callService = (
  *
  *  The switch is explicit so the inbound-credential-never-forwarded invariant
  *  is structural rather than positional: a known client's stored key is
- *  swapped in (useKey), a request with no key of its own drops the field so
- *  python falls back to the global one (useGlobal), and an internal
- *  apollo() hop is forwarded exactly as received (passthrough).
+ *  swapped in (useKey), and a request with no key of its own drops the field
+ *  so python falls back to the global one (useGlobal).
  */
 export const applyResolvedKey = (
   payload: Record<string, any>,
@@ -86,8 +90,6 @@ export const applyResolvedKey = (
       break;
     case "useGlobal":
       delete payload.api_key;
-      break;
-    case "passthrough":
       break;
     default: {
       // A new KeyResolution tag must be a compile error here, not a silent
@@ -114,7 +116,7 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
   console.log("Loading routes:");
   const modules = await describeModules(path.resolve("./services"));
 
-  // `ctx` is the upgrade-time context carrying lightningClient/internalCall:
+  // `ctx` is the upgrade-time context carrying lightningClient:
   // on POST the route ctx, on WS the captured ws.data, never a fresh
   // per-message one.
   const applyKey = (payload: Record<string, any>, ctx: any) =>
@@ -123,10 +125,34 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
   const buildPayload = (ctx: any) =>
     applyKey({ ...(ctx.body ?? {}), session_id: ctx.uuid }, ctx);
 
+  // A python service's apollo() self-call lands here: resolve the named module
+  // and run it in-process. Recurses with the same onCall so a called service
+  // can itself call apollo(). Internal hops carry no caller credential, so the
+  // payload is passed through untouched (no applyKey).
+  const onCall: OnCall = async (service, payload) => {
+    const target = modules.find((mod) => mod.name === service);
+    if (!target) {
+      return {
+        type: "SERVICE_ERROR",
+        code: 404,
+        message: `unknown service: ${service}`,
+      };
+    }
+    return callService(
+      target,
+      port,
+      payload,
+      undefined,
+      undefined,
+      undefined,
+      onCall
+    );
+  };
+
   app.group("/services", (app) => {
     // Resolve every /services/* caller: swap a known client's key, drop the field for
-    // a no-key request (global key), and reject anything else (forged internal header,
-    // or an api_key that isn't a known client -> 401/503).
+    // a no-key request (global key), and reject an api_key that isn't a known
+    // client (-> 401/503).
     app.onBeforeHandle(auth.authenticate);
 
     modules.forEach((m) => {
@@ -151,7 +177,8 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
             payload as any,
             undefined,
             undefined,
-            ctx.request?.signal
+            ctx.request?.signal,
+            onCall
           );
         } catch (error) {
           const payload = toErrorPayload(error);
@@ -248,7 +275,8 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
                 payload as any,
                 onLog,
                 onEvent,
-                abort.signal
+                abort.signal,
+                onCall
               );
 
               if (isApolloError(result)) {
@@ -368,7 +396,8 @@ export default async (app: Elysia, port: number, auth: InstanceAuth) => {
                 payload as any,
                 onLog,
                 onEvent,
-                abort.signal
+                abort.signal,
+                onCall
               ).then(
                 (result) => {
                   // Only if it is still ours: a later start frame may have
