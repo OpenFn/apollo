@@ -1,5 +1,11 @@
 # apollo
 
+## 3.5.5
+
+### Patch Changes
+
+- Fix an issue starting up forked python services
+
 ## 3.5.4
 
 ### Patch Changes
