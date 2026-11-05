@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent))
 
-from langfuse import observe
+from langfuse import observe, get_client as get_langfuse_client
 from util import create_logger, ApolloError, sum_usage, mask_secrets, format_attachments, add_page_prefix, job_code_page
 from streaming_util import (
     StreamManager,
@@ -63,6 +63,8 @@ _FINAL_ROUND_NOTICE = (
     "only if there is any, and then offer to continue next turn — otherwise don't "
     "raise it at all."
 )
+
+_WEB_TOOL_NAMES = {"web_search": "search", "web_fetch": "fetch"}
 
 
 def _api_error_message(error: Exception) -> str:
@@ -331,6 +333,7 @@ class PlannerAgent:
         paused_text = ""
         pause_count = 0
         web_usage = {"web_searches": 0, "web_fetches": 0, "web_domains": []}
+        web_calls: dict[str, dict] = {}
         total_usage = {
             "input_tokens": 0,
             "output_tokens": 0,
@@ -394,6 +397,7 @@ class PlannerAgent:
                     for host in round_web["web_domains"]:
                         if host not in web_usage["web_domains"]:
                             web_usage["web_domains"].append(host)
+                    self._record_web_calls(response, web_calls)
 
                     logger.info(f"Claude API call {tool_call_count + 1}: stop_reason={response.stop_reason}")
 
@@ -569,6 +573,7 @@ class PlannerAgent:
         if self.web_search_enabled:
             meta.update(web_usage)
             meta["web_search_downgraded"] = self.web_search_downgraded
+            self._track_web_calls(list(web_calls.values()))
 
         return PlannerResult(
             response=final_text,
@@ -1121,6 +1126,35 @@ class PlannerAgent:
                     hosts.append(host)
 
         return {"web_searches": searches, "web_fetches": fetches, "web_domains": hosts}
+
+    @staticmethod
+    def _record_web_calls(response, web_calls: dict[str, dict]) -> None:
+        """Add one response's web searches and fetches to web_calls, keyed by tool_use_id."""
+        for block in response.content:
+            block_type = getattr(block, "type", None)
+            if block_type == "server_tool_use" and block.name in _WEB_TOOL_NAMES:
+                tool_input = block.input or {}
+                web_calls[block.id] = {
+                    "tool": _WEB_TOOL_NAMES[block.name],
+                    "target": tool_input.get("url") or tool_input.get("query") or "",
+                    "result": "missing",
+                }
+            elif block_type in PlannerAgent.WEB_RESULT_BLOCK_TYPES:
+                call = web_calls.get(getattr(block, "tool_use_id", None))
+                if call is None:
+                    continue
+                call["result"] = PlannerAgent._web_result_error_code(block) or "ok"
+                if isinstance(block.content, list):
+                    call["result_urls"] = [getattr(result, "url", None) for result in block.content]
+
+    def _track_web_calls(self, web_calls: list[dict]) -> None:
+        """Record each web search and fetch on the planner's Langfuse span."""
+        if not self._metrics_opt_in:
+            return
+        try:
+            get_langfuse_client().update_current_span(metadata={"web_calls": web_calls})
+        except Exception:
+            logger.warning("Failed to record web calls in Langfuse")
 
     WEB_RESULT_BLOCK_TYPES = ("web_search_tool_result", "web_fetch_tool_result")
 

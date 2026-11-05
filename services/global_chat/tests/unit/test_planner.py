@@ -1,6 +1,7 @@
 """Unit tests for PlannerAgent tool execution and user-content building."""
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import anthropic
@@ -141,11 +142,11 @@ def make_run_planner(max_tool_calls: int = 10, max_pause_continuations: int = 5)
     return planner
 
 
-def run_with(planner: PlannerAgent, responses: list, content: str = "q") -> PlannerResult:
+def run_with(planner: PlannerAgent, responses: list, content: str = "q", **run_kwargs: object) -> PlannerResult:
     """Drive planner.run() over a scripted list of API responses."""
     with patch.object(PlannerAgent, "_build_system_prompt", return_value=[]), \
          patch.object(PlannerAgent, "_call_api", side_effect=list(responses)):
-        return planner.run(content, None, None, [], stream=False)
+        return planner.run(content, None, None, [], stream=False, **run_kwargs)
 
 
 def test_inspect_job_code_accepts_multiple_keys() -> None:
@@ -1456,6 +1457,126 @@ def test_meta_omits_the_web_fields_when_web_search_is_off() -> None:
 
     assert "web_searches" not in result.meta
     assert "web_search_downgraded" not in result.meta
+
+
+PATIENT_URL = "https://hl7.org/fhir/R4/patient.html"
+VALUESET_URL = "https://hl7.org/fhir/R4/valueset-link-type.html"
+
+
+class FakeWebResult:
+    """A web_search_tool_result or web_fetch_tool_result, paired to its call by tool_use_id."""
+
+    def __init__(self, block_type: str, tool_use_id: str, content: object) -> None:
+        self.type = block_type
+        self.tool_use_id = tool_use_id
+        self.content = content
+
+
+def fetched(tool_use_id: str) -> FakeWebResult:
+    page = SimpleNamespace(type="web_fetch_result", url=PATIENT_URL, content=SimpleNamespace(type="document"))
+    return FakeWebResult("web_fetch_tool_result", tool_use_id, page)
+
+
+def refused(tool_use_id: str, code: str) -> FakeWebResult:
+    error = SimpleNamespace(type="web_fetch_tool_result_error", error_code=code)
+    return FakeWebResult("web_fetch_tool_result", tool_use_id, error)
+
+
+def searched(tool_use_id: str, *urls: str) -> FakeWebResult:
+    results = [
+        SimpleNamespace(type="web_search_result", url=url, title="t", encrypted_content="e", page_age=None)
+        for url in urls
+    ]
+    return FakeWebResult("web_search_tool_result", tool_use_id, results)
+
+
+def run_tracked(planner: PlannerAgent, responses: list, metrics_opt_in: bool | None = True) -> tuple:
+    """Run the planner with Langfuse patched; return the result and the span-metadata spy."""
+    with patch("global_chat.planner.get_langfuse_client") as get_client:
+        result = run_with(planner, responses, metrics_opt_in=metrics_opt_in)
+    return result, get_client.return_value.update_current_span
+
+
+def test_each_web_call_is_sent_to_langfuse_in_order() -> None:
+    planner = make_run_planner()
+    planner.web_search_enabled = True
+    responses = [
+        FakeResponse("end_turn", [
+            FakeServerToolUse("web_fetch", {"url": PATIENT_URL}, block_id="f1"),
+            refused("f1", "url_not_in_prior_context"),
+            FakeServerToolUse("web_search", {"query": "fhir r4 patient contact"}, block_id="s1"),
+            searched("s1", PATIENT_URL, VALUESET_URL),
+            FakeServerToolUse("web_fetch", {"url": PATIENT_URL}, block_id="f2"),
+            fetched("f2"),
+            FakeTextBlock("Answer."),
+        ]),
+    ]
+
+    result, update_span = run_tracked(planner, responses)
+
+    update_span.assert_called_once_with(metadata={"web_calls": [
+        {"tool": "fetch", "target": PATIENT_URL, "result": "url_not_in_prior_context"},
+        {"tool": "search", "target": "fhir r4 patient contact", "result": "ok", "result_urls": [PATIENT_URL, VALUESET_URL]},
+        {"tool": "fetch", "target": PATIENT_URL, "result": "ok"},
+    ]})
+    # Full URLs and queries are for opted-in Langfuse traces only, never the response.
+    assert "web_calls" not in result.meta
+
+
+def test_a_web_result_from_a_later_round_is_paired_with_its_call() -> None:
+    """A pause_turn can split a call from its result. A call that never gets one stays missing."""
+    planner = make_run_planner()
+    planner.web_search_enabled = True
+    responses = [
+        FakeResponse("pause_turn", [FakeServerToolUse("web_fetch", {"url": PATIENT_URL}, block_id="f1")]),
+        FakeResponse("end_turn", [
+            fetched("f1"),
+            FakeServerToolUse("web_search", {"query": "patient link type"}, block_id="s1"),
+            FakeTextBlock("Done."),
+        ]),
+    ]
+
+    _, update_span = run_tracked(planner, responses)
+
+    assert update_span.call_args.kwargs["metadata"]["web_calls"] == [
+        {"tool": "fetch", "target": PATIENT_URL, "result": "ok"},
+        {"tool": "search", "target": "patient link type", "result": "missing"},
+    ]
+
+
+def test_web_calls_are_not_sent_without_metrics_opt_in() -> None:
+    planner = make_run_planner()
+    planner.web_search_enabled = True
+    responses = [FakeResponse("end_turn", [
+        FakeServerToolUse("web_fetch", {"url": PATIENT_URL}, block_id="f1"),
+        fetched("f1"),
+        FakeTextBlock("Answer."),
+    ])]
+
+    _, update_span = run_tracked(planner, responses, metrics_opt_in=None)
+
+    update_span.assert_not_called()
+
+
+def test_web_calls_are_not_sent_when_web_search_is_off() -> None:
+    planner = make_run_planner()
+    responses = [FakeResponse("end_turn", [FakeTextBlock("Plain answer.")])]
+
+    _, update_span = run_tracked(planner, responses)
+
+    update_span.assert_not_called()
+
+
+def test_a_langfuse_error_does_not_fail_the_turn() -> None:
+    planner = make_run_planner()
+    planner.web_search_enabled = True
+    responses = [FakeResponse("end_turn", [FakeTextBlock("Answer.")])]
+
+    with patch("global_chat.planner.get_langfuse_client") as get_client:
+        get_client.return_value.update_current_span.side_effect = RuntimeError("langfuse down")
+        result = run_with(planner, responses, metrics_opt_in=True)
+
+    assert result.response == "Answer."
 
 
 def make_bad_request(message: str = "web search is not enabled for this account") -> BadRequestError:
