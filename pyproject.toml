@@ -12,7 +12,7 @@ requires-poetry = ">=2.3.2"
 python = ">=3.11,<3.12"
 openai = "^3.39"
 python-dotenv = "^1.2.4"
-anthropic = "^1.15.0"
+anthropic = "^2.4.0"
 
 langchain-pinecone = "^0.2.13"
 langchain-core = "^1.7"
