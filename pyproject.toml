@@ -25,7 +25,7 @@ sentry-sdk = "^2.73.0"
 psycopg2-binary = "^2.9.13"
 langfuse = "^4.15.6"
 opentelemetry-instrumentation-anthropic = "^0.62.4"
-opentelemetry-instrumentation-threading = "0.66b0"
+opentelemetry-instrumentation-threading = "0.66b2"
 pandas = "^3.1"
 pgvector = "^0.5.1"
 
