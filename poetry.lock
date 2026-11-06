@@ -1244,22 +1244,22 @@ langchain-core = ">=1.4.7,<2.0.0"
 
 [[package]]
 name = "langfuse"
-version = "4.15.6"
+version = "5.1.0"
 description = "Langfuse Python SDK - LLM observability/tracing, datasets, experiments, LLM-as-a-judge evaluation, and prompt management"
 optional = false
-python-versions = "<4.0,>=3.10"
+python-versions = "<4.0,>=3.11"
 groups = ["main"]
 files = [
-    {file = "langfuse-4.15.6-py3-none-any.whl", hash = "sha256:2364d5f17342301a8651ef166abb5bb260aaadd94d1ac72aa30c298b3a395d85"},
-    {file = "langfuse-4.15.6.tar.gz", hash = "sha256:af80ed1199e57c2641c9f228066bf9dc324657c06ce6e68660118fa46b237e35"},
+    {file = "langfuse-5.1.0-py3-none-any.whl", hash = "sha256:de947b911ead9d95c56d8592b172b7f84953789c430aa0117045f1f4b6e5a6d3"},
+    {file = "langfuse-5.1.0.tar.gz", hash = "sha256:364afbfdfb44b9ae40feba73d08938c8c823a0101c85f3d466dc49d09951b286"},
 ]
 
 [package.dependencies]
 backoff = ">=1.10.0"
 httpx = ">=0.15.4,<1.0"
-opentelemetry-api = ">=1.33.1,<2"
-opentelemetry-exporter-otlp-proto-http = ">=1.33.1,<2"
-opentelemetry-sdk = ">=1.33.1,<2"
+opentelemetry-api = ">=1.45.0,<2"
+opentelemetry-exporter-otlp-proto-http = ">=1.45.0,<2"
+opentelemetry-sdk = ">=1.45.0,<2"
 packaging = ">=23.2,<27.0"
 pydantic = ">=2,<3"
 typing-extensions = ">=4.12.2,<5"
@@ -3990,4 +3990,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.12"
-content-hash = "850030960a8b33e9a1edf07bd173add190b1049160a8e7971d351d5f7a46f579"
+content-hash = "d381dfef71f683f47abfdde6beb582bd755713929b218508c85183ce83abf72c"
