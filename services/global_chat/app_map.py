@@ -70,6 +70,28 @@ def _format_tab(tab: object) -> str | None:
     return line
 
 
+def _format_element(element: object) -> str | None:
+    """One nested sub-bullet for an in-page control, or None to skip it.
+
+    The `element:` prefix and the id are what the element directive points
+    at, so both are spelled out rather than inferred from position.
+    """
+    if not isinstance(element, dict):
+        return None
+    element_id = element.get("id")
+    label = element.get("label") or element_id
+    if not element_id or not label:
+        return None
+    line = f"    - element: {element_id} — {label}"
+    description = element.get("description")
+    if description:
+        line += f": {description}"
+    hint = element.get("hint")
+    if hint:
+        line += f" (hint: {hint})"
+    return line
+
+
 def _format_entry(entry: dict) -> list[str]:
     """The lines for one page entry, or [] to skip it.
 
@@ -96,6 +118,13 @@ def _format_entry(entry: dict) -> list[str]:
     tabs = entry.get("tabs")
     if isinstance(tabs, list):
         lines.extend(tab_line for tab in tabs if (tab_line := _format_tab(tab)))
+    elements = entry.get("elements")
+    if isinstance(elements, list):
+        ordered = sorted(
+            elements,
+            key=lambda e: str(e.get("label") or e.get("id") or "") if isinstance(e, dict) else "",
+        )
+        lines.extend(el_line for el in ordered if (el_line := _format_element(el)))
     return lines
 
 

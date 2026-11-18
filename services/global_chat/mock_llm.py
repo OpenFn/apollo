@@ -87,15 +87,59 @@ def _tab_tokens(tab: dict) -> set[str]:
     return _tokens(tab.get("label")) | _tokens(tab.get("description"))
 
 
-def pick_destination(content: str, app_map: list[dict] | None) -> tuple[dict, dict | None, int] | None:
-    """The best (page, tab, score) for the user's sentence, or None.
+def _element_tokens(element: dict) -> set[str]:
+    return _tokens(element.get("label")) | _tokens(element.get("description"))
+
+
+# How an element's own word overlap counts — same footing as a tab's.
+_ELEMENT_WEIGHT = 2
+
+
+def _element_candidates(entry: dict, page_id: str, asked: set[str]) -> list[tuple]:
+    """Candidate tuples for the in-page controls of the page the user is on.
+
+    Exempt from the tourable gate: spotlighting navigates nowhere. Rank 2
+    places elements after the bare page and its tabs on tied scores.
+    """
+    elements = entry.get("elements")
+    candidates = []
+    for element in elements if isinstance(elements, list) else []:
+        if not isinstance(element, dict) or not isinstance(element.get("id"), str) or not element["id"]:
+            continue
+        score = _ELEMENT_WEIGHT * len(asked & _element_tokens(element))
+        candidates.append((-score, page_id, 2, element["id"], entry, element))
+    return candidates
+
+
+def _current_page_id(page_hint: object) -> str | None:
+    """Which map page the payload's `page` value says the user is on.
+
+    v2 recognises one shape: any `workflows/...` page URL means the user is
+    in the workflow editor. Element spotlights only make sense on the page
+    the user is already on, so an unrecognised hint offers no elements.
+    """
+    if isinstance(page_hint, str) and page_hint.startswith("workflows/"):
+        return "workflow_edit"
+    return None
+
+
+def pick_destination(
+    content: str, app_map: list[dict] | None, page: str | None = None,
+) -> tuple[dict, dict | None, int] | None:
+    """The best (page, target, score) for the user's sentence, or None.
+
+    `target` is None for a bare page, a tab dict (carries "hash"), or an
+    element dict (carries "id" and no "hash") when the user's current page
+    (the `page` hint) has an in-page control matching their words.
 
     Pure lexical overlap: page candidates score the content tokens shared
     with label+description, counting label hits again at _LABEL_WEIGHT; a
     (page, tab) candidate adds the tab's own overlap twice, so tab-specific
     words outrank the page they sit on. Pages whose path the tour planner
-    cannot open (see _tourable) are never candidates. Deterministic: ties
-    break on alphabetical page id, bare page before its tabs, then tab hash.
+    cannot open (see _tourable) are never navigation candidates — but their
+    elements still are when the user is already on them, because an element
+    spotlight navigates nowhere. Deterministic: ties break on alphabetical
+    page id, bare page before tabs before elements, then target id.
     """
     if not app_map:
         return None
@@ -104,25 +148,32 @@ def pick_destination(content: str, app_map: list[dict] | None) -> tuple[dict, di
     if not asked:
         return None
 
-    candidates = []  # (-score, page_id, tab_rank, tab_hash, page, tab)
-    for page in app_map:
-        if not isinstance(page, dict) or page.get("section") not in _ALLOWED_SECTIONS:
+    on_page_id = _current_page_id(page)
+
+    candidates = []  # (-score, page_id, target_rank, target_id, page, target)
+    for entry in app_map:
+        if not isinstance(entry, dict) or entry.get("section") not in _ALLOWED_SECTIONS:
             continue
-        if not _tourable(page.get("path")):
-            continue
-        page_id = page.get("id")
+        page_id = entry.get("id")
         if not isinstance(page_id, str) or not page_id:
             continue
 
-        base = len(asked & _page_tokens(page)) + _LABEL_WEIGHT * len(asked & _tokens(page.get("label")))
-        candidates.append((-base, page_id, 0, "", page, None))
+        # Elements are offered only for the page the user is on.
+        if page_id == on_page_id:
+            candidates.extend(_element_candidates(entry, page_id, asked))
 
-        tabs = page.get("tabs")
+        if not _tourable(entry.get("path")):
+            continue
+
+        base = len(asked & _page_tokens(entry)) + _LABEL_WEIGHT * len(asked & _tokens(entry.get("label")))
+        candidates.append((-base, page_id, 0, "", entry, None))
+
+        tabs = entry.get("tabs")
         for tab in tabs if isinstance(tabs, list) else []:
             if not isinstance(tab, dict) or not isinstance(tab.get("hash"), str) or not tab["hash"]:
                 continue
             score = base + 2 * len(asked & _tab_tokens(tab))
-            candidates.append((-score, page_id, 1, tab["hash"], page, tab))
+            candidates.append((-score, page_id, 1, tab["hash"], entry, tab))
 
     if not candidates:
         return None
@@ -134,38 +185,61 @@ def pick_destination(content: str, app_map: list[dict] | None) -> tuple[dict, di
     return (best[4], best[5], score)
 
 
-def build_mock_reply(content: str, app_map: list[dict] | None) -> str:
+def _fence(directive: dict) -> str:
+    return f"```openfn-navigate\n{json.dumps(directive)}\n```"
+
+
+def _element_reply(page: dict, element: dict) -> str:
+    """Prose plus an element-spotlight fence for a control on the current page."""
+    page_label = page.get("label") or page.get("id")
+    el_label = element.get("label") or element["id"]
+
+    parts = [f"You can do that right here on the **{page_label}** page, using the **{el_label}** control."]
+    if element.get("description"):
+        parts.append(element["description"])
+    if element.get("hint"):
+        parts.append(f"Hint: {element['hint']}")
+
+    directive = {"page": page["id"], "element": element["id"]}
+    return f"{' '.join(parts)}\n\n{_fence(directive)}"
+
+
+def build_mock_reply(content: str, app_map: list[dict] | None, page: str | None = None) -> str:
     """Templated prose plus the `openfn-navigate` fence, or a no-match line.
 
-    The fence is byte-for-byte the directive shape the real planner is
-    prompted to emit, because the point of mock mode is exercising the
-    client's handling of it.
+    The fence is byte-for-byte a directive shape the real planner is
+    prompted to emit — navigation ({"page", "tab"?}) or element spotlight
+    ({"page", "element"}) — because the point of mock mode is exercising the
+    client's handling of them.
     """
-    pick = pick_destination(content, app_map)
+    pick = pick_destination(content, app_map, page)
     if pick is None:
         return _NO_MATCH_REPLY
 
-    page, tab, _score = pick
-    label = page.get("label") or page.get("id")
+    target_page, target, _score = pick
+    if target is not None and "hash" not in target:
+        return _element_reply(target_page, target)
+
+    tab = target
+    label = target_page.get("label") or target_page.get("id")
 
     first = f"You can do that on the **{label}** page"
     if tab is not None:
         first += f", under the **{tab.get('label') or tab['hash']}** tab"
     first += "."
 
-    description = (tab.get("description") if tab else None) or page.get("description") or ""
-    where = f"`{page['path']}`" if page.get("path") else f"the {label} page"
+    description = (tab.get("description") if tab else None) or target_page.get("description") or ""
+    where = f"`{target_page['path']}`" if target_page.get("path") else f"the {label} page"
     if tab is not None:
         where += f" (tab `#{tab['hash']}`)"
     last = f"You'll find it at {where}."
 
-    directive = {"page": page["id"]}
+    directive = {"page": target_page["id"]}
     if tab is not None:
         directive["tab"] = tab["hash"]
-    fence = f"```openfn-navigate\n{json.dumps(directive)}\n```"
 
     prose = " ".join(part for part in (first, description, last) if part)
-    return f"{prose}\n\n{fence}"
+    return f"{prose}\n\n{_fence(directive)}"
 
 
 def run_mock(payload: "Payload") -> dict:
@@ -178,7 +252,7 @@ def run_mock(payload: "Payload") -> dict:
     """
     logger.info("MOCK LLM mode active (APOLLO_MOCK_LLM) — no Anthropic call made")
 
-    reply = build_mock_reply(payload.content, payload.app_map)
+    reply = build_mock_reply(payload.content, payload.app_map, payload.page)
 
     manager = StreamManager(model="mock-llm", stream=payload.get_stream())
     # A few deltas rather than one, so the client's incremental rendering

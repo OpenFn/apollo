@@ -1264,6 +1264,26 @@ def test_the_app_map_prompt_forbids_untourable_and_current_page_directives() -> 
     assert "do not emit the directive; answer in prose" in prompt
 
 
+def test_the_app_map_prompt_teaches_the_element_spotlight() -> None:
+    """The element directive is the second cross-repo contract: ids from the
+    map, current page only, and the one sanctioned exception to the
+    no-current-page / :project_id-only rules."""
+    path = Path(planner_module.__file__).parent / "prompts.yaml"
+    prompt = yaml.safe_load(path.read_text(encoding="utf-8"))["prompts"]["planner_app_map_prompt"]
+    flat = " ".join(prompt.split())
+
+    assert '{"page": "<page id>", "element": "<element id from the map>"}' in flat
+    assert "element id listed under that page in the map" in flat
+    assert "never include `tab` together with `element`" in flat
+    assert "ONLY for the page the user is currently on" in flat
+    assert "prefer the element directive over a prose-only answer" in flat
+    # The sanctioned exception: spotlighting navigates nowhere.
+    assert "one exception to the navigation rules" in flat
+    # The navigation rules themselves must still be present, unweakened.
+    assert "no placeholder other than `:project_id`" in flat
+    assert "do not emit the directive; answer in prose" in flat
+
+
 def test_run_passes_the_app_map_into_the_system_prompt() -> None:
     """The map arrives per-request through run(), and the prompt the API sees
     must carry the rendered pages."""

@@ -131,6 +131,47 @@ def test_rendering_is_deterministic() -> None:
     assert format_app_map(APP_MAP) == format_app_map(list(reversed(APP_MAP)))
 
 
+def test_elements_render_as_nested_sub_bullets_ordered_by_label() -> None:
+    pages = [{
+        "id": "workflow_edit",
+        "label": "Workflow editor",
+        "path": "/projects/:project_id/w/:id",
+        "section": "project",
+        "description": "The collaborative canvas.",
+        "elements": [
+            {"id": "run-button", "label": "Run button", "description": "Run the workflow now."},
+            {"id": "credential-picker", "label": "Credential picker",
+             "description": "Choose which credential this step uses when it runs.",
+             "hint": "Select a step first."},
+        ],
+    }]
+
+    rendered = format_app_map(pages)
+
+    assert (
+        "    - element: credential-picker — Credential picker: "
+        "Choose which credential this step uses when it runs. (hint: Select a step first.)"
+    ) in rendered
+    assert "    - element: run-button — Run button: Run the workflow now." in rendered
+    # Deterministic: by label, not input order.
+    assert rendered.index("credential-picker") < rendered.index("run-button")
+
+
+def test_malformed_elements_are_skipped_without_crashing() -> None:
+    pages = [{
+        "id": "p", "label": "Page", "path": "/p", "section": "project",
+        "elements": ["not a dict", {"description": "no id or label"}, {"id": "ok-element"}],
+    }]
+
+    rendered = format_app_map(pages)
+
+    assert "    - element: ok-element — ok-element" in rendered
+    assert "no id or label" not in rendered
+
+    # elements with a wrong type are ignored entirely
+    assert "element:" not in format_app_map([{"id": "q", "label": "Q", "section": "user", "elements": "nope"}])
+
+
 def test_the_real_lightning_app_map_renders_every_page() -> None:
     """The sample Lightning actually sends, when present next to the repo.
 

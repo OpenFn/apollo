@@ -100,6 +100,81 @@ def test_pages_with_unresolvable_path_params_are_never_candidates() -> None:
     assert pick_destination("delete a thing entry", only_bad) is None
 
 
+# Synthetic v2 fixture: the real priv/app_map.json may not carry elements yet.
+ELEMENT_MAP = [
+    {
+        "id": "workflow_edit",
+        "section": "project",
+        "path": "/projects/:project_id/w/:id",
+        "label": "Workflow editor",
+        "description": "The collaborative canvas for building a workflow.",
+        "elements": [
+            {
+                "id": "credential-picker",
+                "label": "Credential picker",
+                "description": "Choose which credential this step uses when it runs.",
+                "hint": "Select a step to open its configuration panel first.",
+            },
+            {"id": "run-button", "label": "Run button", "description": "Run the workflow now."},
+        ],
+    },
+    {
+        "id": "credentials",
+        "section": "user",
+        "path": "/credentials",
+        "label": "Credentials",
+        "description": "List and manage the user's credentials for external services.",
+    },
+]
+
+
+def test_on_page_question_picks_the_matching_element() -> None:
+    pick = pick_destination("how do I set a credential on this step?", ELEMENT_MAP, page="workflows/wf/step")
+
+    assert pick is not None
+    page, target, _score = pick
+    assert page["id"] == "workflow_edit"
+    assert target is not None
+    assert target["id"] == "credential-picker"
+    assert "hash" not in target
+
+
+def test_element_reply_carries_the_element_directive_label_and_hint() -> None:
+    reply = build_mock_reply("how do I set a credential on this step?", ELEMENT_MAP, page="workflows/wf/step")
+
+    body = reply.rsplit("```openfn-navigate\n", 1)[1].removesuffix("\n```")
+    assert json.loads(body) == {"page": "workflow_edit", "element": "credential-picker"}
+    assert "**Credential picker**" in reply
+    assert "Select a step to open its configuration panel first." in reply
+
+
+def test_elements_are_never_offered_without_a_page_hint() -> None:
+    """Spotlighting a control on a page the user is not on is meaningless, and
+    workflow_edit itself sits behind /w/:id, so with no hint there is nothing
+    tourable left to offer."""
+    assert pick_destination("how do I set a credential on this step?", ELEMENT_MAP) is None
+
+    reply = build_mock_reply("how do I set a credential on this step?", ELEMENT_MAP)
+    assert "openfn-navigate" not in reply
+
+
+def test_elements_are_never_offered_from_a_different_page() -> None:
+    """A page hint outside the workflow editor must not unlock its elements."""
+    pick = pick_destination("how do I set a credential on this step?", ELEMENT_MAP, page="projects/p/history")
+
+    assert pick is None
+
+
+def test_maps_without_elements_behave_exactly_as_before(app_map: list[dict]) -> None:
+    """The page hint is inert when no entry carries elements."""
+    with_hint = pick_destination("see my past runs", app_map, page="workflows/wf/step")
+    without_hint = pick_destination("see my past runs", app_map)
+
+    assert with_hint == without_hint
+    assert with_hint is not None
+    assert with_hint[0]["id"] == "project_history"
+
+
 def test_gibberish_matches_nothing(app_map: list[dict]) -> None:
     assert pick_destination("flibber jabberwock zzz glorp", app_map) is None
 

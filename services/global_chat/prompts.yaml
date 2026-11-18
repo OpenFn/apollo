@@ -251,3 +251,26 @@ prompts:
       a "Take me there" button the user can click.
     - Your prose answer must still describe where to go in words (page name, path,
       tab). The button is an enhancement, not a replacement.
+
+    ### Element spotlight
+
+    Some pages list elements — in-page controls, shown as `element: <id> — <label>`
+    sub-bullets. When the user asks how to do something ON the page they are
+    currently on (per the page context), and that page has a matching element in
+    the map, end the reply with exactly ONE fence spotlighting it:
+
+    ```openfn-navigate
+    {"page": "<page id>", "element": "<element id from the map>"}
+    ```
+
+    Element rules:
+    - `element` MUST be an element id listed under that page in the map. Never
+      invent one, and never include `tab` together with `element`.
+    - ONLY for the page the user is currently on — never combine an element
+      spotlight with navigating somewhere else.
+    - When a matching element exists for an on-this-page question, prefer the
+      element directive over a prose-only answer.
+    - This is the one exception to the navigation rules above: because no
+      navigation happens, an element spotlight on the current page is allowed
+      even when that page's path has placeholders like `/w/:id`, and the
+      "already on the page" rule does not block it.

@@ -53,6 +53,10 @@ This document defines the input and output payload structure for the Global Agen
       "description": "string",            //   What the page is for
       "tabs": [                           //   Optional tabs on the page
         { "hash": "vcs", "label": "Version Control", "description": "string" }
+      ],
+      "elements": [                       //   Optional in-page controls on the page
+        { "id": "credential-picker", "label": "Credential picker",
+          "description": "string", "hint": "string (optional)" }
       ]
     }
   ],
@@ -108,7 +112,10 @@ This document defines the input and output payload structure for the Global Agen
   Lightning app, so the assistant can answer "where do I…" questions with real
   page names, paths, and settings tabs instead of guessing. Each entry has
   `id`, `path`, `module`, `label`, `section`, `description`, and optionally
-  `tabs` (each with `hash`, `label`, `description`). Only the planner route
+  `tabs` (each with `hash`, `label`, `description`) and `elements` — in-page
+  controls (each with `id`, `label`, `description`, and an optional `hint`)
+  that the assistant can spotlight on the user's current page via the element
+  directive. Only the planner route
   sees it; the direct `workflow_agent` / `job_code_agent` routes do not. If
   present it must be a list of objects — anything else is rejected with a
   `400` — and its serialised size is capped at 250,000 characters.
@@ -196,6 +203,13 @@ This document defines the input and output payload structure for the Global Agen
   render it as code; the prose above it still describes the destination in words.
   `page` is always an id present in the submitted `app_map` (project/user sections
   only), and `tab` appears only when a specific settings tab is the target.
+
+  **Element spotlight.** When the user asks how to do something on the page they
+  are currently on and that page's `app_map` entry lists a matching element, the
+  fence instead carries `{"page": "<page id>", "element": "<element id>"}` (never
+  together with `tab`). No navigation happens — the UI highlights the named
+  control on the current page — so this form may reference pages whose paths the
+  navigation directive cannot (e.g. the workflow editor's `/w/:id`).
 
 - **`response_segments`** (array): The durable transcript of the turn in the order it was streamed, as `{"type", "content"}` objects. Two segment types:
   - `text` — a text block from the model. On the planner path there is one per round of the tool-calling loop; the last one equals `response`.
