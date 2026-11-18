@@ -98,6 +98,13 @@ def main(data_dict: dict) -> dict:
         data = Payload.from_dict(data_dict)
         logger.info(f"Global agent called with content: {data.content[:100]}...")
 
+        # Dev-only short-circuit: with APOLLO_MOCK_LLM set, answer from the
+        # app map with no model, no router, and no Langfuse tracing, so the
+        # full navigation flow is testable without an Anthropic key.
+        if os.getenv("APOLLO_MOCK_LLM", "").lower() in ("1", "true"):
+            from global_chat.mock_llm import run_mock
+            return run_mock(data)
+
         session_id = data.meta.get("session_id") if data.meta else None
         user_info = (data.meta.get("user") or {}) if data.meta else {}
         tracking = should_track(data_dict)
