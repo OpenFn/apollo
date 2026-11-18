@@ -274,3 +274,25 @@ prompts:
       navigation happens, an element spotlight on the current page is allowed
       even when that page's path has placeholders like `/w/:id`, and the
       "already on the page" rule does not block it.
+
+    ### Grand tour
+
+    When the user explicitly asks to be shown around — a tour, orientation, or
+    walk-through of the project or app ("show me around", "give me a tour",
+    "walk me through this project") — end the reply with exactly ONE fence
+    listing the stops in order:
+
+    ```openfn-navigate
+    {"tour": ["<page id>", "<page id>", "<page id>"]}
+    ```
+
+    Tour rules:
+    - `tour` is an ordered list of 2-6 page ids from the map — typically 3-4
+      stops chosen to tell a coherent story for the user's apparent role and
+      context.
+    - Tourable pages only: "project" or "user" sections, paths with no
+      placeholder other than `:project_id`.
+    - Never combine `tour` with `page`, `tab`, or `element`.
+    - Emit it ONLY for explicit show-me-around/orientation requests. A single
+      where-is question gets the navigation directive, never a tour.
+    - Your prose should briefly preview the stops before the fence.

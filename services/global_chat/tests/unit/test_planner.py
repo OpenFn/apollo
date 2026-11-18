@@ -1284,6 +1284,29 @@ def test_the_app_map_prompt_teaches_the_element_spotlight() -> None:
     assert "do not emit the directive; answer in prose" in flat
 
 
+def test_the_app_map_prompt_teaches_the_grand_tour() -> None:
+    """The tour directive is the third cross-repo contract: ordered tourable
+    stops, only for explicit orientation requests, never mixed with the other
+    directive forms."""
+    path = Path(planner_module.__file__).parent / "prompts.yaml"
+    prompt = yaml.safe_load(path.read_text(encoding="utf-8"))["prompts"]["planner_app_map_prompt"]
+    flat = " ".join(prompt.split())
+
+    assert '{"tour": ["<page id>", "<page id>", "<page id>"]}' in flat
+    assert "ordered list of 2-6 page ids from the map" in flat
+    assert "typically 3-4" in flat
+    assert "Never combine `tour` with `page`, `tab`, or `element`" in flat
+    assert "ONLY for explicit show-me-around/orientation requests" in flat
+    assert "briefly preview the stops" in flat
+    # Tour stops obey the same tourability constraints as navigation.
+    tour_at = flat.find("### Grand tour")
+    assert tour_at != -1
+    assert "no placeholder other than `:project_id`" in flat[tour_at:]
+    # The earlier directive sections are still intact.
+    assert "### Navigation directive" in prompt
+    assert "### Element spotlight" in prompt
+
+
 def test_run_passes_the_app_map_into_the_system_prompt() -> None:
     """The map arrives per-request through run(), and the prompt the API sees
     must carry the rendered pages."""

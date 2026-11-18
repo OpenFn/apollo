@@ -229,6 +229,37 @@ def test_reply_without_a_tab_omits_the_tab_key(app_map: list[dict]) -> None:
     assert json.loads(body) == {"page": "project_history"}
 
 
+def test_tour_request_gets_the_grand_tour_fence(app_map: list[dict]) -> None:
+    reply = build_mock_reply("give me a tour of this project", app_map)
+
+    body = reply.rsplit("```openfn-navigate\n", 1)[1].removesuffix("\n```")
+    assert json.loads(body) == {"tour": ["project_workflows", "project_history", "project_settings"]}
+    # The prose previews the stops by their map labels.
+    assert "**Workflows**" in reply
+    assert "**History**" in reply
+    assert "**Settings**" in reply
+
+
+def test_show_me_around_also_triggers_the_tour(app_map: list[dict]) -> None:
+    reply = build_mock_reply("I'm new here — can you show me around?", app_map)
+
+    assert '{"tour": ' in reply
+
+
+def test_a_where_is_question_never_gets_a_tour(app_map: list[dict]) -> None:
+    reply = build_mock_reply("where are my api tokens?", app_map)
+
+    body = reply.rsplit("```openfn-navigate\n", 1)[1].removesuffix("\n```")
+    assert json.loads(body) == {"page": "api_tokens"}
+    assert '"tour"' not in reply
+
+
+def test_no_tour_without_an_app_map() -> None:
+    reply = build_mock_reply("give me a tour of this project", None)
+
+    assert "openfn-navigate" not in reply
+
+
 def test_no_match_reply_has_no_fence(app_map: list[dict]) -> None:
     reply = build_mock_reply("flibber jabberwock zzz", app_map)
 

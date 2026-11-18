@@ -189,6 +189,41 @@ def _fence(directive: dict) -> str:
     return f"```openfn-navigate\n{json.dumps(directive)}\n```"
 
 
+# The fixed grand-tour itinerary the mock offers: where the work lives, what
+# it did, and how the project is configured.
+_TOUR_STOPS = ["project_workflows", "project_history", "project_settings"]
+
+
+def _wants_tour(content: str) -> bool:
+    """Whether the sentence is an explicit show-me-around/orientation request.
+
+    Checked on the raw lowercased words (no stopword filtering — "show" and
+    "around" are stopwords for matching, but here they are the signal):
+    "tour" or "orientation" anywhere, or the pairs "show"+"around" /
+    "walk"+"through".
+    """
+    words = set("".join(c if c.isalnum() else " " for c in content.lower()).split())
+    return (
+        "tour" in words
+        or "orientation" in words
+        or {"show", "around"} <= words
+        or {"walk", "through"} <= words
+    )
+
+
+def _tour_reply(app_map: list[dict]) -> str:
+    """Prose previewing the fixed stops, then the tour fence."""
+    by_id = {p.get("id"): p for p in app_map if isinstance(p, dict)}
+    names = [(by_id.get(stop) or {}).get("label") or stop for stop in _TOUR_STOPS]
+
+    prose = (
+        f"Happy to show you around! We'll start at **{names[0]}**, where your "
+        f"workflows live, then visit **{names[1]}** to see what has run, and "
+        f"finish at **{names[2]}**, where the project is configured."
+    )
+    return f"{prose}\n\n{_fence({'tour': _TOUR_STOPS})}"
+
+
 def _element_reply(page: dict, element: dict) -> str:
     """Prose plus an element-spotlight fence for a control on the current page."""
     page_label = page.get("label") or page.get("id")
@@ -208,10 +243,13 @@ def build_mock_reply(content: str, app_map: list[dict] | None, page: str | None 
     """Templated prose plus the `openfn-navigate` fence, or a no-match line.
 
     The fence is byte-for-byte a directive shape the real planner is
-    prompted to emit — navigation ({"page", "tab"?}) or element spotlight
-    ({"page", "element"}) — because the point of mock mode is exercising the
-    client's handling of them.
+    prompted to emit — navigation ({"page", "tab"?}), element spotlight
+    ({"page", "element"}), or grand tour ({"tour": [...]}) — because the
+    point of mock mode is exercising the client's handling of them.
     """
+    if app_map and _wants_tour(content):
+        return _tour_reply(app_map)
+
     pick = pick_destination(content, app_map, page)
     if pick is None:
         return _NO_MATCH_REPLY

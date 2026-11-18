@@ -211,6 +211,14 @@ This document defines the input and output payload structure for the Global Agen
   control on the current page — so this form may reference pages whose paths the
   navigation directive cannot (e.g. the workflow editor's `/w/:id`).
 
+  **Grand tour.** When the user explicitly asks to be shown around (a tour,
+  orientation, or walk-through of the project or app), the fence instead carries
+  `{"tour": ["<page id>", ...]}` — an ordered list of 2-6 tourable page ids from
+  the `app_map` (project/user sections, paths with no placeholder other than
+  `:project_id`), typically 3-4 stops. Never combined with `page`/`tab`/`element`;
+  the prose previews the stops, and the UI walks the user through the listed
+  pages in order.
+
 - **`response_segments`** (array): The durable transcript of the turn in the order it was streamed, as `{"type", "content"}` objects. Two segment types:
   - `text` — a text block from the model. On the planner path there is one per round of the tool-calling loop; the last one equals `response`.
   - `status` — a completed-action status line ("Edited workflow structure", "Wrote code for \"Fetch Patients\""). Only these settled lines are recorded; the transient "...ing" spinners shown while an action runs are never persisted.
