@@ -26,6 +26,7 @@ from streaming_util import (
     STATUS_PLANNING,
     STATUS_SEARCHING_WEB,
 )
+from global_chat.app_map import format_app_map
 from global_chat.config_loader import ConfigLoader
 from global_chat.skill_registry import SKILLS, Skill
 from models import resolve_model
@@ -257,6 +258,7 @@ class PlannerAgent:
         self.max_pause_continuations = planner_config.get("max_pause_continuations", 5)
 
         self.current_yaml: Optional[str] = None
+        self.app_map: Optional[List[Dict]] = None
         self.subagent_results = []
         self._segments: List[Dict] = []
         self._attachments: List[Dict] = []
@@ -278,6 +280,7 @@ class PlannerAgent:
         metrics_opt_in: Optional[bool] = None,
         stream_manager: Optional[StreamManager] = None,
         skill: Optional[Skill] = None,
+        app_map: Optional[List[Dict]] = None,
     ) -> PlannerResult:
         """
         Run the planner agent with tool-calling loop.
@@ -295,6 +298,8 @@ class PlannerAgent:
                 a handed-over request continues on the same stream
             skill: A skill the user invoked this turn, whose instructions lead
                 the user message
+            app_map: Map of Lightning's user-facing pages, rendered into the
+                system prompt so navigation answers name real pages and paths
 
         Returns:
             PlannerResult with response, attachments, history, usage, meta
@@ -305,6 +310,7 @@ class PlannerAgent:
 
         self.current_yaml = workflow_yaml
         self.yaml_modified = False
+        self.app_map = app_map
         self._attachments = attachments or []
         self._user = user
         self._metrics_opt_in = metrics_opt_in
@@ -1164,5 +1170,13 @@ class PlannerAgent:
         if self.web_tools and web_prompt:
             domains = ", ".join(self.web_tools[0].get("allowed_domains") or [])
             blocks.append({"type": "text", "text": web_prompt.replace("{domains}", domains)})
+
+        app_map_prompt = self.config_loader.get_prompt("planner_app_map_prompt")
+        if self.app_map and app_map_prompt:
+            rendered = format_app_map(self.app_map)
+            # An all-malformed map renders to nothing, and the API rejects
+            # empty text blocks, so say nothing rather than send one.
+            if rendered:
+                blocks.append({"type": "text", "text": app_map_prompt.replace("{app_map}", rendered)})
 
         return blocks

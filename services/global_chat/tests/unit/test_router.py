@@ -1,7 +1,10 @@
 """Unit tests for RouterAgent attachment building on the direct job_chat route."""
 
+from pathlib import Path
 from unittest.mock import patch
 
+import global_chat.router as router_module
+import yaml
 from global_chat.planner import PlannerResult
 from global_chat.router import RouterAgent, RouterDecision, RouterResult
 from yaml_utils import workflow_has_job_code
@@ -36,6 +39,7 @@ def make_router() -> RouterAgent:
     router._user = None
     router._metrics_opt_in = None
     router._stream_manager = None
+    router._app_map = None
     router.model = "claude-test"
     return router
 
@@ -125,6 +129,47 @@ def test_routing_message_tags_empty_workflow() -> None:
     router = make_router()
     msg = router._build_routing_message("what does this do", EMPTY_YAML, None, [])
     assert "[All step bodies are empty/placeholder]" in msg
+
+
+def test_routing_message_nudges_toward_planner_when_an_app_map_is_attached() -> None:
+    """Only the planner holds the app map and the navigation directive, so a
+    request that carries a map tells the router where where-is questions go."""
+    router = make_router()
+    router._app_map = [{"id": "project_history", "path": "/projects/:project_id/history"}]
+
+    msg = router._build_routing_message("where do I set up GitHub sync?", WORKFLOW_YAML, None, [])
+
+    assert "[An app map is attached." in msg
+    assert "route to planner" in msg
+
+
+def test_routing_message_has_no_app_map_nudge_without_a_map() -> None:
+    router = make_router()
+
+    msg = router._build_routing_message("where do I set up GitHub sync?", WORKFLOW_YAML, None, [])
+
+    assert "app map" not in msg
+
+
+def test_the_router_prompt_routes_app_navigation_questions_to_the_planner() -> None:
+    """A live run sent "Where do I set up GitHub version control sync?" to
+    workflow_agent, which can never emit the navigation directive. The rule
+    must name the planner for where-is questions and override the
+    workflow-sounding words such questions contain."""
+    path = Path(router_module.__file__).parent / "prompts.yaml"
+    prompt = yaml.safe_load(path.read_text(encoding="utf-8"))["prompts"]["router_system_prompt"]
+
+    rule_at = prompt.find("App-navigation questions ALWAYS go to planner")
+    assert rule_at != -1
+    # Prominent: ahead of the direct-route heuristics it has to beat.
+    assert rule_at < prompt.find("Route to job_code_agent ONLY")
+    rule = prompt[rule_at:rule_at + 700]
+    assert "where do I configure" in rule
+    assert "how do I get to" in rule
+    assert "workflows, projects, GitHub, or credentials" in rule
+    # And repeated in the planner criteria list, so neither block undercuts
+    # the other.
+    assert "where something is in the Lightning app" in prompt[prompt.find("Route to planner if:"):]
 
 
 def test_job_route_sends_subagent_payload() -> None:
@@ -233,6 +278,19 @@ def test_planner_route_forwards_the_web_search_flag() -> None:
         router._route_to_planner("look up the DHIS2 tracker API", None, None, [], False, 5)
 
     assert planner_cls.call_args.kwargs["web_search"] is True
+
+
+def test_planner_route_forwards_the_app_map() -> None:
+    router = make_router()
+    router._web_search = False
+    pages = [{"id": "project_history", "path": "/projects/:project_id/history", "label": "History"}]
+    router._app_map = pages
+
+    with patch("global_chat.planner.PlannerAgent") as planner_cls:
+        planner_cls.return_value.run.return_value = make_planner_agent_result()
+        router._route_to_planner("where are my runs?", None, None, [], False, 5)
+
+    assert planner_cls.return_value.run.call_args.kwargs["app_map"] == pages
 
 
 def test_confident_direct_route_is_not_gated() -> None:

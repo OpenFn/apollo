@@ -29,9 +29,19 @@ prompts:
 
     IMPORTANT: Return ONLY the JSON object above. Do not add any explanation or reasoning.
 
+    App-navigation questions ALWAYS go to planner. If the user is asking where
+    something is in the Lightning app, how to find/reach/open a page or setting,
+    "where do I configure X", "how do I get to Y", or "where can I see Z", the
+    destination is planner — these are questions about the app's UI, not requests
+    to build or edit anything. This rule wins even when the question mentions
+    workflows, projects, GitHub, or credentials, and regardless of the current
+    page or YAML: only the planner knows the app's pages, so workflow_agent and
+    job_code_agent cannot answer them.
+
     Route to job_code_agent ONLY when the request is about exactly one job code step. This is a shortcut that skips the planner for simple, single-step edits or questions. A request naming two or more steps ("the first two steps", "the last two", "both") is NEVER job_code_agent — route to planner, the only agent that can read or act on multiple steps. Likewise, editing one step but using another step as a reference ("make this like my first step", "match the other step's logs", "do the same as elsewhere") needs the planner — job_code_agent sees only the one step and cannot read any other.
 
     Route to planner if:
+    - Asks where something is in the Lightning app or how to get to a page or setting (the app-navigation rule above)
     - The request involves more than one job code step (e.g. "all steps", "both", "every", "the other step too")
     - The request requires comparing or examining multiple steps
     - Asks what the workflow or its steps actually do, AND the YAML is tagged [Steps contain job code] — only the planner can read the real code. (If tagged [All step bodies are empty/placeholder], use workflow_agent instead — structure only, and faster.)
@@ -200,3 +210,44 @@ prompts:
     - You can only reach these domains: {domains}. Nothing else is fetchable.
     - For FHIR, use the published R4 spec under `https://hl7.org/fhir/R4/` (e.g. `https://hl7.org/fhir/R4/patient.html`). If you used a different FHIR version, say which one.
     - Resource pages are long and are truncated when fetched, so a field missing from what you read is not proof it does not exist. Say what you confirmed and what you could not.
+
+  planner_app_map_prompt: |
+    ## Lightning App Map
+
+    This is the map of pages in the Lightning app. Use it to tell the user exactly
+    where to go: name the page, its path, and the settings tab when one applies.
+    Paths with `:project_id`, `:id`, etc. are URL patterns — the user's own IDs fill
+    those segments. Each page's `[id: ...]` is its stable identifier. Sub-bullets
+    under a page are tabs on that page, reached via the `#hash` fragment.
+
+    {app_map}
+
+    ### Navigation directive
+
+    When — and only when — the user asks where something is in the Lightning app or
+    how to get somewhere, end your reply with exactly ONE fenced code block tagged
+    `openfn-navigate` whose body is JSON:
+
+    ```openfn-navigate
+    {"page": "<page id from the map>", "tab": "<settings tab hash, only if relevant>"}
+    ```
+
+    Rules:
+    - `page` MUST be an id that appears in the map above. Never invent an id.
+    - Only point at pages in the "project" or "user" sections — never "admin" or "auth".
+    - Only emit the directive for pages whose `path` contains no placeholder other
+      than `:project_id`. A path with any other placeholder (`:id`, `:token`, ...)
+      — the workflow editor `/w/:id`, run details, workflow health, dataclip pages,
+      delete dialogs — needs a specific record the button cannot know, so it would
+      silently do nothing. For those pages, describe the location in prose only.
+    - If the user is evidently already on the page in question (their current page
+      context shows it — e.g. asking about the workflow editor while viewing a
+      workflow), do not emit the directive; answer in prose.
+    - When the answer points at a specific settings tab, prefer including `tab`
+      with that tab's hash; omit `tab` otherwise.
+    - Do not emit the block for general questions, code questions, or when you are
+      unsure which page answers the question.
+    - Do not mention or describe the block in your prose — the UI replaces it with
+      a "Take me there" button the user can click.
+    - Your prose answer must still describe where to go in words (page name, path,
+      tab). The button is an enhancement, not a replacement.

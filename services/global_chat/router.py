@@ -87,6 +87,7 @@ class RouterAgent:
         metrics_opt_in: Optional[bool] = None,
         skill: Optional[Skill] = None,
         web_search: bool = False,
+        app_map: Optional[List[Dict]] = None,
     ) -> RouterResult:
         """
         Route request to appropriate handler and execute.
@@ -101,6 +102,8 @@ class RouterAgent:
             skill: A skill the user invoked by name, which routes itself
             web_search: Whether the caller opted into the planner's web
                 search/fetch tools for this request
+            app_map: Map of Lightning's user-facing pages, for the planner to
+                answer navigation questions from (other routes never see it)
 
         Returns:
             RouterResult with response, attachments, history, usage, meta
@@ -118,6 +121,7 @@ class RouterAgent:
         self._user = user
         self._metrics_opt_in = metrics_opt_in
         self._web_search = web_search
+        self._app_map = app_map
         # One stream manager shared by whichever agents serve this request, so
         # a handed-over request continues the same stream instead of starting
         # a second message lifecycle.
@@ -225,6 +229,15 @@ class RouterAgent:
         parts = []
 
         parts.append(f"User request: {content}")
+
+        if self._app_map:
+            # One nudge, mirroring the app-navigation rule in the system
+            # prompt: only the planner holds the app map.
+            parts.append(
+                "\n[An app map is attached. If the user is asking where something "
+                "is in the Lightning app or how to get to a page or setting, "
+                "route to planner.]"
+            )
 
         if page:
             parts.append(f"\nCurrent page: {page}")
@@ -545,6 +558,7 @@ class RouterAgent:
             metrics_opt_in=self._metrics_opt_in,
             stream_manager=self._stream_manager,
             skill=skill,
+            app_map=self._app_map,
         )
 
         total_usage = sum_usage(self.routing_usage, planner_result.usage)

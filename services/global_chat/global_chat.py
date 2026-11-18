@@ -15,6 +15,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from langfuse import observe, propagate_attributes, get_client as get_langfuse_client
 from util import ApolloError, create_logger, check_attachment_size, APOLLO_VERSION
 from langfuse_util import should_track, build_tags, build_generation_diff
+from global_chat.app_map import check_app_map
 from global_chat.config_loader import ConfigLoader
 from global_chat.router import RouterAgent
 from global_chat.skill_registry import Skill, get_skill
@@ -35,6 +36,7 @@ class Payload:
     attachments: Optional[List[Dict]] = None
     metrics_opt_in: Optional[bool] = None
     skill: Optional[Skill] = None
+    app_map: Optional[List[Dict]] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Payload":
@@ -46,6 +48,7 @@ class Payload:
         # be answered by any route, so there is no point paying for the routing
         # call first.
         check_attachment_size(data.get("attachments"))
+        check_app_map(data.get("app_map"))
 
         return cls(
             content=data["content"],
@@ -58,6 +61,7 @@ class Payload:
             attachments=data.get("attachments"),
             metrics_opt_in=data.get("metrics_opt_in"),
             skill=cls._resolve_skill(data.get("skill")),
+            app_map=data.get("app_map"),
         )
 
     @staticmethod
@@ -126,6 +130,7 @@ def main(data_dict: dict) -> dict:
                 metrics_opt_in=data.metrics_opt_in,
                 skill=data.skill,
                 web_search=data.get_web_search(),
+                app_map=data.app_map,
             )
 
             if tracking:

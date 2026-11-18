@@ -50,6 +50,7 @@ def make_planner() -> PlannerAgent:
     planner.web_tools = []
     planner.web_search_enabled = False
     planner.web_search_downgraded = False
+    planner.app_map = None
     return planner
 
 
@@ -1163,6 +1164,124 @@ def test_no_web_block_is_appended_when_the_prompt_is_missing() -> None:
     blocks = planner._build_system_prompt()
 
     assert len(blocks) == 1
+
+
+APP_MAP = [
+    {
+        "id": "project_history",
+        "path": "/projects/:project_id/history",
+        "label": "History",
+        "section": "project",
+        "description": "Search and filter past runs.",
+    },
+]
+
+
+def test_system_prompt_appends_an_uncached_app_map_block() -> None:
+    planner = make_run_planner()
+    planner.config_loader = StubPromptLoader(
+        planner_system_prompt="BASE PROMPT",
+        planner_app_map_prompt="APP MAP ADDENDUM\n{app_map}",
+    )
+    planner.app_map = APP_MAP
+
+    blocks = planner._build_system_prompt()
+
+    # Only the base prompt carries the cache breakpoint; the addendum must
+    # stay after it, outside the cache key, like the web block.
+    assert [("cache_control" in block) for block in blocks] == [True, False]
+    assert blocks[1]["text"].startswith("APP MAP ADDENDUM")
+    assert "**History** [id: project_history] (`/projects/:project_id/history`)" in blocks[1]["text"]
+
+
+def test_no_app_map_block_is_appended_without_an_app_map() -> None:
+    planner = make_run_planner()
+    planner.config_loader = StubPromptLoader(
+        planner_system_prompt="BASE PROMPT",
+        planner_app_map_prompt="APP MAP ADDENDUM\n{app_map}",
+    )
+
+    blocks = planner._build_system_prompt()
+
+    assert len(blocks) == 1
+    assert "APP MAP" not in blocks[0]["text"]
+
+
+def test_no_app_map_block_is_appended_when_the_map_renders_empty() -> None:
+    """A map whose entries all render to nothing would make an addendum with
+    an empty body, so say nothing instead."""
+    planner = make_run_planner()
+    planner.config_loader = StubPromptLoader(
+        planner_system_prompt="BASE PROMPT",
+        planner_app_map_prompt="APP MAP ADDENDUM\n{app_map}",
+    )
+    planner.app_map = [{"section": "project"}]
+
+    blocks = planner._build_system_prompt()
+
+    assert len(blocks) == 1
+
+
+def test_the_app_map_prompt_key_exists_in_prompts_yaml() -> None:
+    path = Path(planner_module.__file__).parent / "prompts.yaml"
+    prompts = yaml.safe_load(path.read_text(encoding="utf-8"))["prompts"]
+
+    assert "{app_map}" in prompts["planner_app_map_prompt"]
+
+
+def test_the_app_map_prompt_teaches_the_navigation_directive() -> None:
+    """Lightning's chat UI renders a ```openfn-navigate fence as a "Take me
+    there" button, so the tag and the JSON shape are a cross-repo contract."""
+    path = Path(planner_module.__file__).parent / "prompts.yaml"
+    prompt = yaml.safe_load(path.read_text(encoding="utf-8"))["prompts"]["planner_app_map_prompt"]
+
+    assert "```openfn-navigate" in prompt
+    assert '{"page": ' in prompt
+    assert '"tab": ' in prompt
+    # The guardrails the UI depends on: real ids only, user-reachable pages
+    # only, and no prose about the mechanism.
+    assert "Never invent an id" in prompt
+    assert '"project" or "user"' in prompt
+    assert "Take me there" in prompt
+
+
+def test_the_app_map_prompt_forbids_untourable_and_current_page_directives() -> None:
+    """A live run emitted {"page": "workflow_edit"} — a page behind /w/:id the
+    tour planner cannot open — and the button silently did nothing. The rules
+    must restrict directives to :project_id-only paths and skip the page the
+    user is already on."""
+    path = Path(planner_module.__file__).parent / "prompts.yaml"
+    prompt = yaml.safe_load(path.read_text(encoding="utf-8"))["prompts"]["planner_app_map_prompt"]
+
+    # Rule 1: only :project_id may appear in a directive target's path.
+    flat = " ".join(prompt.split())
+    assert "no placeholder other than `:project_id`" in flat
+    assert "describe the location in prose only" in flat
+    # The live failure is named so the rule is unambiguous about /w/:id.
+    assert "/w/:id" in prompt
+    # Rule 2: no directive for the page the user is already on.
+    assert "already on the page" in prompt
+    assert "do not emit the directive; answer in prose" in prompt
+
+
+def test_run_passes_the_app_map_into_the_system_prompt() -> None:
+    """The map arrives per-request through run(), and the prompt the API sees
+    must carry the rendered pages."""
+    planner = make_run_planner()
+    planner.config_loader = StubPromptLoader(
+        planner_system_prompt="BASE PROMPT",
+        planner_app_map_prompt="APP MAP ADDENDUM\n{app_map}",
+    )
+    seen_prompts = []
+
+    def record(system_prompt: list, *_args: object, **_kwargs: object) -> FakeResponse:
+        seen_prompts.append(system_prompt)
+        return FakeResponse("end_turn", [FakeTextBlock("Go to History.")])
+
+    with patch.object(PlannerAgent, "_call_api", side_effect=record):
+        planner.run("where are my runs?", None, None, [], stream=False, app_map=APP_MAP)
+
+    assert "/projects/:project_id/history" in seen_prompts[0][-1]["text"]
 
 
 class FakeEvent:

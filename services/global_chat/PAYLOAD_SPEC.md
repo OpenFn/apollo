@@ -43,6 +43,20 @@ This document defines the input and output payload structure for the Global Agen
     "name": "diagnose"                    //   Standard skill name: "design" | "diagnose" | "qa"
   },
 
+  "app_map": [                            // Map of Lightning's user-facing pages (optional)
+    {
+      "id": "project_history",            //   Stable page identifier
+      "path": "/projects/:project_id/history", // URL pattern (`:params` are placeholders)
+      "module": "LightningWeb.RunLive.Index",  // LiveView module
+      "label": "History",                 //   Human-readable page name
+      "section": "project",               //   "project" | "user" | "admin" | "auth"
+      "description": "string",            //   What the page is for
+      "tabs": [                           //   Optional tabs on the page
+        { "hash": "vcs", "label": "Version Control", "description": "string" }
+      ]
+    }
+  ],
+
   "options": {                            // Runtime options (optional)
     "stream": false,
     "web_search": false
@@ -89,6 +103,15 @@ This document defines the input and output payload structure for the Global Agen
   command. `name` is the skill's name (`"design"`, `"diagnose"` or `"qa"`). An unknown name
   is rejected with a `400` `UNKNOWN_SKILL`. See
   [Skill invocation](#skill-invocation).
+
+- **`app_map`** (array, optional): A map of every user-facing page in the
+  Lightning app, so the assistant can answer "where do I…" questions with real
+  page names, paths, and settings tabs instead of guessing. Each entry has
+  `id`, `path`, `module`, `label`, `section`, `description`, and optionally
+  `tabs` (each with `hash`, `label`, `description`). Only the planner route
+  sees it; the direct `workflow_agent` / `job_code_agent` routes do not. If
+  present it must be a list of objects — anything else is rejected with a
+  `400` — and its serialised size is capped at 250,000 characters.
 
 - **`options`** (object, optional): Runtime options.
   - **`stream`** (boolean): Enable streaming response (default: false).
@@ -163,6 +186,16 @@ This document defines the input and output payload structure for the Global Agen
 ### Field Descriptions
 
 - **`response`** (string): The main text response from the agent — the final answer. On the planner path this is the text of the planner's last round only (narration from earlier rounds is not included).
+
+  **Navigation directive (`openfn-navigate` fence).** When the request carried an
+  `app_map` and the user asked where something is in the Lightning app (or how to
+  get somewhere), the planner may end `response` with one fenced code block tagged
+  `openfn-navigate` whose body is JSON:
+  `{"page": "<page id from the app_map>", "tab": "<settings tab hash, optional>"}`.
+  The frontend should replace this block with a "Take me there" button rather than
+  render it as code; the prose above it still describes the destination in words.
+  `page` is always an id present in the submitted `app_map` (project/user sections
+  only), and `tab` appears only when a specific settings tab is the target.
 
 - **`response_segments`** (array): The durable transcript of the turn in the order it was streamed, as `{"type", "content"}` objects. Two segment types:
   - `text` — a text block from the model. On the planner path there is one per round of the tool-calling loop; the last one equals `response`.
